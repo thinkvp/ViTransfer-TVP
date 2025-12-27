@@ -23,6 +23,7 @@ interface UseCommentManagementProps {
   shareToken?: string | null
   useAdminAuth?: boolean
   companyName?: string
+  allowClientDeleteComments?: boolean
 }
 
 export function useCommentManagement({
@@ -38,6 +39,7 @@ export function useCommentManagement({
   shareToken = null,
   useAdminAuth = false,
   companyName = 'Studio',
+  allowClientDeleteComments = false,
 }: UseCommentManagementProps) {
   const router = useRouter()
 
@@ -441,10 +443,39 @@ export function useCommentManagement({
     }
   }
 
+  const findCommentById = (commentId: string): CommentWithReplies | null => {
+    for (const comment of comments) {
+      if (comment.id === commentId) return comment
+      const matchingReply = comment.replies?.find(reply => reply.id === commentId)
+      if (matchingReply) return matchingReply as CommentWithReplies
+    }
+    return null
+  }
+
   const handleDeleteComment = async (commentId: string) => {
-    if (!(useAdminAuth || adminUser)) {
-      alert('Only admins can delete comments')
-      return
+    const isAdminContext = useAdminAuth || !!adminUser
+    const targetComment = findCommentById(commentId)
+
+    if (!isAdminContext) {
+      if (!allowClientDeleteComments) {
+        alert('Comment deletion is disabled for this project.')
+        return
+      }
+
+      if (!targetComment) {
+        alert('Unable to find that comment. Please refresh and try again.')
+        return
+      }
+
+      if (targetComment.isInternal) {
+        alert('Only client comments can be deleted.')
+        return
+      }
+
+      if (!shareToken) {
+        alert('Authentication required to delete comments.')
+        return
+      }
     }
 
     if (!confirm('Are you sure you want to delete this comment? This action cannot be undone.')) {

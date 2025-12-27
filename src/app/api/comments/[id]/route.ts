@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, updateCommentSchema } from '@/lib/validation'
-import { requireApiAdmin } from '@/lib/auth'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
-import { getRedis } from '@/lib/redis'
 export const runtime = 'nodejs'
 
 
@@ -181,12 +179,6 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Authentication - admin only
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
-
   // Rate limiting to prevent abuse
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
@@ -201,34 +193,77 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    // Get the comment to find its project
+    // Get the comment and its project for authorization checks
     const existingComment = await prisma.comment.findUnique({
       where: { id },
       select: {
+        id: true,
+        isInternal: true,
         projectId: true,
         project: {
           select: {
             id: true,
-            recipients: {
-              where: { isPrimary: true },
-              take: 1,
-              select: {
-                name: true,
-              }
-            }
+            sharePassword: true,
+            authMode: true,
+            hideFeedback: true,
+            allowClientDeleteComments: true,
           }
         }
       }
     })
 
-    if (!existingComment) {
+    if (!existingComment || !existingComment.project) {
       return NextResponse.json(
         { error: 'Comment not found' },
         { status: 404 }
       )
     }
 
-    const projectId = existingComment.projectId
+    const accessCheck = await verifyProjectAccess(
+      request,
+      existingComment.project.id,
+      existingComment.project.sharePassword,
+      existingComment.project.authMode
+    )
+
+    if (!accessCheck.authorized) {
+      return accessCheck.errorResponse || NextResponse.json(
+        { error: 'Unable to process request' },
+        { status: 400 }
+      )
+    }
+
+    if (accessCheck.isGuest) {
+      return NextResponse.json(
+        { error: 'Comments are disabled for guest users' },
+        { status: 403 }
+      )
+    }
+
+    // SECURITY: If feedback is hidden, block client deletion attempts
+    if (existingComment.project.hideFeedback && !accessCheck.isAdmin) {
+      return NextResponse.json(
+        { error: 'Comments are disabled for this project' },
+        { status: 403 }
+      )
+    }
+
+    // Clients can delete only client comments when allowed by project settings
+    if (!accessCheck.isAdmin) {
+      if (!existingComment.project.allowClientDeleteComments) {
+        return NextResponse.json(
+          { error: 'Client comment deletion is disabled for this project' },
+          { status: 403 }
+        )
+      }
+
+      if (existingComment.isInternal) {
+        return NextResponse.json(
+          { error: 'Only client comments can be deleted by clients' },
+          { status: 403 }
+        )
+      }
+    }
 
     // Cancel any pending notifications for this comment
     await cancelCommentNotification(id)

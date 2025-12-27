@@ -9,6 +9,7 @@
 #
 # Documentation: https://github.com/MansiVisuals/ViTransfer
 
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -31,11 +32,12 @@ services:
     security_opt:
       - no-new-privileges:true
 
+
   redis:
     image: redis:7-alpine
     container_name: vitransfer-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
     volumes:
       - redis-data:/data
     networks:
@@ -48,8 +50,11 @@ services:
     security_opt:
       - no-new-privileges:true
 
+
   app:
-    image: crypt010/vitransfer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: vitransfer-app
     restart: unless-stopped
     depends_on:
@@ -91,8 +96,11 @@ services:
       retries: 3
       start_period: 5m
 
+
   worker:
-    image: crypt010/vitransfer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: vitransfer-worker
     restart: unless-stopped
     command: npm run worker
@@ -130,6 +138,7 @@ services:
       retries: 3
       start_period: 6m
 
+
 volumes:
   postgres-data:
     driver: local
@@ -137,6 +146,7 @@ volumes:
     driver: local
   uploads:
     driver: local
+
 
 networks:
   vitransfer-internal:

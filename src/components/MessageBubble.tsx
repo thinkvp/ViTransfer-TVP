@@ -29,6 +29,7 @@ interface MessageBubbleProps {
   repliesExpanded?: boolean
   onToggleReplies?: () => void
   onDeleteReply?: (replyId: string) => void
+  canDeleteReply?: (reply: Comment) => boolean
 }
 
 /**
@@ -65,6 +66,7 @@ export default function MessageBubble({
   repliesExpanded,
   onToggleReplies,
   onDeleteReply,
+  canDeleteReply,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
   // Determine which company name to show
@@ -194,6 +196,8 @@ export default function MessageBubble({
                         ((reply as any).user.name || (reply as any).user.email) :
                         null)
 
+                    const replyDeletable = onDeleteReply && (!canDeleteReply || canDeleteReply(reply))
+
                     return (
                       <div key={reply.id} className="pl-3">
                         {/* Reply Author */}
@@ -205,7 +209,7 @@ export default function MessageBubble({
                           <span className="text-xs opacity-50">
                             {formatMessageTime(reply.createdAt)}
                           </span>
-                          {onDeleteReply && (
+                          {replyDeletable && (
                             <>
                               <span className="text-xs opacity-30">•</span>
                               <button

@@ -257,6 +257,7 @@ export async function GET(
         maxRevisions: project.maxRevisions,
         restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
         hideFeedback: project.hideFeedback,
+          allowClientDeleteComments: project.allowClientDeleteComments,
         previewResolution: project.previewResolution,
         watermarkEnabled: project.watermarkEnabled,
       }),

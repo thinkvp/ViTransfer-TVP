@@ -1,32 +1,39 @@
 #!/bin/bash
 
+
 # ViTransfer Docker Entrypoint Script
 # Universal compatibility: Works on Unraid, TrueNAS, Docker Desktop, Ubuntu, Podman
 # Handles PUID/PGID remapping AND docker-compose user: directive
 # This script runs automatically on container start - no manual intervention required
 
+
 set -e
+
 
 echo "ViTransfer starting..."
 echo ""
+
 
 # ========================================
 # SMART USER DETECTION
 # ========================================
 # Detects how the container is running and adapts automatically:
-# - Via docker-compose user: directive → Already correct user
-# - Via PUID/PGID env vars → Remap user
-# - Default → Use default UID 911
+# - Via docker-compose user: directive â†’ Already correct user
+# - Via PUID/PGID env vars â†’ Remap user
+# - Default â†’ Use default UID 911
+
 
 RUNNING_UID=$(id -u)
 RUNNING_GID=$(id -g)
 PUID=${PUID:-911}
 PGID=${PGID:-911}
 
+
 echo "[INFO] User Configuration:"
 echo "  Container running as: UID=$RUNNING_UID GID=$RUNNING_GID"
 echo "  Target (PUID/PGID): UID=$PUID GID=$PGID"
 echo ""
+
 
 # ========================================
 # CASE 1: Already running as target user
@@ -35,6 +42,7 @@ if [ "$RUNNING_UID" = "$PUID" ] && [ "$RUNNING_GID" = "$PGID" ]; then
     echo "[OK] Already running as target user UID:$PUID GID:$PGID"
     echo "     (Detected docker-compose 'user:' directive or matching PUID/PGID)"
     echo ""
+
 
     # Fix ownership of app files if needed (from build-time UID 911)
     if [ "$RUNNING_UID" != "911" ]; then
@@ -47,7 +55,9 @@ if [ "$RUNNING_UID" = "$PUID" ] && [ "$RUNNING_GID" = "$PGID" ]; then
         echo ""
     fi
 
+
     SKIP_SU_EXEC=true
+
 
 # ========================================
 # CASE 2: Running as non-root, but different UID
@@ -57,6 +67,7 @@ elif [ "$RUNNING_UID" != "0" ]; then
     echo "     (Container already secured, using current user)"
     echo ""
 
+
     # Fix ownership if possible (may fail without root, that's ok)
     echo "[SETUP] Attempting to fix app file ownership..."
     find /app -maxdepth 2 \( -name '.next' -o -name 'public' -o -name 'src' \) -user 911 \
@@ -64,7 +75,9 @@ elif [ "$RUNNING_UID" != "0" ]; then
     echo "[OK] Ownership fix attempted (errors ignored)"
     echo ""
 
+
     SKIP_SU_EXEC=true
+
 
 # ========================================
 # CASE 3: Running as root - need to remap
@@ -73,9 +86,11 @@ else
     echo "[SETUP] Running as root, remapping to UID:$PUID GID:$PGID..."
     echo ""
 
+
     # Get current app user IDs
     CURRENT_UID=$(id -u app 2>/dev/null || echo "911")
     CURRENT_GID=$(id -g app 2>/dev/null || echo "911")
+
 
     # Only remap if needed
     if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
@@ -84,14 +99,17 @@ else
             groupmod -o -g "$PGID" app 2>/dev/null || true
         fi
 
+
         # Update user ID if needed
         if [ "$CURRENT_UID" != "$PUID" ]; then
             echo "  Updating user permissions (this may take a moment...)"
             usermod -o -u "$PUID" app 2>/dev/null || true
         fi
 
+
         # Fix ownership of internal app files only (not mounted volumes!)
         chown -R app:app /app/.next /app/public /app/node_modules /app/src 2>/dev/null || true
+
 
         echo "[OK] User permissions updated"
     else
@@ -99,19 +117,24 @@ else
     fi
     echo ""
 
+
     SKIP_SU_EXEC=false
 fi
+
 
 # ========================================
 # SERVICE READINESS CHECKS
 # ========================================
 
+
 # Function to wait for postgres to be ready
 wait_for_postgres() {
     echo "[WAIT] Waiting for PostgreSQL to be ready..."
 
+
     max_attempts=30
     attempt=0
+
 
     while [ $attempt -lt $max_attempts ]; do
         if node -e "
@@ -125,21 +148,26 @@ wait_for_postgres() {
             return 0
         fi
 
+
         attempt=$((attempt + 1))
         echo "  Attempt $attempt/$max_attempts - waiting..."
         sleep 2
     done
 
+
     echo "[ERROR] PostgreSQL is not ready after $max_attempts attempts"
     return 1
 }
+
 
 # Function to wait for Redis to be ready
 wait_for_redis() {
     echo "[WAIT] Waiting for Redis to be ready..."
 
+
     max_attempts=30
     attempt=0
+
 
     while [ $attempt -lt $max_attempts ]; do
         if node -e "
@@ -159,18 +187,22 @@ wait_for_redis() {
             return 0
         fi
 
+
         attempt=$((attempt + 1))
         echo "  Attempt $attempt/$max_attempts - waiting..."
         sleep 2
     done
 
+
     echo "[ERROR] Redis is not ready after $max_attempts attempts"
     return 1
 }
 
+
 # Function to wait for app to be fully ready
 wait_for_app() {
     echo "[WAIT] Waiting for application to be fully ready..."
+
 
     # Configurable hostname and port for different deployment scenarios
     # APP_HOST: Container/service name (default: vitransfer-app)
@@ -180,7 +212,9 @@ wait_for_app() {
     max_attempts=150  # 5 minutes (150 attempts * 2 seconds)
     attempt=0
 
+
     echo "  Checking: http://${APP_HOST}:${APP_PORT}/api/health"
+
 
     while [ $attempt -lt $max_attempts ]; do
         if curl -s -f http://${APP_HOST}:${APP_PORT}/api/health > /dev/null 2>&1; then
@@ -188,31 +222,38 @@ wait_for_app() {
             return 0
         fi
 
+
         attempt=$((attempt + 1))
         echo "  Attempt $attempt/$max_attempts - waiting..."
         sleep 2
     done
+
 
     echo "[ERROR] Application is not ready after $max_attempts attempts"
     echo "        Tried: http://${APP_HOST}:${APP_PORT}"
     return 1
 }
 
+
 # ========================================
 # DATABASE SETUP (MAIN APP ONLY)
 # ========================================
+
 
 # Only run migrations and initialization for the main app, not the worker
 if [ "$1" = "npm" ] && [ "$2" = "start" ]; then
     echo "[SETUP] Running database setup..."
     echo ""
 
+
     # Wait for services to be ready
     wait_for_postgres
     wait_for_redis
 
+
     echo ""
     echo "[DB]  Running Prisma migrations..."
+
 
     # Run migrations automatically
     # - On first run: Creates all tables from scratch (initial_schema migration)
@@ -225,6 +266,7 @@ if [ "$1" = "npm" ] && [ "$2" = "start" ]; then
         exit 1
     fi
 
+
     echo ""
     echo "[INIT] Database setup complete"
     echo "      Admin initialization will run automatically via instrumentation.ts"
@@ -233,19 +275,23 @@ elif [[ "$@" == *"npm run worker"* ]] || [[ "$@" == *"worker"* ]]; then
     echo "[SETUP] Worker initialization..."
     echo ""
 
+
     # Workers need to wait for database, Redis, AND the main app to be ready
     wait_for_postgres
     wait_for_redis
     wait_for_app
+
 
     echo ""
     echo "[OK] All services ready for worker"
     echo ""
 fi
 
+
 # ========================================
 # START APPLICATION
 # ========================================
+
 
 echo "[START] Starting application..."
 if [ "$SKIP_SU_EXEC" = "true" ]; then
@@ -254,6 +300,7 @@ else
     echo "         Running as: UID:$PUID GID:$PGID (via su-exec app)"
 fi
 echo ""
+
 
 # Execute the main command
 if [ "$SKIP_SU_EXEC" = "true" ]; then

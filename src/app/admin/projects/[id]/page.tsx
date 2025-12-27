@@ -321,6 +321,7 @@ export default function ProjectPage() {
                   isPasswordProtected={!!project.sharePassword}
                   adminUser={adminUser}
                   recipients={project.recipients || []}
+                  allowClientDeleteComments={project.allowClientDeleteComments}
                 />
               </div>
             )}

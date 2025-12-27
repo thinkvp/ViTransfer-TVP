@@ -461,6 +461,7 @@ export default function AdminSharePage() {
                     recipients={project.recipients || []}
                     shareToken={null}
                     showShortcutsButton={true}
+                    allowClientDeleteComments={project.allowClientDeleteComments}
                   />
                 </div>
               )}

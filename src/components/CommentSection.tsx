@@ -32,6 +32,7 @@ interface CommentSectionProps {
   recipients?: Array<{ id: string; name: string | null }>
   shareToken?: string | null
   showShortcutsButton?: boolean
+  allowClientDeleteComments?: boolean
 }
 
 export default function CommentSection({
@@ -52,6 +53,7 @@ export default function CommentSection({
   recipients = [],
   shareToken = null,
   showShortcutsButton = false,
+  allowClientDeleteComments = false,
 }: CommentSectionProps) {
   const {
     comments,
@@ -86,12 +88,15 @@ export default function CommentSection({
     shareToken,
     useAdminAuth: isAdminView,
     companyName,
+    allowClientDeleteComments,
   })
 
   // Auto-scroll to latest comment (like messaging apps)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
+
+  const canClientDelete = allowClientDeleteComments && !isAdminView
 
   // Fetch comments function (only used for event-triggered updates)
   const fetchComments = async () => {
@@ -327,6 +332,9 @@ export default function CommentSection({
                 const isViewerMessage = isAdminView ? comment.isInternal : !comment.isInternal
                 const hasReplies = comment.replies && comment.replies.length > 0
                 const repliesExpanded = expandedReplies[comment.id] ?? true // Default to expanded
+                const canDeleteParent = isAdminView || (canClientDelete && !comment.isInternal)
+                const allowAnyReplyDelete = isAdminView || canClientDelete
+                const canDeleteReply = (reply: Comment) => isAdminView || (canClientDelete && !reply.isInternal)
 
                 return (
                   <div key={comment.id}>
@@ -342,7 +350,7 @@ export default function CommentSection({
                         parentComment={null}
                         onReply={() => handleReply(comment.id, comment.videoId)}
                         onSeekToTimestamp={handleSeekToTimestamp}
-                        onDelete={isAdminView ? () => handleDeleteComment(comment.id) : undefined}
+                        onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
                         onScrollToComment={handleScrollToComment}
                         formatMessageTime={formatMessageTime}
                         commentsDisabled={commentsDisabled}
@@ -359,7 +367,7 @@ export default function CommentSection({
                         parentComment={null}
                         onReply={() => handleReply(comment.id, comment.videoId)}
                         onSeekToTimestamp={handleSeekToTimestamp}
-                        onDelete={isAdminView ? () => handleDeleteComment(comment.id) : undefined}
+                        onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
                         onScrollToComment={handleScrollToComment}
                         formatMessageTime={formatMessageTime}
                         commentsDisabled={commentsDisabled}
@@ -367,7 +375,8 @@ export default function CommentSection({
                         replies={comment.replies}
                         repliesExpanded={repliesExpanded}
                         onToggleReplies={() => toggleReplies(comment.id)}
-                        onDeleteReply={isAdminView ? handleDeleteComment : undefined}
+                        onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}
+                        canDeleteReply={allowAnyReplyDelete ? canDeleteReply : undefined}
                       />
                     )}
                   </div>

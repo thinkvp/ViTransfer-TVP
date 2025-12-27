@@ -125,6 +125,7 @@ export async function POST(request: NextRequest) {
       enableRevisions,
       maxRevisions,
       restrictCommentsToLatestVersion,
+      allowClientDeleteComments,
       isShareOnly
     } = validation.data
 
@@ -155,6 +156,7 @@ export async function POST(request: NextRequest) {
         defaultPreviewResolution: true,
         defaultWatermarkEnabled: true,
         defaultWatermarkText: true,
+        defaultAllowClientDeleteComments: true,
       },
     })
 
@@ -177,6 +179,7 @@ export async function POST(request: NextRequest) {
           enableRevisions: isShareOnly ? false : (enableRevisions || false),
           maxRevisions: isShareOnly ? 0 : (enableRevisions ? (maxRevisions || 3) : 0),
           restrictCommentsToLatestVersion: isShareOnly ? false : (restrictCommentsToLatestVersion || false),
+          allowClientDeleteComments: isShareOnly ? false : (allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false),
           status: isShareOnly ? 'SHARE_ONLY' : 'IN_REVIEW',
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,

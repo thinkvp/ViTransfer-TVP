@@ -126,6 +126,7 @@ export const createProjectSchema = z.object({
   enableRevisions: z.boolean().optional(),
   maxRevisions: z.number().int().min(1).max(10).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
+  allowClientDeleteComments: z.boolean().optional(),
   isShareOnly: z.boolean().optional(),
   previewResolution: z.enum(['720p', '1080p']).optional(),
   watermarkText: safeStringSchema(0, 100).optional()
@@ -151,6 +152,7 @@ export const updateProjectSchema = z.object({
   maxRevisions: z.number().int().min(1).max(10).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
+  allowClientDeleteComments: z.boolean().optional(),
   status: z.enum(['IN_REVIEW', 'APPROVED', 'SHARE_ONLY']).optional(),
   previewResolution: z.enum(['720p', '1080p']).optional(),
   watermarkText: safeStringSchema(0, 100).optional()
@@ -210,6 +212,7 @@ export const updateSettingsSchema = z.object({
   appDomain: urlSchema.optional(),
   defaultPreviewResolution: z.enum(['720p', '1080p']).optional(),
   defaultWatermarkText: safeStringSchema(0, 100).optional(),
+  defaultAllowClientDeleteComments: z.boolean().optional(),
   maxUploadSizeGB: z.number().int().min(1).max(100).optional() // 1GB to 100GB
 })
 

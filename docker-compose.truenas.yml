@@ -30,7 +30,7 @@ services:
     container_name: vitransfer-redis
     restart: unless-stopped
     user: "568:568"
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
     volumes:
       - /mnt/tank/apps/vitransfer/redis:/data
     networks:

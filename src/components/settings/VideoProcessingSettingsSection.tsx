@@ -11,6 +11,8 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultWatermarkEnabled: (value: boolean) => void
   defaultWatermarkText: string
   setDefaultWatermarkText: (value: string) => void
+  defaultAllowClientDeleteComments: boolean
+  setDefaultAllowClientDeleteComments: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -22,6 +24,8 @@ export function VideoProcessingSettingsSection({
   setDefaultWatermarkEnabled,
   defaultWatermarkText,
   setDefaultWatermarkText,
+  defaultAllowClientDeleteComments,
+  setDefaultAllowClientDeleteComments,
   show,
   setShow,
 }: VideoProcessingSettingsSectionProps) {
@@ -33,9 +37,9 @@ export function VideoProcessingSettingsSection({
       >
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Default Video Processing Settings</CardTitle>
+            <CardTitle>Default Project Settings</CardTitle>
             <CardDescription>
-              Set default settings for new projects
+              Set default video processing and other settings for new projects
             </CardDescription>
           </div>
           {show ? (
@@ -96,6 +100,22 @@ export function VideoProcessingSettingsSection({
                 </p>
               </div>
             )}
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="defaultAllowClientDeleteComments">Allow clients to delete client comments</Label>
+                <p className="text-xs text-muted-foreground">
+                  All clients will be able to delete any comment left by a client.
+                </p>
+              </div>
+              <Switch
+                id="defaultAllowClientDeleteComments"
+                checked={defaultAllowClientDeleteComments}
+                onCheckedChange={setDefaultAllowClientDeleteComments}
+              />
+            </div>
           </div>
         </CardContent>
       )}

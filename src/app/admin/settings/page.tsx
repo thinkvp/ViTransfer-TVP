@@ -26,6 +26,7 @@ interface Settings {
   defaultPreviewResolution: string | null
   defaultWatermarkEnabled: boolean | null
   defaultWatermarkText: string | null
+  defaultAllowClientDeleteComments: boolean | null
   autoApproveProject: boolean | null
   adminNotificationSchedule: string | null
   adminNotificationTime: string | null
@@ -100,6 +101,7 @@ export default function GlobalSettingsPage() {
   const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('720p')
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
+  const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
 
   // Form state for admin notification settings
@@ -171,6 +173,7 @@ export default function GlobalSettingsPage() {
         setDefaultPreviewResolution(data.defaultPreviewResolution || '720p')
         setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
         setDefaultWatermarkText(data.defaultWatermarkText || '')
+        setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
         setAutoApproveProject(data.autoApproveProject ?? true)
         setTestEmailAddress(data.smtpFromAddress || '')
 
@@ -357,6 +360,7 @@ export default function GlobalSettingsPage() {
         defaultPreviewResolution: defaultPreviewResolution || '720p',
         defaultWatermarkEnabled: defaultWatermarkEnabled,
         defaultWatermarkText: defaultWatermarkText || null,
+        defaultAllowClientDeleteComments,
         autoApproveProject: autoApproveProject,
         adminNotificationSchedule: adminNotificationSchedule,
         adminNotificationTime: (adminNotificationSchedule === 'DAILY' || adminNotificationSchedule === 'WEEKLY') ? adminNotificationTime : null,
@@ -417,7 +421,9 @@ export default function GlobalSettingsPage() {
         setSmtpSecure(refreshedData.smtpSecure || 'STARTTLS')
         setAppDomain(refreshedData.appDomain || '')
         setDefaultPreviewResolution(refreshedData.defaultPreviewResolution || '720p')
+        setDefaultWatermarkEnabled(refreshedData.defaultWatermarkEnabled ?? true)
         setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
+        setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
@@ -590,6 +596,8 @@ export default function GlobalSettingsPage() {
             setDefaultWatermarkEnabled={setDefaultWatermarkEnabled}
             defaultWatermarkText={defaultWatermarkText}
             setDefaultWatermarkText={setDefaultWatermarkText}
+            defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
+            setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
             show={showVideoProcessing}
             setShow={setShowVideoProcessing}
           />
