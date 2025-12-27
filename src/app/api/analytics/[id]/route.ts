@@ -68,6 +68,18 @@ export async function GET(
             },
           },
         },
+        emailEvents: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            video: {
+              select: {
+                id: true,
+                name: true,
+                versionLabel: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -164,8 +176,18 @@ export async function GET(
       }
     })
 
+    const emailEvents = project.emailEvents.map(evt => ({
+      id: evt.id,
+      type: 'EMAIL' as const,
+      description: evt.type === 'ALL_READY_VIDEOS' ? 'All Ready Videos' : 'Specific Video & Version',
+      recipients: JSON.parse(evt.recipientEmails) as string[],
+      videoName: evt.video?.name,
+      versionLabel: evt.video?.versionLabel,
+      createdAt: evt.createdAt,
+    }))
+
     // Merge and sort all activity by timestamp (newest first)
-    const allActivity = [...authEvents, ...downloadEvents].sort(
+    const allActivity = [...authEvents, ...downloadEvents, ...emailEvents].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 

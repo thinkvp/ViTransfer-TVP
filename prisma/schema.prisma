@@ -79,6 +79,7 @@ model Project {
   recipients        ProjectRecipient[] // Multiple email recipients
   notificationQueue NotificationQueue[] // Pending notifications
   sharePageAccesses SharePageAccess[] // Share page authentication tracking
+  emailEvents       ProjectEmailEvent[] // Logged client email notifications
 }
 
 enum ProjectStatus {
@@ -138,9 +139,10 @@ model Video {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  analytics VideoAnalytics[]
-  assets    VideoAsset[]
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  analytics   VideoAnalytics[]
+  assets      VideoAsset[]
+  emailEvents ProjectEmailEvent[]
 
   @@index([projectId, version])
   @@index([projectId, name])
@@ -372,6 +374,29 @@ model VideoAnalytics {
   @@index([videoId, createdAt])
   @@index([eventType])
   @@index([assetId])
+}
+
+model ProjectEmailEvent {
+  id        String   @id @default(cuid())
+
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Email notification type: ALL_READY_VIDEOS or SPECIFIC_VIDEO_VERSION
+  type      String
+
+  // Optional link to a specific video/version when applicable
+  videoId   String?
+  video     Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+
+  // JSON array of recipient email addresses
+  recipientEmails String
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([videoId])
+  @@index([type])
 }
 
 model SharePageAccess {

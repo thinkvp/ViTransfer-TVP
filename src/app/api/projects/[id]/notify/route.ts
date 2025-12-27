@@ -133,15 +133,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       })
 
     const results = await Promise.allSettled(emailPromises)
-    const successCount = results.filter(r => r.status === 'fulfilled' && (r.value as any).success).length
-
-    // Get recipients with emails who were actually sent
     const recipientsWithEmails = recipients.filter(r => r.email)
-    const successfulRecipients = recipientsWithEmails.slice(0, successCount)
+    // Map successes to actual recipient emails using positional alignment
+    const successfulRecipientEmails: string[] = []
+    results.forEach((r, idx) => {
+      if (r.status === 'fulfilled' && (r.value as any).success) {
+        const rec = recipientsWithEmails[idx]
+        if (rec?.email) successfulRecipientEmails.push(rec.email)
+      }
+    })
+    const successCount = successfulRecipientEmails.length
 
     // Send password emails if requested
     let passwordSuccessCount = 0
-    let successfulPasswordRecipients: any[] = []
+    let successfulPasswordRecipientEmails: string[] = []
     if (sendPasswordSeparately && isPasswordProtected && project.sharePassword) {
       try {
         // Wait 10 seconds before sending password emails
@@ -161,25 +166,45 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           )
 
         const passwordResults = await Promise.allSettled(passwordPromises)
-        passwordSuccessCount = passwordResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length
-        successfulPasswordRecipients = recipientsWithEmails.slice(0, passwordSuccessCount)
+        passwordResults.forEach((r, idx) => {
+          if (r.status === 'fulfilled' && (r.value as any).success) {
+            const rec = recipientsWithEmails[idx]
+            if (rec?.email) successfulPasswordRecipientEmails.push(rec.email)
+          }
+        })
+        passwordSuccessCount = successfulPasswordRecipientEmails.length
       } catch (error) {
         console.error('Error sending password emails:', error)
       }
     }
 
     if (successCount > 0) {
-      // Format recipient names
-      const formatRecipientList = (recipients: any[]) => {
-        const names = recipients.map(r => r.name || r.email)
-        if (names.length === 1) return names[0]
-        if (names.length === 2) return `${names[0]} & ${names[1]}`
-        return names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1]
+      // Log analytics email event (clients only)
+      try {
+        const recipientEmailsJson = JSON.stringify(successfulRecipientEmails)
+        await prisma.projectEmailEvent.create({
+          data: {
+            projectId,
+            type: notifyEntireProject ? 'ALL_READY_VIDEOS' : 'SPECIFIC_VIDEO_VERSION',
+            videoId: notifyEntireProject ? null : videoId,
+            recipientEmails: recipientEmailsJson,
+          },
+        })
+      } catch (e) {
+        // Non-blocking: analytics logging should not prevent response
+        console.error('Failed to log ProjectEmailEvent:', e)
       }
 
-      let message = `Sent email to ${formatRecipientList(successfulRecipients)}.`
+      // Format recipient emails for message
+      const formatEmailsList = (emails: string[]) => {
+        if (emails.length === 1) return emails[0]
+        if (emails.length === 2) return `${emails[0]} & ${emails[1]}`
+        return emails.slice(0, -1).join(', ') + ' & ' + emails[emails.length - 1]
+      }
+
+      let message = `Sent email to ${formatEmailsList(successfulRecipientEmails)}.`
       if (sendPasswordSeparately && isPasswordProtected && passwordSuccessCount > 0) {
-        message += ` Password sent to ${formatRecipientList(successfulPasswordRecipients)}.`
+        message += ` Password sent to ${formatEmailsList(successfulPasswordRecipientEmails)}.`
       }
       return NextResponse.json({ success: true, message })
     } else {

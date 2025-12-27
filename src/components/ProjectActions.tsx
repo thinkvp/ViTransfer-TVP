@@ -144,6 +144,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     router.push(`/admin/projects/${project.id}/share`)
   }
 
+  const handleViewAnalytics = () => {
+    router.push(`/admin/analytics/${project.id}`)
+  }
+
   const handleToggleApproval = async () => {
     // Prevent double-clicks during approval toggle
     if (isTogglingApproval) return
@@ -298,6 +302,16 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           >
             <ExternalLink className="w-4 h-4 mr-2" />
             View Share Page
+          </Button>
+
+          <Button
+            variant="outline"
+            size="default"
+            className="w-full"
+            onClick={handleViewAnalytics}
+          >
+            <ExternalLink className="w-4 h-4 mr-2" />
+            View Analytics
           </Button>
 
           {/* Approve/Unapprove Toggle Button */}

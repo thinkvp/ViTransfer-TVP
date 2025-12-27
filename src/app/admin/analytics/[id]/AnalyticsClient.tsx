@@ -38,7 +38,17 @@ interface DownloadActivity {
   createdAt: Date
 }
 
-type Activity = AuthActivity | DownloadActivity
+interface EmailActivity {
+  id: string
+  type: 'EMAIL'
+  description: 'All Ready Videos' | 'Specific Video & Version'
+  recipients: string[]
+  videoName?: string
+  versionLabel?: string
+  createdAt: Date
+}
+
+type Activity = AuthActivity | DownloadActivity | EmailActivity
 
 interface AnalyticsData {
   project: {
@@ -247,7 +257,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
           <Card className="overflow-hidden">
             <CardHeader>
               <CardTitle>Project Activity</CardTitle>
-              <CardDescription>All authentication and download events</CardDescription>
+              <CardDescription>All authentication, email, and download events</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-hidden">
               {activity.length === 0 ? (
@@ -264,16 +274,27 @@ export default function AnalyticsClient({ id }: { id: string }) {
                       >
                         <div className="flex items-center gap-3 p-3">
                           {/* Badge - left aligned */}
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${event.type === 'AUTH' ? getAccessMethodColor(event.accessMethod) : 'bg-success-visible text-success border-2 border-success-visible'}`}>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
+                            event.type === 'AUTH'
+                              ? getAccessMethodColor((event as AuthActivity).accessMethod)
+                              : event.type === 'EMAIL'
+                              ? 'bg-warning-visible text-warning border-2 border-warning-visible'
+                              : 'bg-success-visible text-success border-2 border-success-visible'
+                          }`}>
                             {event.type === 'AUTH' ? (
-                              event.accessMethod === 'OTP' ? 'Email OTP' :
-                              event.accessMethod === 'PASSWORD' ? 'Password' :
-                              event.accessMethod === 'GUEST' ? 'Guest Access' :
+                              (event as AuthActivity).accessMethod === 'OTP' ? 'Email OTP' :
+                              (event as AuthActivity).accessMethod === 'PASSWORD' ? 'Password' :
+                              (event as AuthActivity).accessMethod === 'GUEST' ? 'Guest Access' :
                               'Public Access'
+                            ) : event.type === 'EMAIL' ? (
+                              <>
+                                <Mail className="w-3 h-3 inline mr-1" />
+                                Email Sent
+                              </>
                             ) : (
                               <>
                                 <Download className="w-3 h-3 inline mr-1" />
-                                {event.assetIds ? 'ZIP' : event.assetId ? 'Asset' : 'Video'}
+                                { (event as DownloadActivity).assetIds ? 'ZIP' : (event as DownloadActivity).assetId ? 'Asset' : 'Video' }
                               </>
                             )}
                           </span>
@@ -282,13 +303,15 @@ export default function AnalyticsClient({ id }: { id: string }) {
                           <div className="flex-1 min-w-0 flex items-center justify-center">
                             <span className="text-muted-foreground text-sm truncate">
                               {event.type === 'AUTH' ? (
-                                event.email ? (
-                                  isExpanded ? event.email : `${event.email.substring(0, 20)}${event.email.length > 20 ? '...' : ''}`
+                                (event as AuthActivity).email ? (
+                                  isExpanded ? (event as AuthActivity).email! : `${(event as AuthActivity).email!.substring(0, 20)}${(event as AuthActivity).email!.length > 20 ? '...' : ''}`
                                 ) : (
-                                  event.accessMethod === 'GUEST' ? 'Guest visitor' : 'Public visitor'
+                                  (event as AuthActivity).accessMethod === 'GUEST' ? 'Guest visitor' : 'Public visitor'
                                 )
+                              ) : event.type === 'EMAIL' ? (
+                                (event as EmailActivity).description
                               ) : (
-                                isExpanded ? event.videoName : `${event.videoName.substring(0, 25)}${event.videoName.length > 25 ? '...' : ''}`
+                                isExpanded ? (event as DownloadActivity).videoName : `${(event as DownloadActivity).videoName.substring(0, 25)}${(event as DownloadActivity).videoName.length > 25 ? '...' : ''}`
                               )}
                             </span>
                           </div>
@@ -314,10 +337,33 @@ export default function AnalyticsClient({ id }: { id: string }) {
                                   <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
                                   <span className="text-sm text-muted-foreground">Accessed the project</span>
                                 </div>
-                                {event.email && (
+                                {(event as AuthActivity).email && (
                                   <div className="flex items-start gap-2">
                                     <span className="text-xs font-semibold text-foreground min-w-[80px]">Email</span>
-                                    <span className="text-sm text-muted-foreground break-all">{event.email}</span>
+                                    <span className="text-sm text-muted-foreground break-all">{(event as AuthActivity).email}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : event.type === 'EMAIL' ? (
+                              <div className="space-y-2">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
+                                  <span className="text-sm text-muted-foreground">{(event as EmailActivity).description === 'All Ready Videos' ? 'All Ready Videos email sent' : 'Specific Video & Version email sent'}</span>
+                                </div>
+                                {(event as EmailActivity).videoName && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-xs font-semibold text-foreground min-w-[80px]">Video</span>
+                                    <span className="text-sm text-muted-foreground">{(event as EmailActivity).videoName} ({(event as EmailActivity).versionLabel})</span>
+                                  </div>
+                                )}
+                                {(event as EmailActivity).recipients && (event as EmailActivity).recipients.length > 0 && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-xs font-semibold text-foreground min-w-[80px]">Email</span>
+                                    <div className="flex-1 space-y-1">
+                                      {(event as EmailActivity).recipients.map((email, idx) => (
+                                        <div key={idx} className="text-sm text-muted-foreground break-all">{email}</div>
+                                      ))}
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -325,29 +371,29 @@ export default function AnalyticsClient({ id }: { id: string }) {
                               <div className="space-y-3">
                                 <div className="flex items-start gap-2">
                                   <span className="text-xs font-semibold text-foreground min-w-[80px]">Video</span>
-                                  <span className="text-sm text-muted-foreground">{event.videoName} ({event.versionLabel})</span>
+                                  <span className="text-sm text-muted-foreground">{(event as DownloadActivity).videoName} ({(event as DownloadActivity).versionLabel})</span>
                                 </div>
 
                                 <div className="flex items-start gap-2">
                                   <span className="text-xs font-semibold text-foreground min-w-[80px]">Content</span>
                                   <div className="flex-1">
-                                    {event.assetFileNames && event.assetFileNames.length > 0 ? (
+                                    {(event as DownloadActivity).assetFileNames && (event as DownloadActivity).assetFileNames!.length > 0 ? (
                                       <div>
                                         <p className="text-sm text-muted-foreground mb-2">
-                                          ZIP archive with {event.assetFileNames.length} asset{event.assetFileNames.length !== 1 ? 's' : ''}
+                                          ZIP archive with {(event as DownloadActivity).assetFileNames!.length} asset{(event as DownloadActivity).assetFileNames!.length !== 1 ? 's' : ''}
                                         </p>
                                         <div className="space-y-1 pl-3 border-l-2 border-border">
-                                          {event.assetFileNames.map((fileName, idx) => (
+                                          {(event as DownloadActivity).assetFileNames!.map((fileName, idx) => (
                                             <div key={idx} className="text-sm text-muted-foreground break-all font-mono text-xs">
                                               {fileName}
                                             </div>
                                           ))}
                                         </div>
                                       </div>
-                                    ) : event.assetFileName ? (
+                                    ) : (event as DownloadActivity).assetFileName ? (
                                       <div className="text-sm text-muted-foreground">
                                         <p className="mb-1">Single asset file</p>
-                                        <p className="font-mono text-xs break-all pl-3 border-l-2 border-border">{event.assetFileName}</p>
+                                        <p className="font-mono text-xs break-all pl-3 border-l-2 border-border">{(event as DownloadActivity).assetFileName}</p>
                                       </div>
                                     ) : (
                                       <span className="text-sm text-muted-foreground">Full video file</span>
