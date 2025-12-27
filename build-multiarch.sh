@@ -12,7 +12,7 @@
 
 set -e
 
-DOCKERHUB_USERNAME="crypt010"
+DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-simbamcsimba}"
 IMAGE_NAME="vitransfer"
 VERSION="${1:-latest}"
 NO_CACHE_FLAG=""
