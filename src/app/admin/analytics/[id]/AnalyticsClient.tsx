@@ -48,7 +48,17 @@ interface EmailActivity {
   createdAt: Date
 }
 
-type Activity = AuthActivity | DownloadActivity | EmailActivity
+interface EmailOpenActivity {
+  id: string
+  type: 'EMAIL_OPEN'
+  description: 'All Ready Videos' | 'Specific Video & Version'
+  recipientEmail: string
+  videoName?: string
+  versionLabel?: string
+  createdAt: Date
+}
+
+type Activity = AuthActivity | DownloadActivity | EmailActivity | EmailOpenActivity
 
 interface AnalyticsData {
   project: {
@@ -257,7 +267,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
           <Card className="overflow-hidden">
             <CardHeader>
               <CardTitle>Project Activity</CardTitle>
-              <CardDescription>All authentication, email, and download events</CardDescription>
+              <CardDescription>All authentication, email, download, and open tracking events</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-hidden">
               {activity.length === 0 ? (
@@ -277,7 +287,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
                           <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
                             event.type === 'AUTH'
                               ? getAccessMethodColor((event as AuthActivity).accessMethod)
-                              : event.type === 'EMAIL'
+                              : event.type === 'EMAIL' || event.type === 'EMAIL_OPEN'
                               ? 'bg-warning-visible text-warning border-2 border-warning-visible'
                               : 'bg-success-visible text-success border-2 border-success-visible'
                           }`}>
@@ -290,6 +300,11 @@ export default function AnalyticsClient({ id }: { id: string }) {
                               <>
                                 <Mail className="w-3 h-3 inline mr-1" />
                                 Email Sent
+                              </>
+                            ) : event.type === 'EMAIL_OPEN' ? (
+                              <>
+                                <Mail className="w-3 h-3 inline mr-1" />
+                                Email Opened
                               </>
                             ) : (
                               <>
@@ -310,6 +325,8 @@ export default function AnalyticsClient({ id }: { id: string }) {
                                 )
                               ) : event.type === 'EMAIL' ? (
                                 (event as EmailActivity).description
+                              ) : event.type === 'EMAIL_OPEN' ? (
+                                (event as EmailOpenActivity).description
                               ) : (
                                 isExpanded ? (event as DownloadActivity).videoName : `${(event as DownloadActivity).videoName.substring(0, 25)}${(event as DownloadActivity).videoName.length > 25 ? '...' : ''}`
                               )}
@@ -366,6 +383,23 @@ export default function AnalyticsClient({ id }: { id: string }) {
                                     </div>
                                   </div>
                                 )}
+                              </div>
+                            ) : event.type === 'EMAIL_OPEN' ? (
+                              <div className="space-y-2">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
+                                  <span className="text-sm text-muted-foreground">{(event as EmailOpenActivity).description === 'All Ready Videos' ? 'All Ready Videos email opened' : 'Specific Video & Version email opened'}</span>
+                                </div>
+                                {(event as EmailOpenActivity).videoName && (
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-xs font-semibold text-foreground min-w-[80px]">Video</span>
+                                    <span className="text-sm text-muted-foreground">{(event as EmailOpenActivity).videoName} ({(event as EmailOpenActivity).versionLabel})</span>
+                                  </div>
+                                )}
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">Email</span>
+                                  <span className="text-sm text-muted-foreground break-all">{(event as EmailOpenActivity).recipientEmail}</span>
+                                </div>
                               </div>
                             ) : (
                               <div className="space-y-3">

@@ -109,6 +109,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const emailPromises = recipients
       .filter(recipient => recipient.email)
       .map(async (recipient) => {
+        // Generate unique tracking token for this email/recipient
+        const trackingToken = await prisma.emailTracking.create({
+          data: {
+            token: `${projectId}-${recipient.email}-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            projectId,
+            type: notifyEntireProject ? 'ALL_READY_VIDEOS' : 'SPECIFIC_VIDEO_VERSION',
+            videoId: notifyEntireProject ? null : videoId,
+            recipientEmail: recipient.email!,
+          },
+        })
+
         if (notifyEntireProject) {
           return sendProjectGeneralNotificationEmail({
             clientEmail: recipient.email!,
@@ -118,6 +129,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             shareUrl,
             readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel })),
             isPasswordProtected,
+            trackingToken: trackingToken.token,
           })
         } else {
           return sendNewVersionEmail({
@@ -128,6 +140,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             versionLabel: video!.versionLabel,
             shareUrl,
             isPasswordProtected,
+            trackingToken: trackingToken.token,
           })
         }
       })

@@ -80,6 +80,7 @@ model Project {
   notificationQueue NotificationQueue[] // Pending notifications
   sharePageAccesses SharePageAccess[] // Share page authentication tracking
   emailEvents       ProjectEmailEvent[] // Logged client email notifications
+  emailTracking     EmailTracking[] // Email open tracking pixels
 }
 
 enum ProjectStatus {
@@ -143,6 +144,7 @@ model Video {
   analytics   VideoAnalytics[]
   assets      VideoAsset[]
   emailEvents ProjectEmailEvent[]
+  emailTracking EmailTracking[]
 
   @@index([projectId, version])
   @@index([projectId, name])
@@ -397,6 +399,32 @@ model ProjectEmailEvent {
   @@index([projectId, createdAt])
   @@index([videoId])
   @@index([type])
+}
+
+model EmailTracking {
+  id    String @id @default(cuid())
+  token String @unique // Unique tracking token for this email/recipient
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Email type: ALL_READY_VIDEOS or SPECIFIC_VIDEO_VERSION
+  type String
+
+  // Optional link to specific video when applicable
+  videoId String?
+  video   Video?  @relation(fields: [videoId], references: [id], onDelete: SetNull)
+
+  // Recipient email address
+  recipientEmail String
+
+  // Tracking timestamps
+  sentAt   DateTime  @default(now())
+  openedAt DateTime? // NULL if not opened yet
+
+  @@index([projectId, openedAt])
+  @@index([token])
+  @@index([recipientEmail])
 }
 
 model SharePageAccess {

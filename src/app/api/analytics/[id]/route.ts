@@ -80,6 +80,19 @@ export async function GET(
             },
           },
         },
+        emailTracking: {
+          where: { openedAt: { not: null } }, // Only include opened emails
+          orderBy: { openedAt: 'desc' },
+          include: {
+            video: {
+              select: {
+                id: true,
+                name: true,
+                versionLabel: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -186,8 +199,18 @@ export async function GET(
       createdAt: evt.createdAt,
     }))
 
+    const emailOpenEvents = project.emailTracking.map(tracking => ({
+      id: tracking.id,
+      type: 'EMAIL_OPEN' as const,
+      description: tracking.type === 'ALL_READY_VIDEOS' ? 'All Ready Videos' : 'Specific Video & Version',
+      recipientEmail: tracking.recipientEmail,
+      videoName: tracking.video?.name,
+      versionLabel: tracking.video?.versionLabel,
+      createdAt: tracking.openedAt!, // Non-null because we filtered for openedAt !== null
+    }))
+
     // Merge and sort all activity by timestamp (newest first)
-    const allActivity = [...authEvents, ...downloadEvents, ...emailEvents].sort(
+    const allActivity = [...authEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 

@@ -34,6 +34,8 @@ export interface EmailShellOptions {
   bodyContent: string
   footerNote?: string
   headerGradient: string
+  trackingToken?: string
+  appDomain?: string
 }
 
 export function renderEmailShell({
@@ -43,7 +45,12 @@ export function renderEmailShell({
   bodyContent,
   footerNote,
   headerGradient,
+  trackingToken,
+  appDomain,
 }: EmailShellOptions) {
+  const domain = appDomain || process.env.APP_DOMAIN || 'http://localhost:3000'
+  const trackingPixel = trackingToken ? `<img src="${domain}/api/track/email/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />` : ''
+  
   return `
 <!DOCTYPE html>
 <html>
@@ -73,6 +80,7 @@ export function renderEmailShell({
     </div>
 
   </div>
+  ${trackingPixel}
 </body>
 </html>
   `
@@ -236,6 +244,7 @@ export async function sendNewVersionEmail({
   versionLabel,
   shareUrl,
   isPasswordProtected = false,
+  trackingToken,
 }: {
   clientEmail: string
   clientName: string
@@ -244,6 +253,7 @@ export async function sendNewVersionEmail({
   versionLabel: string
   shareUrl: string
   isPasswordProtected?: boolean
+  trackingToken?: string
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
@@ -255,6 +265,8 @@ export async function sendNewVersionEmail({
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'New Version Available',
     subtitle: 'Ready for your review',
+    trackingToken,
+    appDomain: settings.appDomain || undefined,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(clientName)}</strong>,
@@ -648,6 +660,7 @@ export async function sendProjectGeneralNotificationEmail({
   shareUrl,
   readyVideos = [],
   isPasswordProtected = false,
+  trackingToken,
 }: {
   clientEmail: string
   clientName: string
@@ -656,6 +669,7 @@ export async function sendProjectGeneralNotificationEmail({
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
   isPasswordProtected?: boolean
+  trackingToken?: string
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
@@ -680,6 +694,8 @@ export async function sendProjectGeneralNotificationEmail({
     headerGradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
     title: 'Project Ready for Review',
     subtitle: projectTitle,
+    trackingToken,
+    appDomain: settings.appDomain || undefined,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
         Hi <strong>${escapeHtml(clientName)}</strong>,
