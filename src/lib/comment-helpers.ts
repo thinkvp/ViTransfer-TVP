@@ -4,6 +4,7 @@ import { isSmtpConfigured } from '@/lib/settings'
 import { getRedis } from '@/lib/redis'
 import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
+import { sendPushNotification } from '@/lib/push-notifications'
 
 /**
  * Validate comment permissions
@@ -240,6 +241,24 @@ export async function handleCommentNotifications(params: {
     } else {
       console.log(`[COMMENT-NOTIFICATION] Queuing for later (${schedule})...`)
       await queueNotification(context)
+    }
+
+    // Send push notification for client comments only (not admin replies)
+    if (!isAdminComment) {
+      await sendPushNotification({
+        type: 'CLIENT_COMMENT',
+        projectId: project.id,
+        projectName: project.title,
+        title: 'New Client Comment',
+        message: `New comment on project`,
+        details: {
+          'Project': project.title,
+          'Video': video?.name || 'N/A',
+          'Timecode': comment.timecode,
+          'Author': comment.authorName || 'Client',
+          'Comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
+        },
+      })
     }
   } catch (emailError) {
     // Don't fail the request if notification processing fails

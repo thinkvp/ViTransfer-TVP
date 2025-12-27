@@ -4,6 +4,7 @@ import { checkRateLimit, incrementRateLimit, clearRateLimit } from '@/lib/rate-l
 import { validateRequest, loginSchema } from '@/lib/validation'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
+import { sendPushNotification } from '@/lib/push-notifications'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -96,6 +97,17 @@ export async function POST(request: NextRequest) {
           email,
         },
         wasBlocked: false,
+      })
+
+      // Send push notification for failed admin login
+      await sendPushNotification({
+        type: 'FAILED_LOGIN',
+        title: 'Failed Admin Login Attempt',
+        message: `Failed login attempt to admin dashboard`,
+        details: {
+          'Email/Username': email,
+          'IP Address': ipAddress,
+        },
       })
 
       return NextResponse.json(

@@ -4,6 +4,7 @@ import { sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendPr
 import { getProjectRecipients } from './recipients'
 import { generateShareUrl } from './url'
 import { getRedis } from './redis'
+import { sendPushNotification } from './push-notifications'
 
 interface NotificationContext {
   comment: Comment
@@ -253,4 +254,22 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
       console.error(`[IMMEDIATE→ADMIN]   Failed: ${result.message}`)
     }
   }
+
+  // Send push notification for video approval
+  const videoNames = approvedVideos?.map(v => v.name).join(', ') || video?.name || 'Unknown'
+  const approvalStatus = approved ? 'approved' : 'unapproved'
+  
+  await sendPushNotification({
+    type: 'VIDEO_APPROVAL',
+    projectId: project.id,
+    projectName: project.title,
+    title: `Video ${approved ? 'Approved' : 'Unapproved'}`,
+    message: `Client ${approvalStatus} video${approvedVideos && approvedVideos.length > 1 ? 's' : ''}`,
+    details: {
+      'Project': project.title,
+      'Video(s)': videoNames,
+      'Author': authorName || 'Client',
+      'Status': isComplete ? 'Complete Project Approval' : 'Partial Approval',
+    },
+  })
 }

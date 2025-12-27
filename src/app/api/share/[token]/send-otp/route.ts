@@ -12,6 +12,7 @@ import {
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { isSmtpConfigured } from '@/lib/email'
+import { sendPushNotification } from '@/lib/push-notifications'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -137,6 +138,20 @@ export async function POST(
           attemptedEmail: email,
         },
         wasBlocked: false,
+      })
+
+      // Send push notification for unauthorized OTP request
+      await sendPushNotification({
+        type: 'UNAUTHORIZED_OTP',
+        projectId: project.id,
+        projectName: project.title,
+        title: 'Unauthorized OTP Request',
+        message: `Unauthorized OTP request attempt detected`,
+        details: {
+          'Project': project.title,
+          'Email Attempted': email,
+          'IP Address': ipAddress,
+        },
       })
 
       // SECURITY: Add random delay to match timing of valid email path

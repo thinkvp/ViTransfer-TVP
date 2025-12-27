@@ -10,6 +10,7 @@ import { EmailSettingsSection } from '@/components/settings/EmailSettingsSection
 import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
 import { ProjectBehaviorSection } from '@/components/settings/ProjectBehaviorSection'
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
+import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 
 interface Settings {
@@ -59,6 +60,19 @@ interface BlockedDomain {
   domain: string
   reason: string | null
   createdAt: string
+}
+
+interface PushNotificationSettings {
+  id: string
+  enabled: boolean
+  provider: string | null
+  webhookUrl: string | null
+  title: string | null
+  notifyUnauthorizedOTP: boolean
+  notifyFailedAdminLogin: boolean
+  notifySuccessfulShareAccess: boolean
+  notifyClientComments: boolean
+  notifyVideoApproval: boolean
 }
 
 export default function GlobalSettingsPage() {
@@ -115,12 +129,25 @@ export default function GlobalSettingsPage() {
   const [newDomainReason, setNewDomainReason] = useState('')
   const [blocklistsLoading, setBlocklistsLoading] = useState(false)
 
+  // Form state for push notifications
+  const [pushNotificationSettings, setPushNotificationSettings] = useState<PushNotificationSettings | null>(null)
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushProvider, setPushProvider] = useState('')
+  const [pushWebhookUrl, setPushWebhookUrl] = useState('')
+  const [pushTitlePrefix, setPushTitlePrefix] = useState('')
+  const [pushNotifyUnauthorizedOTP, setPushNotifyUnauthorizedOTP] = useState(true)
+  const [pushNotifyFailedAdminLogin, setPushNotifyFailedAdminLogin] = useState(true)
+  const [pushNotifySuccessfulShareAccess, setPushNotifySuccessfulShareAccess] = useState(true)
+  const [pushNotifyClientComments, setPushNotifyClientComments] = useState(true)
+  const [pushNotifyVideoApproval, setPushNotifyVideoApproval] = useState(true)
+
   // Collapsible section state (all collapsed by default)
   const [showCompanyBranding, setShowCompanyBranding] = useState(false)
   const [showDomainConfiguration, setShowDomainConfiguration] = useState(false)
   const [showEmailSettings, setShowEmailSettings] = useState(false)
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
+  const [showPushNotifications, setShowPushNotifications] = useState(false)
 
   useEffect(() => {
     async function loadSettings() {
@@ -171,6 +198,24 @@ export default function GlobalSettingsPage() {
           setTrackAnalytics(securityData.trackAnalytics ?? true)
           setTrackSecurityLogs(securityData.trackSecurityLogs ?? true)
           setViewSecurityEvents(securityData.viewSecurityEvents ?? false)
+        }
+
+        // Load push notification settings
+        const pushResponse = await apiFetch('/api/settings/push-notifications')
+        if (pushResponse.ok) {
+          const pushData = await pushResponse.json()
+          setPushNotificationSettings(pushData)
+
+          // Set push notification form values
+          setPushEnabled(pushData.enabled ?? false)
+          setPushProvider(pushData.provider || '')
+          setPushWebhookUrl(pushData.webhookUrl || '')
+          setPushTitlePrefix(pushData.title || '')
+          setPushNotifyUnauthorizedOTP(pushData.notifyUnauthorizedOTP ?? true)
+          setPushNotifyFailedAdminLogin(pushData.notifyFailedAdminLogin ?? true)
+          setPushNotifySuccessfulShareAccess(pushData.notifySuccessfulShareAccess ?? true)
+          setPushNotifyClientComments(pushData.notifyClientComments ?? true)
+          setPushNotifyVideoApproval(pushData.notifyVideoApproval ?? true)
         }
       } catch (err) {
         setError('Failed to load settings')
@@ -338,6 +383,21 @@ export default function GlobalSettingsPage() {
       }
 
       await apiPatch('/api/settings/security', securityUpdates)
+
+      // Save push notification settings
+      const pushUpdates = {
+        enabled: pushEnabled,
+        provider: pushProvider || null,
+        webhookUrl: pushWebhookUrl || null,
+        title: pushTitlePrefix || null,
+        notifyUnauthorizedOTP: pushNotifyUnauthorizedOTP,
+        notifyFailedAdminLogin: pushNotifyFailedAdminLogin,
+        notifySuccessfulShareAccess: pushNotifySuccessfulShareAccess,
+        notifyClientComments: pushNotifyClientComments,
+        notifyVideoApproval: pushNotifyVideoApproval,
+      }
+
+      await apiPatch('/api/settings/push-notifications', pushUpdates)
 
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
@@ -539,6 +599,29 @@ export default function GlobalSettingsPage() {
             setAutoApproveProject={setAutoApproveProject}
             show={showProjectBehavior}
             setShow={setShowProjectBehavior}
+          />
+
+          <PushNotificationsSection
+            enabled={pushEnabled}
+            setEnabled={setPushEnabled}
+            provider={pushProvider}
+            setProvider={setPushProvider}
+            webhookUrl={pushWebhookUrl}
+            setWebhookUrl={setPushWebhookUrl}
+            titlePrefix={pushTitlePrefix}
+            setTitlePrefix={setPushTitlePrefix}
+            notifyUnauthorizedOTP={pushNotifyUnauthorizedOTP}
+            setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
+            notifyFailedAdminLogin={pushNotifyFailedAdminLogin}
+            setNotifyFailedAdminLogin={setPushNotifyFailedAdminLogin}
+            notifySuccessfulShareAccess={pushNotifySuccessfulShareAccess}
+            setNotifySuccessfulShareAccess={setPushNotifySuccessfulShareAccess}
+            notifyClientComments={pushNotifyClientComments}
+            setNotifyClientComments={setPushNotifyClientComments}
+            notifyVideoApproval={pushNotifyVideoApproval}
+            setNotifyVideoApproval={setPushNotifyVideoApproval}
+            show={showPushNotifications}
+            setShow={setShowPushNotifications}
           />
 
           <SecuritySettingsSection

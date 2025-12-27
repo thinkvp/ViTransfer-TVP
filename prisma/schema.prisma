@@ -275,6 +275,42 @@ model Settings {
   updatedAt DateTime @updatedAt
 }
 
+model PushNotificationSettings {
+  id String @id @default("default")
+
+  enabled Boolean @default(false)
+  provider String? // 'GOTIFY' or others
+  webhookUrl String?
+  title String? // Optional custom notification title prefix
+
+  // Event toggles
+  notifyUnauthorizedOTP Boolean @default(true)
+  notifyFailedAdminLogin Boolean @default(true)
+  notifySuccessfulShareAccess Boolean @default(true)
+  notifyClientComments Boolean @default(true)
+  notifyVideoApproval Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PushNotificationLog {
+  id String @id @default(cuid())
+
+  type String // UNAUTHORIZED_OTP, FAILED_LOGIN, SHARE_ACCESS, CLIENT_COMMENT, VIDEO_APPROVAL
+  projectId String?
+  success Boolean @default(false)
+  statusCode Int?
+  message String?
+  details Json?
+
+  sentAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([type])
+  @@index([sentAt])
+}
+
 model SecuritySettings {
   id String @id @default("default")
 
