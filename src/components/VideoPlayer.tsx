@@ -4,8 +4,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Video, ProjectStatus } from '@prisma/client'
 import { Button } from './ui/button'
-import { Download, Info, CheckCircle2, Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare } from 'lucide-react'
-import { formatTimestamp, formatFileSize, formatDate } from '@/lib/utils'
+import { Download, Info, CheckCircle2, Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward } from 'lucide-react'
+import { cn, formatTimestamp, formatFileSize, formatDate } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { timecodeToSeconds } from '@/lib/timecode'
 import {
@@ -80,6 +80,7 @@ export default function VideoPlayer({
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0)
   const [isMuted, setIsMuted] = useState(false)
   const [volume, setVolume] = useState(1)
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -742,6 +743,23 @@ export default function VideoPlayer({
     }
   }
 
+  const handleControlsPointerDownCapture = (e: any) => {
+    // Close the volume slider whenever the user interacts with other controls.
+    // Keep it open when interacting with the volume button/slider itself.
+    const target = e?.target as Element | null
+    if (!target) return
+    if (target.closest?.('[data-volume-control="true"]')) return
+    setShowVolumeSlider(false)
+  }
+
+  const handleDecreaseSpeed = () => {
+    setPlaybackSpeed((prev) => Math.max(0.25, prev - 0.25))
+  }
+
+  const handleIncreaseSpeed = () => {
+    setPlaybackSpeed((prev) => Math.min(2.0, prev + 0.25))
+  }
+
   const handleDownload = async () => {
     // Use secure token-based download URL
     const downloadUrl = (selectedVideo as any).downloadUrl
@@ -916,7 +934,10 @@ export default function VideoPlayer({
 
         {/* Custom Controls + Timeline (enables hover thumbnails) */}
         <div className="relative flex-shrink-0">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <div
+            className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+            onPointerDownCapture={handleControlsPointerDownCapture}
+          >
             {/* Desktop/tablet: left controls */}
             <div className="hidden sm:flex items-center gap-3">
               <Button
@@ -1066,36 +1087,72 @@ export default function VideoPlayer({
 
             {/* Desktop/tablet: right controls */}
             <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+              <div className="relative flex-shrink-0" data-volume-control="true">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowVolumeSlider((s) => !s)}
+                  aria-label={showVolumeSlider ? 'Hide volume' : 'Show volume'}
+                  className="relative overflow-hidden w-14 px-0"
+                >
+                  {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-0 left-0 bg-primary/30"
+                      style={{ width: `${Math.round(volume * 100)}%` }}
+                    />
+                  )}
+                  <span className="relative z-10">
+                    {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                  </span>
+                </Button>
+
+                {showVolumeSlider && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm">
+                    <div className="h-28 w-10 flex items-center justify-center">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round(volume * 100)}
+                      onChange={(e) => {
+                        const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                        const nextVolume = next / 100
+                        setVolume(nextVolume)
+                        if (nextVolume > 0) {
+                          setIsMuted(false)
+                        }
+                      }}
+                      className="w-28 h-4 -rotate-90 accent-primary"
+                      aria-label="Volume"
+                    />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setIsMuted((m) => !m)}
-                aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
+                onClick={handleDecreaseSpeed}
+                aria-label="Decrease playback speed"
+                className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
               >
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
+                <Rewind className="w-4 h-4" />
               </Button>
 
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(volume * 100)}
-                onChange={(e) => {
-                  const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
-                  const nextVolume = next / 100
-                  setVolume(nextVolume)
-                  if (nextVolume > 0) {
-                    setIsMuted(false)
-                  }
-                }}
-                className="w-24 h-4 accent-primary"
-                aria-label="Volume"
-              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleIncreaseSpeed}
+                aria-label="Increase playback speed"
+                className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+              >
+                <FastForward className="w-4 h-4" />
+              </Button>
 
               <Button
                 type="button"
@@ -1108,72 +1165,112 @@ export default function VideoPlayer({
               </Button>
             </div>
 
-            {/* Mobile: row 2 controls (play, time, volume, chat, fullscreen) */}
-            <div className="sm:hidden flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={togglePlayPause}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-              >
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              </Button>
+            {/* Mobile: row 2 controls (left: play/time, right: volume/speed/chat/fullscreen) */}
+            <div className="sm:hidden flex items-center justify-between gap-2 w-full">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={togglePlayPause}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                >
+                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                </Button>
 
-              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
+                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                  {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
+                </div>
               </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsMuted((m) => !m)}
-                aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
-              >
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </Button>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-shrink-0" data-volume-control="true">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowVolumeSlider((s) => !s)}
+                    aria-label={showVolumeSlider ? 'Hide volume' : 'Show volume'}
+                    className="relative overflow-hidden w-14 px-0"
+                  >
+                    {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-0 left-0 bg-primary/30"
+                        style={{ width: `${Math.round(volume * 100)}%` }}
+                      />
+                    )}
+                    <span className="relative z-10">
+                      {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                    </span>
+                  </Button>
 
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(volume * 100)}
-                onChange={(e) => {
-                  const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
-                  const nextVolume = next / 100
-                  setVolume(nextVolume)
-                  if (nextVolume > 0) {
-                    setIsMuted(false)
-                  }
-                }}
-                className="flex-1 h-4 accent-primary"
-                aria-label="Volume"
-              />
+                  {showVolumeSlider && (
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm">
+                      <div className="h-24 w-10 flex items-center justify-center">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={Math.round(volume * 100)}
+                          onChange={(e) => {
+                            const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                            const nextVolume = next / 100
+                            setVolume(nextVolume)
+                            if (nextVolume > 0) {
+                              setIsMuted(false)
+                            }
+                          }}
+                          className="w-24 h-4 -rotate-90 accent-primary"
+                          aria-label="Volume"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleOpenFeedback}
-                aria-label="Open feedback"
-              >
-                <MessageSquare className="w-4 h-4" />
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDecreaseSpeed}
+                  aria-label="Decrease playback speed"
+                  className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                >
+                  <Rewind className="w-4 h-4" />
+                </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={toggleFullscreen}
-                aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              >
-                {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleIncreaseSpeed}
+                  aria-label="Increase playback speed"
+                  className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                >
+                  <FastForward className="w-4 h-4" />
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenFeedback}
+                  aria-label="Open feedback"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleFullscreen}
+                  aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                >
+                  {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
