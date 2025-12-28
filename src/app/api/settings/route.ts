@@ -100,14 +100,24 @@ export async function PATCH(request: NextRequest) {
       appDomain,
       defaultPreviewResolution,
       defaultWatermarkEnabled,
+      defaultTimelinePreviewsEnabled,
       defaultWatermarkText,
       defaultAllowClientDeleteComments,
       defaultAllowClientUploadFiles,
+      defaultMaxClientUploadAllocationMB,
       autoApproveProject,
       adminNotificationSchedule,
       adminNotificationTime,
       adminNotificationDay,
     } = body
+
+    // SECURITY: Validate defaultTimelinePreviewsEnabled is boolean
+    if (defaultTimelinePreviewsEnabled !== undefined && typeof defaultTimelinePreviewsEnabled !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid value for defaultTimelinePreviewsEnabled. Must be a boolean.' },
+        { status: 400 }
+      )
+    }
 
     // SECURITY: Validate emailTrackingPixelsEnabled is boolean
     if (emailTrackingPixelsEnabled !== undefined && typeof emailTrackingPixelsEnabled !== 'boolean') {
@@ -176,6 +186,16 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    // SECURITY: Validate defaultMaxClientUploadAllocationMB
+    if (defaultMaxClientUploadAllocationMB !== undefined && defaultMaxClientUploadAllocationMB !== null) {
+      if (!Number.isInteger(defaultMaxClientUploadAllocationMB) || defaultMaxClientUploadAllocationMB < 0 || defaultMaxClientUploadAllocationMB > 1000000) {
+        return NextResponse.json(
+          { error: 'Invalid value for defaultMaxClientUploadAllocationMB. Must be an integer between 0 and 1,000,000.' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Handle SMTP password update - only update if actually changed
     let passwordUpdate: string | null | undefined
     if (smtpPassword !== undefined) {
@@ -221,9 +241,11 @@ export async function PATCH(request: NextRequest) {
       appDomain,
       defaultPreviewResolution,
       defaultWatermarkEnabled,
+      defaultTimelinePreviewsEnabled,
       defaultWatermarkText,
       defaultAllowClientDeleteComments,
       defaultAllowClientUploadFiles,
+      defaultMaxClientUploadAllocationMB,
       autoApproveProject,
       adminNotificationSchedule,
       adminNotificationTime,

@@ -79,6 +79,7 @@ export default function AdminSharePage() {
 
   const fetchTokensForVideos = async (videos: any[]) => {
     const sessionId = sessionIdRef.current
+    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -126,12 +127,31 @@ export default function AdminSharePage() {
             }
           }
 
+          let timelineVttUrl = null
+          let timelineSpriteUrl = null
+          if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+            const [responseVtt, responseSprite] = await Promise.all([
+              apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-vtt&sessionId=${sessionId}`),
+              apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-sprite&sessionId=${sessionId}`),
+            ])
+            if (responseVtt.ok) {
+              const dataVtt = await responseVtt.json()
+              timelineVttUrl = dataVtt.token ? `/api/content/${dataVtt.token}` : null
+            }
+            if (responseSprite.ok) {
+              const dataSprite = await responseSprite.json()
+              timelineSpriteUrl = dataSprite.token ? `/api/content/${dataSprite.token}` : null
+            }
+          }
+
           const tokenized = {
             ...video,
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
+            timelineVttUrl,
+            timelineSpriteUrl,
           }
 
           tokenCacheRef.current.set(video.id, tokenized)
@@ -438,6 +458,7 @@ export default function AdminSharePage() {
                   shareToken={null}
                   onApprove={undefined}
                   hideDownloadButton={true}
+                  commentsForTimeline={filteredComments}
                 />
               </div>
 

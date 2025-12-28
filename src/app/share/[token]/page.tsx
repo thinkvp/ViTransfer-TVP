@@ -296,6 +296,8 @@ export default function SharePage() {
   const fetchTokensForVideos = async (videos: any[]) => {
     if (!shareToken) return videos
 
+    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
+
     return Promise.all(
       videos.map(async (video: any) => {
         const cached = tokenCacheRef.current.get(video.id)
@@ -330,12 +332,25 @@ export default function SharePage() {
             }
           }
 
+          let timelineVttUrl = null
+          let timelineSpriteUrl = null
+          if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+            const [vttToken, spriteToken] = await Promise.all([
+              fetchVideoToken(video.id, 'timeline-vtt'),
+              fetchVideoToken(video.id, 'timeline-sprite'),
+            ])
+            timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
+            timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
+          }
+
           const tokenized = {
             ...video,
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
+            timelineVttUrl,
+            timelineSpriteUrl,
           }
 
           tokenCacheRef.current.set(video.id, tokenized)
@@ -763,6 +778,7 @@ export default function SharePage() {
                   isGuest={isGuest}
                   allowAssetDownload={project.allowAssetDownload}
                   shareToken={shareToken}
+                  commentsForTimeline={filteredComments}
                 />
               </div>
 

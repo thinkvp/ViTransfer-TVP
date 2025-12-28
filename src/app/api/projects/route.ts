@@ -156,8 +156,10 @@ export async function POST(request: NextRequest) {
         defaultPreviewResolution: true,
         defaultWatermarkEnabled: true,
         defaultWatermarkText: true,
+        defaultTimelinePreviewsEnabled: true,
         defaultAllowClientDeleteComments: true,
         defaultAllowClientUploadFiles: true,
+        defaultMaxClientUploadAllocationMB: true,
       },
     })
 
@@ -182,12 +184,14 @@ export async function POST(request: NextRequest) {
           restrictCommentsToLatestVersion: isShareOnly ? false : (restrictCommentsToLatestVersion || false),
           allowClientDeleteComments: isShareOnly ? false : (allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false),
           allowClientUploadFiles: isShareOnly ? false : (settings?.defaultAllowClientUploadFiles ?? false),
+          maxClientUploadAllocationMB: settings?.defaultMaxClientUploadAllocationMB ?? 1000,
           status: isShareOnly ? 'SHARE_ONLY' : 'IN_REVIEW',
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,
           previewResolution: settings?.defaultPreviewResolution || '720p',
           watermarkEnabled: settings?.defaultWatermarkEnabled ?? true,
           watermarkText: settings?.defaultWatermarkText || null,
+          timelinePreviewsEnabled: settings?.defaultTimelinePreviewsEnabled ?? false,
           createdById: admin.id,
         },
       })

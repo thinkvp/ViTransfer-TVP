@@ -1,11 +1,13 @@
+
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Video, ProjectStatus } from '@prisma/client'
 import { Button } from './ui/button'
-import { Download, Info, CheckCircle2 } from 'lucide-react'
+import { Download, Info, CheckCircle2, Play, Pause, Volume2, VolumeX } from 'lucide-react'
 import { formatTimestamp, formatFileSize, formatDate } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
+import { timecodeToSeconds } from '@/lib/timecode'
 import {
   Dialog,
   DialogContent,
@@ -35,6 +37,10 @@ interface VideoPlayerProps {
   allowAssetDownload?: boolean // Allow clients to download assets
   shareToken?: string | null
   hideDownloadButton?: boolean // Hide download button completely (for admin share view)
+
+  // Optional: used to render comment markers along the timeline (share page).
+  // Expected shape matches Comment (and optionally includes `replies`).
+  commentsForTimeline?: any[]
 }
 
 export default function VideoPlayer({
@@ -56,6 +62,7 @@ export default function VideoPlayer({
   allowAssetDownload = true,
   shareToken = null,
   hideDownloadButton = false, // Default to false (show download button)
+  commentsForTimeline = [],
 }: VideoPlayerProps) {
   const router = useRouter()
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
@@ -68,6 +75,88 @@ export default function VideoPlayer({
   const [checkingAssets, setCheckingAssets] = useState(false)
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [durationSeconds, setDurationSeconds] = useState<number>(0)
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0)
+  const [isMuted, setIsMuted] = useState(false)
+  const [volume, setVolume] = useState(1)
+
+  const scrubBarRef = useRef<HTMLDivElement>(null)
+  const [timelineCues, setTimelineCues] = useState<
+    Array<{
+      start: number
+      end: number
+      sprite: string
+      x: number
+      y: number
+      w: number
+      h: number
+    }>
+  >([])
+  const [timelineHover, setTimelineHover] = useState<{
+    visible: boolean
+    leftPx: number
+    timeSeconds: number
+    spriteUrl: string | null
+    x: number
+    y: number
+    w: number
+    h: number
+  }>({
+    visible: false,
+    leftPx: 0,
+    timeSeconds: 0,
+    spriteUrl: null,
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
+  })
+  const isScrubbingRef = useRef(false)
+
+  const parseVtt = (vttText: string) => {
+    const lines = vttText
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((l) => l.trim())
+
+    const cues: Array<{ start: number; end: number; sprite: string; x: number; y: number; w: number; h: number }> = []
+
+    const parseTime = (t: string) => {
+      // Supports HH:MM:SS.mmm
+      const m = t.match(/^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/)
+      if (!m) return 0
+      const hh = parseInt(m[1], 10)
+      const mm = parseInt(m[2], 10)
+      const ss = parseInt(m[3], 10)
+      const ms = parseInt(m[4], 10)
+      return hh * 3600 + mm * 60 + ss + ms / 1000
+    }
+
+    for (let i = 0; i < lines.length - 1; i++) {
+      const timeLine = lines[i]
+      if (!timeLine.includes('-->')) continue
+
+      const [startStr, endStr] = timeLine.split('-->').map((s) => s.trim())
+      const start = parseTime(startStr)
+      const end = parseTime(endStr)
+      const target = lines[i + 1]
+      const m = target.match(/^(.+?)#xywh=(\d+),(\d+),(\d+),(\d+)$/)
+      if (!m) continue
+
+      cues.push({
+        start,
+        end,
+        sprite: m[1],
+        x: parseInt(m[2], 10),
+        y: parseInt(m[3], 10),
+        w: parseInt(m[4], 10),
+        h: parseInt(m[5], 10),
+      })
+    }
+
+    return cues
+  }
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasInitiallySeenRef = useRef(false) // Track if initial seek already happened
@@ -94,6 +183,62 @@ export default function VideoPlayer({
   // Safety check: ensure index is valid
   const safeIndex = Math.min(selectedVideoIndex, displayVideos.length - 1)
   const selectedVideo = displayVideos[safeIndex >= 0 ? safeIndex : 0]
+
+  const effectiveDurationSeconds =
+    durationSeconds || ((selectedVideo as any)?.duration as number | undefined) || 0
+
+  // When switching videos, the new <video> element will start paused.
+  // If we were playing previously, React state can get "stuck" because the old
+  // element unmounts without firing a pause event.
+  useEffect(() => {
+    setIsPlaying(false)
+    setTimelineHover((prev) => ({ ...prev, visible: false }))
+  }, [selectedVideo?.id])
+
+  const timelineCommentMarkers = useMemo(() => {
+    const duration = effectiveDurationSeconds
+    if (!selectedVideo?.id || !duration || duration <= 0) {
+      return [] as Array<{ id: string; seconds: number; isInternal: boolean }>
+    }
+
+    const fps = (selectedVideo as any)?.fps || 24
+
+    const flattened: any[] = []
+    for (const c of commentsForTimeline || []) {
+      flattened.push(c)
+      if (Array.isArray((c as any)?.replies)) {
+        flattened.push(...((c as any).replies as any[]))
+      }
+    }
+
+    const markers: Array<{ id: string; seconds: number; isInternal: boolean }> = []
+    for (const comment of flattened) {
+      if (!comment) continue
+      if (comment.videoId !== selectedVideo.id) continue
+      if (!comment.timecode) continue
+      if (!comment.id) continue
+      try {
+        const seconds = timecodeToSeconds(String(comment.timecode), fps)
+        if (!Number.isFinite(seconds)) continue
+        const clamped = Math.min(duration, Math.max(0, seconds))
+        markers.push({
+          id: String(comment.id),
+          seconds: clamped,
+          isInternal: Boolean((comment as any).isInternal),
+        })
+      } catch {
+        // ignore invalid timecodes
+      }
+    }
+
+    // Deduplicate by id
+    const seen = new Set<string>()
+    return markers.filter((m) => {
+      if (seen.has(m.id)) return false
+      seen.add(m.id)
+      return true
+    })
+  }, [commentsForTimeline, effectiveDurationSeconds, selectedVideo?.id])
 
   // Dispatch event when selected video changes (for immediate comment section update)
   useEffect(() => {
@@ -158,6 +303,85 @@ export default function VideoPlayer({
 
     loadVideoUrl()
   }, [selectedVideo, defaultQuality])
+
+  // Load timeline preview VTT when available
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTimelineVtt() {
+      setTimelineCues([])
+      const vttUrl = (selectedVideo as any)?.timelineVttUrl as string | null | undefined
+      const spriteUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
+      const isReady = (selectedVideo as any)?.timelinePreviewsReady === true
+      if (!vttUrl || !spriteUrl || !isReady) return
+
+      try {
+        const res = await fetch(vttUrl)
+        if (!res.ok) return
+        const text = await res.text()
+        const cues = parseVtt(text)
+        if (!cancelled) {
+          setTimelineCues(cues)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    loadTimelineVtt()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedVideo?.id])
+
+  const getTimeFromScrubEvent = (clientX: number) => {
+    const el = scrubBarRef.current
+    const duration = (videoRef.current?.duration || durationSeconds || (selectedVideo as any)?.duration || 0) as number
+    if (!el || !duration || duration <= 0) return { time: 0, left: 0, width: 0 }
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width)
+    const ratio = rect.width > 0 ? x / rect.width : 0
+    return { time: ratio * duration, left: x, width: rect.width }
+  }
+
+  const findCueForTime = (timeSeconds: number) => {
+    // Linear scan is fine for typical cue counts (<= a few thousand)
+    for (const cue of timelineCues) {
+      if (timeSeconds >= cue.start && timeSeconds < cue.end) return cue
+    }
+    return null
+  }
+
+  const updateHoverFromClientX = (clientX: number) => {
+    const spriteBaseUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
+    if (!spriteBaseUrl || timelineCues.length === 0) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+      return
+    }
+
+    const { time, left, width } = getTimeFromScrubEvent(clientX)
+    const cue = findCueForTime(time)
+    if (!cue) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+      return
+    }
+
+    const desiredLeft = left
+    const previewWidth = cue.w
+    const clampedLeft = Math.min(Math.max(desiredLeft, previewWidth / 2), Math.max(previewWidth / 2, width - previewWidth / 2))
+    const spriteUrl = `${spriteBaseUrl}?file=${encodeURIComponent(cue.sprite)}`
+
+    setTimelineHover({
+      visible: true,
+      leftPx: clampedLeft,
+      timeSeconds: time,
+      spriteUrl,
+      x: cue.x,
+      y: cue.y,
+      w: cue.w,
+      h: cue.h,
+    })
+  }
 
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
@@ -275,6 +499,30 @@ export default function VideoPlayer({
     }
   }, [playbackSpeed])
 
+  // Apply volume/mute to video element
+  useEffect(() => {
+    if (!videoRef.current) return
+    videoRef.current.muted = isMuted
+    // Only apply volume when not muted; browsers still keep volume value while muted
+    videoRef.current.volume = Math.min(1, Math.max(0, volume))
+  }, [isMuted, volume])
+
+  // Keep local volume state in sync if user changes it externally (e.g. OS media keys)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const onVolumeChange = () => {
+      setIsMuted(video.muted)
+      setVolume(video.volume)
+    }
+
+    video.addEventListener('volumechange', onVolumeChange)
+    return () => {
+      video.removeEventListener('volumechange', onVolumeChange)
+    }
+  }, [selectedVideo?.id])
+
   useEffect(() => {
     const handleOpenShortcutsDialog = () => {
       setShowShortcutsDialog(true)
@@ -384,8 +632,26 @@ export default function VideoPlayer({
       // Throttle to update max every 200ms instead of 60 times per second
       if (now - lastTimeUpdateRef.current > 200) {
         currentTimeRef.current = videoRef.current.currentTime
+        setCurrentTimeSeconds(videoRef.current.currentTime)
+        if (Number.isFinite(videoRef.current.duration)) {
+          setDurationSeconds(videoRef.current.duration)
+        }
         lastTimeUpdateRef.current = now
       }
+    }
+  }
+
+  const togglePlayPause = async () => {
+    const video = videoRef.current
+    if (!video) return
+    try {
+      if (video.paused) {
+        await video.play()
+      } else {
+        video.pause()
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -509,12 +775,25 @@ export default function VideoPlayer({
             poster={(selectedVideo as any).thumbnailUrl || undefined}
             className="w-full h-full"
             onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={() => {
+              if (!videoRef.current) return
+              if (Number.isFinite(videoRef.current.duration)) {
+                setDurationSeconds(videoRef.current.duration)
+              }
+              setCurrentTimeSeconds(videoRef.current.currentTime || 0)
+
+              // Ensure volume state is applied to new element
+              videoRef.current.muted = isMuted
+              videoRef.current.volume = Math.min(1, Math.max(0, volume))
+            }}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onEnded={() => setIsPlaying(false)}
             onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
             crossOrigin="anonymous"
-            controls
-            controlsList={!isAdmin ? "nodownload" : undefined}
             playsInline
             preload="metadata"
+            onClick={togglePlayPause}
             style={{
               objectFit: 'contain',
               backgroundColor: '#000',
@@ -532,6 +811,187 @@ export default function VideoPlayer({
             {playbackSpeed.toFixed(2)}x
           </div>
         )}
+      </div>
+
+      {/* Custom Controls + Timeline (enables hover thumbnails) */}
+      <div className="relative flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={togglePlayPause}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </Button>
+
+          <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+            {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
+          </div>
+
+          <div className="flex-1 relative">
+            <div
+              ref={scrubBarRef}
+              className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible"
+              onPointerEnter={(e) => updateHoverFromClientX(e.clientX)}
+              onPointerMove={(e) => {
+                updateHoverFromClientX(e.clientX)
+                if (isScrubbingRef.current && videoRef.current) {
+                  const { time } = getTimeFromScrubEvent(e.clientX)
+                  videoRef.current.currentTime = time
+                  currentTimeRef.current = time
+                  setCurrentTimeSeconds(time)
+                }
+              }}
+              onPointerLeave={() => {
+                isScrubbingRef.current = false
+                setTimelineHover((prev) => ({ ...prev, visible: false }))
+              }}
+              onPointerDown={(e) => {
+                ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+                isScrubbingRef.current = true
+                if (videoRef.current) {
+                  const { time } = getTimeFromScrubEvent(e.clientX)
+                  videoRef.current.currentTime = time
+                  currentTimeRef.current = time
+                  setCurrentTimeSeconds(time)
+                }
+              }}
+              onPointerUp={(e) => {
+                try {
+                  ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+                } catch {}
+                isScrubbingRef.current = false
+              }}
+              onClick={(e) => {
+                if (videoRef.current) {
+                  const { time } = getTimeFromScrubEvent(e.clientX)
+                  videoRef.current.currentTime = time
+                  currentTimeRef.current = time
+                  setCurrentTimeSeconds(time)
+                }
+              }}
+            >
+              <div
+                className="absolute left-0 top-0 h-full bg-primary rounded-md"
+                style={{
+                  width: effectiveDurationSeconds > 0
+                    ? `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`
+                    : '0%'
+                }}
+              />
+
+              {/* Comment markers (orange ticks) */}
+              {timelineCommentMarkers.length > 0 && effectiveDurationSeconds > 0 && (
+                <div className="absolute inset-0 z-10">
+                  {timelineCommentMarkers.map((m) => {
+                    const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
+                    const markerColorClass = m.isInternal ? 'bg-green-500' : 'bg-orange-500'
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="absolute -top-3 h-8 w-4 bg-transparent focus:outline-none"
+                        style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
+                        title="Jump to comment"
+                        aria-label="Jump to comment"
+                        onClick={(e) => {
+                          e.stopPropagation()
+
+                          // Seek video to the comment timecode (do not auto-play)
+                          if (videoRef.current) {
+                            try {
+                              videoRef.current.currentTime = m.seconds
+                              currentTimeRef.current = m.seconds
+                              setCurrentTimeSeconds(m.seconds)
+
+                              // Always pause when jumping to a comment marker
+                              videoRef.current.pause()
+                            } catch {
+                              // ignore
+                            }
+                          }
+
+                          window.dispatchEvent(
+                            new CustomEvent('scrollToComment', {
+                              detail: { commentId: m.id },
+                            })
+                          )
+                        }}
+                        onPointerDown={(e) => {
+                          // Prevent scrubbing when clicking a marker
+                          e.stopPropagation()
+                        }}
+                      >
+                        <span className={`absolute left-1/2 top-0 h-8 w-0.5 -translate-x-1/2 ${markerColorClass}`} />
+                        <span className={`absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${markerColorClass}`} />
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (
+              <div
+                className="absolute bottom-full mb-2 pointer-events-none"
+                style={{ left: timelineHover.leftPx, transform: 'translateX(-50%)' }}
+              >
+                <div
+                  className="rounded-md border border-border overflow-hidden bg-card"
+                  style={{ width: timelineHover.w, height: timelineHover.h }}
+                >
+                  <div
+                    style={{
+                      width: timelineHover.w,
+                      height: timelineHover.h,
+                      backgroundImage: `url(${timelineHover.spriteUrl})`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: `-${timelineHover.x}px -${timelineHover.y}px`,
+                    }}
+                  />
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
+                  {formatTimestamp(timelineHover.timeSeconds)}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsMuted((m) => !m)}
+              aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
+            >
+              {isMuted || volume === 0 ? (
+                <VolumeX className="w-4 h-4" />
+              ) : (
+                <Volume2 className="w-4 h-4" />
+              )}
+            </Button>
+
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(volume * 100)}
+              onChange={(e) => {
+                const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                const nextVolume = next / 100
+                setVolume(nextVolume)
+                if (nextVolume > 0) {
+                  setIsMuted(false)
+                }
+              }}
+              className="w-24 h-4 accent-primary"
+              aria-label="Volume"
+            />
+          </div>
+        </div>
       </div>
 
       {/* Version Selector - Only show if there are multiple versions to choose from */}

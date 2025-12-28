@@ -251,6 +251,26 @@ export default function MessageBubble({
                           className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${textColor}`}
                           dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
                         />
+
+                        {/* Reply Attached Files */}
+                        {(reply as any).files && (reply as any).files.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-300/40 dark:border-gray-600/40 space-y-2">
+                            {(reply as any).files.map((file: any) => (
+                              <CommentFileDisplay
+                                key={file.id}
+                                fileId={file.id}
+                                fileName={file.fileName}
+                                fileSize={file.fileSize}
+                                commentId={reply.id}
+                                onDownload={
+                                  onDownloadCommentFile
+                                    ? async (fileId) => onDownloadCommentFile(reply.id, fileId, file.fileName)
+                                    : undefined
+                                }
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )
                   })}

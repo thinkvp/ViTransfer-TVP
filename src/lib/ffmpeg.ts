@@ -180,6 +180,89 @@ export interface TranscodeOptions {
   onProgress?: (progress: number) => void
 }
 
+export interface TimelineSpriteOptions {
+  inputPath: string
+  outputPath: string
+  startTimeSeconds: number
+  durationSeconds: number
+  intervalSeconds: number
+  tileColumns: number
+  tileRows: number
+  frameWidth: number
+}
+
+export async function generateTimelineSprite(options: TimelineSpriteOptions): Promise<void> {
+  const {
+    inputPath,
+    outputPath,
+    startTimeSeconds,
+    durationSeconds,
+    intervalSeconds,
+    tileColumns,
+    tileRows,
+    frameWidth,
+  } = options
+
+  if (intervalSeconds <= 0) {
+    throw new Error('intervalSeconds must be > 0')
+  }
+  if (tileColumns <= 0 || tileRows <= 0) {
+    throw new Error('tileColumns and tileRows must be > 0')
+  }
+  if (frameWidth <= 0) {
+    throw new Error('frameWidth must be > 0')
+  }
+
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
+
+  const fpsExpr = `fps=1/${intervalSeconds}`
+  const scaleExpr = `scale=${frameWidth}:-2:flags=lanczos`
+  const tileExpr = `tile=${tileColumns}x${tileRows}`
+  const filter = `${fpsExpr},${scaleExpr},${tileExpr}`
+
+  // Note: -frames:v 1 because tile outputs a single sprite image.
+  const args = [
+    '-hide_banner',
+    '-loglevel', DEBUG ? 'info' : 'error',
+    '-ss', `${Math.max(0, startTimeSeconds)}`,
+    '-t', `${Math.max(0, durationSeconds)}`,
+    '-i', inputPath,
+    '-vf', filter,
+    '-frames:v', '1',
+    '-q:v', '3',
+    outputPath,
+  ]
+
+  if (DEBUG) {
+    console.log('[FFMPEG DEBUG] Executing:', ffmpegPath, args.join(' '))
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const ffmpeg = spawn(ffmpegPath, args)
+    let stderr = ''
+
+    ffmpeg.stderr.on('data', (data) => {
+      const text = data.toString()
+      stderr += text
+      if (DEBUG) {
+        console.log('[FFMPEG STDERR]', text.trim())
+      }
+    })
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg sprite generation failed with exit code ${code}: ${stderr || 'Unknown error'}`))
+        return
+      }
+      resolve()
+    })
+
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to spawn ffmpeg: ${err.message}. Is ffmpeg installed?`))
+    })
+  })
+}
+
 export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   const {
     inputPath,

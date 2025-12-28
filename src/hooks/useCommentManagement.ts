@@ -60,6 +60,42 @@ export function useCommentManagement({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStatusText, setUploadStatusText] = useState<string>('')
 
+  const [clientUploadQuota, setClientUploadQuota] = useState<{ usedBytes: number; limitMB: number } | null>(null)
+
+  const fetchClientUploadQuota = async (): Promise<{ usedBytes: number; limitMB: number } | null> => {
+    try {
+      const token = shareToken ? shareToken : (useAdminAuth ? getAccessToken() : null)
+      const response = await fetch(`/api/projects/${projectId}/client-upload-quota`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+
+      if (!response.ok) {
+        return null
+      }
+
+      const data = await response.json()
+      const quota = {
+        usedBytes: Number(data.usedBytes || 0),
+        limitMB: Number(data.limitMB || 0),
+      }
+      setClientUploadQuota(quota)
+      return quota
+    } catch {
+      return null
+    }
+  }
+
+  const refreshClientUploadQuota = async () => {
+    await fetchClientUploadQuota()
+  }
+
+  useEffect(() => {
+    if (allowClientUploadFiles) {
+      refreshClientUploadQuota()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, allowClientUploadFiles])
+
   const uploadCommentFileWithProgress = (
     commentId: string,
     file: File,
@@ -318,6 +354,21 @@ export function useCommentManagement({
       }
     }
 
+    // Pre-check project-level upload allocation for clients (avoid posting the comment then failing uploads)
+    if (!useAdminAuth && allowClientUploadFiles && attachedFiles.length > 0) {
+      const quota = await fetchClientUploadQuota()
+      if (quota && quota.limitMB > 0) {
+        const limitBytes = quota.limitMB * 1024 * 1024
+        const pendingBytes = attachedFiles.reduce((sum, f) => sum + (f.file?.size || 0), 0)
+        if (quota.usedBytes + pendingBytes > limitBytes) {
+          const remainingBytes = Math.max(0, limitBytes - quota.usedBytes)
+          const remainingMB = Math.floor(remainingBytes / (1024 * 1024))
+          alert(`Upload limit exceeded. Remaining allowance: ${remainingMB}MB.`)
+          return
+        }
+      }
+    }
+
     setLoading(true)
     setUploadProgress(attachedFiles.length > 0 ? 0 : null)
     setUploadStatusText(attachedFiles.length > 0 ? 'Uploading...' : 'Sending...')
@@ -443,6 +494,9 @@ export function useCommentManagement({
           const overall = totalBytes > 0 ? completedBytes / totalBytes : 1
           setUploadProgress(Math.max(0, Math.min(100, Math.round(overall * 100))))
         }
+
+        // Refresh quota after successful uploads
+        refreshClientUploadQuota()
       }
 
       // Refresh comments so attachments render immediately
@@ -466,7 +520,11 @@ export function useCommentManagement({
       }
 
       window.dispatchEvent(new CustomEvent('commentPosted', {
-        detail: { comments: commentsForUi }
+        detail: {
+          comments: commentsForUi,
+          newCommentId,
+          parentId: commentParentId || null,
+        }
       }))
 
       // Clear input only after send + uploads complete
@@ -676,5 +734,7 @@ export function useCommentManagement({
     attachedFiles,
     onFileSelect,
     onRemoveFile,
+    clientUploadQuota,
+    refreshClientUploadQuota,
   }
 }

@@ -144,6 +144,8 @@ export async function GET(
       preview1080Path: undefined,
       originalStoragePath: undefined,
       thumbnailPath: undefined,
+      timelinePreviewVttPath: undefined,
+      timelinePreviewSpritesPath: undefined,
     }))
 
     const videosByName = videosSanitizedBase.reduce((acc: any, video: any) => {
@@ -209,6 +211,7 @@ export async function GET(
       height: video.height,
       fps: video.fps,
       status: video.status,
+      timelinePreviewsReady: video.timelinePreviewsReady,
       streamUrl720p: video.streamUrl720p,
       streamUrl1080p: video.streamUrl1080p,
       downloadUrl: video.downloadUrl,
@@ -226,6 +229,7 @@ export async function GET(
         height: video.height,
         fps: video.fps,
         status: video.status,
+        timelinePreviewsReady: video.timelinePreviewsReady,
         streamUrl720p: video.streamUrl720p,
         streamUrl1080p: video.streamUrl1080p,
         downloadUrl: video.downloadUrl,
@@ -264,6 +268,7 @@ export async function GET(
       }),
 
       allowAssetDownload: project.allowAssetDownload,
+      timelinePreviewsEnabled: project.timelinePreviewsEnabled,
 
       videos: sanitizedVideos,
       videosByName: sanitizedVideosByName,

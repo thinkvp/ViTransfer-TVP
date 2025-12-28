@@ -40,7 +40,8 @@ export async function POST(
         id: true,
         sharePassword: true,
         authMode: true,
-        allowClientUploadFiles: true 
+        allowClientUploadFiles: true,
+        maxClientUploadAllocationMB: true,
       },
     })
 
@@ -107,6 +108,26 @@ export async function POST(
         { error: validation.error },
         { status: 400 }
       )
+    }
+
+    // Enforce per-project total allocation for client uploads (0 = unlimited)
+    if (isClient && (project.maxClientUploadAllocationMB ?? 0) > 0) {
+      const limitBytes = BigInt(project.maxClientUploadAllocationMB) * BigInt(1024 * 1024)
+      const used = await prisma.commentFile.aggregate({
+        where: { projectId: comment.projectId },
+        _sum: { fileSize: true },
+      })
+      const usedBytes = (used._sum.fileSize ?? BigInt(0)) as bigint
+      const incomingBytes = BigInt(fileSize)
+
+      if (usedBytes + incomingBytes > limitBytes) {
+        const remainingBytes = usedBytes >= limitBytes ? BigInt(0) : (limitBytes - usedBytes)
+        const remainingMB = Number(remainingBytes / BigInt(1024 * 1024))
+        return NextResponse.json(
+          { error: `Upload limit exceeded. Remaining allowance: ${remainingMB}MB.` },
+          { status: 413 }
+        )
+      }
     }
 
     // Enforce max files per comment

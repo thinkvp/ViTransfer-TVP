@@ -1,5 +1,6 @@
 import { Job } from 'bullmq'
 import { VideoProcessingJob } from '../lib/queue'
+import { prisma } from '../lib/db'
 import {
   TempFiles,
   downloadAndValidateVideo,
@@ -7,6 +8,7 @@ import {
   calculateOutputDimensions,
   processPreview,
   processThumbnail,
+  processTimelinePreviews,
   finalizeVideo,
   updateVideoStatus,
   cleanupTempFiles,
@@ -72,6 +74,18 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       tempFiles
     )
 
+    // Stage 6.5: Generate timeline previews (optional)
+    let timelineResult: { vttPath: string; spritesPath: string; ready: boolean } | null = null
+    if (settings.timelinePreviewsEnabled && tempFiles.preview) {
+      timelineResult = await processTimelinePreviews(
+        videoId,
+        projectId,
+        tempFiles.preview,
+        videoInfo.metadata,
+        tempFiles
+      )
+    }
+
     // Stage 7: Finalize - update database with results
     await finalizeVideo(
       videoId,
@@ -80,6 +94,27 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       videoInfo.metadata,
       settings.resolution
     )
+
+    // Persist timeline preview paths/ready flag (do not block READY if generation skipped)
+    if (settings.timelinePreviewsEnabled && timelineResult?.ready) {
+      await prisma.video.update({
+        where: { id: videoId },
+        data: {
+          timelinePreviewsReady: true,
+          timelinePreviewVttPath: timelineResult.vttPath,
+          timelinePreviewSpritesPath: timelineResult.spritesPath,
+        },
+      })
+    } else {
+      await prisma.video.update({
+        where: { id: videoId },
+        data: {
+          timelinePreviewsReady: false,
+          timelinePreviewVttPath: null,
+          timelinePreviewSpritesPath: null,
+        },
+      })
+    }
 
     // Success!
     const totalTime = Date.now() - processingStart

@@ -25,9 +25,11 @@ const updateProjectSchema = z.object({
   hideFeedback: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
   allowClientUploadFiles: z.boolean().optional(),
+  maxClientUploadAllocationMB: z.number().int().min(0).max(1000000).optional(),
   previewResolution: z.enum(['720p', '1080p', '2160p']).optional(),
   watermarkEnabled: z.boolean().optional(),
   watermarkText: z.string().max(100).nullable().optional(),
+  timelinePreviewsEnabled: z.boolean().optional(),
   allowAssetDownload: z.boolean().optional(),
   sharePassword: z.string().max(200).nullable().optional(),
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
@@ -247,10 +249,17 @@ export async function PATCH(
     if (validatedBody.allowClientUploadFiles !== undefined) {
       updateData.allowClientUploadFiles = validatedBody.allowClientUploadFiles
     }
+    if (validatedBody.maxClientUploadAllocationMB !== undefined) {
+      updateData.maxClientUploadAllocationMB = validatedBody.maxClientUploadAllocationMB
+    }
 
     // Handle video processing settings
     if (validatedBody.previewResolution !== undefined) {
       updateData.previewResolution = validatedBody.previewResolution
+    }
+
+    if (validatedBody.timelinePreviewsEnabled !== undefined) {
+      updateData.timelinePreviewsEnabled = validatedBody.timelinePreviewsEnabled
     }
 
     if (validatedBody.watermarkEnabled !== undefined) {

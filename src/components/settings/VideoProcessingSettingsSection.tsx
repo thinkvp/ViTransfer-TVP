@@ -9,12 +9,16 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultPreviewResolution: (value: string) => void
   defaultWatermarkEnabled: boolean
   setDefaultWatermarkEnabled: (value: boolean) => void
+  defaultTimelinePreviewsEnabled: boolean
+  setDefaultTimelinePreviewsEnabled: (value: boolean) => void
   defaultWatermarkText: string
   setDefaultWatermarkText: (value: string) => void
   defaultAllowClientDeleteComments: boolean
   setDefaultAllowClientDeleteComments: (value: boolean) => void
   defaultAllowClientUploadFiles: boolean
   setDefaultAllowClientUploadFiles: (value: boolean) => void
+  defaultMaxClientUploadAllocationMB: number | ''
+  setDefaultMaxClientUploadAllocationMB: (value: number | '') => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -24,12 +28,16 @@ export function VideoProcessingSettingsSection({
   setDefaultPreviewResolution,
   defaultWatermarkEnabled,
   setDefaultWatermarkEnabled,
+  defaultTimelinePreviewsEnabled,
+  setDefaultTimelinePreviewsEnabled,
   defaultWatermarkText,
   setDefaultWatermarkText,
   defaultAllowClientDeleteComments,
   setDefaultAllowClientDeleteComments,
   defaultAllowClientUploadFiles,
   setDefaultAllowClientUploadFiles,
+  defaultMaxClientUploadAllocationMB,
+  setDefaultMaxClientUploadAllocationMB,
   show,
   setShow,
 }: VideoProcessingSettingsSectionProps) {
@@ -87,6 +95,20 @@ export function VideoProcessingSettingsSection({
               />
             </div>
 
+            <div className="flex items-center justify-between pt-2 mt-2 border-t border-border">
+              <div className="space-y-0.5">
+                <Label htmlFor="defaultTimelinePreviewsEnabled">Enable Timeline Previews</Label>
+                <p className="text-xs text-muted-foreground">
+                  Show preview thumbnails when hovering or scrubbing the timeline
+                </p>
+              </div>
+              <Switch
+                id="defaultTimelinePreviewsEnabled"
+                checked={defaultTimelinePreviewsEnabled}
+                onCheckedChange={setDefaultTimelinePreviewsEnabled}
+              />
+            </div>
+
             {defaultWatermarkEnabled && (
               <div className="space-y-2 pt-2 mt-2 border-t border-border">
                 <Label htmlFor="watermark">Custom Watermark Text</Label>
@@ -135,6 +157,29 @@ export function VideoProcessingSettingsSection({
                 checked={defaultAllowClientUploadFiles}
                 onCheckedChange={setDefaultAllowClientUploadFiles}
               />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="defaultMaxClientUploadAllocationMB">Default max allowed data allocation for client uploads</Label>
+                <p className="text-xs text-muted-foreground">
+                  Clients will not be allowed to upload more than this amount for the entire project. Zero = no limit.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <Input
+                  id="defaultMaxClientUploadAllocationMB"
+                  type="number"
+                  min={0}
+                  value={defaultMaxClientUploadAllocationMB}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setDefaultMaxClientUploadAllocationMB(val === '' ? '' : Math.max(0, parseInt(val, 10) || 0))
+                  }}
+                  className="w-20"
+                />
+                <span className="text-sm text-muted-foreground">MB</span>
+              </div>
             </div>
           </div>
         </CardContent>

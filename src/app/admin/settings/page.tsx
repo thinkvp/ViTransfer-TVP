@@ -26,9 +26,11 @@ interface Settings {
   appDomain: string | null
   defaultPreviewResolution: string | null
   defaultWatermarkEnabled: boolean | null
+  defaultTimelinePreviewsEnabled: boolean | null
   defaultWatermarkText: string | null
   defaultAllowClientDeleteComments: boolean | null
   defaultAllowClientUploadFiles: boolean | null
+  defaultMaxClientUploadAllocationMB: number | null
   autoApproveProject: boolean | null
   adminNotificationSchedule: string | null
   adminNotificationTime: string | null
@@ -103,9 +105,11 @@ export default function GlobalSettingsPage() {
   const [appDomain, setAppDomain] = useState('')
   const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('720p')
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
+  const [defaultTimelinePreviewsEnabled, setDefaultTimelinePreviewsEnabled] = useState(false)
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
   const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
+  const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
 
   // Form state for admin notification settings
@@ -177,9 +181,11 @@ export default function GlobalSettingsPage() {
         setAppDomain(data.appDomain || '')
         setDefaultPreviewResolution(data.defaultPreviewResolution || '720p')
         setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
+        setDefaultTimelinePreviewsEnabled(data.defaultTimelinePreviewsEnabled ?? false)
         setDefaultWatermarkText(data.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
+        setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(data.autoApproveProject ?? true)
         setTestEmailAddress(data.smtpFromAddress || '')
 
@@ -366,9 +372,13 @@ export default function GlobalSettingsPage() {
         appDomain: appDomain || null,
         defaultPreviewResolution: defaultPreviewResolution || '720p',
         defaultWatermarkEnabled: defaultWatermarkEnabled,
+        defaultTimelinePreviewsEnabled: defaultTimelinePreviewsEnabled,
         defaultWatermarkText: defaultWatermarkText || null,
         defaultAllowClientDeleteComments,
         defaultAllowClientUploadFiles,
+        defaultMaxClientUploadAllocationMB: typeof defaultMaxClientUploadAllocationMB === 'number'
+          ? defaultMaxClientUploadAllocationMB
+          : parseInt(String(defaultMaxClientUploadAllocationMB), 10) || 0,
         autoApproveProject: autoApproveProject,
         adminNotificationSchedule: adminNotificationSchedule,
         adminNotificationTime: (adminNotificationSchedule === 'DAILY' || adminNotificationSchedule === 'WEEKLY') ? adminNotificationTime : null,
@@ -431,9 +441,11 @@ export default function GlobalSettingsPage() {
         setAppDomain(refreshedData.appDomain || '')
         setDefaultPreviewResolution(refreshedData.defaultPreviewResolution || '720p')
         setDefaultWatermarkEnabled(refreshedData.defaultWatermarkEnabled ?? true)
+        setDefaultTimelinePreviewsEnabled(refreshedData.defaultTimelinePreviewsEnabled ?? false)
         setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
+        setDefaultMaxClientUploadAllocationMB(refreshedData.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
@@ -606,12 +618,16 @@ export default function GlobalSettingsPage() {
             setDefaultPreviewResolution={setDefaultPreviewResolution}
             defaultWatermarkEnabled={defaultWatermarkEnabled}
             setDefaultWatermarkEnabled={setDefaultWatermarkEnabled}
+            defaultTimelinePreviewsEnabled={defaultTimelinePreviewsEnabled}
+            setDefaultTimelinePreviewsEnabled={setDefaultTimelinePreviewsEnabled}
             defaultWatermarkText={defaultWatermarkText}
             setDefaultWatermarkText={setDefaultWatermarkText}
             defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
             setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
             defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
             setDefaultAllowClientUploadFiles={setDefaultAllowClientUploadFiles}
+            defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
+            setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
             show={showVideoProcessing}
             setShow={setShowVideoProcessing}
           />

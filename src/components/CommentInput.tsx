@@ -49,6 +49,10 @@ interface CommentInputProps {
   // Optional shortcuts UI (share pages)
   showShortcutsButton?: boolean
   onShowShortcuts?: () => void
+
+  // Optional project upload quota (client share page)
+  clientUploadQuota?: { usedBytes: number; limitMB: number } | null
+  onRefreshUploadQuota?: () => Promise<void>
 }
 
 export default function CommentInput({
@@ -79,6 +83,8 @@ export default function CommentInput({
   commentsDisabled,
   showShortcutsButton = false,
   onShowShortcuts,
+  clientUploadQuota = null,
+  onRefreshUploadQuota,
 }: CommentInputProps) {
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -234,7 +240,13 @@ export default function CommentInput({
             <div className="flex flex-col gap-2 self-end">
               {allowFileUpload && (
                 <Button
-                  onClick={() => setUploadModalOpen(true)}
+                  onClick={async () => {
+                    try {
+                      await onRefreshUploadQuota?.()
+                    } finally {
+                      setUploadModalOpen(true)
+                    }
+                  }}
                   variant="outline"
                   size="icon"
                   className="bg-orange-600 text-white border-orange-600 hover:bg-orange-600 hover:text-white hover:border-orange-600 shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation"
@@ -316,11 +328,23 @@ export default function CommentInput({
             <FileUploadModal
               open={uploadModalOpen}
               onOpenChange={setUploadModalOpen}
+              quota={clientUploadQuota}
               onFileSelect={async (files) => {
                 // Keep modal contract simple: add selected files to the pending list
                 setUploadError('')
                 setUploading(true)
                 try {
+                  if (clientUploadQuota && clientUploadQuota.limitMB > 0) {
+                    const limitBytes = clientUploadQuota.limitMB * 1024 * 1024
+                    const alreadySelectedBytes = attachedFiles.reduce((sum, f) => sum + (f.size || 0), 0)
+                    const newlySelectedBytes = files.reduce((sum, f) => sum + (f.size || 0), 0)
+                    if (clientUploadQuota.usedBytes + alreadySelectedBytes + newlySelectedBytes > limitBytes) {
+                      const remainingBytes = Math.max(0, limitBytes - clientUploadQuota.usedBytes)
+                      const remainingMB = Math.floor(remainingBytes / (1024 * 1024))
+                      throw new Error(`Upload limit exceeded. Remaining allowance: ${remainingMB}MB.`)
+                    }
+                  }
+
                   if (onFileSelect) {
                     await onFileSelect(files)
                   }

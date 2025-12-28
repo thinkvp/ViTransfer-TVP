@@ -81,6 +81,8 @@ interface Project {
   restrictCommentsToLatestVersion: boolean
   hideFeedback: boolean
   allowClientDeleteComments: boolean
+  allowClientUploadFiles: boolean
+  maxClientUploadAllocationMB: number
   sharePassword: string | null
   sharePasswordDecrypted: string | null
   authMode: string
@@ -89,6 +91,7 @@ interface Project {
   previewResolution: string
   watermarkEnabled: boolean
   watermarkText: string | null
+  timelinePreviewsEnabled: boolean
   allowAssetDownload: boolean
   clientNotificationSchedule: string
   clientNotificationTime: string | null
@@ -117,6 +120,7 @@ export default function ProjectSettingsPage() {
   const [hideFeedback, setHideFeedback] = useState(false)
   const [allowClientDeleteComments, setAllowClientDeleteComments] = useState(false)
   const [allowClientUploadFiles, setAllowClientUploadFiles] = useState(false)
+  const [maxClientUploadAllocationMB, setMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [sharePassword, setSharePassword] = useState('')
   const [authMode, setAuthMode] = useState('PASSWORD')
   const [guestMode, setGuestMode] = useState(false)
@@ -127,6 +131,7 @@ export default function ProjectSettingsPage() {
   const [watermarkEnabled, setWatermarkEnabled] = useState(true)
   const [watermarkText, setWatermarkText] = useState('')
   const [useCustomWatermark, setUseCustomWatermark] = useState(false)
+  const [timelinePreviewsEnabled, setTimelinePreviewsEnabled] = useState(false)
   const [allowAssetDownload, setAllowAssetDownload] = useState(true)
 
   // Notification settings state
@@ -153,6 +158,7 @@ export default function ProjectSettingsPage() {
     previewResolution: '720p',
     watermarkEnabled: true,
     watermarkText: null as string | null,
+    timelinePreviewsEnabled: false,
   })
 
   // Reprocessing state
@@ -201,10 +207,12 @@ export default function ProjectSettingsPage() {
         setHideFeedback(data.hideFeedback || false)
         setAllowClientDeleteComments(data.allowClientDeleteComments ?? false)
         setAllowClientUploadFiles(data.allowClientUploadFiles ?? false)
+        setMaxClientUploadAllocationMB(data.maxClientUploadAllocationMB ?? 1000)
         setPreviewResolution(data.previewResolution)
         setWatermarkEnabled(data.watermarkEnabled ?? true)
         setWatermarkText(data.watermarkText || '')
         setUseCustomWatermark(!!data.watermarkText)
+        setTimelinePreviewsEnabled(data.timelinePreviewsEnabled ?? false)
         setAllowAssetDownload(data.allowAssetDownload ?? true)
         setAuthMode(data.authMode || 'PASSWORD')
         setGuestMode(data.guestMode || false)
@@ -217,6 +225,7 @@ export default function ProjectSettingsPage() {
           previewResolution: data.previewResolution,
           watermarkEnabled: data.watermarkEnabled ?? true,
           watermarkText: data.watermarkText,
+          timelinePreviewsEnabled: data.timelinePreviewsEnabled ?? false,
         })
 
         // Check if slug was manually customized (different from auto-generated from title)
@@ -301,9 +310,13 @@ export default function ProjectSettingsPage() {
         hideFeedback,
         allowClientDeleteComments,
         allowClientUploadFiles,
+        maxClientUploadAllocationMB: typeof maxClientUploadAllocationMB === 'number'
+          ? maxClientUploadAllocationMB
+          : parseInt(String(maxClientUploadAllocationMB), 10) || 0,
         previewResolution,
         watermarkEnabled,
         watermarkText: useCustomWatermark ? watermarkText : null,
+        timelinePreviewsEnabled,
         allowAssetDownload,
         sharePassword: sharePassword || null,
         authMode,
@@ -320,7 +333,8 @@ export default function ProjectSettingsPage() {
         title !== originalSettings.title ||
         previewResolution !== originalSettings.previewResolution ||
         watermarkEnabled !== originalSettings.watermarkEnabled ||
-        currentWatermarkText !== originalSettings.watermarkText
+        currentWatermarkText !== originalSettings.watermarkText ||
+        timelinePreviewsEnabled !== originalSettings.timelinePreviewsEnabled
 
       // If processing settings changed, show modal
       if (processingSettingsChanged) {
@@ -368,6 +382,7 @@ export default function ProjectSettingsPage() {
         setWatermarkEnabled(refreshedData.watermarkEnabled ?? true)
         setWatermarkText(refreshedData.watermarkText || '')
         setUseCustomWatermark(!!refreshedData.watermarkText)
+        setTimelinePreviewsEnabled(refreshedData.timelinePreviewsEnabled ?? false)
 
         // Update original settings
         setOriginalSettings({
@@ -375,6 +390,7 @@ export default function ProjectSettingsPage() {
           previewResolution: refreshedData.previewResolution,
           watermarkEnabled: refreshedData.watermarkEnabled ?? true,
           watermarkText: refreshedData.watermarkText,
+          timelinePreviewsEnabled: refreshedData.timelinePreviewsEnabled ?? false,
         })
       }
 
@@ -733,6 +749,22 @@ export default function ProjectSettingsPage() {
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
+                    <Label htmlFor="timelinePreviewsEnabled">Enable Timeline Previews</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Show preview thumbnails when hovering or scrubbing the timeline
+                    </p>
+                  </div>
+                  <Switch
+                    id="timelinePreviewsEnabled"
+                    checked={timelinePreviewsEnabled}
+                    onCheckedChange={setTimelinePreviewsEnabled}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
                     <Label htmlFor="allowAssetDownload">Allow Asset Downloads</Label>
                     <p className="text-xs text-muted-foreground">
                       Allow clients to download additional project assets (images, audio, project files) when the video is approved
@@ -869,6 +901,20 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
+                    <Label htmlFor="restrictComments">Restrict Comments to Latest Version</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Only allow feedback on the most recent video version
+                    </p>
+                  </div>
+                  <Switch
+                    id="restrictComments"
+                    checked={restrictCommentsToLatestVersion}
+                    onCheckedChange={setRestrictCommentsToLatestVersion}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowClientDeleteComments">Allow clients to delete client comments</Label>
                     <p className="text-xs text-muted-foreground">
                       All clients will be able to delete any comment left by a client.
@@ -897,16 +943,25 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="restrictComments">Restrict Comments to Latest Version</Label>
+                    <Label htmlFor="maxClientUploadAllocationMB">Max allowed data allocation for client uploads</Label>
                     <p className="text-xs text-muted-foreground">
-                      Only allow feedback on the most recent video version
+                      Clients will not be allowed to upload more than this amount for the entire project. Zero = no limit.
                     </p>
                   </div>
-                  <Switch
-                    id="restrictComments"
-                    checked={restrictCommentsToLatestVersion}
-                    onCheckedChange={setRestrictCommentsToLatestVersion}
-                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Input
+                      id="maxClientUploadAllocationMB"
+                      type="number"
+                      min={0}
+                      value={maxClientUploadAllocationMB}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setMaxClientUploadAllocationMB(val === '' ? '' : Math.max(0, parseInt(val, 10) || 0))
+                      }}
+                      className="w-20"
+                    />
+                    <span className="text-sm text-muted-foreground">MB</span>
+                  </div>
                 </div>
               </div>
             </CardContent>

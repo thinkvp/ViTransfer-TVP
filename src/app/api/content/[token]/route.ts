@@ -202,6 +202,30 @@ export async function GET(
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
         filePath = video.thumbnailPath
+      } else if (verifiedToken.quality === 'timeline-vtt') {
+        if (!video.project.timelinePreviewsEnabled || !video.timelinePreviewsReady) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        }
+
+        filePath = (video as any).timelinePreviewVttPath
+        contentType = 'text/vtt'
+      } else if (verifiedToken.quality === 'timeline-sprite') {
+        if (!video.project.timelinePreviewsEnabled || !video.timelinePreviewsReady) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        }
+
+        const spriteFile = searchParams.get('file')
+        if (!spriteFile || !/^sprite-\d{3}\.jpg$/.test(spriteFile)) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        }
+
+        const spritesBasePath = (video as any).timelinePreviewSpritesPath
+        if (!spritesBasePath) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+        }
+
+        filePath = `${spritesBasePath}/${spriteFile}`
+        contentType = 'image/jpeg'
       } else if (isDownload && isAdminRequest && originalPath) {
         // Admin downloads should always use the original file, even before approval
         filePath = originalPath
@@ -224,14 +248,16 @@ export async function GET(
 
     const stat = statSync(fullPath)
 
-    if (isDownload && verifiedToken.quality === 'thumbnail') {
+    const isThumbnail = verifiedToken.quality === 'thumbnail'
+    const isTimelineAsset = verifiedToken.quality === 'timeline-vtt' || verifiedToken.quality === 'timeline-sprite'
+
+    if (isDownload && (isThumbnail || isTimelineAsset)) {
       return NextResponse.json({ error: 'Thumbnails cannot be downloaded directly' }, { status: 403 })
     }
 
     const range = request.headers.get('range')
 
-    const isThumbnail = verifiedToken.quality === 'thumbnail'
-    const cacheControl = isThumbnail
+    const cacheControl = (isThumbnail || isTimelineAsset)
       ? 'private, no-store, must-revalidate'
       : 'public, max-age=3600'
 
@@ -244,7 +270,7 @@ export async function GET(
 
       // For non-asset streams, determine Content-Type based on quality
       if (!assetId) {
-        contentType = isThumbnail ? 'image/jpeg' : 'video/mp4'
+        contentType = isThumbnail ? 'image/jpeg' : (isTimelineAsset ? contentType : 'video/mp4')
       }
 
       const trackDownloadOnce = async () => {
@@ -328,7 +354,7 @@ export async function GET(
 
       // For non-asset streams, determine Content-Type based on quality
       if (!assetId) {
-        contentType = isThumbnail ? 'image/jpeg' : 'video/mp4'
+        contentType = isThumbnail ? 'image/jpeg' : (isTimelineAsset ? contentType : 'video/mp4')
       }
 
       return new NextResponse(readableStream, {

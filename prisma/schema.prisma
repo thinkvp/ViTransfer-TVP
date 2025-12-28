@@ -55,11 +55,13 @@ model Project {
   hideFeedback                    Boolean @default(false)
   allowClientDeleteComments       Boolean @default(false)
   allowClientUploadFiles          Boolean @default(false) // Allow clients to upload files with comments
+  maxClientUploadAllocationMB     Int     @default(1000) // Total allowed client comment-attachment uploads per project (0 = unlimited)
 
   // Video processing settings
   previewResolution String  @default("720p") // "720p", "1080p", "2160p"
   watermarkEnabled  Boolean @default(true) // Enable/disable watermarks for this project
   watermarkText     String? // Custom watermark text (null = use default format)
+  timelinePreviewsEnabled Boolean @default(false) // Generate timeline preview thumbnails for this project
 
   // Asset download settings
   allowAssetDownload Boolean @default(true) // Allow clients to download video assets when project is approved
@@ -135,6 +137,11 @@ model Video {
   preview1080Path String?
   preview720Path  String?
   thumbnailPath   String?
+
+  // Timeline preview thumbnails (sprite sheets)
+  timelinePreviewsReady Boolean @default(false)
+  timelinePreviewVttPath String?
+  timelinePreviewSpritesPath String?
 
   // Per-video approval
   approved   Boolean   @default(false)
@@ -266,11 +273,13 @@ model Settings {
   // Default Video Processing Settings
   defaultPreviewResolution String?  @default("720p")
   defaultWatermarkEnabled  Boolean  @default(true)
+  defaultTimelinePreviewsEnabled Boolean @default(false)
   defaultWatermarkText     String?
 
   // Default project behavior
   defaultAllowClientDeleteComments   Boolean @default(false)
   defaultAllowClientUploadFiles      Boolean @default(false) // Default toggle for client file uploads
+  defaultMaxClientUploadAllocationMB Int     @default(1000) // Default total allowed client comment-attachment uploads per project (0 = unlimited)
 
   // Project Behavior
   autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved

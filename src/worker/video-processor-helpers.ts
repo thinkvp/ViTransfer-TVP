@@ -1,6 +1,6 @@
 import { prisma } from '../lib/db'
 import { downloadFile, uploadFile } from '../lib/storage'
-import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata } from '../lib/ffmpeg'
+import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite } from '../lib/ffmpeg'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -42,11 +42,13 @@ export interface TempFiles {
   input?: string
   preview?: string
   thumbnail?: string
+  timelineDir?: string
 }
 
 export interface ProcessingSettings {
   resolution: string
   watermarkText?: string
+  timelinePreviewsEnabled: boolean
 }
 
 export interface VideoInfo {
@@ -156,6 +158,7 @@ export async function fetchProcessingSettings(
       previewResolution: true,
       watermarkEnabled: true,
       watermarkText: true,
+      timelinePreviewsEnabled: true,
     },
   })
 
@@ -179,8 +182,113 @@ export async function fetchProcessingSettings(
 
   return {
     resolution: project?.previewResolution || '720p',
-    watermarkText
+    watermarkText,
+    timelinePreviewsEnabled: project?.timelinePreviewsEnabled ?? false,
   }
+}
+
+function formatVttTimestamp(seconds: number): string {
+  const clamped = Math.max(0, seconds)
+  const hours = Math.floor(clamped / 3600)
+  const minutes = Math.floor((clamped % 3600) / 60)
+  const secs = Math.floor(clamped % 60)
+  const ms = Math.floor((clamped - Math.floor(clamped)) * 1000)
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+  const pad3 = (n: number) => String(n).padStart(3, '0')
+  return `${pad2(hours)}:${pad2(minutes)}:${pad2(secs)}.${pad3(ms)}`
+}
+
+function calculateScaledHeight(inputWidth: number, inputHeight: number, targetWidth: number): number {
+  if (inputWidth <= 0 || inputHeight <= 0) return 90
+  const aspect = inputWidth / inputHeight
+  const raw = targetWidth / aspect
+  // Ensure even height like ffmpeg scale=-2
+  return Math.max(2, Math.round(raw / 2) * 2)
+}
+
+export async function processTimelinePreviews(
+  videoId: string,
+  projectId: string,
+  inputPath: string,
+  metadata: VideoMetadata,
+  tempFiles: TempFiles
+): Promise<{ vttPath: string; spritesPath: string; ready: boolean } | null> {
+  const intervalSeconds = 10
+  const tileColumns = 10
+  const tileRows = 10
+  const framesPerSprite = tileColumns * tileRows
+  const frameWidth = 160
+  const frameHeight = calculateScaledHeight(metadata.width, metadata.height, frameWidth)
+  const segmentDurationSeconds = framesPerSprite * intervalSeconds
+
+  const totalDuration = metadata.duration || 0
+  if (totalDuration <= 0) {
+    return null
+  }
+
+  const tempDir = path.join(TEMP_DIR, `${videoId}-timeline`)
+  tempFiles.timelineDir = tempDir
+  await fs.promises.mkdir(tempDir, { recursive: true })
+
+  const spriteCount = Math.ceil(totalDuration / segmentDurationSeconds)
+  const vttLines: string[] = ['WEBVTT', '']
+
+  for (let spriteIndex = 0; spriteIndex < spriteCount; spriteIndex++) {
+    const segmentStart = spriteIndex * segmentDurationSeconds
+    const remaining = Math.max(0, totalDuration - segmentStart)
+    if (remaining <= 0) break
+
+    const segmentDuration = Math.min(segmentDurationSeconds, remaining)
+    const spriteFileName = `sprite-${String(spriteIndex).padStart(3, '0')}.jpg`
+    const tempSpritePath = path.join(tempDir, spriteFileName)
+
+    await generateTimelineSprite({
+      inputPath,
+      outputPath: tempSpritePath,
+      startTimeSeconds: segmentStart,
+      durationSeconds: segmentDuration,
+      intervalSeconds,
+      tileColumns,
+      tileRows,
+      frameWidth,
+    })
+
+    // Generate VTT cues for each tile in the sprite
+    for (let frameIndex = 0; frameIndex < framesPerSprite; frameIndex++) {
+      const cueStart = segmentStart + frameIndex * intervalSeconds
+      if (cueStart >= totalDuration) break
+      const cueEnd = Math.min(totalDuration, cueStart + intervalSeconds)
+
+      const col = frameIndex % tileColumns
+      const row = Math.floor(frameIndex / tileColumns)
+      const x = col * frameWidth
+      const y = row * frameHeight
+
+      vttLines.push(`${formatVttTimestamp(cueStart)} --> ${formatVttTimestamp(cueEnd)}`)
+      vttLines.push(`${spriteFileName}#xywh=${x},${y},${frameWidth},${frameHeight}`)
+      vttLines.push('')
+    }
+  }
+
+  const tempVttPath = path.join(tempDir, 'index.vtt')
+  await fs.promises.writeFile(tempVttPath, vttLines.join('\n'), 'utf-8')
+
+  // Upload VTT + sprites to storage
+  const spritesPath = `projects/${projectId}/videos/${videoId}/timeline-previews`
+  const vttPath = `${spritesPath}/index.vtt`
+
+  const vttStats = fs.statSync(tempVttPath)
+  await uploadFile(vttPath, fs.createReadStream(tempVttPath), vttStats.size, 'text/vtt')
+
+  const localFiles = await fs.promises.readdir(tempDir)
+  const spriteFiles = localFiles.filter((f) => f.startsWith('sprite-') && f.endsWith('.jpg'))
+  for (const spriteFile of spriteFiles) {
+    const localSpritePath = path.join(tempDir, spriteFile)
+    const spriteStats = fs.statSync(localSpritePath)
+    await uploadFile(`${spritesPath}/${spriteFile}`, fs.createReadStream(localSpritePath), spriteStats.size, 'image/jpeg')
+  }
+
+  return { vttPath, spritesPath, ready: true }
 }
 
 /**
@@ -422,9 +530,14 @@ export async function cleanupTempFiles(tempFiles: TempFiles): Promise<void> {
     try {
       if (fs.existsSync(file)) {
         const fileStats = fs.statSync(file)
-        await fs.promises.unlink(file)
-        console.log(`[WORKER] Cleaned up temp file: ${path.basename(file)}`)
-        debugLog('Freed disk space:', (fileStats.size / 1024 / 1024).toFixed(2) + ' MB')
+        if (fileStats.isDirectory()) {
+          await fs.promises.rm(file, { recursive: true, force: true })
+          console.log(`[WORKER] Cleaned up temp directory: ${path.basename(file)}`)
+        } else {
+          await fs.promises.unlink(file)
+          console.log(`[WORKER] Cleaned up temp file: ${path.basename(file)}`)
+          debugLog('Freed disk space:', (fileStats.size / 1024 / 1024).toFixed(2) + ' MB')
+        }
       }
     } catch (cleanupError) {
       console.error(`[WORKER ERROR] Failed to cleanup temp file ${path.basename(file)}:`, cleanupError)

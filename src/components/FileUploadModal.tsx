@@ -16,6 +16,7 @@ interface FileUploadModalProps {
   onFileSelect: (files: File[]) => Promise<void>
   isLoading?: boolean
   error?: string
+  quota?: { usedBytes: number; limitMB: number } | null
 }
 
 export function FileUploadModal({
@@ -24,6 +25,7 @@ export function FileUploadModal({
   onFileSelect,
   isLoading = false,
   error: externalError = '',
+  quota = null,
 }: FileUploadModalProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState('')
@@ -83,6 +85,11 @@ export function FileUploadModal({
 
   const displayError = externalError || error
 
+  const usedMB = quota ? Math.max(0, quota.usedBytes) / (1024 * 1024) : null
+  const availableLabel = quota
+    ? (quota.limitMB === 0 ? 'Unlimited' : `${quota.limitMB} MB`)
+    : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -139,12 +146,17 @@ export function FileUploadModal({
 
           {/* File Types Info */}
           <div className="bg-muted/50 p-3 rounded-lg">
+            {quota && (
+              <p className="text-xs text-foreground font-semibold mb-2">
+                Data Used: {usedMB !== null ? `${usedMB.toFixed(0)} MB` : '0 MB'} / Data Available: {availableLabel}
+              </p>
+            )}
             <p className="text-xs text-muted-foreground font-medium mb-1">Supported file types:</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
               {getAllowedFileTypesDescription()}
             </p>
             <p className="text-xs text-muted-foreground mt-2">
-              Maximum file size: {Math.floor(MAX_COMMENT_FILE_SIZE / (1024 * 1024))}MB
+              Maximum individual file size: {Math.floor(MAX_COMMENT_FILE_SIZE / (1024 * 1024))}MB
             </p>
           </div>
 

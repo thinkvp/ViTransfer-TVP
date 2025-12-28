@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { CheckCircle2, MessageSquare } from 'lucide-react'
+import { ArrowUpDown, CheckCircle2, MessageSquare } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
+import { Button } from '@/components/ui/button'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -82,6 +83,8 @@ export default function CommentSection({
     attachedFiles,
     onFileSelect,
     onRemoveFile,
+    clientUploadQuota,
+    refreshClientUploadQuota,
   } = useCommentManagement({
     projectId,
     initialComments,
@@ -103,6 +106,10 @@ export default function CommentSection({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
+
+  const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
+  const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
+  const pendingScrollAttemptsRef = useRef(0)
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
 
@@ -165,6 +172,13 @@ export default function CommentSection({
   // Listen for immediate comment updates (delete, approve, post, etc.)
   useEffect(() => {
     const handleCommentPosted = (e: CustomEvent) => {
+      const newCommentId = e.detail?.newCommentId as string | undefined
+      const parentId = (e.detail?.parentId as string | null | undefined) ?? null
+      if (newCommentId) {
+        pendingScrollRef.current = { commentId: newCommentId, parentId }
+        pendingScrollAttemptsRef.current = 0
+      }
+
       // Use the comments data from the event if available, otherwise refetch
       if (e.detail?.comments) {
         setLocalComments(e.detail.comments)
@@ -218,8 +232,22 @@ export default function CommentSection({
     return mergedComments.filter(comment => comment.videoId === selectedVideoId)
   })()
 
-  // Sort top-level comments chronologically
   const sortedComments = [...displayComments].sort((a, b) => {
+    if (commentSortMode === 'date') {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    }
+
+    // Sort by timecode (ascending). If multiple videos are displayed, group by videoId first.
+    if (!selectedVideoId && a.videoId !== b.videoId) {
+      return a.videoId.localeCompare(b.videoId)
+    }
+
+    const aTimecode = a.timecode || '00:00:00:00'
+    const bTimecode = b.timecode || '00:00:00:00'
+    const timecodeCmp = aTimecode.localeCompare(bTimecode)
+    if (timecodeCmp !== 0) return timecodeCmp
+
+    // Secondary sort for deterministic ordering
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   })
 
@@ -232,13 +260,53 @@ export default function CommentSection({
     }
   })
 
-  // Auto-scroll to bottom when new comments appear
-  // Scrolls only the messages container, not the entire page
+  // Auto-scroll only when a comment is posted.
   useEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+    const container = messagesContainerRef.current
+    const pending = pendingScrollRef.current
+    if (!container || !pending) return
+
+    const scrollTargetId = pending.parentId || pending.commentId
+    const isReply = Boolean(pending.parentId)
+
+    // For date sorting, show new top-level messages at the bottom
+    if (commentSortMode === 'date' && !isReply) {
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight
+        pendingScrollRef.current = null
+      })
+      return
     }
-  }, [displayComments.length])
+
+    // For timecode sorting (or replies), scroll to the relevant bubble.
+    requestAnimationFrame(() => {
+      const element = document.getElementById(`comment-${scrollTargetId}`)
+      if (element) {
+        handleScrollToComment(scrollTargetId)
+        pendingScrollRef.current = null
+        pendingScrollAttemptsRef.current = 0
+        return
+      }
+
+      // If the server refresh hasn't rendered it yet, retry briefly.
+      if (pendingScrollAttemptsRef.current < 10) {
+        pendingScrollAttemptsRef.current += 1
+        setTimeout(() => {
+          // Trigger effect by keeping ref; the next render (router.refresh) will re-run anyway.
+          // As a fallback, attempt scrolling directly here too.
+          const el = document.getElementById(`comment-${scrollTargetId}`)
+          if (el) {
+            handleScrollToComment(scrollTargetId)
+            pendingScrollRef.current = null
+            pendingScrollAttemptsRef.current = 0
+          }
+        }, 100)
+      } else {
+        pendingScrollRef.current = null
+        pendingScrollAttemptsRef.current = 0
+      }
+    })
+  }, [displayComments, commentSortMode])
 
   // Check if commenting on current video is allowed
   const isCurrentVideoAllowed = () => {
@@ -314,6 +382,20 @@ export default function CommentSection({
     }
   }
 
+  // Allow other UI (e.g. timeline markers) to scroll the feedback pane to a comment.
+  useEffect(() => {
+    const handleScrollRequest = (e: CustomEvent) => {
+      const commentId = e.detail?.commentId as string | undefined
+      if (!commentId) return
+      handleScrollToComment(commentId)
+    }
+
+    window.addEventListener('scrollToComment' as any, handleScrollRequest as EventListener)
+    return () => {
+      window.removeEventListener('scrollToComment' as any, handleScrollRequest as EventListener)
+    }
+  }, [])
+
   const handleOpenShortcuts = () => {
     window.dispatchEvent(new CustomEvent('openShortcutsDialog'))
   }
@@ -321,10 +403,25 @@ export default function CommentSection({
   return (
     <Card className="bg-card border border-border flex flex-col h-auto lg:h-full max-h-[75vh] rounded-lg overflow-hidden" data-comment-section>
       <CardHeader className="border-b border-border flex-shrink-0">
-        <CardTitle className="text-foreground flex items-center gap-2">
-          <MessageSquare className="w-5 h-5" />
-          Feedback & Discussion
-        </CardTitle>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-foreground flex items-center gap-2">
+            <MessageSquare className="w-5 h-5" />
+            Feedback
+          </CardTitle>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCommentSortMode(current => (current === 'timecode' ? 'date' : 'timecode'))}
+            className="text-muted-foreground hover:text-foreground -mr-2"
+            title={commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
+          >
+            <ArrowUpDown className="w-4 h-4" />
+            <span className="ml-2 hidden sm:inline">
+              {commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
+            </span>
+          </Button>
+        </div>
         {selectedVideoId && currentVideo && !isAdminView && (
           <p className="text-xs text-muted-foreground mt-1">
             {commentsDisabled
@@ -439,6 +536,8 @@ export default function CommentSection({
           attachedFiles={attachedFiles}
           onRemoveFile={onRemoveFile}
           allowFileUpload={allowClientUploadFiles && !isAdminView}
+            clientUploadQuota={clientUploadQuota}
+            onRefreshUploadQuota={refreshClientUploadQuota}
           selectedTimestamp={selectedTimestamp}
           onClearTimestamp={handleClearTimestamp}
           selectedVideoFps={selectedVideoFps}
