@@ -24,6 +24,7 @@ const updateProjectSchema = z.object({
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
+  allowClientUploadFiles: z.boolean().optional(),
   previewResolution: z.enum(['720p', '1080p', '2160p']).optional(),
   watermarkEnabled: z.boolean().optional(),
   watermarkText: z.string().max(100).nullable().optional(),
@@ -242,6 +243,9 @@ export async function PATCH(
     }
     if (validatedBody.allowClientDeleteComments !== undefined) {
       updateData.allowClientDeleteComments = validatedBody.allowClientDeleteComments
+    }
+    if (validatedBody.allowClientUploadFiles !== undefined) {
+      updateData.allowClientUploadFiles = validatedBody.allowClientUploadFiles
     }
 
     // Handle video processing settings

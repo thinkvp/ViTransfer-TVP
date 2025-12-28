@@ -63,6 +63,20 @@ export function sanitizeComment(
     parentId: comment.parentId,
   }
 
+  // Attachments: safe metadata only (no storage paths)
+  if (comment.files && Array.isArray(comment.files)) {
+    sanitized.files = comment.files.map((file: any) => ({
+      id: file.id,
+      fileName: file.fileName,
+      fileSize:
+        typeof file.fileSize === 'bigint'
+          ? Number(file.fileSize)
+          : typeof file.fileSize === 'string'
+            ? Number(file.fileSize)
+            : file.fileSize,
+    }))
+  }
+
   // NEVER expose real names or emails to non-admins
   // Use generic labels only
   if (isAdmin) {

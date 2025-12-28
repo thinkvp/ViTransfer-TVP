@@ -157,6 +157,7 @@ export async function POST(request: NextRequest) {
         defaultWatermarkEnabled: true,
         defaultWatermarkText: true,
         defaultAllowClientDeleteComments: true,
+        defaultAllowClientUploadFiles: true,
       },
     })
 
@@ -180,6 +181,7 @@ export async function POST(request: NextRequest) {
           maxRevisions: isShareOnly ? 0 : (enableRevisions ? (maxRevisions || 3) : 0),
           restrictCommentsToLatestVersion: isShareOnly ? false : (restrictCommentsToLatestVersion || false),
           allowClientDeleteComments: isShareOnly ? false : (allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false),
+          allowClientUploadFiles: isShareOnly ? false : (settings?.defaultAllowClientUploadFiles ?? false),
           status: isShareOnly ? 'SHARE_ONLY' : 'IN_REVIEW',
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,

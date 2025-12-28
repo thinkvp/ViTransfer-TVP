@@ -6,6 +6,8 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
+import { readdir, rmdir, unlink } from 'fs/promises'
+import { dirname, join } from 'path'
 export const runtime = 'nodejs'
 
 
@@ -13,6 +15,19 @@ export const runtime = 'nodejs'
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
+
+const STORAGE_ROOT = process.env.STORAGE_ROOT || '/app/uploads'
+
+async function removeDirIfEmpty(dirPath: string) {
+  try {
+    const entries = await readdir(dirPath)
+    if (entries.length === 0) {
+      await rmdir(dirPath)
+    }
+  } catch {
+    // Best-effort only
+  }
+}
 
 // PATCH /api/comments/[id] - Update a comment
 export async function PATCH(
@@ -268,10 +283,46 @@ export async function DELETE(
     // Cancel any pending notifications for this comment
     await cancelCommentNotification(id)
 
+    // Collect comment ids (parent + replies) before deletion
+    const replyIds = await prisma.comment.findMany({
+      where: { parentId: id },
+      select: { id: true },
+    })
+    const commentIds = [id, ...replyIds.map(r => r.id)]
+
+    // Collect file paths for cleanup
+    const commentFiles = await prisma.commentFile.findMany({
+      where: { commentId: { in: commentIds } },
+      select: { storagePath: true },
+    })
+
     // Delete the comment and its replies (cascade)
     await prisma.comment.delete({
       where: { id },
     })
+
+    // Best-effort: delete any comment file records (in case cascade isn't configured)
+    await prisma.commentFile.deleteMany({
+      where: { commentId: { in: commentIds } },
+    })
+
+    // Best-effort: remove files from disk
+    const directoriesToCheck = new Set<string>()
+    for (const file of commentFiles) {
+      try {
+        const fullPath = join(STORAGE_ROOT, file.storagePath)
+        await unlink(fullPath)
+        directoriesToCheck.add(dirname(fullPath))
+      } catch {
+        // Ignore missing/unremovable files to avoid blocking comment deletion
+      }
+    }
+
+    // Best-effort: remove empty directories (commentId folder, then its parent)
+    for (const dirPath of directoriesToCheck) {
+      await removeDirIfEmpty(dirPath)
+      await removeDirIfEmpty(dirname(dirPath))
+    }
 
     // Return success - client will refresh to get updated comments
     return NextResponse.json({ success: true })

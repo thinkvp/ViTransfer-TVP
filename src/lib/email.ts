@@ -35,6 +35,7 @@ export interface EmailShellOptions {
   footerNote?: string
   headerGradient: string
   trackingToken?: string
+  trackingPixelsEnabled?: boolean
   appDomain?: string
 }
 
@@ -46,10 +47,13 @@ export function renderEmailShell({
   footerNote,
   headerGradient,
   trackingToken,
+  trackingPixelsEnabled,
   appDomain,
 }: EmailShellOptions) {
   const domain = appDomain || process.env.APP_DOMAIN || 'http://localhost:3000'
-  const trackingPixel = trackingToken ? `<img src="${domain}/api/track/email/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />` : ''
+  const trackingPixel = trackingPixelsEnabled && trackingToken
+    ? `<img src="${domain}/api/track/email/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />`
+    : ''
   
   return `
 <!DOCTYPE html>
@@ -95,11 +99,17 @@ interface EmailSettings {
   smtpSecure: string | null
   appDomain: string | null
   companyName: string | null
+  emailTrackingPixelsEnabled: boolean | null
 }
 
 let cachedSettings: EmailSettings | null = null
 let settingsCacheTime: number = 0
 const CACHE_DURATION = 30 * 1000 // 30 seconds (reduced for testing)
+
+export function invalidateEmailSettingsCache() {
+  cachedSettings = null
+  settingsCacheTime = 0
+}
 
 /**
  * Get email settings from database with caching
@@ -124,6 +134,7 @@ export async function getEmailSettings(): Promise<EmailSettings> {
       smtpSecure: true,
       appDomain: true,
       companyName: true,
+      emailTrackingPixelsEnabled: true,
     }
   })
 
@@ -140,6 +151,7 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     smtpSecure: null,
     appDomain: null,
     companyName: null,
+    emailTrackingPixelsEnabled: null,
   }
   settingsCacheTime = now
 
@@ -266,6 +278,7 @@ export async function sendNewVersionEmail({
     title: 'New Version Available',
     subtitle: 'Ready for your review',
     trackingToken,
+    trackingPixelsEnabled: settings.emailTrackingPixelsEnabled ?? true,
     appDomain: settings.appDomain || undefined,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
@@ -695,6 +708,7 @@ export async function sendProjectGeneralNotificationEmail({
     title: 'Project Ready for Review',
     subtitle: projectTitle,
     trackingToken,
+    trackingPixelsEnabled: settings.emailTrackingPixelsEnabled ?? true,
     appDomain: settings.appDomain || undefined,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">

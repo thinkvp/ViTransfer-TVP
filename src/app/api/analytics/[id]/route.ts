@@ -192,7 +192,11 @@ export async function GET(
     const emailEvents = project.emailEvents.map(evt => ({
       id: evt.id,
       type: 'EMAIL' as const,
-      description: evt.type === 'ALL_READY_VIDEOS' ? 'All Ready Videos' : 'Specific Video & Version',
+      description: evt.type === 'ALL_READY_VIDEOS'
+        ? 'All Ready Videos'
+        : evt.type === 'COMMENT_SUMMARY'
+        ? 'Comment Summary'
+        : 'Specific Video & Version',
       recipients: JSON.parse(evt.recipientEmails) as string[],
       videoName: evt.video?.name,
       versionLabel: evt.video?.versionLabel,
@@ -202,7 +206,11 @@ export async function GET(
     const emailOpenEvents = project.emailTracking.map(tracking => ({
       id: tracking.id,
       type: 'EMAIL_OPEN' as const,
-      description: tracking.type === 'ALL_READY_VIDEOS' ? 'All Ready Videos' : 'Specific Video & Version',
+      description: tracking.type === 'ALL_READY_VIDEOS'
+        ? 'All Ready Videos'
+        : tracking.type === 'COMMENT_SUMMARY'
+        ? 'Comment Summary'
+        : 'Specific Video & Version',
       recipientEmail: tracking.recipientEmail,
       videoName: tracking.video?.name,
       versionLabel: tracking.video?.versionLabel,

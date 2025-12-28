@@ -323,6 +323,13 @@ export async function fetchProjectComments(projectId: string) {
           email: true,
         }
       },
+      files: {
+        select: {
+          id: true,
+          fileName: true,
+          fileSize: true,
+        },
+      },
       replies: {
         include: {
           user: {
@@ -332,7 +339,14 @@ export async function fetchProjectComments(projectId: string) {
               username: true,
               email: true,
             }
-          }
+          },
+          files: {
+            select: {
+              id: true,
+              fileName: true,
+              fileSize: true,
+            },
+          },
         },
         orderBy: { createdAt: 'asc' }
       }

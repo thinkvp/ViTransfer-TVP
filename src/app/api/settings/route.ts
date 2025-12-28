@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
-import { isSmtpConfigured } from '@/lib/email'
+import { invalidateEmailSettingsCache, isSmtpConfigured } from '@/lib/email'
 export const runtime = 'nodejs'
 
 
@@ -96,16 +96,26 @@ export async function PATCH(request: NextRequest) {
       smtpPassword,
       smtpFromAddress,
       smtpSecure,
+      emailTrackingPixelsEnabled,
       appDomain,
       defaultPreviewResolution,
       defaultWatermarkEnabled,
       defaultWatermarkText,
       defaultAllowClientDeleteComments,
+      defaultAllowClientUploadFiles,
       autoApproveProject,
       adminNotificationSchedule,
       adminNotificationTime,
       adminNotificationDay,
     } = body
+
+    // SECURITY: Validate emailTrackingPixelsEnabled is boolean
+    if (emailTrackingPixelsEnabled !== undefined && typeof emailTrackingPixelsEnabled !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid value for emailTrackingPixelsEnabled. Must be a boolean.' },
+        { status: 400 }
+      )
+    }
 
     // SECURITY: Validate notification schedule
     if (adminNotificationSchedule !== undefined) {
@@ -207,11 +217,13 @@ export async function PATCH(request: NextRequest) {
       smtpUsername,
       smtpFromAddress,
       smtpSecure,
+      emailTrackingPixelsEnabled,
       appDomain,
       defaultPreviewResolution,
       defaultWatermarkEnabled,
       defaultWatermarkText,
       defaultAllowClientDeleteComments,
+      defaultAllowClientUploadFiles,
       autoApproveProject,
       adminNotificationSchedule,
       adminNotificationTime,
@@ -236,6 +248,7 @@ export async function PATCH(request: NextRequest) {
         smtpPassword: passwordUpdate || null,
         smtpFromAddress,
         smtpSecure,
+        emailTrackingPixelsEnabled: emailTrackingPixelsEnabled ?? true,
         appDomain,
         defaultPreviewResolution,
         defaultWatermarkText,
@@ -246,6 +259,9 @@ export async function PATCH(request: NextRequest) {
         adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
       },
     })
+
+    // Ensure future emails pick up updated settings immediately
+    invalidateEmailSettingsCache()
 
     // Decrypt sensitive fields before sending to admin
     const decryptedSettings = {

@@ -13,6 +13,8 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultWatermarkText: (value: string) => void
   defaultAllowClientDeleteComments: boolean
   setDefaultAllowClientDeleteComments: (value: boolean) => void
+  defaultAllowClientUploadFiles: boolean
+  setDefaultAllowClientUploadFiles: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -26,6 +28,8 @@ export function VideoProcessingSettingsSection({
   setDefaultWatermarkText,
   defaultAllowClientDeleteComments,
   setDefaultAllowClientDeleteComments,
+  defaultAllowClientUploadFiles,
+  setDefaultAllowClientUploadFiles,
   show,
   setShow,
 }: VideoProcessingSettingsSectionProps) {
@@ -114,6 +118,22 @@ export function VideoProcessingSettingsSection({
                 id="defaultAllowClientDeleteComments"
                 checked={defaultAllowClientDeleteComments}
                 onCheckedChange={setDefaultAllowClientDeleteComments}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files while commenting</Label>
+                <p className="text-xs text-muted-foreground">
+                  Clients can attach files to comments (up to 5 per comment). Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR). Max 200MB per file.
+                </p>
+              </div>
+              <Switch
+                id="defaultAllowClientUploadFiles"
+                checked={defaultAllowClientUploadFiles}
+                onCheckedChange={setDefaultAllowClientUploadFiles}
               />
             </div>
           </div>

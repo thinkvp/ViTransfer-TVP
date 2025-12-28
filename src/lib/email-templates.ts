@@ -31,6 +31,9 @@ interface NotificationSummaryData {
   recipientEmail: string
   period: string
   notifications: NotificationData[]
+  trackingToken?: string
+  trackingPixelsEnabled?: boolean
+  appDomain?: string
 }
 
 interface AdminSummaryData {
@@ -111,6 +114,9 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'Project Update',
     subtitle: `${summaryText} ${data.period}`,
+    trackingToken: data.trackingToken,
+    trackingPixelsEnabled: data.trackingPixelsEnabled,
+    appDomain: data.appDomain,
     footerNote: 'Project Updates',
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">

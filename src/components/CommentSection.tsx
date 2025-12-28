@@ -33,6 +33,7 @@ interface CommentSectionProps {
   shareToken?: string | null
   showShortcutsButton?: boolean
   allowClientDeleteComments?: boolean
+  allowClientUploadFiles?: boolean
 }
 
 export default function CommentSection({
@@ -54,6 +55,7 @@ export default function CommentSection({
   shareToken = null,
   showShortcutsButton = false,
   allowClientDeleteComments = false,
+  allowClientUploadFiles = false,
 }: CommentSectionProps) {
   const {
     comments,
@@ -62,6 +64,8 @@ export default function CommentSection({
     selectedVideoId,
     selectedVideoFps,
     loading,
+    uploadProgress,
+    uploadStatusText,
     replyingToCommentId,
     authorName,
     nameSource,
@@ -75,6 +79,9 @@ export default function CommentSection({
     handleDeleteComment,
     setAuthorName,
     handleNameSourceChange,
+    attachedFiles,
+    onFileSelect,
+    onRemoveFile,
   } = useCommentManagement({
     projectId,
     initialComments,
@@ -89,6 +96,7 @@ export default function CommentSection({
     useAdminAuth: isAdminView,
     companyName,
     allowClientDeleteComments,
+    allowClientUploadFiles,
   })
 
   // Auto-scroll to latest comment (like messaging apps)
@@ -97,6 +105,35 @@ export default function CommentSection({
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
+
+  const handleDownloadCommentFile = async (commentId: string, fileId: string, fileName: string) => {
+    try {
+      const url = `/api/comments/${commentId}/files/${fileId}`
+      const response = isAdminView
+        ? await apiFetch(url)
+        : shareToken
+          ? await fetch(url, { headers: { Authorization: `Bearer ${shareToken}` } })
+          : await fetch(url)
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to download file')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+
+      const a = document.createElement('a')
+      a.href = objectUrl
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (error) {
+      alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
 
   // Fetch comments function (only used for event-triggered updates)
   const fetchComments = async () => {
@@ -355,6 +392,7 @@ export default function CommentSection({
                         formatMessageTime={formatMessageTime}
                         commentsDisabled={commentsDisabled}
                         isViewerMessage={isViewerMessage}
+                        onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
                       />
                     ) : (
                       // Has replies - render extended bubble
@@ -377,6 +415,7 @@ export default function CommentSection({
                         onToggleReplies={() => toggleReplies(comment.id)}
                         onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}
                         canDeleteReply={allowAnyReplyDelete ? canDeleteReply : undefined}
+                        onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
                       />
                     )}
                   </div>
@@ -394,6 +433,12 @@ export default function CommentSection({
           onCommentChange={handleCommentChange}
           onSubmit={handleSubmitComment}
           loading={loading}
+          uploadProgress={uploadProgress}
+          uploadStatusText={uploadStatusText}
+          onFileSelect={onFileSelect}
+          attachedFiles={attachedFiles}
+          onRemoveFile={onRemoveFile}
+          allowFileUpload={allowClientUploadFiles && !isAdminView}
           selectedTimestamp={selectedTimestamp}
           onClearTimestamp={handleClearTimestamp}
           selectedVideoFps={selectedVideoFps}

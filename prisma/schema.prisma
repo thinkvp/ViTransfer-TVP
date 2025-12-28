@@ -54,6 +54,7 @@ model Project {
   restrictCommentsToLatestVersion Boolean @default(false)
   hideFeedback                    Boolean @default(false)
   allowClientDeleteComments       Boolean @default(false)
+  allowClientUploadFiles          Boolean @default(false) // Allow clients to upload files with comments
 
   // Video processing settings
   previewResolution String  @default("720p") // "720p", "1080p", "2160p"
@@ -82,6 +83,7 @@ model Project {
   sharePageAccesses SharePageAccess[] // Share page authentication tracking
   emailEvents       ProjectEmailEvent[] // Logged client email notifications
   emailTracking     EmailTracking[] // Email open tracking pixels
+  commentFiles      CommentFile[] // Files uploaded with comments
 }
 
 enum ProjectStatus {
@@ -204,6 +206,7 @@ model Comment {
   replies  Comment[] @relation("CommentReplies")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  files   CommentFile[] // Files uploaded with this comment
 
   @@index([projectId])
   @@index([videoId])
@@ -254,6 +257,9 @@ model Settings {
   smtpFromAddress String?
   smtpSecure      String? @default("STARTTLS") // Options: "STARTTLS", "TLS", "NONE"
 
+  // Email privacy / tracking
+  emailTrackingPixelsEnabled Boolean @default(true)
+
   // Domain Configuration
   appDomain String? // e.g., "https://yourdomain.com"
 
@@ -263,7 +269,8 @@ model Settings {
   defaultWatermarkText     String?
 
   // Default project behavior
-  defaultAllowClientDeleteComments Boolean @default(false)
+  defaultAllowClientDeleteComments   Boolean @default(false)
+  defaultAllowClientUploadFiles      Boolean @default(false) // Default toggle for client file uploads
 
   // Project Behavior
   autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved
@@ -427,6 +434,9 @@ model ProjectEmailEvent {
   // Email notification type: ALL_READY_VIDEOS or SPECIFIC_VIDEO_VERSION
   type      String
 
+  // Optional idempotency key to dedupe log entries (allows multiple NULLs)
+  dedupeKey String?  @unique
+
   // Optional link to a specific video/version when applicable
   videoId   String?
   video     Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
@@ -518,4 +528,22 @@ model PasskeyCredential {
 
   @@index([userId])
   @@index([userId, lastUsedAt])
+}
+
+model CommentFile {
+  id          String   @id @default(cuid())
+  commentId   String
+  projectId   String
+  fileName    String // Original filename (e.g., "design.pdf")
+  fileSize    BigInt // Size in bytes
+  fileType    String // MIME type (e.g., "application/pdf")
+  storagePath String // Path relative to project uploads directory
+  createdAt   DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([projectId])
+  @@index([projectId, createdAt])
 }

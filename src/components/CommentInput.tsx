@@ -4,14 +4,24 @@ import { Comment } from '@prisma/client'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
-import { Clock, Send } from 'lucide-react'
+import { Clock, Send, Paperclip, X } from 'lucide-react'
+import { useState } from 'react'
+import { FileUploadModal } from './FileUploadModal'
+import { AttachedFileDisplay } from './FileDisplay'
 import { secondsToTimecode, formatTimecodeDisplay, getTimecodeLabel, isDropFrame } from '@/lib/timecode'
+import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 
 interface CommentInputProps {
   newComment: string
   onCommentChange: (value: string) => void
   onSubmit: () => void
   loading: boolean
+  uploadProgress?: number | null
+  uploadStatusText?: string
+  onFileSelect?: (files: File[]) => Promise<void>
+  attachedFiles?: Array<{ name: string; size: number }>
+  onRemoveFile?: (index: number) => void
+  allowFileUpload?: boolean
 
   // Timestamp
   selectedTimestamp: number | null
@@ -46,6 +56,12 @@ export default function CommentInput({
   onCommentChange,
   onSubmit,
   loading,
+  uploadProgress = null,
+  uploadStatusText = '',
+  onFileSelect,
+  attachedFiles = [],
+  onRemoveFile,
+  allowFileUpload = false,
   selectedTimestamp,
   onClearTimestamp,
   selectedVideoFps,
@@ -64,6 +80,10 @@ export default function CommentInput({
   showShortcutsButton = false,
   onShowShortcuts,
 }: CommentInputProps) {
+  const [uploadModalOpen, setUploadModalOpen] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const [uploading, setUploading] = useState(false)
+
   if (commentsDisabled) return null
 
   // Check if name selection is required but not provided
@@ -209,17 +229,64 @@ export default function CommentInput({
               onKeyDown={handleKeyDown}
               className="resize-none"
               rows={2}
+              disabled={loading}
             />
-            <Button
-              onClick={onSubmit}
-              variant="default"
-              disabled={!canSubmit}
-              className="self-end"
-              size="icon"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
+            <div className="flex flex-col gap-2 self-end">
+              {allowFileUpload && (
+                <Button
+                  onClick={() => setUploadModalOpen(true)}
+                  variant="outline"
+                  size="icon"
+                  className="bg-orange-600 text-white border-orange-600 hover:bg-orange-600 hover:text-white hover:border-orange-600 shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation"
+                  title="Attach file"
+                  disabled={loading || uploading || attachedFiles.length >= MAX_FILES_PER_COMMENT}
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
+              )}
+              <Button
+                onClick={onSubmit}
+                variant="default"
+                disabled={!canSubmit || uploading || loading}
+                size="icon"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
+
+          {/* Attached File Display */}
+          {attachedFiles.length > 0 && onRemoveFile && (
+            <div className="mt-2">
+              <div className="space-y-2">
+                {attachedFiles.map((file, index) => (
+                  <AttachedFileDisplay
+                    key={`${file.name}-${index}`}
+                    fileName={file.name}
+                    fileSize={file.size}
+                    onRemove={loading ? undefined : () => onRemoveFile(index)}
+                    isLoading={uploading || loading}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Upload progress */}
+          {loading && uploadProgress !== null && (
+            <div className="mt-2 space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{uploadStatusText || 'Uploading...'}</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-[width]"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {isNameRequired ? (
             <p className="text-xs text-warning mt-2">
@@ -242,6 +309,32 @@ export default function CommentInput({
                 </Button>
               )}
             </div>
+          )}
+
+          {/* File Upload Modal */}
+          {allowFileUpload && (
+            <FileUploadModal
+              open={uploadModalOpen}
+              onOpenChange={setUploadModalOpen}
+              onFileSelect={async (files) => {
+                // Keep modal contract simple: add selected files to the pending list
+                setUploadError('')
+                setUploading(true)
+                try {
+                  if (onFileSelect) {
+                    await onFileSelect(files)
+                  }
+                  setUploadModalOpen(false)
+                } catch (err) {
+                  setUploadError((err as Error).message)
+                  throw err
+                } finally {
+                  setUploading(false)
+                }
+              }}
+              isLoading={uploading}
+              error={uploadError}
+            />
           )}
         </>
       )}

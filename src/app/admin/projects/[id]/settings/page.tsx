@@ -116,6 +116,7 @@ export default function ProjectSettingsPage() {
   const [restrictCommentsToLatestVersion, setRestrictCommentsToLatestVersion] = useState(false)
   const [hideFeedback, setHideFeedback] = useState(false)
   const [allowClientDeleteComments, setAllowClientDeleteComments] = useState(false)
+  const [allowClientUploadFiles, setAllowClientUploadFiles] = useState(false)
   const [sharePassword, setSharePassword] = useState('')
   const [authMode, setAuthMode] = useState('PASSWORD')
   const [guestMode, setGuestMode] = useState(false)
@@ -199,6 +200,7 @@ export default function ProjectSettingsPage() {
         setRestrictCommentsToLatestVersion(data.restrictCommentsToLatestVersion)
         setHideFeedback(data.hideFeedback || false)
         setAllowClientDeleteComments(data.allowClientDeleteComments ?? false)
+        setAllowClientUploadFiles(data.allowClientUploadFiles ?? false)
         setPreviewResolution(data.previewResolution)
         setWatermarkEnabled(data.watermarkEnabled ?? true)
         setWatermarkText(data.watermarkText || '')
@@ -298,6 +300,7 @@ export default function ProjectSettingsPage() {
         restrictCommentsToLatestVersion,
         hideFeedback,
         allowClientDeleteComments,
+        allowClientUploadFiles,
         previewResolution,
         watermarkEnabled,
         watermarkText: useCustomWatermark ? watermarkText : null,
@@ -875,6 +878,20 @@ export default function ProjectSettingsPage() {
                     id="allowClientDeleteComments"
                     checked={allowClientDeleteComments}
                     onCheckedChange={setAllowClientDeleteComments}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5 flex-1">
+                    <Label htmlFor="allowClientUploadFiles">Allow clients to upload files with comments</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Clients can attach files to comments (up to 5 per comment). Supported: Images, Videos, PDFs, Documents, Fonts, Archives (Max 200MB each).
+                    </p>
+                  </div>
+                  <Switch
+                    id="allowClientUploadFiles"
+                    checked={allowClientUploadFiles}
+                    onCheckedChange={setAllowClientUploadFiles}
                   />
                 </div>
 

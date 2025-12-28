@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { PasswordInput } from '@/components/ui/password-input'
+import { Switch } from '@/components/ui/switch'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
 import { Send, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -16,6 +17,8 @@ interface EmailSettingsSectionProps {
   setSmtpUsername: (value: string) => void
   smtpPassword: string
   setSmtpPassword: (value: string) => void
+  emailTrackingPixelsEnabled: boolean
+  setEmailTrackingPixelsEnabled: (value: boolean) => void
   smtpFromAddress: string
   setSmtpFromAddress: (value: string) => void
   smtpSecure: string
@@ -50,6 +53,8 @@ export function EmailSettingsSection({
   setSmtpUsername,
   smtpPassword,
   setSmtpPassword,
+  emailTrackingPixelsEnabled,
+  setEmailTrackingPixelsEnabled,
   smtpFromAddress,
   setSmtpFromAddress,
   smtpSecure,
@@ -211,6 +216,20 @@ export function EmailSettingsSection({
           <p className="text-xs text-muted-foreground">
             For iCloud or Gmail, use an App Specific Password. For other providers, use your SMTP password.
           </p>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5 flex-1">
+            <Label htmlFor="emailTrackingPixelsEnabled">Enable email tracking pixel</Label>
+            <p className="text-xs text-muted-foreground">
+              When enabled, emails that support tracking will include a 1×1 pixel for open tracking.
+            </p>
+          </div>
+          <Switch
+            id="emailTrackingPixelsEnabled"
+            checked={emailTrackingPixelsEnabled}
+            onCheckedChange={setEmailTrackingPixelsEnabled}
+          />
         </div>
         </div>
 

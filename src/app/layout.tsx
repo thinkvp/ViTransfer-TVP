@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 // Force Node.js runtime across the app to allow use of Node APIs (e.g., crypto).
 export const runtime = 'nodejs';
@@ -53,7 +50,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.className} flex flex-col min-h-dvh overflow-x-hidden`}>
+      <body className="flex flex-col min-h-dvh overflow-x-hidden">
         <main className="flex-1 min-h-0 flex flex-col">{children}</main>
       </body>
     </html>

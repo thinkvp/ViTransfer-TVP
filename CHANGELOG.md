@@ -5,6 +5,20 @@ All notable changes to ViTransfer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3-alpha-4] - 2025-12-28
+
+### Added
+- Comment attachments: multi-file uploads (up to 5 files per comment), 200MB max per file, and expanded allowed formats (including PSD/AI and common videos)
+- Email privacy: global Admin setting to enable/disable email tracking pixels
+- Analytics: Project Update (“Updates on …”) digest emails now log "Comment Summary" sent/opened events (with optional tracking pixel)
+
+### Fixed
+- Share attachments: download now fetches authenticated blobs instead of accidentally downloading JSON error responses
+- Comments: deleting a comment now removes uploaded attachments from disk and cleans up empty attachment folders (best-effort)
+
+### Changed
+- Comment attachments: upload progress now displays and input clears only after completion
+
 ## [0.8.2] - 2025-12-24
 
 ### Fixed

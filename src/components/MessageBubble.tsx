@@ -1,13 +1,15 @@
 'use client'
 
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight } from 'lucide-react'
+import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download } from 'lucide-react'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import DOMPurify from 'dompurify'
+import { CommentFileDisplay } from './FileDisplay'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
+  files?: Array<{ id: string; fileName: string; fileSize: number }>
 }
 
 interface MessageBubbleProps {
@@ -30,6 +32,7 @@ interface MessageBubbleProps {
   onToggleReplies?: () => void
   onDeleteReply?: (replyId: string) => void
   canDeleteReply?: (reply: Comment) => boolean
+  onDownloadCommentFile?: (commentId: string, fileId: string, fileName: string) => Promise<void>
 }
 
 /**
@@ -67,6 +70,7 @@ export default function MessageBubble({
   onToggleReplies,
   onDeleteReply,
   canDeleteReply,
+  onDownloadCommentFile,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
   // Determine which company name to show
@@ -167,6 +171,26 @@ export default function MessageBubble({
             className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${textColor}`}
             dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
           />
+
+          {/* Attached Files */}
+          {(comment as any).files && (comment as any).files.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-300/40 dark:border-gray-600/40 space-y-2">
+              {(comment as any).files.map((file: any) => (
+                <CommentFileDisplay
+                  key={file.id}
+                  fileId={file.id}
+                  fileName={file.fileName}
+                  fileSize={file.fileSize}
+                  commentId={comment.id}
+                  onDownload={
+                    onDownloadCommentFile
+                      ? async (fileId) => onDownloadCommentFile(comment.id, fileId, file.fileName)
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          )}
 
           {/* Replies Section - Extends parent bubble */}
           {hasReplies && (

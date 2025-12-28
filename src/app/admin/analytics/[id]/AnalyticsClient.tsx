@@ -41,7 +41,7 @@ interface DownloadActivity {
 interface EmailActivity {
   id: string
   type: 'EMAIL'
-  description: 'All Ready Videos' | 'Specific Video & Version'
+  description: 'All Ready Videos' | 'Specific Video & Version' | 'Comment Summary'
   recipients: string[]
   videoName?: string
   versionLabel?: string
@@ -51,7 +51,7 @@ interface EmailActivity {
 interface EmailOpenActivity {
   id: string
   type: 'EMAIL_OPEN'
-  description: 'All Ready Videos' | 'Specific Video & Version'
+  description: 'All Ready Videos' | 'Specific Video & Version' | 'Comment Summary'
   recipientEmail: string
   videoName?: string
   versionLabel?: string
@@ -365,7 +365,13 @@ export default function AnalyticsClient({ id }: { id: string }) {
                               <div className="space-y-2">
                                 <div className="flex items-start gap-2">
                                   <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
-                                  <span className="text-sm text-muted-foreground">{(event as EmailActivity).description === 'All Ready Videos' ? 'All Ready Videos email sent' : 'Specific Video & Version email sent'}</span>
+                                  <span className="text-sm text-muted-foreground">
+                                    {(event as EmailActivity).description === 'All Ready Videos'
+                                      ? 'All Ready Videos email sent'
+                                      : (event as EmailActivity).description === 'Comment Summary'
+                                      ? 'Comment Summary email sent'
+                                      : 'Specific Video & Version email sent'}
+                                  </span>
                                 </div>
                                 {(event as EmailActivity).videoName && (
                                   <div className="flex items-start gap-2">
@@ -388,7 +394,13 @@ export default function AnalyticsClient({ id }: { id: string }) {
                               <div className="space-y-2">
                                 <div className="flex items-start gap-2">
                                   <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
-                                  <span className="text-sm text-muted-foreground">{(event as EmailOpenActivity).description === 'All Ready Videos' ? 'All Ready Videos email opened' : 'Specific Video & Version email opened'}</span>
+                                  <span className="text-sm text-muted-foreground">
+                                    {(event as EmailOpenActivity).description === 'All Ready Videos'
+                                      ? 'All Ready Videos email opened'
+                                      : (event as EmailOpenActivity).description === 'Comment Summary'
+                                      ? 'Comment Summary email opened'
+                                      : 'Specific Video & Version email opened'}
+                                  </span>
                                 </div>
                                 {(event as EmailOpenActivity).videoName && (
                                   <div className="flex items-start gap-2">

@@ -1,10 +1,11 @@
 import { prisma } from '../lib/db'
-import { sendEmail } from '../lib/email'
+import { getEmailSettings, sendEmail } from '../lib/email'
 import { generateNotificationSummaryEmail } from '../lib/email-templates'
 import { getProjectRecipients } from '../lib/recipients'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
+import { createHash } from 'crypto'
 
 /**
  * Process client notification summaries
@@ -150,14 +151,48 @@ export async function processClientNotifications() {
             normalizeNotificationDataTimecode(n.data as any)
           )
 
+          const emailSettings = await getEmailSettings()
+          const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
+
+          // Stable batch key to prevent duplicate tracking/event logs on retries.
+          // Note: if the same notification IDs are retried, we reuse the same token per recipient.
+          const sortedNotificationIds = [...notificationIds].sort().join('|')
+          const batchKey = `${project.id}|${period}|${sortedNotificationIds}`
+          const batchHash = createHash('sha256').update(batchKey).digest('hex').slice(0, 16)
+
+          const successfulRecipientEmails: string[] = []
+
           for (const recipient of recipients) {
+            // Create tracking token per-recipient so opens can be recorded.
+            // Use upsert with a stable token so retries don't create duplicate rows.
+            const normalizedEmail = recipient.email!.toLowerCase()
+            const stableToken = `${project.id}-${batchHash}-${normalizedEmail}`
+            const trackingToken = trackingPixelsEnabled
+              ? await prisma.emailTracking.upsert({
+                  where: { token: stableToken },
+                  update: {
+                    sentAt: new Date(),
+                  },
+                  create: {
+                    token: stableToken,
+                    projectId: project.id,
+                    type: 'COMMENT_SUMMARY',
+                    videoId: null,
+                    recipientEmail: normalizedEmail,
+                  },
+                })
+              : null
+
             const html = generateNotificationSummaryEmail({
               projectTitle: project.title,
               shareUrl,
               recipientName: recipient.name || recipient.email!,
               recipientEmail: recipient.email!,
               period,
-              notifications
+              notifications,
+              trackingToken: trackingToken?.token,
+              trackingPixelsEnabled,
+              appDomain: emailSettings.appDomain || undefined,
             })
 
             const result = await sendEmail({
@@ -167,9 +202,39 @@ export async function processClientNotifications() {
             })
 
             if (result.success) {
+              successfulRecipientEmails.push(recipient.email!)
               console.log(`[CLIENT]     Sent to ${recipient.name || recipient.email}`)
             } else {
               throw new Error(`Failed to send to ${recipient.email}: ${result.error}`)
+            }
+          }
+
+          // Log analytics event for this batch (non-blocking)
+          if (successfulRecipientEmails.length > 0) {
+            try {
+              const recipientEmailsJson = JSON.stringify(successfulRecipientEmails)
+
+              // DB-level dedupe: retries will collide on the same dedupeKey and be ignored.
+              const dedupeKey = `COMMENT_SUMMARY:${project.id}:${batchHash}`
+
+              try {
+                await prisma.projectEmailEvent.create({
+                  data: {
+                    projectId: project.id,
+                    type: 'COMMENT_SUMMARY',
+                    dedupeKey,
+                    videoId: null,
+                    recipientEmails: recipientEmailsJson,
+                  },
+                })
+              } catch (e: any) {
+                // Ignore unique constraint violations (already logged)
+                if (e?.code !== 'P2002') {
+                  throw e
+                }
+              }
+            } catch (e) {
+              console.error('[CLIENT]     Failed to log ProjectEmailEvent:', e)
             }
           }
         }

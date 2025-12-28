@@ -5,6 +5,8 @@ import { Comment, Video } from '@prisma/client'
 import { useRouter } from 'next/navigation'
 import { apiPost, apiDelete } from '@/lib/api-client'
 import { secondsToTimecode } from '@/lib/timecode'
+import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
+import { getAccessToken } from '@/lib/token-store'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -24,6 +26,7 @@ interface UseCommentManagementProps {
   useAdminAuth?: boolean
   companyName?: string
   allowClientDeleteComments?: boolean
+  allowClientUploadFiles?: boolean
 }
 
 export function useCommentManagement({
@@ -40,6 +43,7 @@ export function useCommentManagement({
   useAdminAuth = false,
   companyName = 'Studio',
   allowClientDeleteComments = false,
+  allowClientUploadFiles = false,
 }: UseCommentManagementProps) {
   const router = useRouter()
 
@@ -51,6 +55,52 @@ export function useCommentManagement({
   const [loading, setLoading] = useState(false)
   const [hasAutoFilledTimestamp, setHasAutoFilledTimestamp] = useState(false)
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null)
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; size: number; file: File }>>([])
+  const [pendingCommentId, setPendingCommentId] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [uploadStatusText, setUploadStatusText] = useState<string>('')
+
+  const uploadCommentFileWithProgress = (
+    commentId: string,
+    file: File,
+    onProgress: (loaded: number, total: number) => void
+  ): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `/api/comments/${commentId}/files`)
+
+      const token = shareToken ? shareToken : (useAdminAuth ? getAccessToken() : null)
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      }
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          onProgress(e.loaded, e.total)
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve()
+          return
+        }
+
+        try {
+          const parsed = JSON.parse(xhr.responseText || '{}')
+          reject(new Error(parsed.error || `Upload failed (HTTP ${xhr.status})`))
+        } catch {
+          reject(new Error(`Upload failed (HTTP ${xhr.status})`))
+        }
+      }
+
+      xhr.onerror = () => reject(new Error('Upload failed'))
+
+      const formData = new FormData()
+      formData.append('file', file)
+      xhr.send(formData)
+    })
+  }
 
   // Author name management
   const displayClientName = isPasswordProtected ? clientName : 'Client'
@@ -269,6 +319,8 @@ export function useCommentManagement({
     }
 
     setLoading(true)
+    setUploadProgress(attachedFiles.length > 0 ? 0 : null)
+    setUploadStatusText(attachedFiles.length > 0 ? 'Uploading...' : 'Sending...')
 
     // OPTIMISTIC UPDATE
     const isInternalComment = useAdminAuth || !!adminUser
@@ -298,16 +350,12 @@ export function useCommentManagement({
 
     setOptimisticComments(prev => [...prev, optimisticComment])
 
-    // Clear form immediately (but keep video selected for next comment)
+    // Snapshot current form state; keep UI visible until uploads finish
     const commentContent = newComment
     const commentTimestamp = selectedTimestamp
     const commentVideoId = validatedVideoId
     const commentParentId = replyingToCommentId
-    setNewComment('')
-    setSelectedTimestamp(null)
-    // Keep selectedVideoId so user can post multiple comments
-    setHasAutoFilledTimestamp(false)
-    setReplyingToCommentId(null)
+    const filesToUpload = attachedFiles
 
     try {
       // Convert timestamp to timecode for API
@@ -340,8 +388,7 @@ export function useCommentManagement({
         requestBody.parentId = commentParentId
       }
 
-      // Submit comment in background without blocking UI
-      const submitPromise = shareToken
+      const updatedComments = await (shareToken
         ? fetch('/api/comments', {
             method: 'POST',
             headers: {
@@ -354,45 +401,96 @@ export function useCommentManagement({
               const err = await response.json().catch(() => ({}))
               throw new Error(err.error || 'Failed to submit comment')
             }
-            return response.json() // Return the updated comments list
+            return response.json()
           })
         : useAdminAuth
-        ? apiPost('/api/comments', requestBody) // apiPost already returns parsed JSON
-        : Promise.reject(new Error('Authentication required to submit comment'))
+          ? apiPost('/api/comments', requestBody)
+          : Promise.reject(new Error('Authentication required to submit comment')))
 
-      // Handle submission result in background
-      submitPromise
-        .then((updatedComments) => {
-          // Clear the optimistic comment immediately since we have real data
-          setOptimisticComments(prev => prev.filter(c => c.id !== optimisticComment.id))
+      // Clear the optimistic comment immediately since we have real data
+      setOptimisticComments(prev => prev.filter(c => c.id !== optimisticComment.id))
 
-          // Refresh in background (non-blocking)
-          router.refresh()
+      // Find the newly created comment id
+      let newCommentId: string | null = null
+      if (commentParentId) {
+        const parentComment = updatedComments.find((c: any) => c.id === commentParentId)
+        if (parentComment?.replies && parentComment.replies.length > 0) {
+          newCommentId = parentComment.replies[parentComment.replies.length - 1].id
+        }
+      } else {
+        if (updatedComments.length > 0) {
+          newCommentId = updatedComments[updatedComments.length - 1].id
+        }
+      }
 
-          // Trigger immediate update with the fresh comments data
-          window.dispatchEvent(new CustomEvent('commentPosted', {
-            detail: { comments: updatedComments }
-          }))
-        })
-        .catch((error) => {
-          // Remove optimistic comment and restore form on error
-          setOptimisticComments(prev => prev.filter(c => c.id !== optimisticComment.id))
-          setNewComment(commentContent)
-          setSelectedTimestamp(commentTimestamp)
-          setSelectedVideoId(commentVideoId)
-          alert(`Failed to submit comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
-        })
+      // Upload attached files with progress (if any)
+      if (filesToUpload.length > 0 && newCommentId) {
+        setUploadStatusText('Uploading...')
 
-      // UI is already unblocked - loading state cleared immediately
+        const totalBytes = filesToUpload.reduce((sum, f) => sum + (f.file?.size || 0), 0)
+        let completedBytes = 0
+
+        for (const file of filesToUpload) {
+          const currentTotal = file.file.size
+          setUploadStatusText(`Uploading ${file.name}...`)
+
+          await uploadCommentFileWithProgress(newCommentId, file.file, (loaded) => {
+            const overall = totalBytes > 0 ? (completedBytes + Math.min(loaded, currentTotal)) / totalBytes : 0
+            setUploadProgress(Math.max(0, Math.min(100, Math.round(overall * 100))))
+          })
+
+          completedBytes += currentTotal
+          const overall = totalBytes > 0 ? completedBytes / totalBytes : 1
+          setUploadProgress(Math.max(0, Math.min(100, Math.round(overall * 100))))
+        }
+      }
+
+      // Refresh comments so attachments render immediately
+      let commentsForUi = updatedComments
+      if (filesToUpload.length > 0) {
+        try {
+          const response = shareToken
+            ? await fetch(`/api/comments?projectId=${projectId}`, {
+                headers: { Authorization: `Bearer ${shareToken}` },
+              })
+            : useAdminAuth
+              ? await fetch(`/api/comments?projectId=${projectId}`)
+              : null
+
+          if (response?.ok) {
+            commentsForUi = await response.json()
+          }
+        } catch (err) {
+          console.error('Failed to refresh comments after file upload:', err)
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('commentPosted', {
+        detail: { comments: commentsForUi }
+      }))
+
+      // Clear input only after send + uploads complete
+      setNewComment('')
+      setSelectedTimestamp(null)
+      setHasAutoFilledTimestamp(false)
+      setReplyingToCommentId(null)
+      setAttachedFiles([])
+      setPendingCommentId(null)
+      setUploadStatusText('')
+      setUploadProgress(null)
+
+      router.refresh()
     } catch (error) {
       // Handle synchronous errors only
       setOptimisticComments(prev => prev.filter(c => c.id !== optimisticComment.id))
+      setUploadStatusText('')
+      setUploadProgress(null)
       setNewComment(commentContent)
       setSelectedTimestamp(commentTimestamp)
       setSelectedVideoId(commentVideoId)
       alert(`Failed to submit comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
-      // Clear loading immediately so UI is not blocked
+      // Clear loading only after send/upload finishes
       setLoading(false)
     }
   }
@@ -529,6 +627,30 @@ export function useCommentManagement({
   const selectedVideo = videos.find(v => v.id === selectedVideoId)
   const selectedVideoFps = selectedVideo?.fps || 24
 
+  // Handle file selection - store in state; upload happens after comment creation
+  const onFileSelect = async (files: File[]) => {
+    if (!files || files.length === 0) return
+
+    if (attachedFiles.length + files.length > MAX_FILES_PER_COMMENT) {
+      throw new Error(`You can attach up to ${MAX_FILES_PER_COMMENT} files per comment.`)
+    }
+
+    const validated = files.map((file) => {
+      const validation = validateCommentFile(file.name, file.type, file.size)
+      if (!validation.valid) {
+        throw new Error(validation.error || 'File is not allowed')
+      }
+      return { name: file.name, size: file.size, file }
+    })
+
+    setAttachedFiles((prev) => [...prev, ...validated])
+  }
+
+  // Remove one attached file by index
+  const onRemoveFile = (index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
   return {
     comments,
     newComment,
@@ -536,6 +658,8 @@ export function useCommentManagement({
     selectedVideoId,
     selectedVideoFps,
     loading,
+    uploadProgress,
+    uploadStatusText,
     replyingToCommentId,
     authorName,
     nameSource,
@@ -549,5 +673,8 @@ export function useCommentManagement({
     handleDeleteComment,
     setAuthorName: handleAuthorNameChange,
     handleNameSourceChange,
+    attachedFiles,
+    onFileSelect,
+    onRemoveFile,
   }
 }

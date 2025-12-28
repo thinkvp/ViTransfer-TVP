@@ -92,6 +92,13 @@ export async function GET(
             email: true,
           }
         },
+        files: {
+          select: {
+            id: true,
+            fileName: true,
+            fileSize: true,
+          }
+        },
         replies: {
           include: {
             user: {
@@ -100,6 +107,13 @@ export async function GET(
                 name: true,
                 username: true,
                 email: true,
+              }
+            },
+            files: {
+              select: {
+                id: true,
+                fileName: true,
+                fileSize: true,
               }
             }
           },

@@ -22,11 +22,13 @@ interface Settings {
   smtpPassword: string | null
   smtpFromAddress: string | null
   smtpSecure: string | null
+  emailTrackingPixelsEnabled: boolean | null
   appDomain: string | null
   defaultPreviewResolution: string | null
   defaultWatermarkEnabled: boolean | null
   defaultWatermarkText: string | null
   defaultAllowClientDeleteComments: boolean | null
+  defaultAllowClientUploadFiles: boolean | null
   autoApproveProject: boolean | null
   adminNotificationSchedule: string | null
   adminNotificationTime: string | null
@@ -95,6 +97,7 @@ export default function GlobalSettingsPage() {
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
   const [smtpPassword, setSmtpPassword] = useState('')
+  const [emailTrackingPixelsEnabled, setEmailTrackingPixelsEnabled] = useState(true)
   const [smtpFromAddress, setSmtpFromAddress] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
   const [appDomain, setAppDomain] = useState('')
@@ -102,6 +105,7 @@ export default function GlobalSettingsPage() {
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
   const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
+  const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
 
   // Form state for admin notification settings
@@ -167,6 +171,7 @@ export default function GlobalSettingsPage() {
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
         setSmtpPassword(data.smtpPassword || '')
+        setEmailTrackingPixelsEnabled(data.emailTrackingPixelsEnabled ?? true)
         setSmtpFromAddress(data.smtpFromAddress || '')
         setSmtpSecure(data.smtpSecure || 'STARTTLS')
         setAppDomain(data.appDomain || '')
@@ -174,6 +179,7 @@ export default function GlobalSettingsPage() {
         setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
         setDefaultWatermarkText(data.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
+        setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
         setAutoApproveProject(data.autoApproveProject ?? true)
         setTestEmailAddress(data.smtpFromAddress || '')
 
@@ -354,6 +360,7 @@ export default function GlobalSettingsPage() {
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
         smtpPassword: smtpPassword || null,
+        emailTrackingPixelsEnabled,
         smtpFromAddress: smtpFromAddress || null,
         smtpSecure: smtpSecure || 'STARTTLS',
         appDomain: appDomain || null,
@@ -361,6 +368,7 @@ export default function GlobalSettingsPage() {
         defaultWatermarkEnabled: defaultWatermarkEnabled,
         defaultWatermarkText: defaultWatermarkText || null,
         defaultAllowClientDeleteComments,
+        defaultAllowClientUploadFiles,
         autoApproveProject: autoApproveProject,
         adminNotificationSchedule: adminNotificationSchedule,
         adminNotificationTime: (adminNotificationSchedule === 'DAILY' || adminNotificationSchedule === 'WEEKLY') ? adminNotificationTime : null,
@@ -417,6 +425,7 @@ export default function GlobalSettingsPage() {
         setSmtpPort(refreshedData.smtpPort?.toString() || '587')
         setSmtpUsername(refreshedData.smtpUsername || '')
         setSmtpPassword(refreshedData.smtpPassword || '')
+        setEmailTrackingPixelsEnabled(refreshedData.emailTrackingPixelsEnabled ?? true)
         setSmtpFromAddress(refreshedData.smtpFromAddress || '')
         setSmtpSecure(refreshedData.smtpSecure || 'STARTTLS')
         setAppDomain(refreshedData.appDomain || '')
@@ -424,6 +433,7 @@ export default function GlobalSettingsPage() {
         setDefaultWatermarkEnabled(refreshedData.defaultWatermarkEnabled ?? true)
         setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
+        setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
@@ -570,6 +580,8 @@ export default function GlobalSettingsPage() {
             setSmtpUsername={setSmtpUsername}
             smtpPassword={smtpPassword}
             setSmtpPassword={setSmtpPassword}
+            emailTrackingPixelsEnabled={emailTrackingPixelsEnabled}
+            setEmailTrackingPixelsEnabled={setEmailTrackingPixelsEnabled}
             smtpFromAddress={smtpFromAddress}
             setSmtpFromAddress={setSmtpFromAddress}
             smtpSecure={smtpSecure}
@@ -598,6 +610,8 @@ export default function GlobalSettingsPage() {
             setDefaultWatermarkText={setDefaultWatermarkText}
             defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
             setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
+            defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
+            setDefaultAllowClientUploadFiles={setDefaultAllowClientUploadFiles}
             show={showVideoProcessing}
             setShow={setShowVideoProcessing}
           />

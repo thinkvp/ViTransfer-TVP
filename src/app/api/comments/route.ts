@@ -106,6 +106,15 @@ export async function GET(request: NextRequest) {
             email: true,
           }
         },
+        files: {
+          select: {
+            id: true,
+            fileName: true,
+            fileSize: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
         replies: {
           include: {
             user: {
@@ -115,7 +124,16 @@ export async function GET(request: NextRequest) {
                 username: true,
                 email: true,
               }
-            }
+            },
+            files: {
+              select: {
+                id: true,
+                fileName: true,
+                fileSize: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'asc' },
+            },
           },
           orderBy: { createdAt: 'asc' }
         }

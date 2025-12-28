@@ -786,6 +786,7 @@ export default function SharePage() {
                     shareToken={shareToken}
                     showShortcutsButton={true}
                     allowClientDeleteComments={project.allowClientDeleteComments}
+                    allowClientUploadFiles={project.allowClientUploadFiles}
                   />
               </div>
             )}
