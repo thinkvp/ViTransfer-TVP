@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Video, ProjectStatus } from '@prisma/client'
 import { Button } from './ui/button'
-import { Download, Info, CheckCircle2, Play, Pause, Volume2, VolumeX } from 'lucide-react'
+import { Download, Info, CheckCircle2, Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare } from 'lucide-react'
 import { formatTimestamp, formatFileSize, formatDate } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { timecodeToSeconds } from '@/lib/timecode'
@@ -80,6 +80,10 @@ export default function VideoPlayer({
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState<number>(0)
   const [isMuted, setIsMuted] = useState(false)
   const [volume, setVolume] = useState(1)
+
+  const playerContainerRef = useRef<HTMLDivElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
   const [timelineCues, setTimelineCues] = useState<
@@ -238,7 +242,7 @@ export default function VideoPlayer({
       seen.add(m.id)
       return true
     })
-  }, [commentsForTimeline, effectiveDurationSeconds, selectedVideo?.id])
+  }, [commentsForTimeline, effectiveDurationSeconds, selectedVideo])
 
   // Dispatch event when selected video changes (for immediate comment section update)
   useEffect(() => {
@@ -262,6 +266,89 @@ export default function VideoPlayer({
     }
     previousVideoNameRef.current = activeVideoName
   }, [activeVideoName])
+
+  const isInFullscreen = isFullscreen || isPseudoFullscreen
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const container = playerContainerRef.current
+      setIsFullscreen(Boolean(container && document.fullscreenElement === container))
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    handleFullscreenChange()
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  useEffect(() => {
+    if (!isPseudoFullscreen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [isPseudoFullscreen])
+
+  useEffect(() => {
+    if (!isPseudoFullscreen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPseudoFullscreen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isPseudoFullscreen])
+
+  const toggleFullscreen = async () => {
+    // Exit pseudo-fullscreen if active
+    if (isPseudoFullscreen) {
+      setIsPseudoFullscreen(false)
+      return
+    }
+
+    const container = playerContainerRef.current
+    if (!container) return
+
+    // Exit browser fullscreen if already active
+    if (document.fullscreenElement === container) {
+      try {
+        await document.exitFullscreen()
+      } catch {
+        // ignore
+      }
+      return
+    }
+
+    // Prefer Fullscreen API so custom controls remain visible.
+    try {
+      await container.requestFullscreen()
+    } catch {
+      // Fallback for platforms/browsers that don't allow element fullscreen
+      setIsPseudoFullscreen(true)
+    }
+  }
+
+  const handleOpenFeedback = () => {
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause()
+      } catch {
+        // ignore
+      }
+    }
+    setIsPlaying(false)
+
+    const el = document.getElementById('feedback-input')
+    if (el) {
+      try {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        ;(el as any).focus?.()
+      } catch {
+        // ignore
+      }
+    }
+  }
 
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
@@ -765,231 +852,329 @@ export default function VideoPlayer({
 
   return (
     <div className="space-y-4 flex flex-col max-h-full">
-      {/* Video Player */}
-      <div className="relative bg-background rounded-lg overflow-hidden aspect-video flex-shrink min-h-0">
-        {videoUrl ? (
-          <video
-            key={selectedVideo?.id}
-            ref={videoRef}
-            src={videoUrl}
-            poster={(selectedVideo as any).thumbnailUrl || undefined}
-            className="w-full h-full"
-            onTimeUpdate={handleTimeUpdate}
-            onLoadedMetadata={() => {
-              if (!videoRef.current) return
-              if (Number.isFinite(videoRef.current.duration)) {
-                setDurationSeconds(videoRef.current.duration)
-              }
-              setCurrentTimeSeconds(videoRef.current.currentTime || 0)
-
-              // Ensure volume state is applied to new element
-              videoRef.current.muted = isMuted
-              videoRef.current.volume = Math.min(1, Math.max(0, volume))
-            }}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            onEnded={() => setIsPlaying(false)}
-            onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
-            crossOrigin="anonymous"
-            playsInline
-            preload="metadata"
-            onClick={togglePlayPause}
-            style={{
-              objectFit: 'contain',
-              backgroundColor: '#000',
-            }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-card-foreground">
-            Loading video...
-          </div>
-        )}
-
-        {/* Playback Speed Indicator - Show when speed is not 1.0x */}
-        {playbackSpeed !== 1.0 && (
-          <div className="absolute top-4 right-4 bg-black/80 text-white px-3 py-1.5 rounded-md text-sm font-medium pointer-events-none">
-            {playbackSpeed.toFixed(2)}x
-          </div>
-        )}
-      </div>
-
-      {/* Custom Controls + Timeline (enables hover thumbnails) */}
-      <div className="relative flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={togglePlayPause}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </Button>
-
-          <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-            {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
-          </div>
-
-          <div className="flex-1 relative">
-            <div
-              ref={scrubBarRef}
-              className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible"
-              onPointerEnter={(e) => updateHoverFromClientX(e.clientX)}
-              onPointerMove={(e) => {
-                updateHoverFromClientX(e.clientX)
-                if (isScrubbingRef.current && videoRef.current) {
-                  const { time } = getTimeFromScrubEvent(e.clientX)
-                  videoRef.current.currentTime = time
-                  currentTimeRef.current = time
-                  setCurrentTimeSeconds(time)
+      <div
+        ref={playerContainerRef}
+        className={
+          isInFullscreen
+            ? 'fixed inset-0 z-50 bg-background flex flex-col p-3'
+            : 'flex flex-col space-y-4'
+        }
+      >
+        {/* Video Player */}
+        <div
+          className={
+            isInFullscreen
+              ? 'relative bg-background overflow-hidden flex-1 min-h-0'
+              : 'relative bg-background rounded-lg overflow-hidden aspect-video flex-shrink min-h-0'
+          }
+        >
+          {videoUrl ? (
+            <video
+              key={selectedVideo?.id}
+              ref={videoRef}
+              src={videoUrl}
+              poster={(selectedVideo as any).thumbnailUrl || undefined}
+              className="w-full h-full"
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={() => {
+                if (!videoRef.current) return
+                if (Number.isFinite(videoRef.current.duration)) {
+                  setDurationSeconds(videoRef.current.duration)
                 }
+                setCurrentTimeSeconds(videoRef.current.currentTime || 0)
+
+                // Ensure volume state is applied to new element
+                videoRef.current.muted = isMuted
+                videoRef.current.volume = Math.min(1, Math.max(0, volume))
               }}
-              onPointerLeave={() => {
-                isScrubbingRef.current = false
-                setTimelineHover((prev) => ({ ...prev, visible: false }))
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
+              onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
+              crossOrigin="anonymous"
+              playsInline
+              preload="metadata"
+              onClick={togglePlayPause}
+              style={{
+                objectFit: 'contain',
+                backgroundColor: '#000',
               }}
-              onPointerDown={(e) => {
-                ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
-                isScrubbingRef.current = true
-                if (videoRef.current) {
-                  const { time } = getTimeFromScrubEvent(e.clientX)
-                  videoRef.current.currentTime = time
-                  currentTimeRef.current = time
-                  setCurrentTimeSeconds(time)
-                }
-              }}
-              onPointerUp={(e) => {
-                try {
-                  ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
-                } catch {}
-                isScrubbingRef.current = false
-              }}
-              onClick={(e) => {
-                if (videoRef.current) {
-                  const { time } = getTimeFromScrubEvent(e.clientX)
-                  videoRef.current.currentTime = time
-                  currentTimeRef.current = time
-                  setCurrentTimeSeconds(time)
-                }
-              }}
-            >
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-card-foreground">
+              Loading video...
+            </div>
+          )}
+
+          {/* Playback Speed Indicator - Show when speed is not 1.0x */}
+          {playbackSpeed !== 1.0 && (
+            <div className="absolute top-4 right-4 bg-black/80 text-white px-3 py-1.5 rounded-md text-sm font-medium pointer-events-none">
+              {playbackSpeed.toFixed(2)}x
+            </div>
+          )}
+        </div>
+
+        {/* Custom Controls + Timeline (enables hover thumbnails) */}
+        <div className="relative flex-shrink-0">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            {/* Desktop/tablet: left controls */}
+            <div className="hidden sm:flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={togglePlayPause}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              </Button>
+
+              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
+              </div>
+            </div>
+
+            {/* Timeline (mobile row 1) */}
+            <div className="flex-1 relative">
               <div
-                className="absolute left-0 top-0 h-full bg-primary rounded-md"
-                style={{
-                  width: effectiveDurationSeconds > 0
-                    ? `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`
-                    : '0%'
+                ref={scrubBarRef}
+                className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible"
+                onPointerEnter={(e) => updateHoverFromClientX(e.clientX)}
+                onPointerMove={(e) => {
+                  updateHoverFromClientX(e.clientX)
+                  if (isScrubbingRef.current && videoRef.current) {
+                    const { time } = getTimeFromScrubEvent(e.clientX)
+                    videoRef.current.currentTime = time
+                    currentTimeRef.current = time
+                    setCurrentTimeSeconds(time)
+                  }
                 }}
-              />
+                onPointerLeave={() => {
+                  isScrubbingRef.current = false
+                  setTimelineHover((prev) => ({ ...prev, visible: false }))
+                }}
+                onPointerDown={(e) => {
+                  ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+                  isScrubbingRef.current = true
+                  if (videoRef.current) {
+                    const { time } = getTimeFromScrubEvent(e.clientX)
+                    videoRef.current.currentTime = time
+                    currentTimeRef.current = time
+                    setCurrentTimeSeconds(time)
+                  }
+                }}
+                onPointerUp={(e) => {
+                  try {
+                    ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+                  } catch {}
+                  isScrubbingRef.current = false
+                }}
+                onClick={(e) => {
+                  if (videoRef.current) {
+                    const { time } = getTimeFromScrubEvent(e.clientX)
+                    videoRef.current.currentTime = time
+                    currentTimeRef.current = time
+                    setCurrentTimeSeconds(time)
+                  }
+                }}
+              >
+                <div
+                  className="absolute left-0 top-0 h-full bg-primary rounded-md"
+                  style={{
+                    width: effectiveDurationSeconds > 0
+                      ? `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`
+                      : '0%'
+                  }}
+                />
 
-              {/* Comment markers (orange ticks) */}
-              {timelineCommentMarkers.length > 0 && effectiveDurationSeconds > 0 && (
-                <div className="absolute inset-0 z-10">
-                  {timelineCommentMarkers.map((m) => {
-                    const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
-                    const markerColorClass = m.isInternal ? 'bg-green-500' : 'bg-orange-500'
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className="absolute -top-3 h-8 w-4 bg-transparent focus:outline-none"
-                        style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
-                        title="Jump to comment"
-                        aria-label="Jump to comment"
-                        onClick={(e) => {
-                          e.stopPropagation()
+                {/* Comment markers (orange ticks) */}
+                {timelineCommentMarkers.length > 0 && effectiveDurationSeconds > 0 && (
+                  <div className="absolute inset-0 z-10">
+                    {timelineCommentMarkers.map((m) => {
+                      const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
+                      const markerColorClass = m.isInternal ? 'bg-green-500' : 'bg-orange-500'
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          className="absolute -top-3 h-8 w-4 bg-transparent focus:outline-none"
+                          style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
+                          title="Jump to comment"
+                          aria-label="Jump to comment"
+                          onClick={(e) => {
+                            e.stopPropagation()
 
-                          // Seek video to the comment timecode (do not auto-play)
-                          if (videoRef.current) {
-                            try {
-                              videoRef.current.currentTime = m.seconds
-                              currentTimeRef.current = m.seconds
-                              setCurrentTimeSeconds(m.seconds)
+                            // Seek video to the comment timecode (do not auto-play)
+                            if (videoRef.current) {
+                              try {
+                                videoRef.current.currentTime = m.seconds
+                                currentTimeRef.current = m.seconds
+                                setCurrentTimeSeconds(m.seconds)
 
-                              // Always pause when jumping to a comment marker
-                              videoRef.current.pause()
-                            } catch {
-                              // ignore
+                                // Always pause when jumping to a comment marker
+                                videoRef.current.pause()
+                              } catch {
+                                // ignore
+                              }
                             }
-                          }
 
-                          window.dispatchEvent(
-                            new CustomEvent('scrollToComment', {
-                              detail: { commentId: m.id },
-                            })
-                          )
-                        }}
-                        onPointerDown={(e) => {
-                          // Prevent scrubbing when clicking a marker
-                          e.stopPropagation()
-                        }}
-                      >
-                        <span className={`absolute left-1/2 top-0 h-8 w-0.5 -translate-x-1/2 ${markerColorClass}`} />
-                        <span className={`absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${markerColorClass}`} />
-                      </button>
-                    )
-                  })}
+                            window.dispatchEvent(
+                              new CustomEvent('scrollToComment', {
+                                detail: { commentId: m.id },
+                              })
+                            )
+                          }}
+                          onPointerDown={(e) => {
+                            // Prevent scrubbing when clicking a marker
+                            e.stopPropagation()
+                          }}
+                        >
+                          <span className={`absolute left-1/2 top-0 h-8 w-0.5 -translate-x-1/2 ${markerColorClass}`} />
+                          <span className={`absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${markerColorClass}`} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (
+                <div
+                  className="absolute bottom-full mb-2 pointer-events-none"
+                  style={{ left: timelineHover.leftPx, transform: 'translateX(-50%)' }}
+                >
+                  <div
+                    className="rounded-md border border-border overflow-hidden bg-card"
+                    style={{ width: timelineHover.w, height: timelineHover.h }}
+                  >
+                    <div
+                      style={{
+                        width: timelineHover.w,
+                        height: timelineHover.h,
+                        backgroundImage: `url(${timelineHover.spriteUrl})`,
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: `-${timelineHover.x}px -${timelineHover.y}px`,
+                      }}
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
+                    {formatTimestamp(timelineHover.timeSeconds)}
+                  </div>
                 </div>
               )}
             </div>
 
-            {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (
-              <div
-                className="absolute bottom-full mb-2 pointer-events-none"
-                style={{ left: timelineHover.leftPx, transform: 'translateX(-50%)' }}
+            {/* Desktop/tablet: right controls */}
+            <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsMuted((m) => !m)}
+                aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
               >
-                <div
-                  className="rounded-md border border-border overflow-hidden bg-card"
-                  style={{ width: timelineHover.w, height: timelineHover.h }}
-                >
-                  <div
-                    style={{
-                      width: timelineHover.w,
-                      height: timelineHover.h,
-                      backgroundImage: `url(${timelineHover.spriteUrl})`,
-                      backgroundRepeat: 'no-repeat',
-                      backgroundPosition: `-${timelineHover.x}px -${timelineHover.y}px`,
-                    }}
-                  />
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
-                  {formatTimestamp(timelineHover.timeSeconds)}
-                </div>
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-4 h-4" />
+                ) : (
+                  <Volume2 className="w-4 h-4" />
+                )}
+              </Button>
+
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(volume * 100)}
+                onChange={(e) => {
+                  const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                  const nextVolume = next / 100
+                  setVolume(nextVolume)
+                  if (nextVolume > 0) {
+                    setIsMuted(false)
+                  }
+                }}
+                className="w-24 h-4 accent-primary"
+                aria-label="Volume"
+              />
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={toggleFullscreen}
+                aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              >
+                {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              </Button>
+            </div>
+
+            {/* Mobile: row 2 controls (play, time, volume, chat, fullscreen) */}
+            <div className="sm:hidden flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={togglePlayPause}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              </Button>
+
+              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
               </div>
-            )}
-          </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsMuted((m) => !m)}
-              aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
-            >
-              {isMuted || volume === 0 ? (
-                <VolumeX className="w-4 h-4" />
-              ) : (
-                <Volume2 className="w-4 h-4" />
-              )}
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsMuted((m) => !m)}
+                aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
+              >
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-4 h-4" />
+                ) : (
+                  <Volume2 className="w-4 h-4" />
+                )}
+              </Button>
 
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(volume * 100)}
-              onChange={(e) => {
-                const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
-                const nextVolume = next / 100
-                setVolume(nextVolume)
-                if (nextVolume > 0) {
-                  setIsMuted(false)
-                }
-              }}
-              className="w-24 h-4 accent-primary"
-              aria-label="Volume"
-            />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(volume * 100)}
+                onChange={(e) => {
+                  const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                  const nextVolume = next / 100
+                  setVolume(nextVolume)
+                  if (nextVolume > 0) {
+                    setIsMuted(false)
+                  }
+                }}
+                className="flex-1 h-4 accent-primary"
+                aria-label="Volume"
+              />
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleOpenFeedback}
+                aria-label="Open feedback"
+              >
+                <MessageSquare className="w-4 h-4" />
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={toggleFullscreen}
+                aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              >
+                {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -229,6 +229,7 @@ export default function CommentInput({
         <>
           <div className="flex gap-2">
             <Textarea
+              id="feedback-input"
               placeholder="Type your message..."
               value={newComment}
               onChange={(e) => onCommentChange(e.target.value)}
