@@ -186,10 +186,6 @@ export async function GET(
 
       // Check permissions (skip for admins)
       if (!isAdminRequest) {
-        if (!video.project.allowAssetDownload) {
-          return NextResponse.json({ error: 'Asset downloads not allowed' }, { status: 403 })
-        }
-
         if (!video.approved) {
           return NextResponse.json({ error: 'Assets only available for approved videos' }, { status: 403 })
         }

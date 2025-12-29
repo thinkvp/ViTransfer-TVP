@@ -2,7 +2,6 @@
 
 import { Comment } from '@prisma/client'
 import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download } from 'lucide-react'
-import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import DOMPurify from 'dompurify'
 import { CommentFileDisplay } from './FileDisplay'
@@ -77,39 +76,22 @@ export default function MessageBubble({
   onDownloadCommentFile,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
-  // Determine which company name to show
-  const displayCompanyName = isStudio ? studioCompanyName : clientCompanyName
 
-  // Viewer's own messages on RIGHT, others on LEFT
-  const alignment = isViewerMessage ? 'justify-end' : 'justify-start'
-  const headerAlign = isViewerMessage ? 'flex-row-reverse' : 'flex-row'
+  // Flat blocks (no chat bubbles).
+  // Border colors match the timeline marker colors:
+  // - internal/studio/admin: green
+  // - client: orange
 
-  // Bubble colors:
-  // Sender (your messages): Blue bubble with vibrant border per person
-  // Received (others): Gray bubble with vibrant colored border per person
-  // Both: Text is black-ish in light mode, white in dark mode
-
-  // Get effective author name for color generation
+  // Get effective author name
   // For internal comments without authorName, fall back to user.name or user.email
   const effectiveAuthorName = comment.authorName ||
     (comment.isInternal && (comment as any).user ?
       ((comment as any).user.name || (comment as any).user.email) :
       null)
 
-  const userColor = getUserColor(effectiveAuthorName, isViewerMessage)
-  const borderColor = userColor.border
+  const borderColor = comment.isInternal ? 'border-l-green-500' : 'border-l-orange-500'
 
-  let bubbleBg: string
-  if (isViewerMessage) {
-    // Your messages: Blue background
-    bubbleBg = 'bg-blue-500 dark:bg-blue-600'
-  } else {
-    // Received messages: Neutral gray background (more contrast in light mode)
-    bubbleBg = 'bg-gray-200 dark:bg-gray-800'
-  }
-
-  // Text color adapts to light/dark mode (same for both sender and receiver)
-  const textColor = 'text-gray-900 dark:text-gray-100'
+  const textColor = 'text-foreground'
 
   const handleTimestampClick = () => {
     if (comment.timecode && onSeekToTimestamp) {
@@ -121,23 +103,21 @@ export default function MessageBubble({
   }
 
   return (
-    <div className={`flex ${alignment} w-full`} id={`comment-${comment.id}`}>
-      <div className={isViewerMessage ? "max-w-[90%]" : "max-w-[90%]"}>
-        {/* Name and company header */}
-        <div className={`flex ${headerAlign} items-center gap-2 mb-1 px-1`}>
-          <span className="text-sm font-semibold text-foreground">
-            {effectiveAuthorName || 'Anonymous'}
-          </span>
-          {displayCompanyName && (
-            <>
-              <span className="text-xs text-muted-foreground">•</span>
-              <span className="text-xs text-muted-foreground">{displayCompanyName}</span>
-            </>
-          )}
-        </div>
+    <div className="w-full" id={`comment-${comment.id}`}>
+      <div className="w-full">
+        <div data-comment-block className={`bg-card border border-border ${borderColor} border-l-4 rounded-lg p-3`}>
+          {/* Header row: name left, time right */}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-foreground truncate">
+                {effectiveAuthorName || 'Anonymous'}
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground whitespace-nowrap">
+              {formatMessageTime(comment.createdAt)}
+            </div>
+          </div>
 
-        {/* Message Card with colored left border */}
-        <div className={`${bubbleBg} ${borderColor} border-l-4 rounded-lg p-3 shadow-sm`}>
           {/* Simple reply indicator */}
           {isReply && parentComment && (() => {
             const parentEffectiveName = parentComment.authorName ||
@@ -148,7 +128,7 @@ export default function MessageBubble({
             return (
               <div
                 onClick={() => onScrollToComment?.(parentComment.id)}
-                className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground/70 cursor-pointer hover:text-muted-foreground transition-colors"
+                className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
               >
                 <CornerDownRight className="w-3 h-3" />
                 <span>Reply to {parentEffectiveName || 'Anonymous'}</span>
@@ -156,32 +136,33 @@ export default function MessageBubble({
             )
           })()}
 
-          {/* Timecode Badge (only for parent comments, not replies) */}
-          {!isReply && comment.timecode && (
-            <button
-              onClick={handleTimestampClick}
-              className="flex items-center gap-1 mb-2 cursor-pointer hover:opacity-80 transition-opacity"
-              title="Seek to this timecode"
-            >
-              <Clock className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" />
-              <span className="text-xs underline decoration-dotted font-medium text-orange-600 dark:text-orange-400">
-                {formatTimecodeDisplay(comment.timecode, {
-                  showFrames,
-                  durationSeconds: timecodeDurationSeconds,
-                })}
-              </span>
-            </button>
-          )}
+          {/* Timecode prefixed inline so text can use full width when wrapping */}
+          <div className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${textColor}`}>
+            {!isReply && comment.timecode ? (
+              <button
+                onClick={handleTimestampClick}
+                className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap mr-2 align-baseline"
+                title="Seek to this timecode"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span className="underline decoration-dotted">
+                  {formatTimecodeDisplay(comment.timecode, {
+                    showFrames,
+                    durationSeconds: timecodeDurationSeconds,
+                  })}
+                </span>
+              </button>
+            ) : null}
 
-          {/* Message Content */}
-          <div
-            className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${textColor}`}
-            dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
-          />
+            <span
+              className="whitespace-pre-wrap break-words"
+              dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
+            />
+          </div>
 
           {/* Attached Files */}
           {(comment as any).files && (comment as any).files.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-300/40 dark:border-gray-600/40 space-y-2">
+            <div className="mt-3 pt-3 border-t border-border space-y-2">
               {(comment as any).files.map((file: any) => (
                 <CommentFileDisplay
                   key={file.id}
@@ -201,19 +182,19 @@ export default function MessageBubble({
 
           {/* Replies Section - Extends parent bubble */}
           {hasReplies && (
-            <div className="mt-3 pt-3 border-t border-gray-300/40 dark:border-gray-600/40">
+            <div className="mt-3 pt-3 border-t border-border">
               {/* Collapsible Header */}
               <button
                 onClick={onToggleReplies}
-                className="flex items-center justify-between w-full mb-2 text-xs font-medium opacity-70 hover:opacity-100 transition-opacity"
+                className="flex items-center justify-between w-full mb-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
-                <span className={textColor}>
+                <span>
                   {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
                 </span>
                 {repliesExpanded ? (
-                  <ChevronDown className={`w-3 h-3 ${textColor}`} />
+                  <ChevronDown className="w-3 h-3" />
                 ) : (
-                  <ChevronRight className={`w-3 h-3 ${textColor}`} />
+                  <ChevronRight className="w-3 h-3" />
                 )}
               </button>
 
@@ -221,7 +202,6 @@ export default function MessageBubble({
               {repliesExpanded && (
                 <div className="space-y-3">
                   {replies.map((reply) => {
-                    const replyIsViewerMessage = reply.isInternal === comment.isInternal
                     const replyEffectiveName = reply.authorName ||
                       (reply.isInternal && (reply as any).user ?
                         ((reply as any).user.name || (reply as any).user.email) :
@@ -231,37 +211,37 @@ export default function MessageBubble({
 
                     return (
                       <div key={reply.id} className="pl-3">
-                        {/* Reply Author */}
-                        <div className="flex items-center gap-2 mb-1">
-                          <CornerDownRight className="w-3 h-3 opacity-50" />
-                          <span className="text-xs font-semibold opacity-80">
-                            {replyEffectiveName || 'Anonymous'}
-                          </span>
-                          <span className="text-xs opacity-50">
-                            {formatMessageTime(reply.createdAt)}
-                          </span>
-                          {replyDeletable && (
-                            <>
-                              <span className="text-xs opacity-30">•</span>
+                        <div className="flex items-start justify-between gap-3 mb-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <CornerDownRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                            <span className="text-xs font-semibold text-foreground truncate">
+                              {replyEffectiveName || 'Anonymous'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {formatMessageTime(reply.createdAt)}
+                            </span>
+                            {replyDeletable && (
                               <button
                                 onClick={() => onDeleteReply(reply.id)}
-                                className="text-xs opacity-50 hover:opacity-100 hover:text-destructive transition-all flex items-center gap-1"
+                                className="text-xs text-muted-foreground hover:text-destructive transition-colors flex items-center gap-1"
                                 title="Delete reply"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
-                            </>
-                          )}
+                            )}
+                          </div>
                         </div>
-                        {/* Reply Content */}
+
                         <div
-                          className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${textColor}`}
+                          className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
                           dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
                         />
 
                         {/* Reply Attached Files */}
                         {(reply as any).files && (reply as any).files.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-gray-300/40 dark:border-gray-600/40 space-y-2">
+                          <div className="mt-2 pt-2 border-t border-border space-y-2">
                             {(reply as any).files.map((file: any) => (
                               <CommentFileDisplay
                                 key={file.id}
@@ -285,38 +265,29 @@ export default function MessageBubble({
               )}
             </div>
           )}
-        </div>
 
-        {/* Message Time, Reply & Delete Buttons - Below card */}
-        <div className={`flex items-center gap-2 mt-1 px-1 ${isViewerMessage ? 'justify-end' : 'justify-start'}`}>
-          <span className="text-xs text-muted-foreground">
-            {formatMessageTime(comment.createdAt)}
-          </span>
-          {/* Reply Button - show for top-level comments only */}
-          {!isReply && !commentsDisabled && onReply && (
-            <>
-              <span className="text-xs text-muted-foreground">•</span>
-              <button
-                onClick={onReply}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
-              >
-                Reply
-              </button>
-            </>
-          )}
-          {/* Delete Button - admin only */}
-          {onDelete && (
-            <>
-              <span className="text-xs text-muted-foreground">•</span>
-              <button
-                onClick={onDelete}
-                className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center gap-1"
-                title="Delete comment"
-              >
-                <Trash2 className="w-3 h-3" />
-                Delete
-              </button>
-            </>
+          {/* Actions row (inside the block) */}
+          {(!isReply && (!commentsDisabled || onDelete || onReply)) && (
+            <div className="mt-3 flex items-center justify-end gap-3">
+              {!isReply && !commentsDisabled && onReply && (
+                <button
+                  onClick={onReply}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
+                >
+                  Reply
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  onClick={onDelete}
+                  className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center gap-1"
+                  title="Delete comment"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Delete
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

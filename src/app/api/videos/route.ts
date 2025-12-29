@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType } = body
+    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes } = body
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -37,6 +37,14 @@ export async function POST(request: NextRequest) {
     }
 
     const videoName = name.trim()
+
+    const trimmedVideoNotes = typeof videoNotes === 'string' ? videoNotes.trim() : ''
+    if (trimmedVideoNotes.length > 500) {
+      return NextResponse.json(
+        { error: 'Video notes must be 500 characters or fewer' },
+        { status: 400 }
+      )
+    }
 
     // Validate uploaded file
     const fileValidation = validateUploadedFile(
@@ -91,6 +99,7 @@ export async function POST(request: NextRequest) {
         name: videoName,
         version: nextVersion,
         versionLabel: versionLabel || `v${nextVersion}`,
+        videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
         originalFileName,
         originalFileSize: BigInt(originalFileSize),
         originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,

@@ -61,14 +61,6 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    // For non-admins, check if asset downloads are allowed
-    if (!accessCheck.isAdmin && !project.allowAssetDownload) {
-      return NextResponse.json(
-        { error: 'Asset downloads are not allowed for this project' },
-        { status: 403 }
-      )
-    }
-
     if (!accessCheck.isAdmin && !video.approved) {
       return NextResponse.json(
         { error: 'Assets are only available for approved videos' },

@@ -1,6 +1,7 @@
 'use client'
 
-import { Comment } from '@prisma/client'
+// Avoid importing Prisma runtime types in client components.
+type Comment = any
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
@@ -10,6 +11,7 @@ import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
 import { secondsToTimecode, formatTimecodeDisplay, getTimecodeLabel, isDropFrame } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
+import { cn } from '@/lib/utils'
 
 interface CommentInputProps {
   newComment: string
@@ -53,6 +55,10 @@ interface CommentInputProps {
   // Optional project upload quota (client share page)
   clientUploadQuota?: { usedBytes: number; limitMB: number } | null
   onRefreshUploadQuota?: () => Promise<void>
+
+  // Layout/styling
+  containerClassName?: string
+  showTopBorder?: boolean
 }
 
 export default function CommentInput({
@@ -85,6 +91,8 @@ export default function CommentInput({
   onShowShortcuts,
   clientUploadQuota = null,
   onRefreshUploadQuota,
+  containerClassName,
+  showTopBorder = true,
 }: CommentInputProps) {
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -113,7 +121,13 @@ export default function CommentInput({
   }
 
   return (
-    <div className="border-t border-border p-4 bg-card flex-shrink-0">
+    <div
+      className={cn(
+        'p-4 bg-card flex-shrink-0',
+        showTopBorder ? 'border-t border-border' : null,
+        containerClassName
+      )}
+    >
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">

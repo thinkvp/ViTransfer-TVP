@@ -1,16 +1,35 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
-import { Comment, Video } from '@prisma/client'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+// Avoid importing Prisma runtime types in client components.
+type Comment = any
+type Video = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { ArrowUpDown, CheckCircle2, MessageSquare } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Info } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
+import ThemeToggle from './ThemeToggle'
+import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatTimestamp } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { useRouter } from 'next/navigation'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -36,9 +55,16 @@ interface CommentSectionProps {
   showShortcutsButton?: boolean
   allowClientDeleteComments?: boolean
   allowClientUploadFiles?: boolean
+  hideInput?: boolean
+  showVideoActions?: boolean
+  showThemeToggle?: boolean
+  showVideoNotes?: boolean
+  showApproveButton?: boolean
 }
 
-export default function CommentSection({
+type CommentManagement = ReturnType<typeof useCommentManagement>
+
+export function CommentSectionView({
   projectId,
   projectSlug,
   comments: initialComments,
@@ -58,7 +84,14 @@ export default function CommentSection({
   showShortcutsButton = false,
   allowClientDeleteComments = false,
   allowClientUploadFiles = false,
-}: CommentSectionProps) {
+  hideInput = false,
+  showVideoActions = true,
+  showThemeToggle = false,
+  showVideoNotes = true,
+  showApproveButton = true,
+  management,
+}: CommentSectionProps & { management: CommentManagement }) {
+  const router = useRouter()
   const {
     comments,
     newComment,
@@ -69,6 +102,7 @@ export default function CommentSection({
     uploadProgress,
     uploadStatusText,
     replyingToCommentId,
+    replyingToComment,
     authorName,
     nameSource,
     selectedRecipientId,
@@ -86,22 +120,7 @@ export default function CommentSection({
     onRemoveFile,
     clientUploadQuota,
     refreshClientUploadQuota,
-  } = useCommentManagement({
-    projectId,
-    initialComments,
-    videos,
-    clientEmail,
-    isPasswordProtected,
-    adminUser,
-    recipients,
-    clientName,
-    restrictToLatestVersion,
-    shareToken,
-    useAdminAuth: isAdminView,
-    companyName,
-    allowClientDeleteComments,
-    allowClientUploadFiles,
-  })
+  } = management
 
   // Auto-scroll to latest comment (like messaging apps)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -110,6 +129,12 @@ export default function CommentSection({
 
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
   const [showFrames, setShowFrames] = useState(false)
+  const [showVideoInfo, setShowVideoInfo] = useState(false)
+  const [showApproveConfirm, setShowApproveConfirm] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [showDownloadOptions, setShowDownloadOptions] = useState(false)
+  const [videoNotesOpen, setVideoNotesOpen] = useState(true)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
 
@@ -145,7 +170,7 @@ export default function CommentSection({
   }
 
   // Fetch comments function (only used for event-triggered updates)
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     try {
       const response = isAdminView
         ? await apiFetch(`/api/comments?projectId=${projectId}`)
@@ -161,10 +186,10 @@ export default function CommentSection({
         const freshComments = await response.json()
         setLocalComments(freshComments)
       }
-    } catch (error) {
+    } catch {
       // Silent fail - keep showing existing comments
     }
-  }
+  }, [isAdminView, projectId, shareToken])
 
   // Initialize localComments only (no polling - hook handles optimistic updates)
   useEffect(() => {
@@ -202,7 +227,7 @@ export default function CommentSection({
       window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
       window.removeEventListener('videoApprovalChanged', handleCommentUpdate)
     }
-  }, [projectId])
+  }, [fetchComments])
 
   // Get latest video version
   const latestVideoVersion = videos.length > 0
@@ -246,7 +271,8 @@ export default function CommentSection({
 
   const sortedComments = [...displayComments].sort((a, b) => {
     if (commentSortMode === 'date') {
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      // Newest first
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     }
 
     // Sort by timecode (ascending). If multiple videos are displayed, group by videoId first.
@@ -281,10 +307,10 @@ export default function CommentSection({
     const scrollTargetId = pending.parentId || pending.commentId
     const isReply = Boolean(pending.parentId)
 
-    // For date sorting, show new top-level messages at the bottom
+    // For date sorting (newest-first), show new top-level messages at the top
     if (commentSortMode === 'date' && !isReply) {
       requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight
+        container.scrollTop = 0
         pendingScrollRef.current = null
       })
       return
@@ -333,8 +359,6 @@ export default function CommentSection({
   const restrictionMessage = currentVideoRestricted
     ? `You can only leave feedback on the latest version. Please switch to version ${latestVideoVersion} to comment.`
     : undefined
-
-  const replyingToComment = mergedComments.find(c => c.id === replyingToCommentId) || null
 
   // Track which comments have expanded replies (default: all expanded)
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
@@ -385,13 +409,44 @@ export default function CommentSection({
     const element = document.getElementById(`comment-${commentId}`)
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      // Brief highlight effect
-      element.style.transition = 'background-color 0.3s'
-      element.style.backgroundColor = 'rgba(59, 130, 246, 0.1)'
-      setTimeout(() => {
-        element.style.backgroundColor = 'transparent'
-      }, 1000)
+
+      // Brief highlight effect (flash inside the comment block)
+      const block = element.querySelector('[data-comment-block]') as HTMLElement | null
+      const highlightEl = block || (element as HTMLElement)
+
+      try {
+        if (typeof (highlightEl as any).animate === 'function') {
+          ;(highlightEl as any).animate(
+            [
+              { backgroundColor: 'hsl(var(--primary) / 0.18)' },
+              { backgroundColor: 'hsl(var(--primary) / 0.08)' },
+              { backgroundColor: 'transparent' },
+            ],
+            { duration: 900, easing: 'ease-out' }
+          )
+        } else {
+          highlightEl.style.transition = 'background-color 0.3s'
+          highlightEl.style.backgroundColor = 'hsl(var(--primary) / 0.12)'
+          setTimeout(() => {
+            highlightEl.style.backgroundColor = ''
+          }, 900)
+        }
+      } catch {
+        // ignore
+      }
     }
+  }
+
+  // Reset notes accordion when switching versions
+  useEffect(() => {
+    setVideoNotesOpen(true)
+  }, [selectedVideoId])
+
+  const scrollToInput = () => {
+    const el = document.getElementById('feedback-input')
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    ;(el as HTMLTextAreaElement).focus?.()
   }
 
   // Allow other UI (e.g. timeline markers) to scroll the feedback pane to a comment.
@@ -412,51 +467,254 @@ export default function CommentSection({
     window.dispatchEvent(new CustomEvent('openShortcutsDialog'))
   }
 
+  const hasAnyApprovedVideoInGroup = videos.some(v => (v as any).approved === true)
+  const selectableVideos = hasAnyApprovedVideoInGroup
+    ? videos.filter(v => (v as any).approved === true)
+    : videos
+
+  const sortedVideoVersions = useMemo(() => {
+    return [...selectableVideos].sort((a, b) => {
+      const aCreated = new Date((a as any).createdAt as any).getTime()
+      const bCreated = new Date((b as any).createdAt as any).getTime()
+      if (Number.isFinite(aCreated) && Number.isFinite(bCreated) && aCreated !== bCreated) {
+        return bCreated - aCreated
+      }
+      return (b as any).version - (a as any).version
+    })
+  }, [selectableVideos])
+
+  const latestSelectableVideo = sortedVideoVersions[0] || null
+  const headerVideo = currentVideo || latestSelectableVideo
+  const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
+
+  const handleSelectVideoVersion = (videoId: string) => {
+    // Update comments immediately
+    window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
+
+    // If a video player exists, keep the current time when switching versions.
+    // (If there is no player, this is a harmless no-op.)
+    window.dispatchEvent(
+      new CustomEvent('getCurrentTime', {
+        detail: {
+          callback: (time: number) => {
+            const safeTime = typeof time === 'number' && Number.isFinite(time) ? Math.max(0, time) : 0
+            window.dispatchEvent(
+              new CustomEvent('seekToTime', { detail: { timestamp: safeTime, videoId, videoVersion: null } })
+            )
+          },
+        },
+      })
+    )
+    setShowApproveConfirm(false)
+  }
+
+  const triggerDownload = (url: string) => {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = ''
+    link.rel = 'noopener'
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const handleDownloadSelected = async () => {
+    const video = headerVideo
+    if (!video) return
+    if (!(video as any).approved) return
+    if (downloading) return
+
+    // If this video has additional assets, show the download options modal.
+    // Otherwise, keep the one-click direct download behavior.
+    try {
+      const headers = isAdminView
+        ? undefined
+        : shareToken
+          ? { Authorization: `Bearer ${shareToken}` }
+          : undefined
+
+      const res = await fetch(`/api/videos/${video.id}/assets`, { headers })
+      if (res.ok) {
+        const data = await res.json().catch(() => null)
+        const assets = Array.isArray(data?.assets) ? data.assets : []
+        if (assets.length > 0) {
+          setShowDownloadOptions(true)
+          return
+        }
+      }
+      // If assets fetch fails, fall back to direct download.
+    } catch {
+      // ignore
+    }
+
+    setDownloading(true)
+    try {
+      const url = `/api/videos/${video.id}/download-token`
+      const response = isAdminView
+        ? await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        : shareToken
+          ? await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${shareToken}`,
+              },
+              body: '{}',
+            })
+          : await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to generate download link')
+      }
+
+      const data = await response.json()
+      if (!data?.url) {
+        throw new Error('Download link missing')
+      }
+      triggerDownload(data.url)
+    } catch (error) {
+      alert(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleApproveSelected = async () => {
+    const video = headerVideo
+    if (!video) return
+    if (approving) return
+
+    setApproving(true)
+    try {
+      const url = `/api/projects/${projectId}/approve`
+      const response = isAdminView
+        ? await apiFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selectedVideoId: video.id }),
+          })
+        : shareToken
+          ? await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${shareToken}`,
+              },
+              body: JSON.stringify({ selectedVideoId: video.id }),
+            })
+          : await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ selectedVideoId: video.id }),
+            })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to approve video')
+      }
+
+      window.dispatchEvent(new CustomEvent('videoApprovalChanged'))
+      setShowApproveConfirm(false)
+      router.refresh()
+    } catch (error) {
+      alert(`Approval failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setApproving(false)
+    }
+  }
+
   return (
-    <Card className="bg-card border border-border flex flex-col h-auto lg:h-full max-h-[75vh] rounded-lg overflow-hidden" data-comment-section>
-      <CardHeader className="border-b border-border flex-shrink-0">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" />
-            Feedback
-          </CardTitle>
+    <Card className="bg-card border border-border flex flex-col h-full max-h-[70vh] lg:max-h-none rounded-lg overflow-hidden" data-comment-section>
+      <CardHeader className="border-b border-border flex-shrink-0 space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <CardTitle className="text-foreground whitespace-normal break-words leading-snug">
+              {headerVideoName}
+            </CardTitle>
 
-          <div className="flex items-center gap-1 -mr-2 min-w-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowFrames((v) => !v)}
-              className={cn(showFrames ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-              title={showFrames ? 'Hide frames' : 'Show frames'}
-              aria-label={showFrames ? 'Hide frames' : 'Show frames'}
-            >
-              <span className="inline-flex items-center justify-center font-mono text-xs font-semibold leading-none">FF</span>
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setCommentSortMode(current => (current === 'timecode' ? 'date' : 'timecode'))}
-              className="text-muted-foreground hover:text-foreground whitespace-normal h-auto min-w-0"
-              title={commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
-            >
-              <ArrowUpDown className="w-4 h-4" />
-              <span className="ml-2 hidden sm:inline whitespace-normal break-words text-left leading-snug">
-                {commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
-              </span>
-            </Button>
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex-shrink-0">Version:</span>
+              {restrictToLatestVersion || sortedVideoVersions.length <= 1 ? (
+                <span className="text-foreground font-medium">
+                  {(headerVideo as any)?.versionLabel || '—'}
+                </span>
+              ) : (
+                <div className="w-full max-w-[240px]">
+                  <Select
+                    value={selectedVideoId || latestSelectableVideo?.id || undefined}
+                    onValueChange={handleSelectVideoVersion}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortedVideoVersions.map((video) => (
+                        <SelectItem key={video.id} value={video.id}>
+                          {video.versionLabel}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-        {selectedVideoId && currentVideo && !isAdminView && (
-          <p className="text-xs text-muted-foreground mt-1">
-            {commentsDisabled
-              ? 'Watching approved version'
-              : `Currently viewing: ${currentVideo.versionLabel}`}
-          </p>
-        )}
+
+        {showVideoNotes && headerVideo?.videoNotes ? (
+          <div className="border border-border rounded-lg bg-muted/20 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setVideoNotesOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+              aria-expanded={videoNotesOpen}
+            >
+              <span className="font-medium text-foreground">Video Notes</span>
+              {videoNotesOpen ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+            </button>
+            {videoNotesOpen ? (
+              <div className="px-3 pb-3 text-sm text-foreground whitespace-pre-wrap break-words">
+                {headerVideo.videoNotes}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* (Intentionally leaving Download + other actions here) */}
+
+          {(headerVideo as any)?.approved && !isApproved && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleDownloadSelected}
+              disabled={downloading}
+            >
+              {downloading ? 'Preparing...' : 'Download'}
+            </Button>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
+        {headerVideo && (headerVideo as any)?.approved ? (
+          <VideoAssetDownloadModal
+            videoId={headerVideo.id}
+            videoName={headerVideoName}
+            versionLabel={(headerVideo as any)?.versionLabel || '—'}
+            isOpen={showDownloadOptions}
+            onClose={() => setShowDownloadOptions(false)}
+            shareToken={shareToken}
+            isAdmin={isAdminView}
+          />
+        ) : null}
+
         {/* Approval Status Banner */}
         {commentsDisabled && (
           <div className="bg-success-visible border-b-2 border-success-visible p-4 flex-shrink-0">
@@ -478,11 +736,175 @@ export default function CommentSection({
           </div>
         )}
 
+        {!hideInput && (
+          <CommentInput
+            newComment={newComment}
+            onCommentChange={handleCommentChange}
+            onSubmit={handleSubmitComment}
+            loading={loading}
+            uploadProgress={uploadProgress}
+            uploadStatusText={uploadStatusText}
+            onFileSelect={onFileSelect}
+            attachedFiles={attachedFiles}
+            onRemoveFile={onRemoveFile}
+            allowFileUpload={allowClientUploadFiles && !isAdminView}
+            clientUploadQuota={clientUploadQuota}
+            onRefreshUploadQuota={refreshClientUploadQuota}
+            selectedTimestamp={selectedTimestamp}
+            onClearTimestamp={handleClearTimestamp}
+            selectedVideoFps={selectedVideoFps}
+            replyingToComment={replyingToComment}
+            onCancelReply={handleCancelReply}
+            showAuthorInput={!isAdminView && isPasswordProtected}
+            authorName={authorName}
+            onAuthorNameChange={setAuthorName}
+            namedRecipients={namedRecipients}
+            nameSource={nameSource}
+            selectedRecipientId={selectedRecipientId}
+            onNameSourceChange={handleNameSourceChange}
+            currentVideoRestricted={currentVideoRestricted}
+            restrictionMessage={restrictionMessage}
+            commentsDisabled={commentsDisabled}
+            showShortcutsButton={showShortcutsButton}
+            onShowShortcuts={handleOpenShortcuts}
+          />
+        )}
+
+        {/* List Controls (directly above the message list) */}
+        <div className="px-4 py-2 border-b border-border bg-card flex-shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {showVideoActions && (
+                <>
+                  {showApproveButton && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && (
+                    <Button
+                      variant="success"
+                      size="sm"
+                      onClick={() => setShowApproveConfirm(true)}
+                      disabled={approving}
+                        className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
+                    >
+                      Approve Video
+                    </Button>
+                  )}
+
+                  <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9"
+                      onClick={() => setShowVideoInfo(true)}
+                      title="Info"
+                      aria-label="Info"
+                    >
+                      <Info className="w-4 h-4" />
+                    </Button>
+                    <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Video Information</DialogTitle>
+                        <DialogDescription className="text-muted-foreground">
+                          Detailed metadata for this version
+                        </DialogDescription>
+                      </DialogHeader>
+
+                      {headerVideo ? (
+                        <div className="space-y-3 text-xs sm:text-sm">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground">Filename:</span>
+                            <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Resolution:</span>
+                            <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Codec:</span>
+                            <span className="font-medium">{(headerVideo as any).codec || 'N/A'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Duration:</span>
+                            <span className="font-medium">{formatTimestamp((headerVideo as any).duration)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">FPS:</span>
+                            <span className="font-medium">{(headerVideo as any).fps ? Number((headerVideo as any).fps).toFixed(2) : 'N/A'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Upload Date:</span>
+                            <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </DialogContent>
+                  </Dialog>
+
+                  {showThemeToggle && !isAdminView ? (
+                    <div className="shrink-0">
+                      <ThemeToggle />
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowFrames((v) => !v)}
+                className={cn(showFrames ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                title={showFrames ? 'Hide frames' : 'Show frames'}
+                aria-label={showFrames ? 'Hide frames' : 'Show frames'}
+              >
+                <span className="inline-flex items-center justify-center font-mono text-xs font-semibold leading-none">FF</span>
+              </Button>
+
+              <div className="flex-shrink-0">
+                <Select
+                  value={commentSortMode}
+                  onValueChange={(v) => setCommentSortMode(v as 'timecode' | 'date')}
+                >
+                  <SelectTrigger className="h-8 w-auto px-2 pr-2">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="timecode">Timecode</SelectItem>
+                    <SelectItem value="date">Newest</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          {showVideoActions && showApproveButton && showApproveConfirm && (
+            <div className="mt-2 border border-border rounded-lg p-3 bg-accent/30">
+              <div className="text-sm text-foreground font-semibold">Approve this video?</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Version: <span className="font-medium text-foreground">{(headerVideo as any)?.versionLabel}</span>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  variant="success"
+                  size="sm"
+                  onClick={handleApproveSelected}
+                  disabled={approving}
+                  className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
+                >
+                  {approving ? 'Approving...' : 'Yes, Approve'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowApproveConfirm(false)} disabled={approving}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Messages Area - Threaded Conversations */}
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-gray-50 dark:bg-gray-900/30">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0 bg-muted/30">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
-              <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+              <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />
               <p className="text-muted-foreground">No messages yet. Start the conversation!</p>
             </div>
           ) : (
@@ -509,7 +931,10 @@ export default function CommentSection({
                         showFrames={showFrames}
                         timecodeDurationSeconds={videoDurationById.get(comment.videoId)}
                         parentComment={null}
-                        onReply={() => handleReply(comment.id, comment.videoId)}
+                        onReply={() => {
+                          handleReply(comment.id, comment.videoId)
+                          if (!hideInput) scrollToInput()
+                        }}
                         onSeekToTimestamp={handleSeekToTimestamp}
                         onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
                         onScrollToComment={handleScrollToComment}
@@ -529,7 +954,10 @@ export default function CommentSection({
                         showFrames={showFrames}
                         timecodeDurationSeconds={videoDurationById.get(comment.videoId)}
                         parentComment={null}
-                        onReply={() => handleReply(comment.id, comment.videoId)}
+                        onReply={() => {
+                          handleReply(comment.id, comment.videoId)
+                          if (!hideInput) scrollToInput()
+                        }}
                         onSeekToTimestamp={handleSeekToTimestamp}
                         onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
                         onScrollToComment={handleScrollToComment}
@@ -552,40 +980,45 @@ export default function CommentSection({
             </>
           )}
         </div>
-
-        {/* Input Area */}
-        <CommentInput
-          newComment={newComment}
-          onCommentChange={handleCommentChange}
-          onSubmit={handleSubmitComment}
-          loading={loading}
-          uploadProgress={uploadProgress}
-          uploadStatusText={uploadStatusText}
-          onFileSelect={onFileSelect}
-          attachedFiles={attachedFiles}
-          onRemoveFile={onRemoveFile}
-          allowFileUpload={allowClientUploadFiles && !isAdminView}
-            clientUploadQuota={clientUploadQuota}
-            onRefreshUploadQuota={refreshClientUploadQuota}
-          selectedTimestamp={selectedTimestamp}
-          onClearTimestamp={handleClearTimestamp}
-          selectedVideoFps={selectedVideoFps}
-          replyingToComment={replyingToComment}
-          onCancelReply={handleCancelReply}
-          showAuthorInput={!isAdminView && isPasswordProtected}
-          authorName={authorName}
-          onAuthorNameChange={setAuthorName}
-          namedRecipients={namedRecipients}
-          nameSource={nameSource}
-          selectedRecipientId={selectedRecipientId}
-          onNameSourceChange={handleNameSourceChange}
-          currentVideoRestricted={currentVideoRestricted}
-          restrictionMessage={restrictionMessage}
-          commentsDisabled={commentsDisabled}
-          showShortcutsButton={showShortcutsButton}
-          onShowShortcuts={handleOpenShortcuts}
-        />
       </CardContent>
     </Card>
   )
+}
+
+export default function CommentSection(props: CommentSectionProps) {
+  const {
+    projectId,
+    comments: initialComments,
+    videos = [],
+    clientEmail,
+    isPasswordProtected = false,
+    adminUser = null,
+    recipients = [],
+    clientName,
+    restrictToLatestVersion = false,
+    shareToken = null,
+    isAdminView = false,
+    companyName = 'Studio',
+    allowClientDeleteComments = false,
+    allowClientUploadFiles = false,
+  } = props
+
+  const management = useCommentManagement({
+    projectId,
+    initialComments,
+    videos,
+    clientEmail,
+    isPasswordProtected,
+    adminUser,
+    recipients,
+    clientName,
+    restrictToLatestVersion,
+    shareToken,
+    useAdminAuth: isAdminView,
+    companyName,
+    allowClientDeleteComments,
+    allowClientUploadFiles,
+  })
+
+  return <CommentSectionView {...props} management={management} />
 }

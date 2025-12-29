@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { Textarea } from './ui/textarea'
 import { useRouter } from 'next/navigation'
 import { Upload, Pause, Play, X } from 'lucide-react'
 import * as tus from 'tus-js-client'
@@ -23,9 +24,20 @@ interface VideoUploadProps {
   projectId: string
   videoName: string // Required video name for multi-video support
   onUploadComplete?: () => void // Callback when upload completes successfully
+
+  // Optional per-version notes stored on the Video record.
+  // If showVideoNotesField is false, this value is used but no input is rendered.
+  videoNotes?: string
+  showVideoNotesField?: boolean
 }
 
-export default function VideoUpload({ projectId, videoName, onUploadComplete }: VideoUploadProps) {
+export default function VideoUpload({
+  projectId,
+  videoName,
+  onUploadComplete,
+  videoNotes: videoNotesProp,
+  showVideoNotesField = true,
+}: VideoUploadProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<tus.Upload | null>(null)
@@ -37,8 +49,15 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete }: 
   const [progress, setProgress] = useState(0)
   const [uploadSpeed, setUploadSpeed] = useState(0)
   const [versionLabel, setVersionLabel] = useState('')
+  const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+
+  useEffect(() => {
+    if (videoNotesProp !== undefined) {
+      setVideoNotes(videoNotesProp)
+    }
+  }, [videoNotesProp])
 
   // Warn before leaving page if upload is in progress
   useEffect(() => {
@@ -126,6 +145,11 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete }: 
 
     const trimmedVideoName = videoName.trim()
     const trimmedVersionLabel = versionLabel.trim()
+    const trimmedVideoNotes = (videoNotes || '').trim()
+    if (trimmedVideoNotes.length > 500) {
+      setError('Video notes must be 500 characters or fewer')
+      return
+    }
     const contextKey = `${projectId}:${trimmedVideoName}:${trimmedVersionLabel || 'auto'}`
 
     setUploading(true)
@@ -165,6 +189,7 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete }: 
         const { videoId } = await apiPost('/api/videos', {
           projectId,
           versionLabel: trimmedVersionLabel,
+          videoNotes: trimmedVideoNotes,
           originalFileName: file.name,
           originalFileSize: file.size,
           name: trimmedVideoName, // Include video name for multi-video support
@@ -249,6 +274,7 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete }: 
 
           setFile(null)
           setVersionLabel('')
+          setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
           uploadRef.current = null
           videoIdRef.current = null
           router.refresh()
@@ -428,6 +454,26 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete }: 
           disabled={uploading}
         />
       </div>
+
+      {/* Video Notes */}
+      {showVideoNotesField && (
+        <div className="space-y-2">
+          <Label htmlFor="videoNotes">
+            Video Notes <span className="text-muted-foreground">(Optional)</span>
+          </Label>
+          <Textarea
+            id="videoNotes"
+            value={videoNotes}
+            onChange={(e) => setVideoNotes(e.target.value)}
+            placeholder="Optional notes for this version"
+            disabled={uploading}
+            className="resize-none"
+            rows={3}
+            maxLength={500}
+          />
+          <p className="text-xs text-muted-foreground">Max 500 characters</p>
+        </div>
+      )}
 
       {/* File Selection */}
       <div className="space-y-2">

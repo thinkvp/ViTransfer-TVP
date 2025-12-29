@@ -254,6 +254,7 @@ export async function sendNewVersionEmail({
   projectTitle,
   videoName,
   versionLabel,
+  videoNotes,
   shareUrl,
   isPasswordProtected = false,
   trackingToken,
@@ -263,6 +264,7 @@ export async function sendNewVersionEmail({
   projectTitle: string
   videoName: string
   versionLabel: string
+  videoNotes?: string
   shareUrl: string
   isPasswordProtected?: boolean
   trackingToken?: string
@@ -271,6 +273,8 @@ export async function sendNewVersionEmail({
   const companyName = settings.companyName || 'Studio'
 
   const subject = `New Version Available: ${projectTitle}`
+
+  const trimmedVideoNotes = (videoNotes || '').trim()
 
   const html = renderEmailShell({
     companyName,
@@ -298,6 +302,13 @@ export async function sendNewVersionEmail({
           ${escapeHtml(videoName)} <span style="color: #60a5fa;">${escapeHtml(versionLabel)}</span>
         </div>
       </div>
+
+      ${trimmedVideoNotes ? `
+        <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
+          <div style="font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Video Notes</div>
+          <div style="font-size: 15px; color: #374151; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(trimmedVideoNotes)}</div>
+        </div>
+      ` : ''}
 
       ${isPasswordProtected ? `
         <div style="background: #fef3c7; border: 1px solid #fbbf24; border-radius: 6px; padding: 14px; margin-bottom: 24px;">

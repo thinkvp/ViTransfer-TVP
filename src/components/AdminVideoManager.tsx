@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { Textarea } from './ui/textarea'
 import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
@@ -62,6 +63,7 @@ export default function AdminVideoManager({
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
   const [showNewVideoForm, setShowNewVideoForm] = useState(!hasVideos) // Auto-show if no videos
   const [newVideoName, setNewVideoName] = useState('')
+  const [newVideoNotes, setNewVideoNotes] = useState('')
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
   const [editGroupValue, setEditGroupValue] = useState('')
   const [savingGroupName, setSavingGroupName] = useState<string | null>(null)
@@ -99,6 +101,7 @@ export default function AdminVideoManager({
     // Reset the "Add New Video" form when upload completes
     setShowNewVideoForm(false)
     setNewVideoName('')
+    setNewVideoNotes('')
     // Refresh the project data to show the new video
     onRefresh?.()
   }
@@ -308,10 +311,28 @@ export default function AdminVideoManager({
                   </p>
                 </div>
 
+                <div>
+                  <Label htmlFor="videoNotes">
+                    Video Notes <span className="text-muted-foreground">(Optional)</span>
+                  </Label>
+                  <Textarea
+                    id="videoNotes"
+                    value={newVideoNotes}
+                    onChange={(e) => setNewVideoNotes(e.target.value)}
+                    placeholder="Add notes about this version (shown to the client when you send a Specific Video & Version notification)"
+                    className="resize-none"
+                    rows={3}
+                    maxLength={500}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Max 500 characters</p>
+                </div>
+
                 {newVideoName.trim() ? (
                   <VideoUpload
                     projectId={projectId}
                     videoName={newVideoName.trim()}
+                    videoNotes={newVideoNotes}
+                    showVideoNotesField={false}
                     onUploadComplete={handleUploadComplete}
                   />
                 ) : (
@@ -327,6 +348,7 @@ export default function AdminVideoManager({
                     onClick={() => {
                       setShowNewVideoForm(false)
                       setNewVideoName('')
+                      setNewVideoNotes('')
                     }}
                   >
                     Cancel

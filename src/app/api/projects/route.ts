@@ -46,7 +46,6 @@ export async function GET(request: NextRequest) {
         authMode: true,
         hideFeedback: true,
         guestMode: true,
-        allowAssetDownload: true,
         previewResolution: true,
         companyName: true,
         maxRevisions: true,

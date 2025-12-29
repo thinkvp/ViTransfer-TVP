@@ -208,7 +208,21 @@ export function useCommentManagement({
   // Auto-select first video when videos list changes (admin panel without player)
   useEffect(() => {
     if (videos.length > 0 && !selectedVideoId) {
-      setSelectedVideoId(videos[0].id)
+      // Default to the latest version (order by upload/created date, then version)
+      const latest = [...videos].sort((a, b) => {
+        const aCreated = new Date((a as any).createdAt as any).getTime()
+        const bCreated = new Date((b as any).createdAt as any).getTime()
+        if (Number.isFinite(aCreated) && Number.isFinite(bCreated) && aCreated !== bCreated) {
+          return bCreated - aCreated
+        }
+        return (b as any).version - (a as any).version
+      })[0]
+
+      if (latest?.id) {
+        setSelectedVideoId(latest.id)
+      } else {
+        setSelectedVideoId(videos[0].id)
+      }
     }
   }, [videos, selectedVideoId])
 
@@ -709,6 +723,8 @@ export function useCommentManagement({
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const replyingToComment = comments.find((c) => c.id === replyingToCommentId) || null
+
   return {
     comments,
     newComment,
@@ -719,6 +735,7 @@ export function useCommentManagement({
     uploadProgress,
     uploadStatusText,
     replyingToCommentId,
+    replyingToComment,
     authorName,
     nameSource,
     selectedRecipientId,

@@ -322,6 +322,8 @@ export default function ProjectPage() {
                   adminUser={adminUser}
                   recipients={project.recipients || []}
                   allowClientDeleteComments={project.allowClientDeleteComments}
+                  showVideoActions={false}
+                  showVideoNotes={false}
                 />
               </div>
             )}

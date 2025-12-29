@@ -1,15 +1,17 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
-import CommentSection from '@/components/CommentSection'
+import CommentInput from '@/components/CommentInput'
+import { CommentSectionView } from '@/components/CommentSection'
 import VideoSidebar from '@/components/VideoSidebar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { useCommentManagement } from '@/hooks/useCommentManagement'
 
 export default function AdminSharePage() {
   const params = useParams()
@@ -438,58 +440,234 @@ export default function AdminSharePage() {
               </Card>
             ) : (
             <div className={`flex-1 min-h-0 ${project.hideFeedback ? 'flex flex-col w-full' : 'grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3'}`}>
-              <div className={project.hideFeedback ? 'flex-1 min-h-0 flex flex-col' : 'lg:col-span-2'}>
-                <VideoPlayer
-                  videos={readyVideos}
-                  projectId={project.id}
-                  projectStatus={project.status}
+              {project.hideFeedback ? (
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <VideoPlayer
+                    videos={readyVideos}
+                    projectId={project.id}
+                    projectStatus={project.status}
+                    defaultQuality={defaultQuality}
+                    projectTitle={project.title}
+                    projectDescription={project.description}
+                    clientName={project.clientName}
+                    isPasswordProtected={!!project.sharePassword}
+                    watermarkEnabled={project.watermarkEnabled}
+                    activeVideoName={activeVideoName}
+                    initialSeekTime={initialSeekTime}
+                    initialVideoIndex={initialVideoIndex}
+                    isAdmin={true}
+                    isGuest={false}
+                    shareToken={null}
+                    onApprove={undefined}
+                    hideDownloadButton={true}
+                    commentsForTimeline={filteredComments}
+                  />
+                </div>
+              ) : (
+                <AdminShareFeedbackGrid
+                  project={project}
+                  readyVideos={readyVideos}
+                  filteredComments={filteredComments}
                   defaultQuality={defaultQuality}
-                  projectTitle={project.title}
-                  projectDescription={project.description}
-                  clientName={project.clientName}
-                  isPasswordProtected={!!project.sharePassword}
-                  watermarkEnabled={project.watermarkEnabled}
                   activeVideoName={activeVideoName}
                   initialSeekTime={initialSeekTime}
                   initialVideoIndex={initialVideoIndex}
-                  isAdmin={true}
-                  isGuest={false}
-                  allowAssetDownload={project.allowAssetDownload}
-                  shareToken={null}
-                  onApprove={undefined}
-                  hideDownloadButton={true}
-                  commentsForTimeline={filteredComments}
+                  companyName={companyName}
+                  adminUser={adminUser}
+                  clientDisplayName={clientDisplayName}
                 />
-              </div>
-
-              {!project.hideFeedback && (
-                <div className="lg:sticky lg:top-6 lg:self-start">
-                  <CommentSection
-                    projectId={project.id}
-                    projectSlug={project.slug}
-                    comments={filteredComments}
-                    clientName={clientDisplayName}
-                    clientEmail={project.recipients?.[0]?.email}
-                    isApproved={project.status === 'APPROVED' || project.status === 'SHARE_ONLY'}
-                    restrictToLatestVersion={project.restrictCommentsToLatestVersion}
-                    videos={readyVideos}
-                    isAdminView={true}
-                    companyName={companyName}
-                    clientCompanyName={project.companyName}
-                    smtpConfigured={project.smtpConfigured}
-                    isPasswordProtected={!!project.sharePassword}
-                    adminUser={adminUser}
-                    recipients={project.recipients || []}
-                    shareToken={null}
-                    showShortcutsButton={true}
-                    allowClientDeleteComments={project.allowClientDeleteComments}
-                  />
-                </div>
               )}
             </div>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+function AdminShareFeedbackGrid({
+  project,
+  readyVideos,
+  filteredComments,
+  defaultQuality,
+  activeVideoName,
+  initialSeekTime,
+  initialVideoIndex,
+  companyName,
+  adminUser,
+  clientDisplayName,
+}: {
+  project: any
+  readyVideos: any[]
+  filteredComments: any[]
+  defaultQuality: any
+  activeVideoName: string
+  initialSeekTime: number | null
+  initialVideoIndex: number
+  companyName: string
+  adminUser: any
+  clientDisplayName: string
+}) {
+  const [serverComments, setServerComments] = useState<any[]>(filteredComments)
+
+  const projectId = String(project?.id || '')
+
+  useEffect(() => {
+    setServerComments(filteredComments)
+  }, [filteredComments])
+
+  const fetchComments = useCallback(async () => {
+    try {
+      if (!projectId) return
+      const response = await apiFetch(`/api/comments?projectId=${projectId}`)
+      if (!response.ok) return
+      const fresh = await response.json()
+      setServerComments(fresh)
+    } catch {
+      // ignore
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    const handleCommentPosted = (e: any) => {
+      if (e?.detail?.comments) {
+        setServerComments(e.detail.comments)
+      } else {
+        fetchComments()
+      }
+    }
+
+    const handleCommentDeleted = () => {
+      fetchComments()
+    }
+
+    window.addEventListener('commentPosted', handleCommentPosted as EventListener)
+    window.addEventListener('commentDeleted', handleCommentDeleted as EventListener)
+
+    return () => {
+      window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
+      window.removeEventListener('commentDeleted', handleCommentDeleted as EventListener)
+    }
+  }, [fetchComments])
+
+  const management = useCommentManagement({
+    projectId: String(project.id),
+    initialComments: serverComments as any,
+    videos: readyVideos as any,
+    clientEmail: project.recipients?.[0]?.email,
+    isPasswordProtected: Boolean(project.sharePassword),
+    adminUser,
+    recipients: (project.recipients || []) as any,
+    clientName: clientDisplayName,
+    restrictToLatestVersion: Boolean(project.restrictCommentsToLatestVersion),
+    shareToken: null,
+    useAdminAuth: true,
+    companyName,
+    allowClientDeleteComments: Boolean(project.allowClientDeleteComments),
+    allowClientUploadFiles: false,
+  })
+
+  const isApproved = project.status === 'APPROVED' || project.status === 'SHARE_ONLY'
+
+  const latestVideoVersion = readyVideos.length > 0
+    ? Math.max(...readyVideos.map((v: any) => v.version))
+    : null
+
+  const selectedVideo = readyVideos.find((v: any) => v.id === management.selectedVideoId)
+  const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
+  const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
+  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved)
+
+  const currentVideoRestricted = Boolean(
+    project.restrictCommentsToLatestVersion &&
+      management.selectedVideoId &&
+      selectedVideo &&
+      latestVideoVersion !== null &&
+      selectedVideo.version !== latestVideoVersion
+  )
+
+  const restrictionMessage = currentVideoRestricted
+    ? `You can only leave feedback on the latest version. Please switch to version ${latestVideoVersion} to comment.`
+    : undefined
+
+  return (
+    <>
+      <div className="lg:col-span-2 flex-1 min-h-0 flex flex-col">
+        <VideoPlayer
+          videos={readyVideos}
+          projectId={project.id}
+          projectStatus={project.status}
+          defaultQuality={defaultQuality}
+          projectTitle={project.title}
+          projectDescription={project.description}
+          clientName={project.clientName}
+          isPasswordProtected={!!project.sharePassword}
+          watermarkEnabled={project.watermarkEnabled}
+          activeVideoName={activeVideoName}
+          initialSeekTime={initialSeekTime}
+          initialVideoIndex={initialVideoIndex}
+          isAdmin={true}
+          isGuest={false}
+          shareToken={null}
+          onApprove={undefined}
+          hideDownloadButton={true}
+          commentsForTimeline={management.comments as any}
+        />
+
+        <CommentInput
+          newComment={management.newComment}
+          onCommentChange={management.handleCommentChange}
+          onSubmit={management.handleSubmitComment}
+          loading={management.loading}
+          uploadProgress={management.uploadProgress}
+          uploadStatusText={management.uploadStatusText}
+          selectedTimestamp={management.selectedTimestamp}
+          onClearTimestamp={management.handleClearTimestamp}
+          selectedVideoFps={management.selectedVideoFps}
+          replyingToComment={management.replyingToComment}
+          onCancelReply={management.handleCancelReply}
+          showAuthorInput={false}
+          authorName={management.authorName}
+          onAuthorNameChange={management.setAuthorName}
+          namedRecipients={management.namedRecipients}
+          nameSource={management.nameSource}
+          selectedRecipientId={management.selectedRecipientId}
+          onNameSourceChange={management.handleNameSourceChange}
+          currentVideoRestricted={currentVideoRestricted}
+          restrictionMessage={restrictionMessage}
+          commentsDisabled={commentsDisabled}
+          showShortcutsButton={true}
+          onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
+          containerClassName="mt-4 border border-border rounded-lg"
+          showTopBorder={false}
+        />
+      </div>
+
+      <div className="lg:sticky lg:top-6 lg:self-start lg:h-[calc(100vh-6rem)] min-h-0">
+        <CommentSectionView
+          projectId={project.id}
+          projectSlug={project.slug}
+          comments={serverComments as any}
+          clientName={clientDisplayName}
+          clientEmail={project.recipients?.[0]?.email}
+          isApproved={isApproved}
+          restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
+          videos={readyVideos as any}
+          isAdminView={true}
+          companyName={companyName}
+          clientCompanyName={project.companyName}
+          smtpConfigured={project.smtpConfigured}
+          isPasswordProtected={!!project.sharePassword}
+          adminUser={adminUser}
+          recipients={project.recipients || []}
+          shareToken={null}
+          showShortcutsButton={true}
+          allowClientDeleteComments={project.allowClientDeleteComments}
+          hideInput={true}
+          showApproveButton={false}
+          management={management as any}
+        />
+      </div>
+    </>
   )
 }

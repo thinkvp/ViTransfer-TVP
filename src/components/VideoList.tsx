@@ -7,7 +7,8 @@ import { Progress } from './ui/progress'
 import { Button } from './ui/button'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
-import { Trash2, CheckCircle2, XCircle, Pencil, MessageSquare, Upload, Download } from 'lucide-react'
+import { Textarea } from './ui/textarea'
+import { Trash2, CheckCircle2, XCircle, Pencil, MessageSquare, Upload, Download, Check, X } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -29,6 +30,9 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   const [showReprocessModal, setShowReprocessModal] = useState(false)
   const [pendingVideoUpdate, setPendingVideoUpdate] = useState<{ videoId: string; newLabel: string } | null>(null)
   const [reprocessing, setReprocessing] = useState(false)
+  const [editingNotesId, setEditingNotesId] = useState<string | null>(null)
+  const [notesEditValue, setNotesEditValue] = useState('')
+  const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
   const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
 
@@ -114,6 +118,42 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   const handleCancelEdit = () => {
     setEditingId(null)
     setEditValue('')
+  }
+
+  const handleStartEditNotes = (videoId: string, currentNotes: string) => {
+    setEditingNotesId(videoId)
+    setNotesEditValue(currentNotes)
+  }
+
+  const handleCancelEditNotes = () => {
+    setEditingNotesId(null)
+    setNotesEditValue('')
+  }
+
+  const handleSaveNotes = async (videoId: string) => {
+    const trimmed = notesEditValue.trim()
+    if (trimmed.length > 500) {
+      alert('Video notes must be 500 characters or fewer')
+      return
+    }
+
+    setSavingNotesId(videoId)
+    try {
+      await apiPatch(`/api/videos/${videoId}`, { videoNotes: trimmed })
+
+      // Optimistically update local state
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? ({ ...v, videoNotes: trimmed || null } as any) : v
+      ))
+
+      setEditingNotesId(null)
+      setNotesEditValue('')
+      onRefresh?.()
+    } catch (error) {
+      alert('Failed to update video notes')
+    } finally {
+      setSavingNotesId(null)
+    }
   }
 
   const handleSaveEdit = async (videoId: string) => {
@@ -397,6 +437,74 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                 <p className="text-muted-foreground">Size</p>
                 <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
               </div>
+            </div>
+          )}
+
+          {/* Video Notes */}
+          {video.status === 'READY' && (
+            <div className="pt-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-muted-foreground text-xs sm:text-sm">Video Notes</p>
+                {isAdmin && editingId !== video.id && (
+                  editingNotesId === video.id ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-success hover:text-success hover:bg-success-visible"
+                        onClick={() => handleSaveNotes(video.id)}
+                        disabled={savingNotesId === video.id}
+                        title="Save video notes"
+                      >
+                        <Check className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive-visible"
+                        onClick={handleCancelEditNotes}
+                        disabled={savingNotesId === video.id}
+                        title="Cancel"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
+                      onClick={() => handleStartEditNotes(video.id, ((video as any).videoNotes as string) || '')}
+                      title="Edit video notes"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </Button>
+                  )
+                )}
+              </div>
+
+              {editingNotesId === video.id ? (
+                <div className="mt-2">
+                  <Textarea
+                    value={notesEditValue}
+                    onChange={(e) => setNotesEditValue(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                    className="resize-none"
+                    disabled={savingNotesId === video.id}
+                    placeholder="Add notes for this version (optional)"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Max 500 characters</p>
+                </div>
+              ) : (
+                <p className="text-sm mt-1 whitespace-pre-wrap">
+                  {(((video as any).videoNotes as string) || '').trim() ? (
+                    (video as any).videoNotes
+                  ) : (
+                    <span className="text-muted-foreground">No notes</span>
+                  )}
+                </p>
+              )}
             </div>
           )}
 

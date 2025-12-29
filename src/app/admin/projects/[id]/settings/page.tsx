@@ -92,7 +92,6 @@ interface Project {
   watermarkEnabled: boolean
   watermarkText: string | null
   timelinePreviewsEnabled: boolean
-  allowAssetDownload: boolean
   clientNotificationSchedule: string
   clientNotificationTime: string | null
   clientNotificationDay: number | null
@@ -132,7 +131,6 @@ export default function ProjectSettingsPage() {
   const [watermarkText, setWatermarkText] = useState('')
   const [useCustomWatermark, setUseCustomWatermark] = useState(false)
   const [timelinePreviewsEnabled, setTimelinePreviewsEnabled] = useState(false)
-  const [allowAssetDownload, setAllowAssetDownload] = useState(true)
 
   // Notification settings state
   const [clientNotificationSchedule, setClientNotificationSchedule] = useState('HOURLY')
@@ -213,7 +211,6 @@ export default function ProjectSettingsPage() {
         setWatermarkText(data.watermarkText || '')
         setUseCustomWatermark(!!data.watermarkText)
         setTimelinePreviewsEnabled(data.timelinePreviewsEnabled ?? false)
-        setAllowAssetDownload(data.allowAssetDownload ?? true)
         setAuthMode(data.authMode || 'PASSWORD')
         setGuestMode(data.guestMode || false)
         setGuestLatestOnly(data.guestLatestOnly ?? true)
@@ -317,7 +314,6 @@ export default function ProjectSettingsPage() {
         watermarkEnabled,
         watermarkText: useCustomWatermark ? watermarkText : null,
         timelinePreviewsEnabled,
-        allowAssetDownload,
         sharePassword: sharePassword || null,
         authMode,
         guestMode,
@@ -761,22 +757,6 @@ export default function ProjectSettingsPage() {
                   />
                 </div>
               </div>
-
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="allowAssetDownload">Allow Asset Downloads</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Allow clients to download additional project assets (images, audio, project files) when the video is approved
-                    </p>
-                  </div>
-                  <Switch
-                    id="allowAssetDownload"
-                    checked={allowAssetDownload}
-                    onCheckedChange={setAllowAssetDownload}
-                  />
-                </div>
-              </div>
             </CardContent>
             )}
           </Card>
@@ -869,9 +849,9 @@ export default function ProjectSettingsPage() {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Feedback & Comments</CardTitle>
+                  <CardTitle>Feedback & Client Uploads</CardTitle>
                   <CardDescription>
-                    Control how clients can leave feedback
+                    Control clients ability to see or leave feedback and upload files
                   </CardDescription>
                 </div>
                 {showFeedback ? (

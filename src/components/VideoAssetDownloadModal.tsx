@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X, Download, FileIcon, Loader2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
@@ -193,27 +194,36 @@ export function VideoAssetDownloadModal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg max-w-3xl w-full max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <div>
-            <h2 className="text-xl font-bold">Download Options</h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              {videoName} - {versionLabel}
-            </p>
+    <DialogPrimitive.Root
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-black/50" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[200] w-[calc(100vw-2rem)] max-w-3xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-card border border-border rounded-lg flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-border">
+            <div>
+              <DialogPrimitive.Title asChild>
+                <h2 className="text-xl font-bold">Download Options</h2>
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Description asChild>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {videoName} - {versionLabel}
+                </p>
+              </DialogPrimitive.Description>
+            </div>
+            <DialogPrimitive.Close asChild>
+              <Button variant="ghost" size="icon">
+                <X className="h-5 w-5" />
+              </Button>
+            </DialogPrimitive.Close>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-          >
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Quick actions */}
           <div className="space-y-3">
             <h3 className="font-medium text-sm">Quick Download</h3>
@@ -330,9 +340,10 @@ export function VideoAssetDownloadModal({
           >
             Close
           </Button>
-        </div>
-      </div>
-    </div>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   )
 }
 

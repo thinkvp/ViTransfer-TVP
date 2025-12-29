@@ -267,7 +267,6 @@ export async function GET(
         watermarkEnabled: project.watermarkEnabled,
       }),
 
-      allowAssetDownload: project.allowAssetDownload,
       timelinePreviewsEnabled: project.timelinePreviewsEnabled,
 
       videos: sanitizedVideos,

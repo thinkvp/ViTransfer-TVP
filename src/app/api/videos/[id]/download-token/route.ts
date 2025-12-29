@@ -38,13 +38,6 @@ export async function POST(
 
     // Check download permissions for non-admins
     if (!accessCheck.isAdmin) {
-      if (!video.project.allowAssetDownload) {
-        return NextResponse.json(
-          { error: 'Downloads are disabled for this project' },
-          { status: 403 }
-        )
-      }
-
       if (!video.approved) {
         return NextResponse.json(
           { error: 'Downloads available after approval' },

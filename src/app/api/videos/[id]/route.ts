@@ -135,7 +135,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel } = body
+    const { approved, name, versionLabel, videoNotes } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
@@ -159,8 +159,22 @@ export async function PATCH(
       )
     }
 
+    if (videoNotes !== undefined && typeof videoNotes !== 'string') {
+      return NextResponse.json(
+        { error: 'Invalid request: videoNotes must be a string' },
+        { status: 400 }
+      )
+    }
+
+    if (typeof videoNotes === 'string' && videoNotes.trim().length > 500) {
+      return NextResponse.json(
+        { error: 'Invalid request: videoNotes must be 500 characters or fewer' },
+        { status: 400 }
+      )
+    }
+
     // At least one field must be provided
-    if (approved === undefined && name === undefined && versionLabel === undefined) {
+    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined) {
       return NextResponse.json(
         { error: 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -206,6 +220,11 @@ export async function PATCH(
 
     if (versionLabel !== undefined) {
       updateData.versionLabel = versionLabel.trim()
+    }
+
+    if (videoNotes !== undefined) {
+      const trimmed = videoNotes.trim()
+      updateData.videoNotes = trimmed ? trimmed : null
     }
 
     // Update video

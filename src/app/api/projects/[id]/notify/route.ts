@@ -89,6 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         select: {
           name: true,
           versionLabel: true,
+          videoNotes: true,
           status: true,
         }
       })
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             projectTitle: project.title,
             videoName: video!.name,
             versionLabel: video!.versionLabel,
+            videoNotes: (video as any).videoNotes || '',
             shareUrl,
             isPasswordProtected,
             trackingToken: trackingToken.token,
