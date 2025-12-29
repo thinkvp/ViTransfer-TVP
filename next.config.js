@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Avoid bundling certain Node-only packages into the server build.
+  // This prevents webpack from rewriting jsdom asset paths (e.g. default-stylesheet.css)
+  // into `.next/` and causing ENOENT during `next build`.
+  serverExternalPackages: ['jsdom', 'isomorphic-dompurify'],
+
   // Increase body size limit for TUS chunked uploads
   // TUS uploads can send chunks larger than 10MB (default Next.js limit)
   // Set to 100MB to handle large video chunks safely

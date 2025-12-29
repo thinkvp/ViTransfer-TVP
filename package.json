@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "0.8.3-alpha-4",
+  "version": "0.8.3-alpha-6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -60,6 +60,8 @@
   },
   "overrides": {
     "esbuild": "0.27.0",
-    "glob": "^11.1.0"
+    "glob": "^11.1.0",
+    "jsdom": "27.2.0",
+    "parse5": "7.2.1"
   }
 }

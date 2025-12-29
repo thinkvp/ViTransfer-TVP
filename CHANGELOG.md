@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.3-alpha-4] - 2025-12-28
 
+## [0.8.3-alpha-6] - 2025-12-30
+
+### Changed
+- Share authentication copy: clarified recipient wording and guest access messaging
+
+### Fixed
+- Build: resolved jsdom/parse5 ESM incompatibility affecting `next build`
+
 ### Added
 - Comment attachments: multi-file uploads (up to 5 files per comment) and expanded allowed formats (including PSD/AI and common videos)
 - Email privacy: global Admin setting to enable/disable email tracking pixels
