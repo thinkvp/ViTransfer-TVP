@@ -117,6 +117,16 @@ export default function VideoPlayer({
     w: 0,
     h: 0,
   })
+
+  const [timelineCommentHover, setTimelineCommentHover] = useState<{
+    visible: boolean
+    leftPx: number
+    commentId: string | null
+  }>({
+    visible: false,
+    leftPx: 0,
+    commentId: null,
+  })
   const isScrubbingRef = useRef(false)
 
   const parseVtt = (vttText: string) => {
@@ -244,6 +254,38 @@ export default function VideoPlayer({
       return true
     })
   }, [commentsForTimeline, effectiveDurationSeconds, selectedVideo])
+
+  const commentByIdForTimeline = useMemo(() => {
+    const map = new Map<string, any>()
+    for (const c of commentsForTimeline || []) {
+      if (c?.id) map.set(String(c.id), c)
+      if (Array.isArray((c as any)?.replies)) {
+        for (const r of (c as any).replies as any[]) {
+          if (r?.id) map.set(String(r.id), r)
+        }
+      }
+    }
+    return map
+  }, [commentsForTimeline])
+
+  const hoveredBaseCommentForTimeline = useMemo(() => {
+    if (!timelineCommentHover.visible || !timelineCommentHover.commentId) return null
+    const hovered = commentByIdForTimeline.get(timelineCommentHover.commentId)
+    if (!hovered) return null
+
+    const parentId = (hovered as any)?.parentId ? String((hovered as any).parentId) : null
+    if (parentId) {
+      return commentByIdForTimeline.get(parentId) || hovered
+    }
+
+    return hovered
+  }, [commentByIdForTimeline, timelineCommentHover.commentId, timelineCommentHover.visible])
+
+  const getTimelineCommentPreviewText = (content: unknown) => {
+    return String(content ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
 
   // Dispatch event when selected video changes (for immediate comment section update)
   useEffect(() => {
@@ -432,12 +474,67 @@ export default function VideoPlayer({
     return { time: ratio * duration, left: x, width: rect.width }
   }
 
+  const getLeftPxForSeconds = (seconds: number, maxTooltipWidthPx: number) => {
+    const el = scrubBarRef.current
+    const duration = effectiveDurationSeconds
+    if (!el || !duration || duration <= 0) return 0
+    const rect = el.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, seconds / duration))
+    const desiredLeft = ratio * rect.width
+    const half = Math.max(0, maxTooltipWidthPx / 2)
+
+    if (rect.width <= 0) return 0
+    if (rect.width < maxTooltipWidthPx) return rect.width / 2
+    return Math.min(Math.max(desiredLeft, half), Math.max(half, rect.width - half))
+  }
+
   const findCueForTime = (timeSeconds: number) => {
     // Linear scan is fine for typical cue counts (<= a few thousand)
     for (const cue of timelineCues) {
       if (timeSeconds >= cue.start && timeSeconds < cue.end) return cue
     }
     return null
+  }
+
+  const updateHoverFromTimeSeconds = (timeSeconds: number, minClampWidthPx?: number) => {
+    const spriteBaseUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
+    const duration = (videoRef.current?.duration || durationSeconds || (selectedVideo as any)?.duration || 0) as number
+    const el = scrubBarRef.current
+
+    if (!el || !duration || duration <= 0 || !spriteBaseUrl || timelineCues.length === 0) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+      return null as number | null
+    }
+
+    const rect = el.getBoundingClientRect()
+    const time = Math.min(duration, Math.max(0, timeSeconds))
+    const cue = findCueForTime(time)
+    if (!cue) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+      return null as number | null
+    }
+
+    const desiredLeft = rect.width > 0 ? (time / duration) * rect.width : 0
+    const clampWidth = Math.max(cue.w, minClampWidthPx || 0)
+    const half = clampWidth / 2
+    const clampedLeft = Math.min(
+      Math.max(desiredLeft, half),
+      Math.max(half, rect.width - half)
+    )
+
+    const spriteUrl = `${spriteBaseUrl}?file=${encodeURIComponent(cue.sprite)}`
+    setTimelineHover({
+      visible: true,
+      leftPx: clampedLeft,
+      timeSeconds: time,
+      spriteUrl,
+      x: cue.x,
+      y: cue.y,
+      w: cue.w,
+      h: cue.h,
+    })
+
+    return clampedLeft
   }
 
   const updateHoverFromClientX = (clientX: number) => {
@@ -973,6 +1070,7 @@ export default function VideoPlayer({
                 onPointerLeave={() => {
                   isScrubbingRef.current = false
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
+                  setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onPointerDown={(e) => {
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
@@ -1022,6 +1120,23 @@ export default function VideoPlayer({
                           style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
                           title="Jump to comment"
                           aria-label="Jump to comment"
+                          onPointerEnter={(e) => {
+                            e.stopPropagation()
+
+                            // Align both thumbnail and comment tooltip to the marker timestamp,
+                            // not the current pointer X (prevents drift for longer tooltips).
+                            const hoverLeftPx = updateHoverFromTimeSeconds(m.seconds, 260)
+                            const leftPx = hoverLeftPx ?? getLeftPxForSeconds(m.seconds, 260)
+                            setTimelineCommentHover({
+                              visible: true,
+                              leftPx,
+                              commentId: m.id,
+                            })
+                          }}
+                          onPointerLeave={(e) => {
+                            e.stopPropagation()
+                            setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
+                          }}
                           onClick={(e) => {
                             e.stopPropagation()
 
@@ -1059,28 +1174,59 @@ export default function VideoPlayer({
                 )}
               </div>
 
-              {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (
+              {((timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl) ||
+                (timelineCommentHover.visible && hoveredBaseCommentForTimeline)) && (
                 <div
-                  className="absolute bottom-full mb-2 pointer-events-none"
-                  style={{ left: timelineHover.leftPx, transform: 'translateX(-50%)' }}
+                  className="absolute bottom-full mb-2 pointer-events-none z-20 flex flex-col items-center"
+                  style={{
+                    left:
+                      timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl
+                        ? timelineHover.leftPx
+                        : timelineCommentHover.leftPx,
+                    transform: 'translateX(-50%)',
+                  }}
                 >
-                  <div
-                    className="rounded-md border border-border overflow-hidden bg-card"
-                    style={{ width: timelineHover.w, height: timelineHover.h }}
-                  >
-                    <div
-                      style={{
-                        width: timelineHover.w,
-                        height: timelineHover.h,
-                        backgroundImage: `url(${timelineHover.spriteUrl})`,
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: `-${timelineHover.x}px -${timelineHover.y}px`,
-                      }}
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
-                    {formatTimestamp(timelineHover.timeSeconds)}
-                  </div>
+                  {timelineCommentHover.visible && hoveredBaseCommentForTimeline && (
+                    <div className="mb-2 max-w-[260px] rounded-md border border-border bg-card px-3 py-2 shadow-elevation-sm">
+                      <div className="text-xs font-medium text-card-foreground">
+                        {String((hoveredBaseCommentForTimeline as any)?.authorName ||
+                          ((hoveredBaseCommentForTimeline as any)?.isInternal ? 'Studio' : 'Client'))}
+                      </div>
+                      <div
+                        className="mt-0.5 text-xs text-muted-foreground leading-snug"
+                        style={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {getTimelineCommentPreviewText((hoveredBaseCommentForTimeline as any)?.content)}
+                      </div>
+                    </div>
+                  )}
+
+                  {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (
+                    <>
+                      <div
+                        className="rounded-md border border-border overflow-hidden bg-card"
+                        style={{ width: timelineHover.w, height: timelineHover.h }}
+                      >
+                        <div
+                          style={{
+                            width: timelineHover.w,
+                            height: timelineHover.h,
+                            backgroundImage: `url(${timelineHover.spriteUrl})`,
+                            backgroundRepeat: 'no-repeat',
+                            backgroundPosition: `-${timelineHover.x}px -${timelineHover.y}px`,
+                          }}
+                        />
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
+                        {formatTimestamp(timelineHover.timeSeconds)}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.3-alpha-4] - 2025-12-28
 
 ### Added
-- Comment attachments: multi-file uploads (up to 5 files per comment), 200MB max per file, and expanded allowed formats (including PSD/AI and common videos)
+- Comment attachments: multi-file uploads (up to 5 files per comment) and expanded allowed formats (including PSD/AI and common videos)
 - Email privacy: global Admin setting to enable/disable email tracking pixels
 - Analytics: Project Update (“Updates on …”) digest emails now log "Comment Summary" sent/opened events (with optional tracking pixel)
 

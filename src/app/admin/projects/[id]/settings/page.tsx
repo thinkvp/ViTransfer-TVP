@@ -931,7 +931,7 @@ export default function ProjectSettingsPage() {
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowClientUploadFiles">Allow clients to upload files with comments</Label>
                     <p className="text-xs text-muted-foreground">
-                      Clients can attach files to comments (up to 5 per comment). Supported: Images, Videos, PDFs, Documents, Fonts, Archives (Max 200MB each).
+                      Clients can attach files to comments (up to 5 per comment). Supported: Images, Videos, PDFs, Documents, Fonts, Archives.
                     </p>
                   </div>
                   <Switch

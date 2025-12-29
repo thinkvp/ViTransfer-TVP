@@ -2,9 +2,6 @@
  * File upload configuration and utilities for comment attachments
  */
 
-// Maximum file size per attachment: 200MB
-export const MAX_COMMENT_FILE_SIZE = 200 * 1024 * 1024;
-
 // Maximum number of files per comment
 export const MAX_FILES_PER_COMMENT = 5;
 
@@ -133,16 +130,8 @@ export const BLOCKED_FILE_EXTENSIONS = new Set([
 export function validateCommentFile(
   fileName: string,
   mimeType: string,
-  fileSize: number
+  _fileSize: number
 ): { valid: boolean; error?: string } {
-  // Check file size
-  if (fileSize > MAX_COMMENT_FILE_SIZE) {
-    return {
-      valid: false,
-      error: `File size exceeds maximum of ${MAX_COMMENT_FILE_SIZE / (1024 * 1024)}MB`,
-    };
-  }
-
   // Check file extension against blocklist
   const fileExtension = fileName.split(".").pop()?.toLowerCase();
   if (fileExtension && BLOCKED_FILE_EXTENSIONS.has(fileExtension)) {

@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { AlertCircle, Upload, X } from 'lucide-react'
-import { getAllowedFileTypesDescription, MAX_COMMENT_FILE_SIZE, validateCommentFile } from '@/lib/fileUpload'
+import { getAllowedFileTypesDescription, validateCommentFile } from '@/lib/fileUpload'
 
 interface FileUploadModalProps {
   open: boolean
@@ -154,9 +154,6 @@ export function FileUploadModal({
             <p className="text-xs text-muted-foreground font-medium mb-1">Supported file types:</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
               {getAllowedFileTypesDescription()}
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Maximum individual file size: {Math.floor(MAX_COMMENT_FILE_SIZE / (1024 * 1024))}MB
             </p>
           </div>
 

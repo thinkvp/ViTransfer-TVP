@@ -4,7 +4,7 @@ import { join } from 'path'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
-import { validateCommentFile, generateCommentFilePath, MAX_COMMENT_FILE_SIZE, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
+import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

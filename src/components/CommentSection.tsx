@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { ArrowUpDown, CheckCircle2, MessageSquare } from 'lucide-react'
@@ -10,6 +10,7 @@ import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -108,6 +109,7 @@ export default function CommentSection({
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
 
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
+  const [showFrames, setShowFrames] = useState(false)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
 
@@ -218,6 +220,16 @@ export default function CommentSection({
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
   const mergedComments = comments.length > 0 ? comments : localComments
+
+  const videoDurationById = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const v of videos || []) {
+      if (v?.id && typeof v.duration === 'number') {
+        map.set(v.id, v.duration)
+      }
+    }
+    return map
+  }, [videos])
 
   // Filter comments based on currently selected video
   const displayComments = (() => {
@@ -409,18 +421,31 @@ export default function CommentSection({
             Feedback
           </CardTitle>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setCommentSortMode(current => (current === 'timecode' ? 'date' : 'timecode'))}
-            className="text-muted-foreground hover:text-foreground -mr-2"
-            title={commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
-          >
-            <ArrowUpDown className="w-4 h-4" />
-            <span className="ml-2 hidden sm:inline">
-              {commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
-            </span>
-          </Button>
+          <div className="flex items-center gap-1 -mr-2 min-w-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowFrames((v) => !v)}
+              className={cn(showFrames ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+              title={showFrames ? 'Hide frames' : 'Show frames'}
+              aria-label={showFrames ? 'Hide frames' : 'Show frames'}
+            >
+              <span className="inline-flex items-center justify-center font-mono text-xs font-semibold leading-none">FF</span>
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCommentSortMode(current => (current === 'timecode' ? 'date' : 'timecode'))}
+              className="text-muted-foreground hover:text-foreground whitespace-normal h-auto min-w-0"
+              title={commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
+            >
+              <ArrowUpDown className="w-4 h-4" />
+              <span className="ml-2 hidden sm:inline whitespace-normal break-words text-left leading-snug">
+                {commentSortMode === 'timecode' ? 'Sorting by timecode' : 'Sorting by comment date'}
+              </span>
+            </Button>
+          </div>
         </div>
         {selectedVideoId && currentVideo && !isAdminView && (
           <p className="text-xs text-muted-foreground mt-1">
@@ -481,6 +506,8 @@ export default function CommentSection({
                         isStudio={comment.isInternal}
                         studioCompanyName={companyName}
                         clientCompanyName={clientCompanyName}
+                        showFrames={showFrames}
+                        timecodeDurationSeconds={videoDurationById.get(comment.videoId)}
                         parentComment={null}
                         onReply={() => handleReply(comment.id, comment.videoId)}
                         onSeekToTimestamp={handleSeekToTimestamp}
@@ -499,6 +526,8 @@ export default function CommentSection({
                         isStudio={comment.isInternal}
                         studioCompanyName={companyName}
                         clientCompanyName={clientCompanyName}
+                        showFrames={showFrames}
+                        timecodeDurationSeconds={videoDurationById.get(comment.videoId)}
                         parentComment={null}
                         onReply={() => handleReply(comment.id, comment.videoId)}
                         onSeekToTimestamp={handleSeekToTimestamp}

@@ -18,6 +18,8 @@ interface MessageBubbleProps {
   isStudio: boolean
   studioCompanyName: string
   clientCompanyName?: string | null
+  showFrames?: boolean
+  timecodeDurationSeconds?: number
   parentComment?: Comment | null
   onReply?: () => void
   onSeekToTimestamp?: (timestamp: number, videoId: string, videoVersion: number | null) => void
@@ -57,6 +59,8 @@ export default function MessageBubble({
   isStudio,
   studioCompanyName,
   clientCompanyName,
+  showFrames = true,
+  timecodeDurationSeconds,
   parentComment,
   onReply,
   onSeekToTimestamp,
@@ -161,7 +165,10 @@ export default function MessageBubble({
             >
               <Clock className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" />
               <span className="text-xs underline decoration-dotted font-medium text-orange-600 dark:text-orange-400">
-                {formatTimecodeDisplay(comment.timecode)}
+                {formatTimecodeDisplay(comment.timecode, {
+                  showFrames,
+                  durationSeconds: timecodeDurationSeconds,
+                })}
               </span>
             </button>
           )}

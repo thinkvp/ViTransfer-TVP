@@ -205,7 +205,14 @@ export function getTimecodeLabel(fps: number): string {
  * @param timecode - HH:MM:SS:FF or HH:MM:SS;FF format
  * @returns Formatted timecode for display
  */
-export function formatTimecodeDisplay(timecode: string): string {
+export function formatTimecodeDisplay(
+  timecode: string,
+  options?: {
+    showFrames?: boolean
+    padHours?: boolean
+    durationSeconds?: number
+  }
+): string {
   // Detect if this is drop-frame (contains semicolon) or non-drop-frame (all colons)
   const isDF = timecode.includes(';')
   const separator = isDF ? ';' : ':'
@@ -216,8 +223,32 @@ export function formatTimecodeDisplay(timecode: string): string {
 
   if (parts.length !== 4) return timecode
 
-  const [hours, minutes, seconds, frames] = parts.map(part => part.padStart(2, '0'))
+  const showFrames = options?.showFrames ?? true
 
-  // Use semicolon before frames for DF, colon for NDF
-  return `${hours}:${minutes}:${seconds}${separator}${frames}`
+  const hoursNum = parseInt(parts[0] || '0', 10) || 0
+  const minutes = String(parseInt(parts[1] || '0', 10) || 0).padStart(2, '0')
+  const seconds = String(parseInt(parts[2] || '0', 10) || 0).padStart(2, '0')
+  const frames = String(parseInt(parts[3] || '0', 10) || 0).padStart(2, '0')
+
+  const shouldPadHours =
+    options?.padHours ??
+    (typeof options?.durationSeconds === 'number' ? options.durationSeconds >= 10 * 3600 : false)
+
+  if (!showFrames) {
+    const durationSeconds = options?.durationSeconds
+
+    const shouldShowHours =
+      (typeof durationSeconds === 'number' ? durationSeconds >= 3600 : hoursNum > 0)
+
+    if (!shouldShowHours) {
+      const totalMinutes = (hoursNum * 60) + (parseInt(minutes, 10) || 0)
+      return `${String(totalMinutes)}:${seconds}`
+    }
+
+    const hoursDisplay = shouldPadHours ? String(hoursNum).padStart(2, '0') : String(hoursNum)
+    return `${hoursDisplay}:${minutes}:${seconds}`
+  }
+
+  // When frames are shown, keep the conventional 2-digit HH
+  return `${String(hoursNum).padStart(2, '0')}:${minutes}:${seconds}${separator}${frames}`
 }

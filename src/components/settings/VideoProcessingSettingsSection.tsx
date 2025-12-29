@@ -149,7 +149,7 @@ export function VideoProcessingSettingsSection({
               <div className="space-y-0.5">
                 <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files while commenting</Label>
                 <p className="text-xs text-muted-foreground">
-                  Clients can attach files to comments (up to 5 per comment). Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR). Max 200MB per file.
+                  Clients can attach files to comments (up to 5 per comment). Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR).
                 </p>
               </div>
               <Switch
