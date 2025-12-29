@@ -562,7 +562,7 @@ export default function SharePage() {
               {authMode === 'BOTH' && 'Choose your preferred authentication method.'}
             </p>
             <p className="text-xs text-muted-foreground mt-3 px-4">
-              This authentication is for project recipients only.
+              This authentication is for those assigned to this project.
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -689,22 +689,25 @@ export default function SharePage() {
             )}
 
             {/* Guest Entry Button - hide when OTP code is being entered */}
-            {guestMode && !otpSent && (
+            {guestMode && (
               <>
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-border"></div>
                   </div>
                   <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">Not a recipient?</span>
+                    <span className="bg-card px-2 text-muted-foreground">Not assigned to this project?</span>
                   </div>
                 </div>
+                <p className="text-sm text-muted-foreground text-center">
+                  Guest users do not have permissions to provide feedback, approve videos, or download files.
+                </p>
                 <Button
                   type="button"
                   size="default"
                   onClick={handleGuestEntry}
                   disabled={loading}
-                  className="w-full bg-warning text-warning-foreground hover:bg-warning/90 shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation transition-all duration-200"
+                  className="w-full bg-warning text-white hover:bg-warning/90 shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation transition-all duration-200"
                 >
                   Continue as Guest
                 </Button>
