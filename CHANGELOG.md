@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.3-alpha-4] - 2025-12-28
 
+## [0.8.3-alpha-7] - 2025-12-30
+
+### Added
+- Projects: optional per-project setting to display full timecode (HH:MM:SS:FF) in comments
+
+### Fixed
+- Admin share view: header/sidebar layout alignment and scrolling behavior
+- Mobile: OTP input no longer overflows horizontally
+
 ## [0.8.3-alpha-6] - 2025-12-30
 
 ### Changed
