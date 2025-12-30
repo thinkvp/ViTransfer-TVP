@@ -2,11 +2,12 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo } from 'react'
+import Image from 'next/image'
 // Avoid importing Prisma runtime types in client components.
 type Video = any
 type ProjectStatus = 'IN_REVIEW' | 'APPROVED' | 'SHARE_ONLY'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Rewind, FastForward } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import {
@@ -74,6 +75,7 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1)
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(DEFAULT_ASPECT_RATIO)
+  const [showPosterOverlay, setShowPosterOverlay] = useState(true)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -172,6 +174,7 @@ export default function VideoPlayer({
   const previousVideoNameRef = useRef<string | null>(null)
   const currentTimeRef = useRef(0)
   const selectedVideoIdRef = useRef<string | null>(null)
+  const hasTrustedAspectRatioRef = useRef(false)
 
   // If ANY video is approved, only show approved videos (for both admin and client)
   const hasAnyApprovedVideo = videos.some((v: any) => v.approved === true)
@@ -186,14 +189,37 @@ export default function VideoPlayer({
   const effectiveDurationSeconds =
     durationSeconds || ((selectedVideo as any)?.duration as number | undefined) || 0
 
+  const selectedVideoWidth = (selectedVideo as any)?.width as number | undefined
+  const selectedVideoHeight = (selectedVideo as any)?.height as number | undefined
+
+  const selectedVideoTimelineVttUrl = (selectedVideo as any)?.timelineVttUrl as string | null | undefined
+  const selectedVideoTimelineSpriteUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
+  const selectedVideoTimelinePreviewsReady = (selectedVideo as any)?.timelinePreviewsReady === true
+
   // When switching videos, the new <video> element will start paused.
   // If we were playing previously, React state can get "stuck" because the old
   // element unmounts without firing a pause event.
   useEffect(() => {
     setIsPlaying(false)
     setTimelineHover((prev) => ({ ...prev, visible: false }))
-    setVideoAspectRatio(DEFAULT_ASPECT_RATIO)
-  }, [selectedVideo?.id])
+    setShowPosterOverlay(true)
+    const w = selectedVideoWidth
+    const h = selectedVideoHeight
+    if (
+      typeof w === 'number' &&
+      typeof h === 'number' &&
+      Number.isFinite(w) &&
+      Number.isFinite(h) &&
+      w > 0 &&
+      h > 0
+    ) {
+      hasTrustedAspectRatioRef.current = true
+      setVideoAspectRatio(w / h)
+    } else {
+      hasTrustedAspectRatioRef.current = false
+      setVideoAspectRatio(DEFAULT_ASPECT_RATIO)
+    }
+  }, [selectedVideo?.id, selectedVideoWidth, selectedVideoHeight])
 
   const timelineCommentMarkers = useMemo(() => {
     const duration = effectiveDurationSeconds
@@ -357,26 +383,6 @@ export default function VideoPlayer({
     }
   }
 
-  const handleOpenFeedback = () => {
-    if (videoRef.current) {
-      try {
-        videoRef.current.pause()
-      } catch {
-        // ignore
-      }
-    }
-    setIsPlaying(false)
-
-    const el = document.getElementById('feedback-input')
-    if (el) {
-      try {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        ;(el as any).focus?.()
-      } catch {
-        // ignore
-      }
-    }
-  }
 
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
@@ -425,13 +431,12 @@ export default function VideoPlayer({
 
     async function loadTimelineVtt() {
       setTimelineCues([])
-      const vttUrl = (selectedVideo as any)?.timelineVttUrl as string | null | undefined
-      const spriteUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
-      const isReady = (selectedVideo as any)?.timelinePreviewsReady === true
-      if (!vttUrl || !spriteUrl || !isReady) return
+      if (!selectedVideoTimelineVttUrl || !selectedVideoTimelineSpriteUrl || !selectedVideoTimelinePreviewsReady) {
+        return
+      }
 
       try {
-        const res = await fetch(vttUrl)
+        const res = await fetch(selectedVideoTimelineVttUrl)
         if (!res.ok) return
         const text = await res.text()
         const cues = parseVtt(text)
@@ -447,7 +452,12 @@ export default function VideoPlayer({
     return () => {
       cancelled = true
     }
-  }, [selectedVideo?.id])
+  }, [
+    selectedVideo?.id,
+    selectedVideoTimelineVttUrl,
+    selectedVideoTimelineSpriteUrl,
+    selectedVideoTimelinePreviewsReady,
+  ])
 
   const getTimeFromScrubEvent = (clientX: number) => {
     const el = scrubBarRef.current
@@ -556,13 +566,14 @@ export default function VideoPlayer({
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
     if (initialSeekTime !== null && videoRef.current && videoUrl && !hasInitiallySeenRef.current) {
+      const videoEl = videoRef.current
       const handleLoadedMetadata = () => {
-        if (videoRef.current && initialSeekTime !== null) {
+        if (initialSeekTime !== null) {
           // Ensure timestamp is within video duration
-          const duration = videoRef.current.duration
+          const duration = videoEl.duration
           const seekTime = Math.min(initialSeekTime, duration)
 
-          videoRef.current.currentTime = seekTime
+          videoEl.currentTime = seekTime
           currentTimeRef.current = seekTime
           // Don't auto-play - mobile browsers block this anyway, let user control playback
 
@@ -572,15 +583,15 @@ export default function VideoPlayer({
       }
 
       // If metadata already loaded, seek immediately
-      if (videoRef.current.readyState >= 1) {
+      if (videoEl.readyState >= 1) {
         handleLoadedMetadata()
       } else {
         // Otherwise wait for metadata to load
-        videoRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+        videoEl.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
       }
 
       return () => {
-        videoRef.current?.removeEventListener('loadedmetadata', handleLoadedMetadata)
+        videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata)
       }
     }
   }, [initialSeekTime, videoUrl])
@@ -618,6 +629,9 @@ export default function VideoPlayer({
   useEffect(() => {
     const handleSeekToTime = (e: CustomEvent) => {
       const { timestamp, videoId, videoVersion } = e.detail
+
+      // If the user is seeking to a timestamp, show actual video frames (not the poster overlay).
+      setShowPosterOverlay(false)
 
       // If videoId is specified and different from current, try to switch to it
       if (videoId && videoId !== selectedVideo.id) {
@@ -806,6 +820,13 @@ export default function VideoPlayer({
         if (Number.isFinite(videoRef.current.duration)) {
           setDurationSeconds(videoRef.current.duration)
         }
+
+        // Keep comment time displays in sync with playback.
+        window.dispatchEvent(
+          new CustomEvent('videoTimeUpdated', {
+            detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current },
+          })
+        )
         lastTimeUpdateRef.current = now
       }
     }
@@ -816,6 +837,7 @@ export default function VideoPlayer({
     if (!video) return
     try {
       if (video.paused) {
+        setShowPosterOverlay(false)
         await video.play()
       } else {
         video.pause()
@@ -856,6 +878,7 @@ export default function VideoPlayer({
       <div
         ref={playerContainerRef}
         className={
+
           isInFullscreen
             ? 'fixed inset-0 z-50 bg-background flex flex-col p-3'
             : 'flex flex-col space-y-4'
@@ -902,13 +925,17 @@ export default function VideoPlayer({
                   }
                   setCurrentTimeSeconds(el.currentTime || 0)
 
-                  // Update wrapper aspect ratio to match the actual video.
-                  const w = el.videoWidth
-                  const h = el.videoHeight
-                  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-                    setVideoAspectRatio(w / h)
-                  } else {
-                    setVideoAspectRatio(DEFAULT_ASPECT_RATIO)
+                  // Update wrapper aspect ratio from metadata only when DB dimensions are missing.
+                  // Some media can report dimensions differently (e.g., rotation metadata), which can cause
+                  // a visible resize/jump after initial render.
+                  if (!hasTrustedAspectRatioRef.current) {
+                    const w = el.videoWidth
+                    const h = el.videoHeight
+                    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+                      setVideoAspectRatio(w / h)
+                    } else {
+                      setVideoAspectRatio(DEFAULT_ASPECT_RATIO)
+                    }
                   }
 
                   // Ensure volume state is applied to new element
@@ -933,6 +960,20 @@ export default function VideoPlayer({
                 Loading video...
               </div>
             )}
+
+            {showPosterOverlay && (selectedVideo as any)?.thumbnailUrl ? (
+              <Image
+                alt="Video thumbnail"
+                src={(selectedVideo as any).thumbnailUrl}
+                fill
+                unoptimized
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                style={{
+                  objectFit: 'contain',
+                  backgroundColor: '#000',
+                }}
+              />
+            ) : null}
 
             {/* Playback Speed Indicator - Show when speed is not 1.0x */}
             {playbackSpeed !== 1.0 && (
@@ -1225,7 +1266,7 @@ export default function VideoPlayer({
               </Button>
             </div>
 
-            {/* Mobile: row 2 controls (left: play/time, right: volume/speed/chat/fullscreen) */}
+            {/* Mobile: row 2 controls (left: play/time, right: volume/speed/fullscreen) */}
             <div className="sm:hidden flex items-center justify-between gap-2 w-full">
               <div className="flex items-center gap-2">
                 <Button
@@ -1309,16 +1350,6 @@ export default function VideoPlayer({
                   className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                 >
                   <FastForward className="w-4 h-4" />
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleOpenFeedback}
-                  aria-label="Open feedback"
-                >
-                  <MessageSquare className="w-4 h-4" />
                 </Button>
 
                 <Button

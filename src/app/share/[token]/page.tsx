@@ -341,7 +341,7 @@ export default function SharePage() {
           }
 
           let thumbnailUrl = null
-          if (video.thumbnailPath) {
+          if (video.hasThumbnail) {
             const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
             if (thumbToken) {
               thumbnailUrl = `/api/content/${thumbToken}`
@@ -776,7 +776,11 @@ export default function SharePage() {
               </CardContent>
             </Card>
           ) : (
-            <div className={`flex-1 min-h-0 ${(project.hideFeedback || isGuest) ? 'flex flex-col max-w-7xl mx-auto w-full' : 'grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3'}`}>
+            <div
+              className={`flex-1 min-h-0 ${(project.hideFeedback || isGuest)
+                ? 'flex flex-col max-w-7xl mx-auto w-full'
+                : 'grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3 lg:-mx-8 lg:-my-8'}`}
+            >
               {(project.hideFeedback || isGuest) ? (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <VideoPlayer
@@ -934,7 +938,7 @@ function ShareFeedbackGrid({
 
   return (
     <>
-      <div className="lg:col-span-2 flex-1 min-h-0 flex flex-col">
+      <div className="lg:col-span-2 flex-1 min-h-0 flex flex-col lg:pl-8 lg:py-8">
         <VideoPlayer
           videos={readyVideos}
           projectId={project.id}
@@ -971,15 +975,12 @@ function ShareFeedbackGrid({
           selectedTimestamp={management.selectedTimestamp}
           onClearTimestamp={management.handleClearTimestamp}
           selectedVideoFps={management.selectedVideoFps}
+          useFullTimecode={Boolean(project?.useFullTimecode)}
           replyingToComment={management.replyingToComment}
           onCancelReply={management.handleCancelReply}
           showAuthorInput={Boolean(isPasswordProtected)}
           authorName={management.authorName}
           onAuthorNameChange={management.setAuthorName}
-          namedRecipients={management.namedRecipients}
-          nameSource={management.nameSource}
-          selectedRecipientId={management.selectedRecipientId}
-          onNameSourceChange={management.handleNameSourceChange}
           currentVideoRestricted={currentVideoRestricted}
           restrictionMessage={restrictionMessage}
           commentsDisabled={commentsDisabled}
@@ -990,7 +991,7 @@ function ShareFeedbackGrid({
         />
       </div>
 
-      <div className="lg:sticky lg:top-6 lg:self-start lg:h-[calc(100vh-6rem)] min-h-0">
+      <div className="lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height))] min-h-0 overflow-hidden">
         <CommentSectionView
           projectId={project.id}
           comments={serverComments as any}
@@ -998,6 +999,7 @@ function ShareFeedbackGrid({
           clientEmail={project.clientEmail}
           isApproved={isApproved}
           restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
+          useFullTimecode={Boolean(project?.useFullTimecode)}
           videos={readyVideos as any}
           isAdminView={false}
           companyName={companyName}

@@ -43,6 +43,7 @@ interface CommentSectionProps {
   clientEmail?: string
   isApproved: boolean
   restrictToLatestVersion?: boolean
+  useFullTimecode?: boolean
   videos?: Video[]
   isAdminView?: boolean
   companyName?: string // Studio company name
@@ -72,6 +73,7 @@ export function CommentSectionView({
   clientEmail,
   isApproved,
   restrictToLatestVersion = false,
+  useFullTimecode = false,
   videos = [],
   isAdminView = false,
   companyName = 'Studio',
@@ -104,9 +106,6 @@ export function CommentSectionView({
     replyingToCommentId,
     replyingToComment,
     authorName,
-    nameSource,
-    selectedRecipientId,
-    namedRecipients,
     handleCommentChange,
     handleSubmitComment,
     handleReply,
@@ -114,7 +113,6 @@ export function CommentSectionView({
     handleClearTimestamp,
     handleDeleteComment,
     setAuthorName,
-    handleNameSourceChange,
     attachedFiles,
     onFileSelect,
     onRemoveFile,
@@ -128,7 +126,7 @@ export function CommentSectionView({
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
 
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
-  const [showFrames, setShowFrames] = useState(false)
+  const showFrames = useFullTimecode
   const [showVideoInfo, setShowVideoInfo] = useState(false)
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
@@ -627,14 +625,14 @@ export function CommentSectionView({
 
   return (
     <Card className="bg-card border border-border flex flex-col h-full max-h-[70vh] lg:max-h-none rounded-lg overflow-hidden" data-comment-section>
-      <CardHeader className="border-b border-border flex-shrink-0 space-y-3">
+      <CardHeader className="border-b border-border flex-shrink-0 space-y-1">
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <CardTitle className="text-foreground whitespace-normal break-words leading-snug">
+          <div className="min-w-0 w-full">
+            <CardTitle className="text-lg font-semibold text-foreground whitespace-normal break-words leading-snug">
               {headerVideoName}
             </CardTitle>
 
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="flex-shrink-0">Version:</span>
               {restrictToLatestVersion || sortedVideoVersions.length <= 1 ? (
                 <span className="text-foreground font-medium">
@@ -659,6 +657,60 @@ export function CommentSectionView({
                   </Select>
                 </div>
               )}
+
+              {showVideoActions ? (
+                <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 ml-auto"
+                    onClick={() => setShowVideoInfo(true)}
+                    title="Info"
+                    aria-label="Info"
+                  >
+                    <Info className="w-4 h-4" />
+                  </Button>
+
+                  <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Video Information</DialogTitle>
+                      <DialogDescription className="text-muted-foreground">
+                        Detailed metadata for this version
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    {headerVideo ? (
+                      <div className="space-y-3 text-xs sm:text-sm">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-muted-foreground">Filename:</span>
+                          <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Resolution:</span>
+                          <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Codec:</span>
+                          <span className="font-medium">{(headerVideo as any).codec || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Duration:</span>
+                          <span className="font-medium">{formatTimestamp((headerVideo as any).duration)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">FPS:</span>
+                          <span className="font-medium">{(headerVideo as any).fps ? Number((headerVideo as any).fps).toFixed(2) : 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Upload Date:</span>
+                          <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </DialogContent>
+                </Dialog>
+              ) : null}
             </div>
           </div>
         </div>
@@ -686,10 +738,8 @@ export function CommentSectionView({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* (Intentionally leaving Download + other actions here) */}
-
-          {(headerVideo as any)?.approved && !isApproved && (
+        {isAdminView && (headerVideo as any)?.approved && !isApproved ? (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="default"
               size="sm"
@@ -698,8 +748,8 @@ export function CommentSectionView({
             >
               {downloading ? 'Preparing...' : 'Download'}
             </Button>
-          )}
-        </div>
+          </div>
+        ) : null}
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
@@ -753,15 +803,12 @@ export function CommentSectionView({
             selectedTimestamp={selectedTimestamp}
             onClearTimestamp={handleClearTimestamp}
             selectedVideoFps={selectedVideoFps}
+            useFullTimecode={useFullTimecode}
             replyingToComment={replyingToComment}
             onCancelReply={handleCancelReply}
             showAuthorInput={!isAdminView && isPasswordProtected}
             authorName={authorName}
             onAuthorNameChange={setAuthorName}
-            namedRecipients={namedRecipients}
-            nameSource={nameSource}
-            selectedRecipientId={selectedRecipientId}
-            onNameSourceChange={handleNameSourceChange}
             currentVideoRestricted={currentVideoRestricted}
             restrictionMessage={restrictionMessage}
             commentsDisabled={commentsDisabled}
@@ -772,71 +819,32 @@ export function CommentSectionView({
 
         {/* List Controls (directly above the message list) */}
         <div className="px-4 py-2 border-b border-border bg-card flex-shrink-0">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
               {showVideoActions && (
                 <>
-                  {showApproveButton && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && (
+                  {showApproveButton && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup ? (
                     <Button
                       variant="success"
                       size="sm"
                       onClick={() => setShowApproveConfirm(true)}
                       disabled={approving}
-                        className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
+                      className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
                     >
                       Approve Video
                     </Button>
+                  ) : (
+                    !isAdminView && (headerVideo as any)?.approved && !isApproved && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handleDownloadSelected}
+                        disabled={downloading}
+                      >
+                        {downloading ? 'Preparing...' : 'Download'}
+                      </Button>
+                    )
                   )}
-
-                  <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => setShowVideoInfo(true)}
-                      title="Info"
-                      aria-label="Info"
-                    >
-                      <Info className="w-4 h-4" />
-                    </Button>
-                    <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>Video Information</DialogTitle>
-                        <DialogDescription className="text-muted-foreground">
-                          Detailed metadata for this version
-                        </DialogDescription>
-                      </DialogHeader>
-
-                      {headerVideo ? (
-                        <div className="space-y-3 text-xs sm:text-sm">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground">Filename:</span>
-                            <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Resolution:</span>
-                            <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Codec:</span>
-                            <span className="font-medium">{(headerVideo as any).codec || 'N/A'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Duration:</span>
-                            <span className="font-medium">{formatTimestamp((headerVideo as any).duration)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">FPS:</span>
-                            <span className="font-medium">{(headerVideo as any).fps ? Number((headerVideo as any).fps).toFixed(2) : 'N/A'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Upload Date:</span>
-                            <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
-                          </div>
-                        </div>
-                      ) : null}
-                    </DialogContent>
-                  </Dialog>
 
                   {showThemeToggle && !isAdminView ? (
                     <div className="shrink-0">
@@ -847,18 +855,7 @@ export function CommentSectionView({
               )}
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowFrames((v) => !v)}
-                className={cn(showFrames ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                title={showFrames ? 'Hide frames' : 'Show frames'}
-                aria-label={showFrames ? 'Hide frames' : 'Show frames'}
-              >
-                <span className="inline-flex items-center justify-center font-mono text-xs font-semibold leading-none">FF</span>
-              </Button>
-
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
               <div className="flex-shrink-0">
                 <Select
                   value={commentSortMode}

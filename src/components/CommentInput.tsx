@@ -5,13 +5,13 @@ type Comment = any
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
-import { Clock, Send, Paperclip, X } from 'lucide-react'
+import { Send, Paperclip, X, Clock } from 'lucide-react'
 import { useState } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
-import { secondsToTimecode, formatTimecodeDisplay, getTimecodeLabel, isDropFrame } from '@/lib/timecode'
+import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
-import { cn } from '@/lib/utils'
+import { cn, formatTimestamp } from '@/lib/utils'
 
 interface CommentInputProps {
   newComment: string
@@ -30,6 +30,9 @@ interface CommentInputProps {
   onClearTimestamp: () => void
   selectedVideoFps: number // FPS of the currently selected video
 
+  // Display
+  useFullTimecode?: boolean
+
   // Reply state
   replyingToComment: Comment | null
   onCancelReply: () => void
@@ -38,10 +41,6 @@ interface CommentInputProps {
   showAuthorInput: boolean
   authorName: string
   onAuthorNameChange: (value: string) => void
-  namedRecipients: Array<{ id: string; name: string | null }>
-  nameSource: 'recipient' | 'custom' | 'none'
-  selectedRecipientId: string
-  onNameSourceChange: (source: 'recipient' | 'custom' | 'none', recipientId?: string) => void
 
   // Restrictions
   currentVideoRestricted: boolean
@@ -75,15 +74,12 @@ export default function CommentInput({
   selectedTimestamp,
   onClearTimestamp,
   selectedVideoFps,
+  useFullTimecode = false,
   replyingToComment,
   onCancelReply,
   showAuthorInput,
   authorName,
   onAuthorNameChange,
-  namedRecipients,
-  nameSource,
-  selectedRecipientId,
-  onNameSourceChange,
   currentVideoRestricted,
   restrictionMessage,
   commentsDisabled,
@@ -100,9 +96,8 @@ export default function CommentInput({
 
   if (commentsDisabled) return null
 
-  // Check if name selection is required but not provided
-  const isNameRequired = showAuthorInput && namedRecipients.length > 0 && nameSource === 'none'
-  const canSubmit = !loading && newComment.trim() && !isNameRequired
+  const hasRequiredName = !showAuthorInput || Boolean(authorName.trim())
+  const canSubmit = !loading && newComment.trim() && hasRequiredName
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Allow Ctrl+Space and other Ctrl shortcuts to pass through to VideoPlayer
@@ -160,81 +155,30 @@ export default function CommentInput({
         </div>
       )}
 
-      {/* Author Info - Only show for password-protected shares (not for admin users) */}
-      {!currentVideoRestricted && showAuthorInput && (
-        <div className="mb-3 space-y-2">
-          {namedRecipients.length > 0 ? (
-            <>
-              <select
-                value={nameSource === 'recipient' && selectedRecipientId ? selectedRecipientId : nameSource === 'custom' ? 'custom' : 'none'}
-                onChange={(e) => {
-                  if (e.target.value === 'custom') {
-                    onNameSourceChange('custom')
-                  } else if (e.target.value === 'none') {
-                    onNameSourceChange('none')
-                  } else {
-                    onNameSourceChange('recipient', e.target.value)
-                  }
-                }}
-                className="w-full px-3 py-2 text-sm bg-card border border-border rounded-md"
-              >
-                <option value="none">Select a name...</option>
-                {namedRecipients.map((recipient) => (
-                  <option key={recipient.id} value={recipient.id}>
-                    {recipient.name}
-                  </option>
-                ))}
-                <option value="custom">Custom Name</option>
-              </select>
+      {/* Time + Name row */}
+      {!currentVideoRestricted && (
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 bg-warning-visible text-warning border-2 border-warning-visible flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            <span className="tabular-nums">
+              {useFullTimecode
+                ? secondsToTimecode(selectedTimestamp ?? 0, selectedVideoFps || 24)
+                : formatTimestamp(selectedTimestamp ?? 0)}
+            </span>
+          </span>
 
-              {nameSource === 'custom' && (
-                <Input
-                  placeholder="Enter your name"
-                  value={authorName}
-                  onChange={(e) => onAuthorNameChange(e.target.value)}
-                  className="text-sm"
-                  autoFocus
-                />
-              )}
-            </>
-          ) : (
-            <Input
-              placeholder="Your name (optional)"
-              value={authorName}
-              onChange={(e) => onAuthorNameChange(e.target.value)}
-              className="text-sm"
-            />
-          )}
-        </div>
-      )}
-
-      {/* Timecode indicator */}
-      {selectedTimestamp !== null && selectedTimestamp !== undefined && !currentVideoRestricted && (
-        <div className="mb-2">
-          {/* Format hint - aligned to match timecode position */}
-          <div className="flex items-center gap-3 mb-0.5 ml-7">
-            <span className="text-sm text-muted-foreground/60 font-mono">
-              {isDropFrame(selectedVideoFps) ? 'HH:MM:SS;FF' : 'HH:MM:SS:FF'}
-            </span>
-            <span className="text-sm text-muted-foreground/50">
-              (Hours:Minutes:Seconds{isDropFrame(selectedVideoFps) ? ';' : ':'}Frames)
-            </span>
-          </div>
-          {/* Timecode value with clock and clear button */}
-          <div className="flex items-center gap-3">
-            <Clock className="w-4 h-4 text-warning flex-shrink-0" />
-            <span className="text-warning font-mono text-sm">
-              {formatTimecodeDisplay(secondsToTimecode(selectedTimestamp, selectedVideoFps))}
-            </span>
-            <Button
-              onClick={onClearTimestamp}
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground"
-            >
-              Clear
-            </Button>
-          </div>
+          {showAuthorInput ? (
+            <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Name:</span>
+              <Input
+                placeholder="Enter your name"
+                value={authorName}
+                onChange={(e) => onAuthorNameChange(e.target.value)}
+                className="text-sm"
+                aria-label="Your name"
+              />
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -315,28 +259,26 @@ export default function CommentInput({
             </div>
           )}
 
-          {isNameRequired ? (
-            <p className="text-xs text-warning mt-2">
-              Please select your name from the dropdown above before sending
-            </p>
-          ) : (
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground">
-                Press Enter to send & Shift+Enter for new line
-              </p>
-              {showShortcutsButton && onShowShortcuts && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={onShowShortcuts}
-                  className="self-start sm:self-auto"
-                >
-                  Shortcuts
-                </Button>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              {showAuthorInput && !authorName.trim() ? (
+                <p className="text-xs text-warning">Enter your name to send</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">Press Enter to send & Shift+Enter for new line</p>
               )}
             </div>
-          )}
+            {showShortcutsButton && onShowShortcuts && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={onShowShortcuts}
+                className="hidden self-start sm:inline-flex sm:self-auto"
+              >
+                Shortcuts
+              </Button>
+            )}
+          </div>
 
           {/* File Upload Modal */}
           {allowFileUpload && (

@@ -140,6 +140,7 @@ export async function GET(
       streamUrl1080p: '',
       downloadUrl: null,
       thumbnailUrl: null,
+      hasThumbnail: !!video.thumbnailPath,
       preview720Path: undefined,
       preview1080Path: undefined,
       originalStoragePath: undefined,
@@ -216,6 +217,7 @@ export async function GET(
       streamUrl1080p: video.streamUrl1080p,
       downloadUrl: video.downloadUrl,
       thumbnailUrl: video.thumbnailUrl,
+      hasThumbnail: video.hasThumbnail,
     })) : videosSanitizedBase
 
     const sanitizedVideosByName = isGuest ? Object.keys(sortedVideosByName).reduce((acc: any, name: string) => {
@@ -234,6 +236,7 @@ export async function GET(
         streamUrl1080p: video.streamUrl1080p,
         downloadUrl: video.downloadUrl,
         thumbnailUrl: video.thumbnailUrl,
+        hasThumbnail: video.hasThumbnail,
       }))
       return acc
     }, {}) : sortedVideosByName
@@ -261,6 +264,7 @@ export async function GET(
         maxRevisions: project.maxRevisions,
         restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
         hideFeedback: project.hideFeedback,
+        useFullTimecode: (project as any).useFullTimecode ?? false,
         allowClientDeleteComments: project.allowClientDeleteComments,
         allowClientUploadFiles: project.allowClientUploadFiles,
         previewResolution: project.previewResolution,

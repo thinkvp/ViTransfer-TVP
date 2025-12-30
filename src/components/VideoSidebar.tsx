@@ -246,14 +246,29 @@ export default function VideoSidebar({
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="w-full p-4 flex items-center justify-between text-left hover:bg-accent transition-colors"
         >
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-muted-foreground mb-1">
-              {isCollapsed ? 'Tap to select video' : 'Currently viewing'}
-            </p>
-            <p className="text-sm font-medium text-foreground truncate">{activeVideoName}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {videoGroups.find(g => g.name === activeVideoName)?.versionCount || 0} versions
-            </p>
+          <div className="flex-1 min-w-0 flex items-center gap-4">
+            <div className="w-24 flex-shrink-0">
+              <p className="text-xs text-muted-foreground leading-tight text-right">
+                {isCollapsed ? (
+                  <>
+                    Tap to<br />
+                    select video
+                  </>
+                ) : (
+                  <>
+                    Currently<br />
+                    viewing
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground truncate">{activeVideoName}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {videoGroups.find(g => g.name === activeVideoName)?.versionCount || 0} versions
+              </p>
+            </div>
           </div>
           {isCollapsed ? (
             <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0 ml-3" />

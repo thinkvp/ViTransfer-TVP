@@ -53,6 +53,7 @@ model Project {
   // Comment restrictions
   restrictCommentsToLatestVersion Boolean @default(false)
   hideFeedback                    Boolean @default(false)
+  useFullTimecode                 Boolean @default(false) // Display comment times as full timecode (HH:MM:SS:FF / DF) instead of M:SS
   allowClientDeleteComments       Boolean @default(false)
   allowClientUploadFiles          Boolean @default(false) // Allow clients to upload files with comments
   maxClientUploadAllocationMB     Int     @default(1000) // Total allowed client comment-attachment uploads per project (0 = unlimited)

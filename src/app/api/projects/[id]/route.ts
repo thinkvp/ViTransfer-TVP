@@ -23,6 +23,7 @@ const updateProjectSchema = z.object({
   maxRevisions: z.number().int().min(0).max(50).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
+  useFullTimecode: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
   allowClientUploadFiles: z.boolean().optional(),
   maxClientUploadAllocationMB: z.number().int().min(0).max(1000000).optional(),
@@ -241,6 +242,9 @@ export async function PATCH(
     }
     if (validatedBody.hideFeedback !== undefined) {
       updateData.hideFeedback = validatedBody.hideFeedback
+    }
+    if (validatedBody.useFullTimecode !== undefined) {
+      updateData.useFullTimecode = validatedBody.useFullTimecode
     }
     if (validatedBody.allowClientDeleteComments !== undefined) {
       updateData.allowClientDeleteComments = validatedBody.allowClientDeleteComments

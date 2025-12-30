@@ -308,14 +308,36 @@ export function calculateOutputDimensions(
 
   let dimensions: OutputDimensions
 
-  if (isVertical) {
-    dimensions = {
-      width: preset.verticalWidth,
-      height: Math.round(preset.verticalWidth / aspectRatio / 2) * 2  // Ensure even number
-    }
-  } else {
-    dimensions = preset.horizontal
+  const inputWidth = Number(metadata.width) || 0
+  const inputHeight = Number(metadata.height) || 0
+
+  // Fall back to a safe default if metadata is missing.
+  if (inputWidth <= 0 || inputHeight <= 0) {
+    const fallback = RESOLUTION_PRESETS[resolution as keyof typeof RESOLUTION_PRESETS] || RESOLUTION_PRESETS['720p']
+    return fallback.horizontal
   }
+
+  const isVertical = inputHeight > inputWidth
+  const aspectRatio = inputWidth / inputHeight
+
+  console.log(`[WORKER] Video orientation: ${isVertical ? 'vertical' : 'horizontal'} (${inputWidth}x${inputHeight}, ratio: ${aspectRatio.toFixed(2)})`)
+
+  const preset = RESOLUTION_PRESETS[resolution as keyof typeof RESOLUTION_PRESETS] || RESOLUTION_PRESETS['720p']
+
+  // Fit-to-box (no stretching): preserve source aspect ratio while staying within a target bounding box.
+  // For vertical, we use a portrait-ish bounding box by swapping the horizontal dimensions.
+  const maxWidth = isVertical ? preset.verticalWidth : preset.horizontal.width
+  const maxHeight = isVertical ? preset.horizontal.width : preset.horizontal.height
+
+  const scale = Math.min(maxWidth / inputWidth, maxHeight / inputHeight)
+
+  const even = (n: number) => Math.max(2, Math.round(n / 2) * 2)
+  const width = even(inputWidth * scale)
+  const height = even(inputHeight * scale)
+
+  const dimensions: OutputDimensions = { width, height }
+  console.log(`[WORKER] Output resolution: ${dimensions.width}x${dimensions.height}`)
+  return dimensions
 
   console.log(`[WORKER] Output resolution: ${dimensions.width}x${dimensions.height}`)
 

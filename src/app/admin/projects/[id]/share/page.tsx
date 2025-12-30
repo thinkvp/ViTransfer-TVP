@@ -393,42 +393,61 @@ export default function AdminSharePage() {
   })()
 
   return (
-    <div className="flex-1 min-h-0 bg-background flex flex-col lg:flex-row overflow-hidden">
-      {/* Video Sidebar */}
-      {project.videosByName && hasMultipleVideos && (
-        <VideoSidebar
-          videosByName={project.videosByName}
-          activeVideoName={activeVideoName}
-          onVideoSelect={handleVideoSelect}
-          className="w-64 flex-shrink-0 lg:h-full"
-        />
-      )}
+    <div className="flex-1 min-h-0 bg-background flex flex-col overflow-hidden">
+      {/* Subheader (match Project page back-row styling) */}
+      <div className="flex-shrink-0">
+        <div className="max-w-screen-2xl mx-auto w-full px-3 sm:px-4 lg:px-6 pt-3 sm:pt-6">
+          <div className="mb-3 sm:mb-4">
+            <div className="flex items-center gap-2">
+              <div className="flex-shrink-0">
+                <Link href={projectUrl}>
+                  <Button variant="ghost" size="default" className="justify-start px-3">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    <span className="hidden sm:inline">Back to Project</span>
+                    <span className="sm:hidden">Back</span>
+                  </Button>
+                </Link>
+              </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
-        <div className="max-w-screen-2xl mx-auto w-full px-3 sm:px-4 lg:px-6 py-3 sm:py-6 flex-1 min-h-0 flex flex-col">
-          {/* Header */}
-          <div className="mb-6 flex flex-wrap items-center gap-4">
-            <Button
-              variant="ghost"
-              size="default"
-              className="px-3"
-              onClick={() => router.push(projectUrl)}
-            >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              <span className="hidden sm:inline">Back to Project</span>
-              <span className="sm:hidden">Back</span>
-            </Button>
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-bold text-foreground truncate">
-                {project.title}
-              </h1>
-              <p className="text-muted-foreground text-sm mt-1">
-                Share View
-              </p>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-end lg:justify-center gap-2 sm:gap-3 min-w-0">
+                  <span className="text-lg sm:text-xl font-semibold text-foreground truncate">
+                    {project.title}
+                  </span>
+                  <span className="text-sm sm:text-lg font-medium text-muted-foreground flex-shrink-0">
+                    Share view
+                  </span>
+                </div>
+              </div>
+
+              {/* Spacer to keep the title truly centered on desktop */}
+              <div className="hidden lg:block flex-shrink-0 opacity-0 pointer-events-none" aria-hidden="true">
+                <Button variant="ghost" size="default" className="justify-start px-3" tabIndex={-1}>
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Back to Project</span>
+                  <span className="sm:hidden">Back</span>
+                </Button>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
 
+      {/* Content */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+        {/* Video Sidebar */}
+        {project.videosByName && hasMultipleVideos && (
+          <VideoSidebar
+            videosByName={project.videosByName}
+            activeVideoName={activeVideoName}
+            onVideoSelect={handleVideoSelect}
+            className="w-64 flex-shrink-0 max-h-full"
+          />
+        )}
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
+          <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
           {/* Main Content */}
             {readyVideos.length === 0 ? (
               <Card className="bg-card border-border rounded-lg">
@@ -439,7 +458,11 @@ export default function AdminSharePage() {
                 </CardContent>
               </Card>
             ) : (
-            <div className={`flex-1 min-h-0 ${project.hideFeedback ? 'flex flex-col w-full' : 'grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3'}`}>
+            <div
+              className={`flex-1 min-h-0 ${project.hideFeedback
+                ? 'flex flex-col w-full'
+                : 'grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3 lg:-mx-8 lg:-my-8'}`}
+            >
               {project.hideFeedback ? (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <VideoPlayer
@@ -479,6 +502,7 @@ export default function AdminSharePage() {
               )}
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
@@ -592,7 +616,7 @@ function AdminShareFeedbackGrid({
 
   return (
     <>
-      <div className="lg:col-span-2 flex-1 min-h-0 flex flex-col">
+      <div className="lg:col-span-2 flex-1 min-h-0 flex flex-col lg:pl-8 lg:py-8">
         <VideoPlayer
           videos={readyVideos}
           projectId={project.id}
@@ -624,15 +648,12 @@ function AdminShareFeedbackGrid({
           selectedTimestamp={management.selectedTimestamp}
           onClearTimestamp={management.handleClearTimestamp}
           selectedVideoFps={management.selectedVideoFps}
+          useFullTimecode={Boolean(project?.useFullTimecode)}
           replyingToComment={management.replyingToComment}
           onCancelReply={management.handleCancelReply}
           showAuthorInput={false}
           authorName={management.authorName}
           onAuthorNameChange={management.setAuthorName}
-          namedRecipients={management.namedRecipients}
-          nameSource={management.nameSource}
-          selectedRecipientId={management.selectedRecipientId}
-          onNameSourceChange={management.handleNameSourceChange}
           currentVideoRestricted={currentVideoRestricted}
           restrictionMessage={restrictionMessage}
           commentsDisabled={commentsDisabled}
@@ -643,7 +664,7 @@ function AdminShareFeedbackGrid({
         />
       </div>
 
-      <div className="lg:sticky lg:top-6 lg:self-start lg:h-[calc(100vh-6rem)] min-h-0">
+      <div className="lg:sticky lg:top-0 lg:self-stretch lg:h-full min-h-0 overflow-hidden">
         <CommentSectionView
           projectId={project.id}
           projectSlug={project.slug}
@@ -652,6 +673,7 @@ function AdminShareFeedbackGrid({
           clientEmail={project.recipients?.[0]?.email}
           isApproved={isApproved}
           restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
+          useFullTimecode={Boolean(project?.useFullTimecode)}
           videos={readyVideos as any}
           isAdminView={true}
           companyName={companyName}

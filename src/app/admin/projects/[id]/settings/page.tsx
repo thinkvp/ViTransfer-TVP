@@ -80,6 +80,7 @@ interface Project {
   maxRevisions: number
   restrictCommentsToLatestVersion: boolean
   hideFeedback: boolean
+  useFullTimecode: boolean
   allowClientDeleteComments: boolean
   allowClientUploadFiles: boolean
   maxClientUploadAllocationMB: number
@@ -117,6 +118,7 @@ export default function ProjectSettingsPage() {
   const [maxRevisions, setMaxRevisions] = useState<number | ''>('')
   const [restrictCommentsToLatestVersion, setRestrictCommentsToLatestVersion] = useState(false)
   const [hideFeedback, setHideFeedback] = useState(false)
+  const [useFullTimecode, setUseFullTimecode] = useState(false)
   const [allowClientDeleteComments, setAllowClientDeleteComments] = useState(false)
   const [allowClientUploadFiles, setAllowClientUploadFiles] = useState(false)
   const [maxClientUploadAllocationMB, setMaxClientUploadAllocationMB] = useState<number | ''>(1000)
@@ -203,6 +205,7 @@ export default function ProjectSettingsPage() {
         setMaxRevisions(data.maxRevisions)
         setRestrictCommentsToLatestVersion(data.restrictCommentsToLatestVersion)
         setHideFeedback(data.hideFeedback || false)
+        setUseFullTimecode(data.useFullTimecode ?? false)
         setAllowClientDeleteComments(data.allowClientDeleteComments ?? false)
         setAllowClientUploadFiles(data.allowClientUploadFiles ?? false)
         setMaxClientUploadAllocationMB(data.maxClientUploadAllocationMB ?? 1000)
@@ -305,6 +308,7 @@ export default function ProjectSettingsPage() {
         maxRevisions: enableRevisions ? finalMaxRevisions : 0,
         restrictCommentsToLatestVersion,
         hideFeedback,
+        useFullTimecode,
         allowClientDeleteComments,
         allowClientUploadFiles,
         maxClientUploadAllocationMB: typeof maxClientUploadAllocationMB === 'number'
@@ -890,6 +894,20 @@ export default function ProjectSettingsPage() {
                     id="restrictComments"
                     checked={restrictCommentsToLatestVersion}
                     onCheckedChange={setRestrictCommentsToLatestVersion}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5 flex-1">
+                    <Label htmlFor="useFullTimecode">Display Full Timecode</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.
+                    </p>
+                  </div>
+                  <Switch
+                    id="useFullTimecode"
+                    checked={useFullTimecode}
+                    onCheckedChange={setUseFullTimecode}
                   />
                 </div>
 

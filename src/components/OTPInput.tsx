@@ -72,7 +72,8 @@ export function OTPInput({ value, onChange, disabled = false, autoFocus = false 
   }
 
   return (
-    <div className="flex gap-2 justify-center">
+    <div className="w-full flex justify-center">
+      <div className="flex gap-1 sm:gap-2 justify-center max-w-full">
       {[0, 1, 2, 3, 4, 5].map((index) => (
         <input
           key={index}
@@ -87,10 +88,11 @@ export function OTPInput({ value, onChange, disabled = false, autoFocus = false 
           onFocus={() => handleFocus(index)}
           disabled={disabled}
           autoFocus={autoFocus && index === 0}
-          className="w-12 h-14 text-center text-2xl font-mono font-bold border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-10 h-12 text-center text-xl sm:w-12 sm:h-14 sm:text-2xl font-mono font-bold border border-border rounded-md bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
           aria-label={`Digit ${index + 1}`}
         />
       ))}
+      </div>
     </div>
   )
 }

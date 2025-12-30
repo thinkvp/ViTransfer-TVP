@@ -66,9 +66,6 @@ COPY prisma ./prisma
 # Install all dependencies
 RUN npm install --legacy-peer-deps
 
-# Copy node_modules for production (we'll use all deps for now to avoid prisma issues)
-RUN cp -R node_modules /tmp/prod_node_modules
-
 # Run security audit - fail build if HIGH or CRITICAL vulnerabilities found
 # This ensures we never deploy with known security issues
 RUN echo "Running npm security audit..." && \
@@ -121,32 +118,29 @@ RUN addgroup -g 911 app && \
     adduser -D -u 911 -G app -h /app app
 
 # Copy only production dependencies
-COPY --from=deps /tmp/prod_node_modules ./node_modules
+COPY --chown=app:app --from=deps /app/node_modules ./node_modules
 
 # Copy built application from builder
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next ./.next
+COPY --chown=app:app --from=builder /app/public ./public
+COPY --chown=app:app --from=builder /app/.next ./.next
 
 # Copy Prisma files for migrations
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/prisma ./prisma
+COPY --chown=app:app --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --chown=app:app --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --chown=app:app --from=builder /app/prisma ./prisma
 
 # Copy necessary runtime files
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
-COPY --from=builder /app/next.config.js ./next.config.js
+COPY --chown=app:app --from=builder /app/src ./src
+COPY --chown=app:app --from=builder /app/package.json ./package.json
+COPY --chown=app:app --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --chown=app:app --from=builder /app/next.config.js ./next.config.js
 
 # Copy worker script
-COPY --from=builder /app/worker.mjs ./worker.mjs
+COPY --chown=app:app --from=builder /app/worker.mjs ./worker.mjs
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Set proper ownership for app user
-RUN chown -R app:app /app
 
 # This allows containers starting as any UID to read app code built as UID 911
 # Only affects app code, NOT user uploads (handled by volume mount permissions)

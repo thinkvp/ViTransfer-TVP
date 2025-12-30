@@ -50,7 +50,7 @@ export function useCommentManagement({
   // State
   const [optimisticComments, setOptimisticComments] = useState<CommentWithReplies[]>([])
   const [newComment, setNewComment] = useState('')
-  const [selectedTimestamp, setSelectedTimestamp] = useState<number | null>(null) // Internal: still use seconds for video player integration
+  const [selectedTimestamp, setSelectedTimestamp] = useState<number | null>(0) // Always show; kept in sync with playback
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [hasAutoFilledTimestamp, setHasAutoFilledTimestamp] = useState(false)
@@ -139,10 +139,7 @@ export function useCommentManagement({
   }
 
   // Author name management
-  const displayClientName = isPasswordProtected ? clientName : 'Client'
-  const namedRecipients = recipients.filter(r => r.name && r.name.trim() !== '')
-
-  // Load persisted name selection from sessionStorage (survives commenting but not page refresh)
+  // Load persisted name from sessionStorage (survives commenting but not page refresh)
   const storageKey = `comment-name-${projectId}`
   const loadPersistedName = () => {
     if (typeof window === 'undefined') return null
@@ -155,9 +152,9 @@ export function useCommentManagement({
   }
 
   const persistedName = loadPersistedName()
-  const [authorName, setAuthorName] = useState(persistedName?.authorName || '')
-  const [nameSource, setNameSource] = useState<'recipient' | 'custom' | 'none'>(persistedName?.nameSource || 'none')
-  const [selectedRecipientId, setSelectedRecipientId] = useState(persistedName?.selectedRecipientId || '')
+  const [authorName, setAuthorName] = useState(
+    typeof persistedName?.authorName === 'string' ? persistedName.authorName : ''
+  )
 
   // Merge real comments with optimistic comments
   // Remove optimistic comments that have been confirmed by the server
@@ -292,7 +289,7 @@ export function useCommentManagement({
     }
   }, [])
 
-  // Keep selectedTimestamp in sync when the user frame-steps while commenting
+  // Keep selectedTimestamp in sync with playback (including frame-step shortcuts)
   useEffect(() => {
     const handleVideoTimeUpdated = (e: CustomEvent) => {
       const time = e.detail?.time
@@ -300,8 +297,6 @@ export function useCommentManagement({
 
       if (typeof time !== 'number') return
       if (!videoId || videoId !== selectedVideoId) return
-      if (!hasAutoFilledTimestamp || selectedTimestamp === null) return
-
       setSelectedTimestamp(time)
     }
 
@@ -309,28 +304,10 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('videoTimeUpdated', handleVideoTimeUpdated as EventListener)
     }
-  }, [hasAutoFilledTimestamp, selectedTimestamp, selectedVideoId])
+  }, [selectedVideoId])
 
-  // Auto-fill timestamp when user starts typing
   const handleCommentChange = (value: string) => {
     setNewComment(value)
-
-    if (value.length > 0 && !hasAutoFilledTimestamp && selectedTimestamp === null) {
-      // Pause video and capture timestamp when user starts typing
-      window.dispatchEvent(new CustomEvent('pauseVideoForComment'))
-
-      window.dispatchEvent(
-        new CustomEvent('getCurrentTime', {
-          detail: {
-            callback: (time: number, videoId: string) => {
-              setSelectedTimestamp(time)
-              setSelectedVideoId(videoId)
-              setHasAutoFilledTimestamp(true)
-            },
-          },
-        })
-      )
-    }
   }
 
   // Submit comment
@@ -350,9 +327,9 @@ export function useCommentManagement({
       return
     }
 
-    // Prevent anonymous comments when named recipients are available
-    if (!useAdminAuth && isPasswordProtected && namedRecipients.length > 0 && nameSource === 'none') {
-      alert('Please select your name from the dropdown or choose "Custom Name" before commenting.')
+    // Require a name for clients on password-protected shares
+    if (!useAdminAuth && isPasswordProtected && !authorName.trim()) {
+      alert('Please enter your name before commenting.')
       return
     }
 
@@ -443,9 +420,6 @@ export function useCommentManagement({
       } else {
         if (authorName) requestBody.authorName = authorName
         if (clientEmail) requestBody.authorEmail = clientEmail
-        if (nameSource === 'recipient' && selectedRecipientId) {
-          requestBody.recipientId = selectedRecipientId
-        }
       }
 
       // Only include parentId if replying (not null)
@@ -543,7 +517,6 @@ export function useCommentManagement({
 
       // Clear input only after send + uploads complete
       setNewComment('')
-      setSelectedTimestamp(null)
       setHasAutoFilledTimestamp(false)
       setReplyingToCommentId(null)
       setAttachedFiles([])
@@ -580,37 +553,6 @@ export function useCommentManagement({
     setSelectedTimestamp(null)
     setSelectedVideoId(null)
     setHasAutoFilledTimestamp(false)
-  }
-
-  const handleNameSourceChange = (source: 'recipient' | 'custom' | 'none', recipientId?: string) => {
-    setNameSource(source)
-    let newAuthorName = ''
-    let newRecipientId = ''
-
-    if (source === 'custom') {
-      newAuthorName = ''
-    } else if (source === 'none') {
-      newAuthorName = ''
-      newRecipientId = ''
-    } else if (recipientId) {
-      newRecipientId = recipientId
-      const selected = namedRecipients.find(r => r.id === recipientId)
-      newAuthorName = selected?.name || ''
-    }
-
-    setAuthorName(newAuthorName)
-    setSelectedRecipientId(newRecipientId)
-
-    // Persist to sessionStorage
-    try {
-      sessionStorage.setItem(storageKey, JSON.stringify({
-        nameSource: source,
-        authorName: newAuthorName,
-        selectedRecipientId: newRecipientId,
-      }))
-    } catch {
-      // Ignore storage errors
-    }
   }
 
   const findCommentById = (commentId: string): CommentWithReplies | null => {
@@ -681,17 +623,10 @@ export function useCommentManagement({
   const handleAuthorNameChange = (name: string) => {
     setAuthorName(name)
 
-    // Persist to sessionStorage when custom name is being typed
-    if (nameSource === 'custom') {
-      try {
-        sessionStorage.setItem(storageKey, JSON.stringify({
-          nameSource,
-          authorName: name,
-          selectedRecipientId,
-        }))
-      } catch {
-        // Ignore storage errors
-      }
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify({ authorName: name }))
+    } catch {
+      // Ignore storage errors
     }
   }
 
@@ -737,9 +672,6 @@ export function useCommentManagement({
     replyingToCommentId,
     replyingToComment,
     authorName,
-    nameSource,
-    selectedRecipientId,
-    namedRecipients,
     handleCommentChange,
     handleSubmitComment,
     handleReply,
@@ -747,7 +679,6 @@ export function useCommentManagement({
     handleClearTimestamp,
     handleDeleteComment,
     setAuthorName: handleAuthorNameChange,
-    handleNameSourceChange,
     attachedFiles,
     onFileSelect,
     onRemoveFile,
