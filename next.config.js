@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
+
   // Avoid bundling certain Node-only packages into the server build.
   // This prevents webpack from rewriting jsdom asset paths (e.g. default-stylesheet.css)
   // into `.next/` and causing ENOENT during `next build`.

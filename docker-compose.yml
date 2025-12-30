@@ -55,6 +55,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: app
     container_name: vitransfer-app
     restart: unless-stopped
     depends_on:
@@ -101,6 +102,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: worker
     container_name: vitransfer-worker
     restart: unless-stopped
     command: npm run worker

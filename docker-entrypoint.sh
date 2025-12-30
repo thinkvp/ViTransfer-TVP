@@ -241,7 +241,9 @@ wait_for_app() {
 
 
 # Only run migrations and initialization for the main app, not the worker
-if [ "$1" = "npm" ] && [ "$2" = "start" ]; then
+if ([ "$1" = "npm" ] && [ "$2" = "start" ]) || \
+    ([ "$1" = "npm" ] && [ "$2" = "run" ] && [ "$3" = "start:standalone" ]) || \
+    ([ "$1" = "node" ] && [[ "$2" == *".next/standalone/server.js"* ]]); then
     echo "[SETUP] Running database setup..."
     echo ""
 

@@ -69,7 +69,7 @@ We will respond to your report within 48 hours and provide a timeline for a fix.
 ### Docker Scout Scan Results (As of 2025-12-05 - Version 0.6.4)
 
 **Scan Summary:**
-- **Image**: crypt010/vitransfer:0.6.4
+- **Image**: simbamcsimba/vitransfer-app:latest
 - **Platform**: linux/arm64
 - **Base Image**: node:24.11.1-alpine3.23
 - **Image Size**: 774 MB
@@ -116,13 +116,15 @@ We will respond to your report within 48 hours and provide a timeline for a fix.
 
 **1. Keep images updated:**
 ```bash
-docker pull crypt010/vitransfer:latest
+docker pull simbamcsimba/vitransfer-app:latest
+docker pull simbamcsimba/vitransfer-worker:latest
 docker-compose up -d
 ```
 
 **2. Run security scans:**
 ```bash
-docker scout cves crypt010/vitransfer:latest
+docker scout cves simbamcsimba/vitransfer-app:latest
+docker scout cves simbamcsimba/vitransfer-worker:latest
 ```
 
 **3. Enable HTTPS:**

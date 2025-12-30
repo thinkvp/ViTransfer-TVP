@@ -6,7 +6,7 @@ ViTransfer is a self-hosted web application designed for video professionals to 
 
 NOTE: Code-assisted development with Claude AI, built with focus on security and best practices.
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/crypt010/vitransfer)](https://hub.docker.com/r/crypt010/vitransfer)
+[![Docker Pulls](https://img.shields.io/docker/pulls/simbamcsimba/vitransfer-app)](https://hub.docker.com/r/simbamcsimba/vitransfer-app)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![GitHub](https://img.shields.io/badge/github-MansiVisuals%2FViTransfer-blue)](https://github.com/MansiVisuals/ViTransfer)
 [![Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/E1E215DBM4)
@@ -454,12 +454,25 @@ tar -czf vitransfer-backup.tar.gz \
 docker-compose pull
 
 # Or pull specific version tag
-docker pull crypt010/vitransfer:latest
+docker pull simbamcsimba/vitransfer-app:latest
+docker pull simbamcsimba/vitransfer-worker:latest
 
 # Restart with new images
 docker-compose up -d
 
 # Database migrations run automatically
+```
+
+### Publishing (maintainers)
+
+```bash
+# Linux/macOS (multi-arch buildx, pushes app + worker)
+./build-multiarch.sh
+```
+
+```powershell
+# Windows PowerShell (multi-arch buildx, pushes app + worker)
+./publish-docker.ps1
 ```
 
 ### Logs
@@ -546,7 +559,8 @@ See the [LICENSE](LICENSE) file for full details.
 - **Issues:** [GitHub Issues](https://github.com/MansiVisuals/ViTransfer/issues)
 - **Documentation:** This README and inline code comments
 - **Discussions:** [GitHub Discussions](https://github.com/MansiVisuals/ViTransfer/discussions)
-- **Docker Hub:** [crypt010/vitransfer](https://hub.docker.com/r/crypt010/vitransfer)
+- **Docker Hub:** [simbamcsimba/vitransfer-app](https://hub.docker.com/r/simbamcsimba/vitransfer-app)
+- **Docker Hub (worker):** [simbamcsimba/vitransfer-worker](https://hub.docker.com/r/simbamcsimba/vitransfer-worker)
 
 ---
 

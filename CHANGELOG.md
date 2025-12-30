@@ -932,5 +932,5 @@ Future v0.2.x releases will include notification system changes (configurable em
 
 ### Version Tagging
 Starting with v0.1.0, Docker images are tagged with both version numbers and "latest":
-- `crypt010/vitransfer:0.1.0` - Specific version
-- `crypt010/vitransfer:latest` - Always points to the latest stable release
+- `simbamcsimba/vitransfer-app:latest` - Application server image
+- `simbamcsimba/vitransfer-worker:latest` - Worker image (FFmpeg processing)
