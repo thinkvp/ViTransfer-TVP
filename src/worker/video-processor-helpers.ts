@@ -299,15 +299,6 @@ export function calculateOutputDimensions(
   metadata: VideoMetadata,
   resolution: string
 ): OutputDimensions {
-  const isVertical = metadata.height > metadata.width
-  const aspectRatio = metadata.width / metadata.height
-
-  console.log(`[WORKER] Video orientation: ${isVertical ? 'vertical' : 'horizontal'} (${metadata.width}x${metadata.height}, ratio: ${aspectRatio.toFixed(2)})`)
-
-  const preset = RESOLUTION_PRESETS[resolution as keyof typeof RESOLUTION_PRESETS] || RESOLUTION_PRESETS['720p']
-
-  let dimensions: OutputDimensions
-
   const inputWidth = Number(metadata.width) || 0
   const inputHeight = Number(metadata.height) || 0
 
@@ -320,7 +311,9 @@ export function calculateOutputDimensions(
   const isVertical = inputHeight > inputWidth
   const aspectRatio = inputWidth / inputHeight
 
-  console.log(`[WORKER] Video orientation: ${isVertical ? 'vertical' : 'horizontal'} (${inputWidth}x${inputHeight}, ratio: ${aspectRatio.toFixed(2)})`)
+  console.log(
+    `[WORKER] Video orientation: ${isVertical ? 'vertical' : 'horizontal'} (${inputWidth}x${inputHeight}, ratio: ${aspectRatio.toFixed(2)})`
+  )
 
   const preset = RESOLUTION_PRESETS[resolution as keyof typeof RESOLUTION_PRESETS] || RESOLUTION_PRESETS['720p']
 
@@ -337,14 +330,11 @@ export function calculateOutputDimensions(
 
   const dimensions: OutputDimensions = { width, height }
   console.log(`[WORKER] Output resolution: ${dimensions.width}x${dimensions.height}`)
-  return dimensions
-
-  console.log(`[WORKER] Output resolution: ${dimensions.width}x${dimensions.height}`)
 
   debugLog('Resolution calculation:', {
     setting: resolution,
     isVertical,
-    inputDimensions: `${metadata.width}x${metadata.height}`,
+    inputDimensions: `${inputWidth}x${inputHeight}`,
     outputDimensions: `${dimensions.width}x${dimensions.height}`,
     aspectRatio: aspectRatio.toFixed(2)
   })

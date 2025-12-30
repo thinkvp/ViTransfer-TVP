@@ -77,11 +77,16 @@ export default function VideoPlayer({
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(DEFAULT_ASPECT_RATIO)
   const [showPosterOverlay, setShowPosterOverlay] = useState(true)
 
+  const [canShowTimelineHover, setCanShowTimelineHover] = useState(true)
+
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
+
+  const scrubRafRef = useRef<number | null>(null)
+  const pendingScrubClientXRef = useRef<number | null>(null)
   const [timelineCues, setTimelineCues] = useState<
     Array<{
       start: number
@@ -123,6 +128,52 @@ export default function VideoPlayer({
     commentId: null,
   })
   const isScrubbingRef = useRef(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mql = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const update = () => setCanShowTimelineHover(mql.matches)
+    update()
+
+    // Safari < 14 uses addListener/removeListener
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', update)
+      return () => mql.removeEventListener('change', update)
+    }
+
+    // eslint-disable-next-line deprecation/deprecation
+    mql.addListener(update)
+    // eslint-disable-next-line deprecation/deprecation
+    return () => mql.removeListener(update)
+  }, [])
+
+  const scheduleScrubToClientX = (clientX: number) => {
+    pendingScrubClientXRef.current = clientX
+    if (scrubRafRef.current != null) return
+
+    scrubRafRef.current = window.requestAnimationFrame(() => {
+      scrubRafRef.current = null
+      const x = pendingScrubClientXRef.current
+      if (x == null) return
+
+      if (videoRef.current) {
+        const { time } = getTimeFromScrubEvent(x)
+        try {
+          videoRef.current.currentTime = time
+        } catch {
+          // ignore
+        }
+        currentTimeRef.current = time
+        setCurrentTimeSeconds(time)
+      }
+
+      // Only show hover previews on devices that support hover.
+      if (canShowTimelineHover) {
+        updateHoverFromClientX(x)
+      }
+    })
+  }
 
   const parseVtt = (vttText: string) => {
     const lines = vttText
@@ -1011,16 +1062,20 @@ export default function VideoPlayer({
             <div className="flex-1 relative">
               <div
                 ref={scrubBarRef}
-                className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible"
-                onPointerEnter={(e) => updateHoverFromClientX(e.clientX)}
-                onPointerMove={(e) => {
+                className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible touch-none select-none"
+                onPointerEnter={(e) => {
+                  if (!canShowTimelineHover) return
                   updateHoverFromClientX(e.clientX)
-                  if (isScrubbingRef.current && videoRef.current) {
-                    const { time } = getTimeFromScrubEvent(e.clientX)
-                    videoRef.current.currentTime = time
-                    currentTimeRef.current = time
-                    setCurrentTimeSeconds(time)
+                }}
+                onPointerMove={(e) => {
+                  if (isScrubbingRef.current) {
+                    e.preventDefault()
+                    scheduleScrubToClientX(e.clientX)
+                    return
                   }
+
+                  if (!canShowTimelineHover) return
+                  updateHoverFromClientX(e.clientX)
                 }}
                 onPointerLeave={() => {
                   isScrubbingRef.current = false
@@ -1028,20 +1083,24 @@ export default function VideoPlayer({
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onPointerDown={(e) => {
+                  e.preventDefault()
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
                   isScrubbingRef.current = true
-                  if (videoRef.current) {
-                    const { time } = getTimeFromScrubEvent(e.clientX)
-                    videoRef.current.currentTime = time
-                    currentTimeRef.current = time
-                    setCurrentTimeSeconds(time)
-                  }
+                  scheduleScrubToClientX(e.clientX)
                 }}
                 onPointerUp={(e) => {
                   try {
                     ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
                   } catch {}
                   isScrubbingRef.current = false
+                }}
+                onPointerCancel={(e) => {
+                  try {
+                    ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+                  } catch {}
+                  isScrubbingRef.current = false
+                  setTimelineHover((prev) => ({ ...prev, visible: false }))
+                  setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onClick={(e) => {
                   if (videoRef.current) {
@@ -1076,6 +1135,7 @@ export default function VideoPlayer({
                           title="Jump to comment"
                           aria-label="Jump to comment"
                           onPointerEnter={(e) => {
+                            if (!canShowTimelineHover) return
                             e.stopPropagation()
 
                             // Align both thumbnail and comment tooltip to the marker timestamp,
@@ -1089,6 +1149,7 @@ export default function VideoPlayer({
                             })
                           }}
                           onPointerLeave={(e) => {
+                            if (!canShowTimelineHover) return
                             e.stopPropagation()
                             setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                           }}
@@ -1225,7 +1286,8 @@ export default function VideoPlayer({
                           setIsMuted(false)
                         }
                       }}
-                      className="w-28 h-4 -rotate-90 accent-primary"
+                      className="w-28 h-4 -rotate-90 accent-primary touch-none"
+                      style={{ touchAction: 'none' }}
                       aria-label="Volume"
                     />
                     </div>
@@ -1322,7 +1384,8 @@ export default function VideoPlayer({
                               setIsMuted(false)
                             }
                           }}
-                          className="w-24 h-4 -rotate-90 accent-primary"
+                          className="w-24 h-4 -rotate-90 accent-primary touch-none"
+                          style={{ touchAction: 'none' }}
                           aria-label="Volume"
                         />
                       </div>

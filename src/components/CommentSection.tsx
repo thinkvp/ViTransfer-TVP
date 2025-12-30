@@ -738,7 +738,7 @@ export function CommentSectionView({
           </div>
         ) : null}
 
-        {isAdminView && (headerVideo as any)?.approved && !isApproved ? (
+        {showVideoActions && isAdminView && (headerVideo as any)?.approved && !isApproved ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="default"

@@ -324,6 +324,7 @@ export default function ProjectPage() {
                   allowClientDeleteComments={project.allowClientDeleteComments}
                   showVideoActions={false}
                   showVideoNotes={false}
+                  hideInput={true}
                 />
               </div>
             )}

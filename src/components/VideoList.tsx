@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, MessageSquare, Upload, Download, Check, X } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Download, Check, X } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -206,19 +206,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
     }
   }
 
-  const handleShowComments = (videoId: string) => {
-    // Dispatch event to update CommentSection to show this video's comments
-    window.dispatchEvent(new CustomEvent('selectVideoForComments', {
-      detail: { videoId }
-    }))
-
-    // Scroll to comment section smoothly
-    const commentSection = document.querySelector('[data-comment-section]')
-    if (commentSection) {
-      commentSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }
-
   const triggerDownload = (url: string) => {
     const link = document.createElement('a')
     link.href = url
@@ -336,17 +323,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                     ) : (
                       <CheckCircle2 className="w-4 h-4" />
                     )}
-                  </Button>
-                )}
-                {isAdmin && video.status === 'READY' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleShowComments(video.id)}
-                    className="text-primary hover:text-primary hover:bg-primary-visible"
-                    title="Show Feedback & Discussion"
-                  >
-                    <MessageSquare className="w-4 h-4" />
                   </Button>
                 )}
                 {isAdmin && video.status === 'READY' && (

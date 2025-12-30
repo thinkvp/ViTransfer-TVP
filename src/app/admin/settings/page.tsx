@@ -83,6 +83,8 @@ interface PushNotificationSettings {
 export default function GlobalSettingsPage() {
   const router = useRouter()
 
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+
   const [settings, setSettings] = useState<Settings | null>(null)
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -116,6 +118,25 @@ export default function GlobalSettingsPage() {
   const [adminNotificationSchedule, setAdminNotificationSchedule] = useState('HOURLY')
   const [adminNotificationTime, setAdminNotificationTime] = useState('09:00')
   const [adminNotificationDay, setAdminNotificationDay] = useState(1)
+
+  useEffect(() => {
+    let cancelled = false
+
+    apiFetch('/api/meta/version')
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return
+        const v = typeof data?.version === 'string' ? data.version : null
+        setAppVersion(v)
+      })
+      .catch(() => {
+        // ignore
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Form state for security settings
   const [showSecuritySettings, setShowSecuritySettings] = useState(false)
@@ -547,6 +568,14 @@ export default function GlobalSettingsPage() {
               <p className="text-sm sm:text-base text-muted-foreground mt-1">
                 Configure application-wide settings
               </p>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Powered by <span className="font-medium text-foreground">ViTransfer</span>
+                {appVersion ? (
+                  <span className="ml-2 rounded-md border border-border bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wide">
+                    Version {appVersion}
+                  </span>
+                ) : null}
+              </div>
             </div>
 
             <Button onClick={handleSave} variant="default" disabled={saving} size="lg" className="w-full sm:w-auto">
