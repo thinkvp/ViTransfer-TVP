@@ -4,7 +4,7 @@ param(
   [switch]$Dev,
   [switch]$NoLatest,
   [switch]$NoCache,
-  [string]$Platforms = 'linux/amd64,linux/arm64',
+  [string]$Platforms = 'linux/amd64',
   [string]$Builder
 )
 

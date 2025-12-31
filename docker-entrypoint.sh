@@ -1,125 +1,14 @@
 #!/bin/bash
 
-
-# ViTransfer Docker Entrypoint Script
-# Universal compatibility: Works on Unraid, TrueNAS, Docker Desktop, Ubuntu, Podman
-# Handles PUID/PGID remapping AND docker-compose user: directive
-# This script runs automatically on container start - no manual intervention required
-
+# ViTransfer Docker Entrypoint Script (simplified)
+# Assumes the container runtime (docker-compose `user:`) controls UID/GID.
+# Keeps only service readiness checks + Prisma migrations.
 
 set -e
 
-
 echo "ViTransfer starting..."
+echo "[INFO] Running as UID=$(id -u) GID=$(id -g)"
 echo ""
-
-
-# ========================================
-# SMART USER DETECTION
-# ========================================
-# Detects how the container is running and adapts automatically:
-# - Via docker-compose user: directive â†’ Already correct user
-# - Via PUID/PGID env vars â†’ Remap user
-# - Default â†’ Use default UID 911
-
-
-RUNNING_UID=$(id -u)
-RUNNING_GID=$(id -g)
-PUID=${PUID:-911}
-PGID=${PGID:-911}
-
-
-echo "[INFO] User Configuration:"
-echo "  Container running as: UID=$RUNNING_UID GID=$RUNNING_GID"
-echo "  Target (PUID/PGID): UID=$PUID GID=$PGID"
-echo ""
-
-
-# ========================================
-# CASE 1: Already running as target user
-# ========================================
-if [ "$RUNNING_UID" = "$PUID" ] && [ "$RUNNING_GID" = "$PGID" ]; then
-    echo "[OK] Already running as target user UID:$PUID GID:$PGID"
-    echo "     (Detected docker-compose 'user:' directive or matching PUID/PGID)"
-    echo ""
-
-
-    # Fix ownership of app files if needed (from build-time UID 911)
-    if [ "$RUNNING_UID" != "911" ]; then
-        echo "[SETUP] Fixing ownership of app files..."
-        # Only fix files still owned by build-time user (911)
-        # Don't touch mounted volumes!
-        find /app -maxdepth 2 \( -name '.next' -o -name 'public' -o -name 'node_modules' -o -name 'src' \) -user 911 \
-            -exec chown -R $RUNNING_UID:$RUNNING_GID {} + 2>/dev/null || true
-        echo "[OK] File ownership updated"
-        echo ""
-    fi
-
-
-    SKIP_SU_EXEC=true
-
-
-# ========================================
-# CASE 2: Running as non-root, but different UID
-# ========================================
-elif [ "$RUNNING_UID" != "0" ]; then
-    echo "[OK] Running as non-root user UID:$RUNNING_UID GID:$RUNNING_GID"
-    echo "     (Container already secured, using current user)"
-    echo ""
-
-
-    # Fix ownership if possible (may fail without root, that's ok)
-    echo "[SETUP] Attempting to fix app file ownership..."
-    find /app -maxdepth 2 \( -name '.next' -o -name 'public' -o -name 'src' \) -user 911 \
-        -exec chown -R $RUNNING_UID:$RUNNING_GID {} + 2>/dev/null || true
-    echo "[OK] Ownership fix attempted (errors ignored)"
-    echo ""
-
-
-    SKIP_SU_EXEC=true
-
-
-# ========================================
-# CASE 3: Running as root - need to remap
-# ========================================
-else
-    echo "[SETUP] Running as root, remapping to UID:$PUID GID:$PGID..."
-    echo ""
-
-
-    # Get current app user IDs
-    CURRENT_UID=$(id -u app 2>/dev/null || echo "911")
-    CURRENT_GID=$(id -g app 2>/dev/null || echo "911")
-
-
-    # Only remap if needed
-    if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
-        # Update group ID if needed
-        if [ "$CURRENT_GID" != "$PGID" ]; then
-            groupmod -o -g "$PGID" app 2>/dev/null || true
-        fi
-
-
-        # Update user ID if needed
-        if [ "$CURRENT_UID" != "$PUID" ]; then
-            echo "  Updating user permissions (this may take a moment...)"
-            usermod -o -u "$PUID" app 2>/dev/null || true
-        fi
-
-
-        # Fix ownership of internal app files only (not mounted volumes!)
-        chown -R app:app /app/.next /app/public /app/node_modules /app/src 2>/dev/null || true
-
-
-        echo "[OK] User permissions updated"
-    else
-        echo "[OK] User permissions already correct"
-    fi
-    echo ""
-
-
-    SKIP_SU_EXEC=false
-fi
 
 
 # ========================================
@@ -296,19 +185,8 @@ fi
 
 
 echo "[START] Starting application..."
-if [ "$SKIP_SU_EXEC" = "true" ]; then
-    echo "         Running as: UID:$RUNNING_UID GID:$RUNNING_GID (direct)"
-else
-    echo "         Running as: UID:$PUID GID:$PGID (via su-exec app)"
-fi
+echo "         Command: $*"
 echo ""
 
-
 # Execute the main command
-if [ "$SKIP_SU_EXEC" = "true" ]; then
-    # Already running as correct user, no need for su-exec
-    exec "$@"
-else
-    # Running as root, switch to app user
-    exec su-exec app "$@"
-fi
+exec "$@"

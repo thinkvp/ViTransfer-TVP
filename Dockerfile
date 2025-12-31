@@ -7,10 +7,6 @@
 # ========================================
 FROM node:24.11.1-alpine3.23 AS base-common
 
-ARG TARGETPLATFORM
-ARG TARGETARCH
-ARG BUILDPLATFORM
-
 RUN npm install -g npm@latest
 
 # Security: Update Alpine to latest packages
@@ -25,9 +21,7 @@ RUN apk add --no-cache \
 RUN apk add --no-cache \
     bash \
     curl \
-    ca-certificates \
-    shadow \
-    su-exec
+    ca-certificates
 
 # ========================================
 # Worker base (adds FFmpeg)
@@ -101,12 +95,6 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-ARG TARGETPLATFORM
-ARG TARGETARCH
-
-RUN echo "Building APP for platform: $TARGETPLATFORM (arch: $TARGETARCH)" && \
-    uname -a
-
 RUN addgroup -g 911 app && \
     adduser -D -u 911 -G app -h /app app
 
@@ -133,9 +121,6 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/
 
 RUN chmod -R a+rX /app/.next /app/node_modules /app/public /app/prisma
 
-ENV PUID=1000 \
-    PGID=1000
-
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:4321/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
 
@@ -155,12 +140,6 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-ARG TARGETPLATFORM
-ARG TARGETARCH
-
-RUN echo "Building WORKER for platform: $TARGETPLATFORM (arch: $TARGETARCH)" && \
-    uname -a
-
 RUN addgroup -g 911 app && \
     adduser -D -u 911 -G app -h /app app
 
@@ -175,9 +154,6 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod -R a+rX /app/src /app/node_modules /app/prisma
-
-ENV PUID=1000 \
-    PGID=1000
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["npm", "run", "worker"]

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# ViTransfer Multi-Architecture Build Script
-# Builds and pushes BOTH images (app + worker) for amd64 and arm64 platforms
+# ViTransfer Build Script (amd64)
+# Builds and pushes BOTH images (app + worker) for linux/amd64 only
 # Usage: ./build-multiarch.sh [version|--dev|-dev<version>|latest] [--no-cache]
 # Examples:
 #   ./build-multiarch.sh 0.1.0         # Tag both images as 0.1.0 and latest
@@ -52,7 +52,7 @@ else
     WORKER_TAGS="${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}:latest"
 fi
 
-echo "🏗️  ViTransfer Multi-Architecture Build"
+echo "🏗️  ViTransfer Build (linux/amd64)"
 echo "========================================"
 echo ""
 
@@ -79,23 +79,13 @@ echo "✅ Docker buildx available"
 
 echo ""
 
-# Create or use existing buildx builder
-echo "🛠️  Setting up multi-arch builder..."
-if ! docker buildx ls | grep -q "multiarch-builder"; then
-    echo "Creating new builder: multiarch-builder"
-    docker buildx create --name multiarch-builder --driver docker-container --use
-else
-    echo "Using existing builder: multiarch-builder"
-    docker buildx use multiarch-builder
-fi
-
-# Inspect builder
+# Inspect the currently-selected builder (no QEMU required for amd64-only)
 docker buildx inspect --bootstrap
 
 echo ""
-echo "🏗️  Building multi-architecture image..."
+echo "🏗️  Building image..."
 echo "   Version: ${VERSION}"
-echo "   Platforms: linux/amd64, linux/arm64"
+echo "   Platform: linux/amd64"
 if [[ "$VERSION" == dev* ]]; then
     echo "   Tags: ${VERSION} (testing only, will NOT update latest)"
 elif [ "$VERSION" != "latest" ]; then
@@ -119,7 +109,7 @@ build_and_push() {
     done
 
     docker buildx build \
-        --platform linux/amd64,linux/arm64 \
+        --platform linux/amd64 \
         --build-arg APP_VERSION="${VERSION}" \
         --target "$target" \
         $tag_args \
@@ -171,7 +161,7 @@ if [[ "$VERSION" != dev* ]] && [ "$VERSION" != "latest" ]; then
 fi
 
 echo ""
-echo "✅ Multi-architecture build complete!"
+echo "✅ Build complete!"
 echo ""
 echo "📦 Images pushed to Docker Hub:"
 for tag in $APP_TAGS; do
@@ -181,9 +171,7 @@ for tag in $WORKER_TAGS; do
     echo "   $tag"
 done
 echo ""
-echo "🔍 Supported architectures:"
-echo "   - linux/amd64 (x86_64)"
-echo "   - linux/arm64 (aarch64)"
+echo "🔍 Platform: linux/amd64 (x86_64)"
 echo ""
 if [ "$VERSION" != "latest" ]; then
     echo "📥 Pull specific version:"

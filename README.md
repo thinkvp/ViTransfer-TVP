@@ -466,12 +466,12 @@ docker-compose up -d
 ### Publishing (maintainers)
 
 ```bash
-# Linux/macOS (multi-arch buildx, pushes app + worker)
+# Linux/macOS (buildx, pushes app + worker for linux/amd64)
 ./build-multiarch.sh
 ```
 
 ```powershell
-# Windows PowerShell (multi-arch buildx, pushes app + worker)
+# Windows PowerShell (buildx, pushes app + worker for linux/amd64)
 ./publish-docker.ps1
 ```
 
