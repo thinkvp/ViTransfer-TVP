@@ -128,12 +128,47 @@ build_and_push() {
         .
 }
 
+retag_latest_from_version() {
+    local image="$1"
+    local version_tag="$2"
+    local retries="${3:-30}"
+    local sleep_seconds="${4:-3}"
+
+    for i in $(seq 1 "$retries"); do
+        echo "Retagging ${image}:latest -> ${image}:${version_tag} (attempt ${i}/${retries})"
+        if docker buildx imagetools create --tag "${image}:latest" "${image}:${version_tag}" >/dev/null; then
+            echo "✅ Updated ${image}:latest"
+            return 0
+        fi
+        sleep "$sleep_seconds"
+    done
+
+    echo "❌ Failed to update ${image}:latest after ${retries} attempts"
+    return 1
+}
+
 echo "🏗️  Building + pushing app image..."
-build_and_push "app" "$APP_TAGS"
+if [[ "$VERSION" == dev* ]] || [ "$VERSION" = "latest" ]; then
+    build_and_push "app" "$APP_TAGS"
+else
+    build_and_push "app" "${DOCKERHUB_USERNAME}/${APP_IMAGE_NAME}:${VERSION}"
+fi
 
 echo ""
 echo "🏗️  Building + pushing worker image..."
-build_and_push "worker" "$WORKER_TAGS"
+if [[ "$VERSION" == dev* ]] || [ "$VERSION" = "latest" ]; then
+    build_and_push "worker" "$WORKER_TAGS"
+else
+    build_and_push "worker" "${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}:${VERSION}"
+fi
+
+# If this is a normal version, update :latest as a separate, lightweight manifest operation
+if [[ "$VERSION" != dev* ]] && [ "$VERSION" != "latest" ]; then
+    echo ""
+    echo "🏷️  Updating :latest tags (manifest-only)..."
+    retag_latest_from_version "${DOCKERHUB_USERNAME}/${APP_IMAGE_NAME}" "$VERSION"
+    retag_latest_from_version "${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}" "$VERSION"
+fi
 
 echo ""
 echo "✅ Multi-architecture build complete!"

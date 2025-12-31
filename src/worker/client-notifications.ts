@@ -2,6 +2,7 @@ import { prisma } from '../lib/db'
 import { getEmailSettings, sendEmail } from '../lib/email'
 import { generateNotificationSummaryEmail } from '../lib/email-templates'
 import { getProjectRecipients } from '../lib/recipients'
+import { buildUnsubscribeUrl } from '../lib/unsubscribe'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
@@ -153,6 +154,7 @@ export async function processClientNotifications() {
 
           const emailSettings = await getEmailSettings()
           const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
+          const appDomain = emailSettings.appDomain || new URL(shareUrl).origin
 
           // Stable batch key to prevent duplicate tracking/event logs on retries.
           // Note: if the same notification IDs are retried, we reuse the same token per recipient.
@@ -186,13 +188,14 @@ export async function processClientNotifications() {
             const html = generateNotificationSummaryEmail({
               projectTitle: project.title,
               shareUrl,
+              unsubscribeUrl: recipient.id ? buildUnsubscribeUrl(appDomain, project.id, recipient.id) : undefined,
               recipientName: recipient.name || recipient.email!,
               recipientEmail: recipient.email!,
               period,
               notifications,
               trackingToken: trackingToken?.token,
               trackingPixelsEnabled,
-              appDomain: emailSettings.appDomain || undefined,
+              appDomain,
             })
 
             const result = await sendEmail({

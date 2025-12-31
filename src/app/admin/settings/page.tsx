@@ -75,6 +75,8 @@ interface PushNotificationSettings {
   title: string | null
   notifyUnauthorizedOTP: boolean
   notifyFailedAdminLogin: boolean
+  notifySuccessfulAdminLogin: boolean
+  notifyFailedSharePasswordAttempt: boolean
   notifySuccessfulShareAccess: boolean
   notifyClientComments: boolean
   notifyVideoApproval: boolean
@@ -168,6 +170,8 @@ export default function GlobalSettingsPage() {
   const [pushTitlePrefix, setPushTitlePrefix] = useState('')
   const [pushNotifyUnauthorizedOTP, setPushNotifyUnauthorizedOTP] = useState(true)
   const [pushNotifyFailedAdminLogin, setPushNotifyFailedAdminLogin] = useState(true)
+  const [pushNotifySuccessfulAdminLogin, setPushNotifySuccessfulAdminLogin] = useState(true)
+  const [pushNotifyFailedSharePasswordAttempt, setPushNotifyFailedSharePasswordAttempt] = useState(true)
   const [pushNotifySuccessfulShareAccess, setPushNotifySuccessfulShareAccess] = useState(true)
   const [pushNotifyClientComments, setPushNotifyClientComments] = useState(true)
   const [pushNotifyVideoApproval, setPushNotifyVideoApproval] = useState(true)
@@ -249,6 +253,8 @@ export default function GlobalSettingsPage() {
           setPushTitlePrefix(pushData.title || '')
           setPushNotifyUnauthorizedOTP(pushData.notifyUnauthorizedOTP ?? true)
           setPushNotifyFailedAdminLogin(pushData.notifyFailedAdminLogin ?? true)
+          setPushNotifySuccessfulAdminLogin(pushData.notifySuccessfulAdminLogin ?? true)
+          setPushNotifyFailedSharePasswordAttempt(pushData.notifyFailedSharePasswordAttempt ?? true)
           setPushNotifySuccessfulShareAccess(pushData.notifySuccessfulShareAccess ?? true)
           setPushNotifyClientComments(pushData.notifyClientComments ?? true)
           setPushNotifyVideoApproval(pushData.notifyVideoApproval ?? true)
@@ -435,6 +441,8 @@ export default function GlobalSettingsPage() {
         title: pushTitlePrefix || null,
         notifyUnauthorizedOTP: pushNotifyUnauthorizedOTP,
         notifyFailedAdminLogin: pushNotifyFailedAdminLogin,
+        notifySuccessfulAdminLogin: pushNotifySuccessfulAdminLogin,
+        notifyFailedSharePasswordAttempt: pushNotifyFailedSharePasswordAttempt,
         notifySuccessfulShareAccess: pushNotifySuccessfulShareAccess,
         notifyClientComments: pushNotifyClientComments,
         notifyVideoApproval: pushNotifyVideoApproval,
@@ -681,6 +689,10 @@ export default function GlobalSettingsPage() {
             setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
             notifyFailedAdminLogin={pushNotifyFailedAdminLogin}
             setNotifyFailedAdminLogin={setPushNotifyFailedAdminLogin}
+            notifySuccessfulAdminLogin={pushNotifySuccessfulAdminLogin}
+            setNotifySuccessfulAdminLogin={setPushNotifySuccessfulAdminLogin}
+            notifyFailedSharePasswordAttempt={pushNotifyFailedSharePasswordAttempt}
+            setNotifyFailedSharePasswordAttempt={setPushNotifyFailedSharePasswordAttempt}
             notifySuccessfulShareAccess={pushNotifySuccessfulShareAccess}
             setNotifySuccessfulShareAccess={setPushNotifySuccessfulShareAccess}
             notifyClientComments={pushNotifyClientComments}

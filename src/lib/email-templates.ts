@@ -27,6 +27,7 @@ interface NotificationData {
 interface NotificationSummaryData {
   projectTitle: string
   shareUrl: string
+  unsubscribeUrl?: string
   recipientName: string
   recipientEmail: string
   period: string
@@ -131,9 +132,11 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
           View Project
         </a>
       </div>
-      <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-        Reply to this email to unsubscribe from project updates.
-      </p>
+      ${data.unsubscribeUrl ? `
+        <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
+          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="color:#2563eb; text-decoration:underline;">Unsubscribe</a>
+        </p>
+      ` : ''}
     `,
   }).trim()
 }

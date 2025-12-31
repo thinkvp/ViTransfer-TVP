@@ -5,8 +5,9 @@ type Comment = any
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
-import { Send, Paperclip, X, Clock } from 'lucide-react'
-import { useState } from 'react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
+import { Send, Paperclip, X, Clock, ChevronDown, Check } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
 import { secondsToTimecode } from '@/lib/timecode'
@@ -41,6 +42,7 @@ interface CommentInputProps {
   showAuthorInput: boolean
   authorName: string
   onAuthorNameChange: (value: string) => void
+  recipients?: Array<{ id?: string; name?: string | null }>
 
   // Restrictions
   currentVideoRestricted: boolean
@@ -80,6 +82,7 @@ export default function CommentInput({
   showAuthorInput,
   authorName,
   onAuthorNameChange,
+  recipients = [],
   currentVideoRestricted,
   restrictionMessage,
   commentsDisabled,
@@ -93,6 +96,41 @@ export default function CommentInput({
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [namePickerOpen, setNamePickerOpen] = useState(false)
+  const [customName, setCustomName] = useState('')
+  const customNameInputRef = useRef<HTMLInputElement>(null)
+
+  const recipientNames = useMemo(() => {
+    const uniqueNames: string[] = []
+    const seen = new Set<string>()
+
+    for (const recipient of recipients) {
+      const trimmed = (recipient?.name || '').trim()
+      if (!trimmed) continue
+      if (seen.has(trimmed)) continue
+      seen.add(trimmed)
+      uniqueNames.push(trimmed)
+    }
+
+    return uniqueNames
+  }, [recipients])
+
+  useEffect(() => {
+    if (!namePickerOpen) return
+
+    const trimmedAuthor = authorName.trim()
+    const isRecipientName = Boolean(trimmedAuthor) && recipientNames.includes(trimmedAuthor)
+
+    // If they previously entered a custom name, keep it editable.
+    // If they selected a recipient name, start with an empty custom name.
+    setCustomName(isRecipientName ? '' : trimmedAuthor)
+
+    // Focus the custom name input on open (handy if there are no recipients, or they want a custom entry).
+    setTimeout(() => {
+      customNameInputRef.current?.focus()
+      customNameInputRef.current?.select()
+    }, 0)
+  }, [namePickerOpen, authorName, recipientNames])
 
   if (commentsDisabled) return null
 
@@ -170,13 +208,97 @@ export default function CommentInput({
           {showAuthorInput ? (
             <div className="flex items-center gap-2 flex-1 min-w-[220px]">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Name:</span>
-              <Input
-                placeholder="Enter your name"
-                value={authorName}
-                onChange={(e) => onAuthorNameChange(e.target.value)}
-                className="text-sm"
-                aria-label="Your name"
-              />
+              <Dialog open={namePickerOpen} onOpenChange={setNamePickerOpen}>
+                <button
+                  type="button"
+                  onClick={() => setNamePickerOpen(true)}
+                  className={cn(
+                    'h-9 w-full flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background',
+                    'flex items-center justify-between gap-2',
+                    'hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                  )}
+                  aria-label="Your name"
+                >
+                  <span
+                    className={cn(
+                      'truncate',
+                      authorName.trim() ? 'text-foreground' : 'text-muted-foreground'
+                    )}
+                  >
+                    {authorName.trim() ? authorName.trim() : 'Select your name'}
+                  </span>
+                  <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                </button>
+
+                <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Choose your name</DialogTitle>
+                    <DialogDescription>
+                      Pick an existing recipient name, or enter a custom name.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    {recipientNames.length > 0 ? (
+                      <div className="space-y-2">
+                        {recipientNames.map((name) => {
+                          const isSelected = authorName.trim() === name
+                          return (
+                            <Button
+                              key={name}
+                              type="button"
+                              variant="outline"
+                              className="w-full justify-between"
+                              onClick={() => {
+                                onAuthorNameChange(name)
+                                setNamePickerOpen(false)
+                              }}
+                            >
+                              <span className="truncate">{name}</span>
+                              {isSelected ? <Check className="h-4 w-4 flex-shrink-0" /> : null}
+                            </Button>
+                          )
+                        })}
+                      </div>
+                    ) : null}
+
+                    <div className="border-t border-border pt-4">
+                      <div className="text-sm font-medium text-foreground">Enter a custom name</div>
+                      <div className="mt-2 flex flex-col gap-2">
+                        <Input
+                          ref={customNameInputRef}
+                          placeholder="Enter a custom name"
+                          value={customName}
+                          onChange={(e) => setCustomName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const trimmed = customName.trim()
+                              if (!trimmed) return
+                              onAuthorNameChange(trimmed)
+                              setNamePickerOpen(false)
+                            }
+                          }}
+                          className="text-sm"
+                        />
+                        <Button
+                          type="button"
+                          variant="default"
+                          disabled={!customName.trim()}
+                          onClick={() => {
+                            const trimmed = customName.trim()
+                            if (!trimmed) return
+                            onAuthorNameChange(trimmed)
+                            setNamePickerOpen(false)
+                          }}
+                        >
+                          Use custom name
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           ) : null}
         </div>
@@ -261,11 +383,17 @@ export default function CommentInput({
 
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
-              {showAuthorInput && !authorName.trim() ? (
-                <p className="text-xs text-warning">Enter your name to send</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">Press Enter to send & Shift+Enter for new line</p>
-              )}
+              <p
+                className={`text-xs ${
+                  showAuthorInput && !authorName.trim()
+                    ? 'text-warning'
+                    : 'text-muted-foreground invisible sm:visible'
+                }`}
+              >
+                {showAuthorInput && !authorName.trim()
+                  ? 'Enter your name to send'
+                  : 'Press Enter to send & Shift+Enter for new line'}
+              </p>
             </div>
             {showShortcutsButton && onShowShortcuts && (
               <Button

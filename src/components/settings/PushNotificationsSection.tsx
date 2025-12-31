@@ -19,6 +19,10 @@ interface PushNotificationsSectionProps {
   setNotifyUnauthorizedOTP: (value: boolean) => void
   notifyFailedAdminLogin: boolean
   setNotifyFailedAdminLogin: (value: boolean) => void
+  notifySuccessfulAdminLogin: boolean
+  setNotifySuccessfulAdminLogin: (value: boolean) => void
+  notifyFailedSharePasswordAttempt: boolean
+  setNotifyFailedSharePasswordAttempt: (value: boolean) => void
   notifySuccessfulShareAccess: boolean
   setNotifySuccessfulShareAccess: (value: boolean) => void
   notifyClientComments: boolean
@@ -42,6 +46,10 @@ export function PushNotificationsSection({
   setNotifyUnauthorizedOTP,
   notifyFailedAdminLogin,
   setNotifyFailedAdminLogin,
+  notifySuccessfulAdminLogin,
+  setNotifySuccessfulAdminLogin,
+  notifyFailedSharePasswordAttempt,
+  setNotifyFailedSharePasswordAttempt,
   notifySuccessfulShareAccess,
   setNotifySuccessfulShareAccess,
   notifyClientComments,
@@ -153,25 +161,8 @@ export function PushNotificationsSection({
                   <div className="space-y-3 border-2 border-border p-4 rounded-lg bg-accent/5">
                     <h4 className="font-semibold text-sm">Enable Notifications For:</h4>
                     <div className="space-y-3">
-                      {/* Unauthorized OTP Request */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="notifyUnauthorizedOTP" className="text-sm font-normal">
-                            Unauthorized OTP Requests
-                          </Label>
-                          <p className="text-xs text-muted-foreground">
-                            When someone requests OTP with invalid email
-                          </p>
-                        </div>
-                        <Switch
-                          id="notifyUnauthorizedOTP"
-                          checked={notifyUnauthorizedOTP}
-                          onCheckedChange={setNotifyUnauthorizedOTP}
-                        />
-                      </div>
-
                       {/* Failed Admin Login */}
-                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
                           <Label htmlFor="notifyFailedAdminLogin" className="text-sm font-normal">
                             Failed Admin Login Attempts
@@ -186,6 +177,57 @@ export function PushNotificationsSection({
                           onCheckedChange={setNotifyFailedAdminLogin}
                         />
                       </div>
+
+                        {/* Successful Admin Login */}
+                        <div className="flex items-center justify-between pt-3 border-t">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="notifySuccessfulAdminLogin" className="text-sm font-normal">
+                              Successful Admin Login
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              When an administrator logs in successfully
+                            </p>
+                          </div>
+                          <Switch
+                            id="notifySuccessfulAdminLogin"
+                            checked={notifySuccessfulAdminLogin}
+                            onCheckedChange={setNotifySuccessfulAdminLogin}
+                          />
+                        </div>
+
+                        {/* Unauthorized OTP Request */}
+                        <div className="flex items-center justify-between pt-3 border-t">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="notifyUnauthorizedOTP" className="text-sm font-normal">
+                              Unauthorized OTP Requests
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              When someone requests OTP with invalid email
+                            </p>
+                          </div>
+                          <Switch
+                            id="notifyUnauthorizedOTP"
+                            checked={notifyUnauthorizedOTP}
+                            onCheckedChange={setNotifyUnauthorizedOTP}
+                          />
+                        </div>
+
+                        {/* Failed Share Password Attempt */}
+                        <div className="flex items-center justify-between pt-3 border-t">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="notifyFailedSharePasswordAttempt" className="text-sm font-normal">
+                              Failed Client Share page password attempt
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              When a client enters an incorrect share password
+                            </p>
+                          </div>
+                          <Switch
+                            id="notifyFailedSharePasswordAttempt"
+                            checked={notifyFailedSharePasswordAttempt}
+                            onCheckedChange={setNotifyFailedSharePasswordAttempt}
+                          />
+                        </div>
 
                       {/* Successful Share Access */}
                       <div className="flex items-center justify-between pt-3 border-t">

@@ -270,9 +270,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                 />
               ) : (
                 <>
-                  {(video as any).approved && (
-                    <CheckCircle2 className="w-5 h-5 text-success flex-shrink-0" />
-                  )}
                   <h4 className="font-medium truncate">{video.versionLabel}</h4>
                   {isAdmin && video.status === 'READY' && (
                     <Button
@@ -366,8 +363,15 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
 
           {/* Bottom row: Filename */}
           {editingId !== video.id && (
-            <div>
-              <p className="text-sm text-muted-foreground break-all">{video.originalFileName}</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-muted-foreground break-all flex-1 min-w-0">
+                {video.originalFileName}
+              </p>
+              {(video as any).approved && (
+                <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 bg-success-visible text-success border-2 border-success-visible">
+                  Approved
+                </span>
+              )}
             </div>
           )}
 

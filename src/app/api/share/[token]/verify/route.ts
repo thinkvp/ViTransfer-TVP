@@ -9,6 +9,7 @@ import { getRedis } from '@/lib/redis'
 import { signShareToken } from '@/lib/auth'
 import { getShareTokenTtlSeconds } from '@/lib/settings'
 import { trackSharePageAccess } from '@/lib/share-access-tracking'
+import { sendPushNotification } from '@/lib/push-notifications'
 import jwt from 'jsonwebtoken'
 export const runtime = 'nodejs'
 
@@ -173,6 +174,19 @@ export async function POST(
           maxAttempts: MAX_FAILED_ATTEMPTS,
         },
         wasBlocked: false,
+      })
+
+      await sendPushNotification({
+        type: 'FAILED_SHARE_PASSWORD',
+        projectId: project.id,
+        title: 'Failed Share Password Attempt',
+        message: 'Incorrect share password entered',
+        details: {
+          'Share Token': token,
+          'Attempt': count,
+          'Max Attempts': MAX_FAILED_ATTEMPTS,
+          'IP Address': ipAddress,
+        },
       })
 
       // If this was the 5th failed attempt, return rate limit error

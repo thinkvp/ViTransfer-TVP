@@ -489,20 +489,10 @@ export function CommentSectionView({
     // Update comments immediately
     window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
 
-    // If a video player exists, keep the current time when switching versions.
-    // (If there is no player, this is a harmless no-op.)
-    window.dispatchEvent(
-      new CustomEvent('getCurrentTime', {
-        detail: {
-          callback: (time: number) => {
-            const safeTime = typeof time === 'number' && Number.isFinite(time) ? Math.max(0, time) : 0
-            window.dispatchEvent(
-              new CustomEvent('seekToTime', { detail: { timestamp: safeTime, videoId, videoVersion: null } })
-            )
-          },
-        },
-      })
-    )
+    // Reset playback time when switching versions.
+    // (If there is no player, these are harmless no-ops.)
+    window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId } }))
+    window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId, videoVersion: null } }))
     setShowApproveConfirm(false)
   }
 
@@ -639,7 +629,7 @@ export function CommentSectionView({
                   {(headerVideo as any)?.versionLabel || '—'}
                 </span>
               ) : (
-                <div className="w-full max-w-[240px]">
+                <div className="flex-1 min-w-0 max-w-[180px] sm:max-w-[240px]">
                   <Select
                     value={selectedVideoId || latestSelectableVideo?.id || undefined}
                     onValueChange={handleSelectVideoVersion}
@@ -809,6 +799,7 @@ export function CommentSectionView({
             showAuthorInput={!isAdminView && isPasswordProtected}
             authorName={authorName}
             onAuthorNameChange={setAuthorName}
+            recipients={recipients}
             currentVideoRestricted={currentVideoRestricted}
             restrictionMessage={restrictionMessage}
             commentsDisabled={commentsDisabled}

@@ -1,7 +1,14 @@
 import { prisma } from '@/lib/db'
 
 export interface PushNotificationPayload {
-  type: 'UNAUTHORIZED_OTP' | 'FAILED_LOGIN' | 'SHARE_ACCESS' | 'CLIENT_COMMENT' | 'VIDEO_APPROVAL'
+  type:
+    | 'UNAUTHORIZED_OTP'
+    | 'FAILED_LOGIN'
+    | 'SUCCESSFUL_ADMIN_LOGIN'
+    | 'FAILED_SHARE_PASSWORD'
+    | 'SHARE_ACCESS'
+    | 'CLIENT_COMMENT'
+    | 'VIDEO_APPROVAL'
   projectId?: string
   projectName?: string
   title: string
@@ -28,6 +35,8 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
     const eventToggleMap: Record<string, keyof Omit<typeof settings, 'id' | 'enabled' | 'provider' | 'webhookUrl' | 'title' | 'createdAt' | 'updatedAt'>> = {
       'UNAUTHORIZED_OTP': 'notifyUnauthorizedOTP',
       'FAILED_LOGIN': 'notifyFailedAdminLogin',
+      'SUCCESSFUL_ADMIN_LOGIN': 'notifySuccessfulAdminLogin',
+      'FAILED_SHARE_PASSWORD': 'notifyFailedSharePasswordAttempt',
       'SHARE_ACCESS': 'notifySuccessfulShareAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',
@@ -141,12 +150,16 @@ function getPriorityForType(type: string): number {
   switch (type) {
     case 'FAILED_LOGIN':
       return 10 // Critical
+    case 'FAILED_SHARE_PASSWORD':
+      return 7 // High
     case 'UNAUTHORIZED_OTP':
       return 8 // High
     case 'VIDEO_APPROVAL':
       return 7 // High
     case 'CLIENT_COMMENT':
       return 5 // Medium
+    case 'SUCCESSFUL_ADMIN_LOGIN':
+      return 3 // Low
     case 'SHARE_ACCESS':
       return 3 // Low
     default:

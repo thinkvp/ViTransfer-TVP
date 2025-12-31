@@ -307,6 +307,8 @@ model PushNotificationSettings {
   // Event toggles
   notifyUnauthorizedOTP       Boolean @default(true)
   notifyFailedAdminLogin      Boolean @default(true)
+  notifySuccessfulAdminLogin  Boolean @default(true)
+  notifyFailedSharePasswordAttempt Boolean @default(true)
   notifySuccessfulShareAccess Boolean @default(true)
   notifyClientComments        Boolean @default(true)
   notifyVideoApproval         Boolean @default(true)

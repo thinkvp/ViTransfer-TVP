@@ -4,7 +4,8 @@ param(
   [switch]$Dev,
   [switch]$NoLatest,
   [switch]$NoCache,
-  [string]$Platforms = 'linux/amd64,linux/arm64'
+  [string]$Platforms = 'linux/amd64,linux/arm64',
+  [string]$Builder
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,23 +20,23 @@ if ($Dev) {
 # Tag selection
 $appTags = @()
 $workerTags = @()
+$shouldCreateLatest = $false
+$latestOnly = $false
 
 if ($Version -like 'dev-*') {
-  $appTags += "$appRepo:$Version"
-  $workerTags += "$workerRepo:$Version"
+  $appTags += "${appRepo}:$Version"
+  $workerTags += "${workerRepo}:$Version"
 } elseif ($Version -eq 'dev') {
-  $appTags += "$appRepo:dev"
-  $workerTags += "$workerRepo:dev"
+  $appTags += "${appRepo}:dev"
+  $workerTags += "${workerRepo}:dev"
 } elseif ($Version -eq 'latest') {
-  $appTags += "$appRepo:latest"
-  $workerTags += "$workerRepo:latest"
+  $appTags += "${appRepo}:latest"
+  $workerTags += "${workerRepo}:latest"
+  $latestOnly = $true
 } else {
-  $appTags += "$appRepo:$Version"
-  $workerTags += "$workerRepo:$Version"
-  if (-not $NoLatest) {
-    $appTags += "$appRepo:latest"
-    $workerTags += "$workerRepo:latest"
-  }
+  $appTags += "${appRepo}:$Version"
+  $workerTags += "${workerRepo}:$Version"
+  $shouldCreateLatest = (-not $NoLatest)
 }
 
 Write-Host "Publishing ViTransfer images" -ForegroundColor Cyan
@@ -48,14 +49,15 @@ Write-Host ""
 # Verify buildx
 & docker buildx version | Out-Null
 
-# Ensure a buildx builder exists/selected
-$builderName = 'multiarch-builder'
+# Prefer using the current/desktop builder (avoids extra buildkit container DNS flakiness)
 $builders = & docker buildx ls | Out-String
-if ($builders -notmatch [regex]::Escape($builderName)) {
-  Write-Host "Creating buildx builder: $builderName" -ForegroundColor Yellow
-  & docker buildx create --name $builderName --driver docker-container --use | Out-Null
+if ($Builder) {
+  Write-Host "Using buildx builder: $Builder" -ForegroundColor Yellow
+  & docker buildx use $Builder | Out-Null
+} elseif ($builders -match "desktop-linux") {
+  & docker buildx use desktop-linux | Out-Null
 } else {
-  & docker buildx use $builderName | Out-Null
+  & docker buildx use default | Out-Null
 }
 
 & docker buildx inspect --bootstrap | Out-Null
@@ -79,10 +81,37 @@ function BuildPushTarget([string]$target, [string[]]$tags) {
     .
 }
 
+function RetagLatestFromVersion([string]$repo, [string]$versionTag, [int]$maxRetries = 30, [int]$sleepSeconds = 3) {
+  $src = "${repo}:$versionTag"
+  $dst = "${repo}:latest"
+
+  for ($i = 1; $i -le $maxRetries; $i++) {
+    try {
+      Write-Host "Retagging $dst -> $src (attempt $i/$maxRetries)" -ForegroundColor Yellow
+      & docker buildx imagetools create --tag $dst $src | Out-Null
+      Write-Host "Updated $dst" -ForegroundColor Green
+      return
+    } catch {
+      if ($i -eq $maxRetries) { throw }
+      Start-Sleep -Seconds $sleepSeconds
+    }
+  }
+}
+
 BuildPushTarget -target 'app' -tags $appTags
 BuildPushTarget -target 'worker' -tags $workerTags
+
+if ($shouldCreateLatest -and (-not $latestOnly) -and ($Version -ne 'dev') -and ($Version -notlike 'dev-*')) {
+  RetagLatestFromVersion -repo $appRepo -versionTag $Version
+  RetagLatestFromVersion -repo $workerRepo -versionTag $Version
+}
 
 Write-Host "" 
 Write-Host "Pushed tags:" -ForegroundColor Green
 $appTags | ForEach-Object { Write-Host "  $_" }
 $workerTags | ForEach-Object { Write-Host "  $_" }
+
+if ($shouldCreateLatest -and (-not $latestOnly) -and ($Version -ne 'dev') -and ($Version -notlike 'dev-*')) {
+  Write-Host "  ${appRepo}:latest" 
+  Write-Host "  ${workerRepo}:latest" 
+}

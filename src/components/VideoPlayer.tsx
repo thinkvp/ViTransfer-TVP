@@ -142,9 +142,7 @@ export default function VideoPlayer({
       return () => mql.removeEventListener('change', update)
     }
 
-    // eslint-disable-next-line deprecation/deprecation
     mql.addListener(update)
-    // eslint-disable-next-line deprecation/deprecation
     return () => mql.removeListener(update)
   }, [])
 
@@ -352,6 +350,25 @@ export default function VideoPlayer({
   // Dispatch event when selected video changes (for immediate comment section update)
   useEffect(() => {
     if (selectedVideo?.id) {
+      // Reset playback time when switching versions so UI (and comment timestamp) returns to 0.
+      try {
+        if (videoRef.current) {
+          videoRef.current.currentTime = 0
+        }
+      } catch {
+        // ignore
+      }
+
+      currentTimeRef.current = 0
+      setCurrentTimeSeconds(0)
+
+      // Keep comment timestamp displays in sync immediately (without waiting for timeupdate).
+      window.dispatchEvent(
+        new CustomEvent('videoTimeUpdated', {
+          detail: { time: 0, videoId: selectedVideo.id },
+        })
+      )
+
       window.dispatchEvent(new CustomEvent('videoChanged', {
         detail: { videoId: selectedVideo.id }
       }))
@@ -999,7 +1016,7 @@ export default function VideoPlayer({
                 onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
                 crossOrigin="anonymous"
                 playsInline
-                preload="metadata"
+                preload={!isAdmin || hideDownloadButton ? 'auto' : 'metadata'}
                 onClick={togglePlayPause}
                 style={{
                   objectFit: 'contain',
@@ -1084,6 +1101,8 @@ export default function VideoPlayer({
                 }}
                 onPointerDown={(e) => {
                   e.preventDefault()
+                  // If the user is seeking, show actual video frames (not the poster overlay).
+                  setShowPosterOverlay(false)
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
                   isScrubbingRef.current = true
                   scheduleScrubToClientX(e.clientX)
@@ -1103,6 +1122,8 @@ export default function VideoPlayer({
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onClick={(e) => {
+                  // If the user is seeking, show actual video frames (not the poster overlay).
+                  setShowPosterOverlay(false)
                   if (videoRef.current) {
                     const { time } = getTimeFromScrubEvent(e.clientX)
                     videoRef.current.currentTime = time
@@ -1155,6 +1176,9 @@ export default function VideoPlayer({
                           }}
                           onClick={(e) => {
                             e.stopPropagation()
+
+                            // If the user is seeking, show actual video frames (not the poster overlay).
+                            setShowPosterOverlay(false)
 
                             // Seek video to the comment timecode (do not auto-play)
                             if (videoRef.current) {

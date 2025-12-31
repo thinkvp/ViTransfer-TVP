@@ -4,6 +4,7 @@ import { checkRateLimit, incrementRateLimit, clearRateLimit } from '@/lib/rate-l
 import { getClientIpAddress } from '@/lib/utils'
 import type { AuthenticationResponseJSON } from '@simplewebauthn/browser'
 import { issueAdminTokens } from '@/lib/auth'
+import { sendPushNotification } from '@/lib/push-notifications'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -85,6 +86,16 @@ export async function POST(request: NextRequest) {
 
     const fingerprint = crypto.createHash('sha256').update(request.headers.get('user-agent') || 'unknown').digest('base64url')
     const tokens = await issueAdminTokens(result.user, fingerprint)
+
+    await sendPushNotification({
+      type: 'SUCCESSFUL_ADMIN_LOGIN',
+      title: 'Successful Admin Login',
+      message: 'Administrator logged in successfully (passkey)',
+      details: {
+        'Email': result.user.email,
+        'IP Address': ipAddress,
+      },
+    })
 
     // Return user data (without password)
     return NextResponse.json({

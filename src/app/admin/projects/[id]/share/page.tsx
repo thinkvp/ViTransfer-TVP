@@ -654,6 +654,7 @@ function AdminShareFeedbackGrid({
           showAuthorInput={false}
           authorName={management.authorName}
           onAuthorNameChange={management.setAuthorName}
+          recipients={project.recipients || []}
           currentVideoRestricted={currentVideoRestricted}
           restrictionMessage={restrictionMessage}
           commentsDisabled={commentsDisabled}

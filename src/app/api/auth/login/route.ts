@@ -135,6 +135,16 @@ export async function POST(request: NextRequest) {
       wasBlocked: false,
     })
 
+    await sendPushNotification({
+      type: 'SUCCESSFUL_ADMIN_LOGIN',
+      title: 'Successful Admin Login',
+      message: 'Administrator logged in successfully',
+      details: {
+        'Email': user.email,
+        'IP Address': ipAddress,
+      },
+    })
+
     // Return user data (without password)
     return NextResponse.json({
       success: true,

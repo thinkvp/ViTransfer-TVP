@@ -208,8 +208,7 @@ export default function ProjectPage() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6 min-w-0">
-            <Card className="overflow-hidden">
+          <Card className="overflow-hidden lg:col-span-2 order-1">
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
                   <div className="min-w-0 flex-1">
@@ -258,8 +257,13 @@ export default function ProjectPage() {
                   <ShareLink shareUrl={shareUrl} />
                 </div>
               </CardContent>
-            </Card>
+          </Card>
 
+          <div className="space-y-6 min-w-0 order-2 lg:order-3 lg:col-span-1 lg:col-start-3 lg:row-start-1">
+            <ProjectActions project={project} videos={project.videos} onRefresh={fetchProject} />
+          </div>
+
+          <div className="lg:col-span-2 space-y-6 min-w-0 order-3 lg:order-2 lg:row-start-2">
             <div>
 	              <div className="flex items-center justify-between mb-4">
 	                <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -296,10 +300,8 @@ export default function ProjectPage() {
             </div>
           </div>
 
-          <div className="space-y-6 min-w-0">
-            <ProjectActions project={project} videos={project.videos} onRefresh={fetchProject} />
-
-            {!hideFeedback && activeVideos.length > 0 && (
+          {!hideFeedback && activeVideos.length > 0 && (
+            <div className="min-w-0 order-4 lg:order-3 lg:col-span-1 lg:col-start-3 lg:row-start-2">
               <div className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
                 <CommentSection
                   key={activeVideoName} // Force fresh component per video
@@ -327,8 +329,8 @@ export default function ProjectPage() {
                   hideInput={true}
                 />
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
