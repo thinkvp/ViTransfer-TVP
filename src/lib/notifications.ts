@@ -1,10 +1,12 @@
 import { Comment } from '@prisma/client'
 import { prisma } from './db'
-import { sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail } from './email'
+import { getEmailSettings, sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail } from './email'
 import { getProjectRecipients } from './recipients'
+import { buildUnsubscribeUrl } from './unsubscribe'
 import { generateShareUrl } from './url'
 import { getRedis } from './redis'
 import { sendPushNotification } from './push-notifications'
+import { createHash } from 'crypto'
 
 interface NotificationContext {
   comment: Comment
@@ -59,13 +61,46 @@ export async function sendImmediateNotification(context: NotificationContext) {
       return
     }
 
+    const emailSettings = await getEmailSettings()
+    const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
+    const appDomain = emailSettings.appDomain || new URL(shareUrl).origin
+
     console.log(`[IMMEDIATE→CLIENT] Sending to ${recipients.length} recipient(s) for "${project.title}"`)
     console.log(`[IMMEDIATE→CLIENT]   Video: ${videoName} (${versionLabel})`)
     console.log(`[IMMEDIATE→CLIENT]   Author: ${comment.authorName || 'Admin'}`)
 
-    const emailPromises = recipients.map(recipient =>
-      sendCommentNotificationEmail({
-        clientEmail: recipient.email!,
+    const emailPromises = recipients.map(async (recipient) => {
+      const recipientEmail = recipient.email!
+      const unsubscribeUrl = recipient.id
+        ? buildUnsubscribeUrl(appDomain, project.id, recipient.id)
+        : undefined
+
+      const trackingToken = trackingPixelsEnabled
+        ? await prisma.emailTracking.upsert({
+            where: {
+              token: createHash('sha256')
+                .update(`NEW_COMMENT|${project.id}|${comment.id}|${recipientEmail.toLowerCase()}`)
+                .digest('hex')
+                .slice(0, 32),
+            },
+            update: {
+              sentAt: new Date(),
+            },
+            create: {
+              token: createHash('sha256')
+                .update(`NEW_COMMENT|${project.id}|${comment.id}|${recipientEmail.toLowerCase()}`)
+                .digest('hex')
+                .slice(0, 32),
+              projectId: project.id,
+              type: 'NEW_COMMENT',
+              videoId: comment.videoId,
+              recipientEmail: recipientEmail.toLowerCase(),
+            },
+          })
+        : null
+
+      const result = await sendCommentNotificationEmail({
+        clientEmail: recipientEmail,
         clientName: recipient.name || 'Client',
         projectTitle: project.title,
         videoName,
@@ -74,17 +109,45 @@ export async function sendImmediateNotification(context: NotificationContext) {
         commentContent: comment.content,
         timecode: comment.timecode,
         shareUrl,
-      }).then(result => {
-        if (result.success) {
-          console.log(`[IMMEDIATE→CLIENT]   Sent to ${recipient.email}`)
-        } else {
-          console.error(`[IMMEDIATE→CLIENT]   Failed to ${recipient.email}: ${result.error}`)
-        }
-        return result
+        trackingToken: trackingToken?.token,
+        unsubscribeUrl,
       })
-    )
 
-    await Promise.allSettled(emailPromises)
+      if (result.success) {
+        console.log(`[IMMEDIATE→CLIENT]   Sent to ${recipientEmail}`)
+      } else {
+        console.error(`[IMMEDIATE→CLIENT]   Failed to ${recipientEmail}: ${result.error}`)
+      }
+
+      return { recipientEmail: recipientEmail.toLowerCase(), success: result.success }
+    })
+
+    const results = await Promise.allSettled(emailPromises)
+    const successfulRecipientEmails: string[] = []
+    results.forEach((r) => {
+      if (r.status === 'fulfilled' && r.value.success) {
+        successfulRecipientEmails.push(r.value.recipientEmail)
+      }
+    })
+
+    if (successfulRecipientEmails.length > 0) {
+      try {
+        await prisma.projectEmailEvent.create({
+          data: {
+            projectId: project.id,
+            type: 'NEW_COMMENT',
+            dedupeKey: `NEW_COMMENT:${comment.id}`,
+            videoId: comment.videoId,
+            recipientEmails: JSON.stringify(successfulRecipientEmails),
+          },
+        })
+      } catch (e: any) {
+        // Ignore unique constraint violations (already logged)
+        if (e?.code !== 'P2002') {
+          console.error('[IMMEDIATE→CLIENT]   Failed to log ProjectEmailEvent:', e)
+        }
+      }
+    }
   } else {
     // Client commented → notify admins IMMEDIATELY
     if (admins.length === 0) {

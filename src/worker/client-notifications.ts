@@ -33,6 +33,7 @@ export async function processClientNotifications() {
         id: true,
         title: true,
         slug: true,
+        useFullTimecode: true,
         clientNotificationSchedule: true,
         clientNotificationTime: true,
         clientNotificationDay: true,
@@ -187,6 +188,7 @@ export async function processClientNotifications() {
 
             const html = generateNotificationSummaryEmail({
               projectTitle: project.title,
+              useFullTimecode: project.useFullTimecode,
               shareUrl,
               unsubscribeUrl: recipient.id ? buildUnsubscribeUrl(appDomain, project.id, recipient.id) : undefined,
               recipientName: recipient.name || recipient.email!,

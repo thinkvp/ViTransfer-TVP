@@ -424,6 +424,8 @@ export async function sendCommentNotificationEmail({
   commentContent,
   timecode,
   shareUrl,
+  trackingToken,
+  unsubscribeUrl,
 }: {
   clientEmail: string
   clientName: string
@@ -434,9 +436,13 @@ export async function sendCommentNotificationEmail({
   commentContent: string
   timecode?: string | null
   shareUrl: string
+  trackingToken?: string
+  unsubscribeUrl?: string
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
+  const trackingPixelsEnabled = settings.emailTrackingPixelsEnabled ?? true
+  const appDomain = settings.appDomain || new URL(shareUrl).origin
 
   const subject = `New Comment: ${projectTitle}`
 
@@ -446,14 +452,17 @@ export async function sendCommentNotificationEmail({
     companyName,
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'New Comment',
-    subtitle: `${companyName} left feedback on your video`,
+    subtitle: `${companyName} left a comment on your video`,
+    trackingToken,
+    trackingPixelsEnabled,
+    appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(clientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-        We've reviewed your video and left some feedback for you.
+        We've reviewed your video and left a comment.
       </p>
 
       <div style="background: #f9fafb; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
@@ -477,9 +486,11 @@ export async function sendCommentNotificationEmail({
         </a>
       </div>
 
-      <p style="margin: 24px 0 0 0; font-size: 14px; color: #6b7280; line-height: 1.5;">
-        Questions? Simply reply to this email.
-      </p>
+      ${unsubscribeUrl ? `
+        <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
+          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="color:#2563eb; text-decoration:underline;">Unsubscribe</a>
+        </p>
+      ` : ''}
     `,
   })
 

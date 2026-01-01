@@ -59,7 +59,7 @@ export async function processAdminNotifications() {
       },
       include: {
         project: {
-          select: { title: true, slug: true }
+          select: { title: true, slug: true, useFullTimecode: true }
         }
       },
       orderBy: { createdAt: 'asc' }
@@ -110,6 +110,7 @@ export async function processAdminNotifications() {
       if (!projectGroups[projectId]) {
         projectGroups[projectId] = {
           projectTitle: notification.project.title,
+          useFullTimecode: notification.project.useFullTimecode,
           shareUrl: await generateShareUrl(notification.project.slug),
           notifications: []
         }

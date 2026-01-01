@@ -194,6 +194,8 @@ export async function GET(
       type: 'EMAIL' as const,
       description: evt.type === 'ALL_READY_VIDEOS'
         ? 'All Ready Videos'
+        : evt.type === 'NEW_COMMENT'
+        ? 'New Comment'
         : evt.type === 'COMMENT_SUMMARY'
         ? 'Comment Summary'
         : 'Specific Video & Version',
@@ -208,6 +210,8 @@ export async function GET(
       type: 'EMAIL_OPEN' as const,
       description: tracking.type === 'ALL_READY_VIDEOS'
         ? 'All Ready Videos'
+        : tracking.type === 'NEW_COMMENT'
+        ? 'New Comment'
         : tracking.type === 'COMMENT_SUMMARY'
         ? 'Comment Summary'
         : 'Specific Video & Version',
