@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 type Video = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { CheckCircle2, ChevronDown, ChevronRight, Info } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Info, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import ThemeToggle from './ThemeToggle'
@@ -93,6 +94,10 @@ export function CommentSectionView({
   showApproveButton = true,
   management,
 }: CommentSectionProps & { management: CommentManagement }) {
+  const [isVideoFullscreen, setIsVideoFullscreen] = useState(false)
+  const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
+  const [fullscreenChatPortalTarget, setFullscreenChatPortalTarget] = useState<HTMLElement | null>(null)
+
   const router = useRouter()
   const {
     comments,
@@ -119,6 +124,60 @@ export function CommentSectionView({
     clientUploadQuota,
     refreshClientUploadQuota,
   } = management
+
+  const syncFullscreenStateFromDom = useCallback(() => {
+    if (typeof window === 'undefined') return
+
+    const el = document.querySelector('[data-video-player-container="true"]') as HTMLElement | null
+    if (!el) {
+      setIsVideoFullscreen(false)
+      setFullscreenChatPortalTarget(null)
+      return
+    }
+
+    // For pseudo-fullscreen we rely on the player adding the `fixed` class.
+    // For true fullscreen we can also check fullscreenElement.
+    const isFullscreenLike = document.fullscreenElement === el || el.classList.contains('fixed')
+    setIsVideoFullscreen(isFullscreenLike)
+    setFullscreenChatPortalTarget(isFullscreenLike ? el : null)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const onFullscreenStateChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ isInFullscreen?: boolean }>).detail
+      const next = Boolean(detail?.isInFullscreen)
+      setIsVideoFullscreen(next)
+      if (!next) setIsFullscreenChatOpen(false)
+
+      // Keep portal target in sync (covers pseudo-fullscreen too).
+      syncFullscreenStateFromDom()
+    }
+
+    const onSetOpen = (e: Event) => {
+      const detail = (e as CustomEvent<{ open?: boolean }>).detail
+      if (typeof detail?.open !== 'boolean') return
+      setIsFullscreenChatOpen(detail.open)
+
+      // If we're already in fullscreen when CommentSection mounts, we can miss the
+      // initial fullscreen state event. Sync from DOM when opening.
+      if (detail.open) {
+        syncFullscreenStateFromDom()
+      }
+    }
+
+    window.addEventListener('videoFullscreenStateChanged', onFullscreenStateChanged)
+    window.addEventListener('fullscreenChatSetOpen', onSetOpen)
+
+    // Initial sync in case we're already fullscreen when this mounts.
+    syncFullscreenStateFromDom()
+
+    return () => {
+      window.removeEventListener('videoFullscreenStateChanged', onFullscreenStateChanged)
+      window.removeEventListener('fullscreenChatSetOpen', onSetOpen)
+    }
+  }, [syncFullscreenStateFromDom])
 
   // Auto-scroll to latest comment (like messaging apps)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -613,9 +672,77 @@ export function CommentSectionView({
     }
   }
 
+  const fullscreenChatOverlay =
+    isVideoFullscreen && isFullscreenChatOpen && fullscreenChatPortalTarget
+      ? createPortal(
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-[60] w-[min(720px,calc(100vw-2rem))]">
+            <div className="relative rounded-lg border border-border bg-card shadow-elevation-sm opacity-50 hover:opacity-100 focus-within:opacity-100 transition-opacity">
+              <div className="absolute -top-4 right-3 z-10">
+                <div className="rounded-full border border-border bg-card shadow-elevation-sm">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    aria-label="Close comments"
+                    onClick={() => {
+                      window.dispatchEvent(
+                        new CustomEvent('fullscreenChatSetOpen', {
+                          detail: { open: false },
+                        })
+                      )
+                    }}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="p-3">
+                <CommentInput
+                  newComment={newComment}
+                  onCommentChange={handleCommentChange}
+                  onSubmit={handleSubmitComment}
+                  loading={loading}
+                  uploadProgress={uploadProgress}
+                  uploadStatusText={uploadStatusText}
+                  onFileSelect={onFileSelect}
+                  attachedFiles={attachedFiles}
+                  onRemoveFile={onRemoveFile}
+                  allowFileUpload={allowClientUploadFiles && !isAdminView}
+                  clientUploadQuota={clientUploadQuota}
+                  onRefreshUploadQuota={refreshClientUploadQuota}
+                  selectedTimestamp={selectedTimestamp}
+                  onClearTimestamp={handleClearTimestamp}
+                  selectedVideoFps={selectedVideoFps}
+                  useFullTimecode={useFullTimecode}
+                  replyingToComment={replyingToComment}
+                  onCancelReply={handleCancelReply}
+                  showAuthorInput={!isAdminView && isPasswordProtected}
+                  authorName={authorName}
+                  onAuthorNameChange={setAuthorName}
+                  recipients={recipients}
+                  currentVideoRestricted={currentVideoRestricted}
+                  restrictionMessage={restrictionMessage}
+                  commentsDisabled={commentsDisabled}
+                  showShortcutsButton={showShortcutsButton}
+                  onShowShortcuts={handleOpenShortcuts}
+                  showTopBorder={false}
+                  dialogPortalContainer={fullscreenChatPortalTarget}
+                  isInFullscreenMode={true}
+                />
+              </div>
+            </div>
+          </div>,
+          fullscreenChatPortalTarget
+        )
+      : null
+
   return (
-    <Card className="bg-card border border-border flex flex-col h-full max-h-[70vh] lg:max-h-none rounded-lg overflow-hidden" data-comment-section>
-      <CardHeader className="border-b border-border flex-shrink-0 space-y-1">
+    <>
+      {fullscreenChatOverlay}
+      <Card className="bg-card border border-border flex flex-col h-full max-h-[70vh] lg:max-h-none rounded-lg overflow-hidden" data-comment-section>
+        <CardHeader className="border-b border-border flex-shrink-0 space-y-1">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 w-full">
             <CardTitle className="text-lg font-semibold text-foreground whitespace-normal break-words leading-snug">
@@ -740,7 +867,7 @@ export function CommentSectionView({
             </Button>
           </div>
         ) : null}
-      </CardHeader>
+        </CardHeader>
 
       <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
         {headerVideo && (headerVideo as any)?.approved ? (
@@ -969,7 +1096,8 @@ export function CommentSectionView({
           )}
         </div>
       </CardContent>
-    </Card>
+      </Card>
+    </>
   )
 }
 

@@ -7,7 +7,7 @@ import Image from 'next/image'
 type Video = any
 type ProjectStatus = 'IN_REVIEW' | 'APPROVED' | 'SHARE_ONLY'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Rewind, FastForward } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Rewind, FastForward, MessageSquare } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import {
@@ -82,6 +82,7 @@ export default function VideoPlayer({
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false)
+  const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
 
@@ -390,6 +391,20 @@ export default function VideoPlayer({
   }, [activeVideoName])
 
   const isInFullscreen = isFullscreen || isPseudoFullscreen
+  const prevIsInFullscreenRef = useRef(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const onSetOpen = (e: Event) => {
+      const detail = (e as CustomEvent<{ open?: boolean }>).detail
+      if (typeof detail?.open !== 'boolean') return
+      setIsFullscreenChatOpen(detail.open)
+    }
+
+    window.addEventListener('fullscreenChatSetOpen', onSetOpen)
+    return () => window.removeEventListener('fullscreenChatSetOpen', onSetOpen)
+  }, [])
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -401,6 +416,35 @@ export default function VideoPlayer({
     handleFullscreenChange()
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(
+      new CustomEvent('videoFullscreenStateChanged', {
+        detail: { isInFullscreen },
+      })
+    )
+
+    // Default behavior: when entering fullscreen on desktop (pointer-fine), open the chat overlay.
+    const wasInFullscreen = prevIsInFullscreenRef.current
+    if (!wasInFullscreen && isInFullscreen && canShowTimelineHover) {
+      window.dispatchEvent(
+        new CustomEvent('fullscreenChatSetOpen', {
+          detail: { open: true },
+        })
+      )
+    }
+
+    prevIsInFullscreenRef.current = isInFullscreen
+
+    if (!isInFullscreen && isFullscreenChatOpen) {
+      window.dispatchEvent(
+        new CustomEvent('fullscreenChatSetOpen', {
+          detail: { open: false },
+        })
+      )
+    }
+  }, [canShowTimelineHover, isInFullscreen, isFullscreenChatOpen])
 
   useEffect(() => {
     if (!isPseudoFullscreen) return
@@ -420,6 +464,29 @@ export default function VideoPlayer({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isPseudoFullscreen])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const onRequestExitFullscreen = async () => {
+      if (isPseudoFullscreen) {
+        setIsPseudoFullscreen(false)
+        return
+      }
+
+      const container = playerContainerRef.current
+      if (container && document.fullscreenElement === container) {
+        try {
+          await document.exitFullscreen()
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    window.addEventListener('requestExitVideoFullscreen', onRequestExitFullscreen as EventListener)
+    return () => window.removeEventListener('requestExitVideoFullscreen', onRequestExitFullscreen as EventListener)
   }, [isPseudoFullscreen])
 
   const toggleFullscreen = async () => {
@@ -945,6 +1012,7 @@ export default function VideoPlayer({
     <div className="space-y-4 flex flex-col max-h-full">
       <div
         ref={playerContainerRef}
+        data-video-player-container="true"
         className={
 
           isInFullscreen
@@ -1341,6 +1409,24 @@ export default function VideoPlayer({
                 <FastForward className="w-4 h-4" />
               </Button>
 
+              {isInFullscreen && canShowTimelineHover && (
+                <Button
+                  type="button"
+                  variant={isFullscreenChatOpen ? 'default' : 'outline'}
+                  size="sm"
+                  aria-label={isFullscreenChatOpen ? 'Hide comments' : 'Show comments'}
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('fullscreenChatSetOpen', {
+                        detail: { open: !isFullscreenChatOpen },
+                      })
+                    )
+                  }}
+                >
+                  <MessageSquare className="w-4 h-4" />
+                </Button>
+              )}
+
               <Button
                 type="button"
                 variant="outline"
@@ -1456,7 +1542,10 @@ export default function VideoPlayer({
 
       {/* Keyboard Shortcuts Dialog (triggered by CommentInput shortcut button) */}
       <Dialog open={showShortcutsDialog} onOpenChange={setShowShortcutsDialog}>
-        <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+        <DialogContent
+          portalContainer={playerContainerRef.current}
+          className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md"
+        >
           <DialogHeader>
             <DialogTitle>Keyboard Shortcuts</DialogTitle>
             <DialogDescription className="text-muted-foreground">

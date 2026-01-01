@@ -17,6 +17,7 @@ interface FileUploadModalProps {
   isLoading?: boolean
   error?: string
   quota?: { usedBytes: number; limitMB: number } | null
+  portalContainer?: HTMLElement | null
 }
 
 export function FileUploadModal({
@@ -26,6 +27,7 @@ export function FileUploadModal({
   isLoading = false,
   error: externalError = '',
   quota = null,
+  portalContainer = null,
 }: FileUploadModalProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState('')
@@ -92,7 +94,7 @@ export function FileUploadModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent portalContainer={portalContainer} className="max-w-md">
         <DialogHeader>
           <DialogTitle>Upload Files</DialogTitle>
           <DialogDescription>

@@ -60,6 +60,12 @@ interface CommentInputProps {
   // Layout/styling
   containerClassName?: string
   showTopBorder?: boolean
+
+  // Optional: portal dialogs into a specific container (needed for element fullscreen)
+  dialogPortalContainer?: HTMLElement | null
+
+  // Fullscreen overlay mode (used to adjust behaviors like file uploads)
+  isInFullscreenMode?: boolean
 }
 
 export default function CommentInput({
@@ -92,10 +98,13 @@ export default function CommentInput({
   onRefreshUploadQuota,
   containerClassName,
   showTopBorder = true,
+  dialogPortalContainer = null,
+  isInFullscreenMode = false,
 }: CommentInputProps) {
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [fullscreenUploadNotSupportedOpen, setFullscreenUploadNotSupportedOpen] = useState(false)
   const [namePickerOpen, setNamePickerOpen] = useState(false)
   const [customName, setCustomName] = useState('')
   const customNameInputRef = useRef<HTMLInputElement>(null)
@@ -229,8 +238,10 @@ export default function CommentInput({
                   </span>
                   <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                 </button>
-
-                <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+                <DialogContent
+                  portalContainer={dialogPortalContainer}
+                  className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md"
+                >
                   <DialogHeader>
                     <DialogTitle>Choose your name</DialogTitle>
                     <DialogDescription>
@@ -307,6 +318,41 @@ export default function CommentInput({
       {/* Message Input */}
       {!currentVideoRestricted && (
         <>
+          <Dialog
+            open={fullscreenUploadNotSupportedOpen}
+            onOpenChange={setFullscreenUploadNotSupportedOpen}
+          >
+            <DialogContent portalContainer={dialogPortalContainer} className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>File uploads are not supported in fullscreen mode</DialogTitle>
+                <DialogDescription className="text-muted-foreground">
+                  Exit fullscreen to attach files.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex items-center justify-between gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setFullscreenUploadNotSupportedOpen(false)
+                    window.dispatchEvent(new CustomEvent('requestExitVideoFullscreen'))
+                  }}
+                >
+                  Exit Fullscreen
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={() => setFullscreenUploadNotSupportedOpen(false)}
+                >
+                  Okay
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <div className="flex gap-2">
             <Textarea
               id="feedback-input"
@@ -322,6 +368,10 @@ export default function CommentInput({
               {allowFileUpload && (
                 <Button
                   onClick={async () => {
+                    if (isInFullscreenMode) {
+                      setFullscreenUploadNotSupportedOpen(true)
+                      return
+                    }
                     try {
                       await onRefreshUploadQuota?.()
                     } finally {
@@ -414,6 +464,7 @@ export default function CommentInput({
               open={uploadModalOpen}
               onOpenChange={setUploadModalOpen}
               quota={clientUploadQuota}
+              portalContainer={dialogPortalContainer}
               onFileSelect={async (files) => {
                 // Keep modal contract simple: add selected files to the pending list
                 setUploadError('')
