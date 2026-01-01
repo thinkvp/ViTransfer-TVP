@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { prisma } from './db'
-import { buildCompanyLogoUrl, sendEmail, escapeHtml, getEmailSettings, renderEmailShell } from './email'
+import { EMAIL_THEME, buildCompanyLogoUrl, emailCardStyle, escapeHtml, getEmailSettings, renderEmailShell, sendEmail } from './email'
 import { getRedis } from './redis'
 
 // OTP Configuration
@@ -192,15 +192,41 @@ export async function sendOTPEmail(
   projectTitle: string,
   code: string
 ): Promise<void> {
-  const settings = await getEmailSettings()
-  const companyName = settings.companyName || 'Secure Access'
-  const companyLogoUrl = buildCompanyLogoUrl({
-    appDomain: settings.appDomain,
-    companyLogoMode: settings.companyLogoMode,
-    companyLogoPath: settings.companyLogoPath,
-    companyLogoUrl: settings.companyLogoUrl,
-    updatedAt: settings.updatedAt,
+  const { subject, html, text } = await renderOTPEmail({ projectTitle, code })
+
+  await sendEmail({
+    to: email,
+    subject,
+    html,
+    text,
   })
+}
+
+export async function renderOTPEmail({
+  projectTitle,
+  code,
+  branding,
+}: {
+  projectTitle: string
+  code: string
+  branding?: {
+    companyName?: string
+    companyLogoUrl?: string | null
+  }
+}): Promise<{ subject: string; html: string; text: string }> {
+  const hasCompleteBranding = branding?.companyName != null && branding.companyLogoUrl !== undefined
+  const settings = hasCompleteBranding ? null : await getEmailSettings()
+
+  const companyName = branding?.companyName || settings?.companyName || 'Secure Access'
+  const companyLogoUrl = branding?.companyLogoUrl ?? (settings
+    ? buildCompanyLogoUrl({
+        appDomain: settings.appDomain,
+        companyLogoMode: settings.companyLogoMode,
+        companyLogoPath: settings.companyLogoPath,
+        companyLogoUrl: settings.companyLogoUrl,
+        updatedAt: settings.updatedAt,
+      })
+    : null)
 
   // SECURITY: Escape HTML to prevent XSS
   const safeProjectTitle = escapeHtml(projectTitle)
@@ -209,24 +235,24 @@ export async function sendOTPEmail(
   const html = renderEmailShell({
     companyName,
     companyLogoUrl,
-    headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+    headerGradient: EMAIL_THEME.headerBackground,
     title: 'Verification Code',
     bodyContent: `
-      <p style="margin: 0 0 20px 0; font-size: 16px; color: #666; line-height: 1.5;">
+      <p style="margin: 0 0 20px 0; font-size: 16px; color: ${EMAIL_THEME.textMuted}; line-height: 1.5;">
         Your verification code for <strong>${safeProjectTitle}</strong> is:
       </p>
 
-      <div style="background: #f5f5f5; border-radius: 8px; padding: 30px; text-align: center; margin-bottom: 30px;">
-        <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #000;">
+      <div style="${emailCardStyle({ paddingPx: 30, borderRadiusPx: 8, marginBottomPx: 30 })}; text-align: center;">
+        <div style="font-size: 36px; font-weight: 700; letter-spacing: 8px; color: ${EMAIL_THEME.text};">
           ${code}
         </div>
       </div>
 
-      <p style="margin: 0 0 10px 0; font-size: 14px; color: #666; line-height: 1.5;">
+      <p style="margin: 0 0 10px 0; font-size: 14px; color: ${EMAIL_THEME.textMuted}; line-height: 1.5;">
         This code will expire in ${OTP_EXPIRY_MINUTES} minutes.
       </p>
 
-      <p style="margin: 0; font-size: 13px; color: #999; line-height: 1.5;">
+      <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textSubtle}; line-height: 1.5;">
         If you didn't request this code, please ignore this email.
       </p>
     `,
@@ -242,12 +268,7 @@ This code will expire in ${OTP_EXPIRY_MINUTES} minutes.
 If you didn't request this code, you can safely ignore this email.
   `.trim()
 
-  await sendEmail({
-    to: email,
-    subject,
-    html,
-    text,
-  })
+  return { subject, html, text }
 }
 
 /**

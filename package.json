@@ -10,7 +10,8 @@
     "start:standalone": "node .next/standalone/server.js",
     "lint": "eslint .",
     "postinstall": "prisma generate",
-    "worker": "tsx src/worker/index.ts"
+    "worker": "tsx src/worker/index.ts",
+    "preview:emails": "tsx scripts/render-email-previews.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",

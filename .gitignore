@@ -63,3 +63,6 @@ AGENTS.md
 website.html
 documentation.html
 about.html
+
+# Local email preview output
+.email-previews/

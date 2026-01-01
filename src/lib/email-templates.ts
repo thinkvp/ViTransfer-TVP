@@ -3,7 +3,7 @@
  * Clean, minimal, and easy to scan
  */
 
-import { escapeHtml, renderEmailShell } from './email'
+import { EMAIL_THEME, emailCardStyle, emailPrimaryButtonStyle, escapeHtml, renderEmailShell } from './email'
 import { formatTimecodeDisplay } from './timecode'
 
 interface NotificationData {
@@ -85,7 +85,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     if (n.type === 'PROJECT_APPROVED') {
       return `
         <div style="padding:10px 0;">
-          <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#2563eb; margin-bottom:4px;">Project approved</div>
+          <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:${EMAIL_THEME.accent}; margin-bottom:4px;">Project approved</div>
           <div style="font-size:14px; color:#111827;">All videos are ready for download.</div>
         </div>
       `
@@ -115,7 +115,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
   }).join('<div style="height:1px; background:#e5e7eb; margin:6px 0;"></div>')
 
   const itemsHtml = `
-    <div style="border:1px solid #e2e8f0; border-radius:12px; padding:10px 14px; margin-bottom:14px;">
+    <div style="${emailCardStyle({ paddingPx: 10, borderRadiusPx: 12, marginBottomPx: 14 })}">
       ${itemsHtmlContent}
     </div>
   `
@@ -123,7 +123,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
   return renderEmailShell({
     companyName: 'Project Updates',
     companyLogoUrl: data.companyLogoUrl,
-    headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+    headerGradient: EMAIL_THEME.headerBackground,
     title: 'Project Update',
     subtitle: `${summaryText} ${data.period}`,
     trackingToken: data.trackingToken,
@@ -139,13 +139,13 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       </p>
       ${itemsHtml}
       <div style="text-align:center; margin:32px 0;">
-        <a href="${escapeHtml(data.shareUrl)}" style="display:inline-block; background:#3b82f6; color:#ffffff; text-decoration:none; padding:14px 32px; border-radius:8px; font-size:16px; font-weight:600; box-shadow:0 4px 12px rgba(59,130,246,0.3);">
+        <a href="${escapeHtml(data.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
           View Project
         </a>
       </div>
       ${data.unsubscribeUrl ? `
         <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="color:#2563eb; text-decoration:underline;">Unsubscribe</a>
+          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="color:${EMAIL_THEME.accent}; text-decoration:underline;">Unsubscribe</a>
         </p>
       ` : ''}
     `,
@@ -175,11 +175,11 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
     `).join('')
 
     return `
-      <div style="border:1px solid #e2e8f0; border-radius:12px; padding:16px; margin-bottom:16px; background:#f9fafb;">
+      <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">
         <div style="font-size:15px; font-weight:800; color:#111827; margin-bottom:8px;">${escapeHtml(project.projectTitle)}</div>
         ${items}
         <div style="margin-top:12px; text-align:center;">
-          <a href="${escapeHtml(project.shareUrl)}" style="display:inline-flex; align-items:center; gap:8px; color:#111827; text-decoration:none; padding:10px 22px; border-radius:999px; border:1px solid #111827; font-weight:700; font-size:14px;">
+          <a href="${escapeHtml(project.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999 })}">
             View project<span style="font-size:16px;">→</span>
           </a>
         </div>
@@ -192,7 +192,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
   return renderEmailShell({
     companyName: 'Admin Dashboard',
     companyLogoUrl: data.companyLogoUrl,
-    headerGradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+    headerGradient: EMAIL_THEME.headerBackground,
     title: 'Client Activity Summary',
     subtitle: `${totalComments} ${totalComments === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
     footerNote: 'Admin Notifications',
@@ -205,7 +205,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
       </p>
       ${projectsHtml}
       <div style="text-align:center; margin:32px 0;">
-        <a href="${adminUrl}" style="display:inline-block; background:#f59e0b; color:#ffffff; text-decoration:none; padding:14px 32px; border-radius:8px; font-size:16px; font-weight:600; box-shadow:0 4px 12px rgba(245,158,11,0.3);">
+        <a href="${adminUrl}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
           Open Admin Dashboard
         </a>
       </div>
