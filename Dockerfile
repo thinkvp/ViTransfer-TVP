@@ -52,10 +52,18 @@ COPY prisma ./prisma
 RUN npm install --legacy-peer-deps
 
 RUN echo "Running npm security audit..." && \
-    npm audit --audit-level=high || \
-    (echo "SECURITY ALERT: High or critical vulnerabilities found!" && \
-     echo "Run 'npm audit' locally to see details and 'npm audit fix' to resolve." && \
-     exit 1)
+    if audit_output="$(npm audit --audit-level=high 2>&1)"; then \
+        echo "$audit_output"; \
+    else \
+        echo "$audit_output"; \
+        if echo "$audit_output" | grep -qiE "ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|network"; then \
+            echo "WARN: npm audit failed due to network/registry connectivity; continuing build."; \
+        else \
+            echo "SECURITY ALERT: High or critical vulnerabilities found (or audit failed unexpectedly)!"; \
+            echo "Run 'npm audit' locally to see details and 'npm audit fix' to resolve."; \
+            exit 1; \
+        fi; \
+    fi
 
 # ========================================
 # Builder (Next standalone)
