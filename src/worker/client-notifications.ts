@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db'
 import { getEmailSettings, sendEmail } from '../lib/email'
+import { buildCompanyLogoUrl } from '../lib/email'
 import { generateNotificationSummaryEmail } from '../lib/email-templates'
 import { getProjectRecipients } from '../lib/recipients'
 import { buildUnsubscribeUrl } from '../lib/unsubscribe'
@@ -156,6 +157,13 @@ export async function processClientNotifications() {
           const emailSettings = await getEmailSettings()
           const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
           const appDomain = emailSettings.appDomain || new URL(shareUrl).origin
+          const companyLogoUrl = buildCompanyLogoUrl({
+            appDomain: emailSettings.appDomain || appDomain,
+            companyLogoMode: emailSettings.companyLogoMode,
+            companyLogoPath: emailSettings.companyLogoPath,
+            companyLogoUrl: emailSettings.companyLogoUrl,
+            updatedAt: emailSettings.updatedAt,
+          })
 
           // Stable batch key to prevent duplicate tracking/event logs on retries.
           // Note: if the same notification IDs are retried, we reuse the same token per recipient.
@@ -198,6 +206,7 @@ export async function processClientNotifications() {
               trackingToken: trackingToken?.token,
               trackingPixelsEnabled,
               appDomain,
+               companyLogoUrl,
             })
 
             const result = await sendEmail({

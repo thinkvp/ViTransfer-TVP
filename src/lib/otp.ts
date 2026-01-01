@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { prisma } from './db'
-import { sendEmail, escapeHtml, getEmailSettings, renderEmailShell } from './email'
+import { buildCompanyLogoUrl, sendEmail, escapeHtml, getEmailSettings, renderEmailShell } from './email'
 import { getRedis } from './redis'
 
 // OTP Configuration
@@ -194,6 +194,13 @@ export async function sendOTPEmail(
 ): Promise<void> {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Secure Access'
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   // SECURITY: Escape HTML to prevent XSS
   const safeProjectTitle = escapeHtml(projectTitle)
@@ -201,6 +208,7 @@ export async function sendOTPEmail(
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'Verification Code',
     bodyContent: `

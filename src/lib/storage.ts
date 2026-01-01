@@ -4,7 +4,7 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
 
-const STORAGE_ROOT = process.env.STORAGE_ROOT || '/app/uploads'
+const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
 /**
  * Validate and sanitize file paths to prevent path traversal attacks

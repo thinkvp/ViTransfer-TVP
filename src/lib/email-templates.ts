@@ -36,11 +36,13 @@ interface NotificationSummaryData {
   trackingToken?: string
   trackingPixelsEnabled?: boolean
   appDomain?: string
+  companyLogoUrl?: string
 }
 
 interface AdminSummaryData {
   adminName: string
   period: string
+  companyLogoUrl?: string
   projects: Array<{
     projectTitle: string
     useFullTimecode: boolean
@@ -120,6 +122,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
 
   return renderEmailShell({
     companyName: 'Project Updates',
+    companyLogoUrl: data.companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'Project Update',
     subtitle: `${summaryText} ${data.period}`,
@@ -188,6 +191,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
 
   return renderEmailShell({
     companyName: 'Admin Dashboard',
+    companyLogoUrl: data.companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
     title: 'Client Activity Summary',
     subtitle: `${totalComments} ${totalComments === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,

@@ -34,9 +34,48 @@ export interface EmailShellOptions {
   bodyContent: string
   footerNote?: string
   headerGradient: string
+  companyLogoUrl?: string | null
   trackingToken?: string
   trackingPixelsEnabled?: boolean
   appDomain?: string
+}
+
+export function buildCompanyLogoUrl({
+  appDomain,
+  companyLogoMode,
+  companyLogoPath,
+  companyLogoUrl,
+  updatedAt,
+}: {
+  appDomain?: string | null
+  companyLogoMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
+  companyLogoPath?: string | null
+  companyLogoUrl?: string | null
+  updatedAt?: Date
+}): string | null {
+  const mode = companyLogoMode || 'NONE'
+  if (mode === 'NONE') return null
+
+  if (mode === 'LINK') {
+    const raw = (companyLogoUrl || '').trim()
+    if (!raw) return null
+    try {
+      const parsed = new URL(raw)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+      return raw
+    } catch {
+      return null
+    }
+  }
+
+  // UPLOAD
+  if (!companyLogoPath) return null
+  const base = appDomain || process.env.APP_DOMAIN
+  if (!base) return null
+
+  // Cache-bust for email clients using Settings.updatedAt.
+  const version = updatedAt ? updatedAt.getTime() : Date.now()
+  return `${base.replace(/\/$/, '')}/api/branding/logo?v=${version}`
 }
 
 export function renderEmailShell({
@@ -46,6 +85,7 @@ export function renderEmailShell({
   bodyContent,
   footerNote,
   headerGradient,
+  companyLogoUrl,
   trackingToken,
   trackingPixelsEnabled,
   appDomain,
@@ -70,6 +110,18 @@ export function renderEmailShell({
       <div style="font-size: 24px; font-weight: 700; color: #ffffff; margin-bottom: 8px;">${escapeHtml(title)}</div>
       ${subtitle ? `<div style="font-size: 15px; color: rgba(255,255,255,0.95);">${escapeHtml(subtitle)}</div>` : ''}
     </div>
+
+    ${companyLogoUrl ? `
+    <!-- Logo -->
+    <div style="padding: 16px 24px 0; text-align: center; background: #ffffff;">
+      <img
+        src="${escapeHtml(companyLogoUrl)}"
+        alt="${escapeHtml(companyName)} logo"
+        style="display:block; margin:0 auto; width:auto; max-width:300px; height:auto; border:0; outline:none; text-decoration:none;"
+      />
+      <div style="height: 16px; line-height: 16px;">&nbsp;</div>
+    </div>
+    ` : ''}
 
     <!-- Content -->
     <div style="padding: 32px 24px;">
@@ -99,7 +151,11 @@ interface EmailSettings {
   smtpSecure: string | null
   appDomain: string | null
   companyName: string | null
+  companyLogoMode: 'NONE' | 'UPLOAD' | 'LINK' | null
+  companyLogoPath: string | null
+  companyLogoUrl: string | null
   emailTrackingPixelsEnabled: boolean | null
+  updatedAt?: Date
 }
 
 let cachedSettings: EmailSettings | null = null
@@ -134,7 +190,11 @@ export async function getEmailSettings(): Promise<EmailSettings> {
       smtpSecure: true,
       appDomain: true,
       companyName: true,
+      companyLogoMode: true,
+      companyLogoPath: true,
+      companyLogoUrl: true,
       emailTrackingPixelsEnabled: true,
+      updatedAt: true,
     }
   })
 
@@ -151,7 +211,11 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     smtpSecure: null,
     appDomain: null,
     companyName: null,
+    companyLogoMode: null,
+    companyLogoPath: null,
+    companyLogoUrl: null,
     emailTrackingPixelsEnabled: null,
+    updatedAt: undefined,
   }
   settingsCacheTime = now
 
@@ -264,20 +328,26 @@ export async function sendNewVersionEmail({
   projectTitle: string
   videoName: string
   versionLabel: string
-  videoNotes?: string
+  videoNotes?: string | null
   shareUrl: string
   isPasswordProtected?: boolean
   trackingToken?: string
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   const subject = `New Version Available: ${projectTitle}`
 
-  const trimmedVideoNotes = (videoNotes || '').trim()
-
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'New Version Available',
     subtitle: 'Ready for your review',
@@ -303,10 +373,10 @@ export async function sendNewVersionEmail({
         </div>
       </div>
 
-      ${trimmedVideoNotes ? `
+      ${videoNotes && videoNotes.trim() ? `
         <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
-          <div style="font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Video Notes</div>
-          <div style="font-size: 15px; color: #374151; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(trimmedVideoNotes)}</div>
+          <div style="font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Notes</div>
+          <div style="font-size: 15px; color: #111827; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(videoNotes)}</div>
         </div>
       ` : ''}
 
@@ -357,6 +427,13 @@ export async function sendProjectApprovedEmail({
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   const subject = isComplete
     ? `${projectTitle} - Project Approved and Ready for Download`
@@ -369,6 +446,7 @@ export async function sendProjectApprovedEmail({
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
     title: statusTitle,
     subtitle: statusMessage,
@@ -441,8 +519,13 @@ export async function sendCommentNotificationEmail({
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
-  const trackingPixelsEnabled = settings.emailTrackingPixelsEnabled ?? true
-  const appDomain = settings.appDomain || new URL(shareUrl).origin
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   const subject = `New Comment: ${projectTitle}`
 
@@ -450,19 +533,20 @@ export async function sendCommentNotificationEmail({
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
     title: 'New Comment',
-    subtitle: `${companyName} left a comment on your video`,
+    subtitle: `${companyName} left feedback on your video`,
     trackingToken,
-    trackingPixelsEnabled,
-    appDomain,
+    trackingPixelsEnabled: settings.emailTrackingPixelsEnabled ?? true,
+    appDomain: settings.appDomain || undefined,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(clientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-        We've reviewed your video and left a comment.
+        We've reviewed your video and left some feedback for you.
       </p>
 
       <div style="background: #f9fafb; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
@@ -486,9 +570,13 @@ export async function sendCommentNotificationEmail({
         </a>
       </div>
 
+      <p style="margin: 24px 0 0 0; font-size: 14px; color: #6b7280; line-height: 1.5;">
+        Questions? Simply reply to this email.
+      </p>
+
       ${unsubscribeUrl ? `
-        <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="color:#2563eb; text-decoration:underline;">Unsubscribe</a>
+        <p style="margin: 16px 0 0 0; font-size: 13px; color: #9ca3af; line-height: 1.5;">
+          <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7280; text-decoration: underline;">Unsubscribe from these notifications</a>
         </p>
       ` : ''}
     `,
@@ -527,6 +615,13 @@ export async function sendAdminCommentNotificationEmail({
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   const subject = `Client Feedback: ${projectTitle}`
 
@@ -534,6 +629,7 @@ export async function sendAdminCommentNotificationEmail({
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
     title: 'New Client Feedback',
     subtitle: 'Your client left a comment',
@@ -612,6 +708,13 @@ export async function sendAdminProjectApprovedEmail({
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
   const appDomain = settings.appDomain
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   if (!appDomain) {
     throw new Error('App domain not configured. Please configure domain in Settings to enable email notifications.')
@@ -643,6 +746,7 @@ export async function sendAdminProjectApprovedEmail({
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient,
     title: statusTitle,
     subtitle: statusMessage,
@@ -708,6 +812,13 @@ export async function sendProjectGeneralNotificationEmail({
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   const subject = `Project Ready for Review: ${escapeHtml(projectTitle)}`
 
@@ -726,6 +837,7 @@ export async function sendProjectGeneralNotificationEmail({
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
     title: 'Project Ready for Review',
     subtitle: projectTitle,
@@ -790,11 +902,19 @@ export async function sendPasswordEmail({
 }) {
   const settings = await getEmailSettings()
   const companyName = settings.companyName || 'Studio'
+  const companyLogoUrl = buildCompanyLogoUrl({
+    appDomain: settings.appDomain,
+    companyLogoMode: settings.companyLogoMode,
+    companyLogoPath: settings.companyLogoPath,
+    companyLogoUrl: settings.companyLogoUrl,
+    updatedAt: settings.updatedAt,
+  })
 
   const subject = `Access Password: ${escapeHtml(projectTitle)}`
 
   const html = renderEmailShell({
     companyName,
+    companyLogoUrl,
     headerGradient: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
     title: 'Project Password',
     subtitle: projectTitle,
@@ -836,8 +956,9 @@ export async function sendPasswordEmail({
  */
 export async function testEmailConnection(testEmail: string, customConfig?: any) {
   try {
-    // Use custom config if provided, otherwise load from database
-    const settings = customConfig || await getEmailSettings()
+    // Use custom config for SMTP transport, but load DB settings for branding defaults.
+    const dbSettings = await getEmailSettings()
+    const settings = customConfig || dbSettings
     const transporter = await createTransporter(customConfig)
 
     // Verify connection
@@ -846,6 +967,13 @@ export async function testEmailConnection(testEmail: string, customConfig?: any)
     // Send test email
     const html = renderEmailShell({
       companyName: settings.companyName || 'ViTransfer',
+      companyLogoUrl: buildCompanyLogoUrl({
+        appDomain: settings.appDomain || dbSettings.appDomain,
+        companyLogoMode: settings.companyLogoMode || dbSettings.companyLogoMode,
+        companyLogoPath: dbSettings.companyLogoPath,
+        companyLogoUrl: settings.companyLogoUrl || dbSettings.companyLogoUrl,
+        updatedAt: dbSettings.updatedAt,
+      }),
       headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
       title: 'SMTP Test Succeeded',
       subtitle: 'Email sending is working',

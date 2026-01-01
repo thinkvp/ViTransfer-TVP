@@ -118,12 +118,26 @@ export async function GET(
     const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
 
     // Sanitize/normalize comments to ensure timecodes are consistent
-    const sanitizedComments = project.comments.map((comment: any) =>
-      sanitizeComment(comment, true, true, fallbackName)
-    )
+    // Be defensive: malformed legacy comments should not break the entire project view.
+    const sanitizedComments = project.comments.map((comment: any) => {
+      try {
+        return sanitizeComment(comment, true, true, fallbackName)
+      } catch {
+        return comment
+      }
+    })
 
     // Decrypt password for admin users (needed for settings form)
-    const decryptedPassword = project.sharePassword ? decrypt(project.sharePassword) : null
+    // Be defensive: if ENCRYPTION_KEY changed, older records may not decrypt.
+    let decryptedPassword: string | null = null
+    if (project.sharePassword) {
+      try {
+        decryptedPassword = decrypt(project.sharePassword)
+      } catch (e) {
+        console.error('[API] Failed to decrypt project sharePassword:', e)
+        decryptedPassword = null
+      }
+    }
 
     // Convert BigInt fields to strings for JSON serialization
     const projectData = {
@@ -139,6 +153,7 @@ export async function GET(
 
     return NextResponse.json(projectData)
   } catch (error) {
+    console.error('[API] Error fetching project:', error)
     return NextResponse.json(
       { error: 'Unable to process request' },
       { status: 500 }

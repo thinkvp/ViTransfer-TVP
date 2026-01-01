@@ -30,14 +30,14 @@ enum UserRole {
 }
 
 model Project {
-  id              String  @id @default(cuid())
-  title           String
-  slug            String  @unique
-  description     String?
-  companyName     String? // Optional company/brand name (display priority: companyName → primary recipient → 'Client')
-  sharePassword   String?
-  authMode        String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
-  guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
+  id            String  @id @default(cuid())
+  title         String
+  slug          String  @unique
+  description   String?
+  companyName   String? // Optional company/brand name (display priority: companyName → primary recipient → 'Client')
+  sharePassword String?
+  authMode      String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
+  guestMode     Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
   guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
 
   // Revision tracking (optional)
@@ -59,12 +59,14 @@ model Project {
   maxClientUploadAllocationMB     Int     @default(1000) // Total allowed client comment-attachment uploads per project (0 = unlimited)
 
   // Video processing settings
-  previewResolution       String  @default("720p") // "720p", "1080p", "2160p"
-  watermarkEnabled        Boolean @default(true) // Enable/disable watermarks for this project
-  watermarkText           String? // Custom watermark text (null = use default format)
+  previewResolution String  @default("720p") // "720p", "1080p", "2160p"
+  watermarkEnabled  Boolean @default(true) // Enable/disable watermarks for this project
+  watermarkText     String? // Custom watermark text (null = use default format)
   timelinePreviewsEnabled Boolean @default(false) // Generate timeline preview thumbnails for this project
 
   // Asset download settings
+  allowAssetDownload Boolean @default(true) // Allow clients to download video assets when project is approved
+
   // Client notification settings (per-project)
   // Note: Approval emails are always IMMEDIATE regardless of this setting
   clientNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, WEEKLY
@@ -114,6 +116,7 @@ model Video {
   version      Int // 1, 2, 3 (for revisions)
   versionLabel String // "v1", "v2", "v3" or custom
 
+  // Optional notes shown to clients/admins (max 500 chars)
   videoNotes String? @db.VarChar(500)
 
   // Original file
@@ -140,8 +143,8 @@ model Video {
   thumbnailPath   String?
 
   // Timeline preview thumbnails (sprite sheets)
-  timelinePreviewsReady      Boolean @default(false)
-  timelinePreviewVttPath     String?
+  timelinePreviewsReady Boolean @default(false)
+  timelinePreviewVttPath String?
   timelinePreviewSpritesPath String?
 
   // Per-video approval
@@ -151,30 +154,32 @@ model Video {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  analytics     VideoAnalytics[]
-  assets        VideoAsset[]
-  emailEvents   ProjectEmailEvent[]
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  analytics   VideoAnalytics[]
+  assets      VideoAsset[]
+  emailEvents ProjectEmailEvent[]
   emailTracking EmailTracking[]
 
   @@index([projectId, version])
   @@index([projectId, name])
+  @@index([status])
+  @@index([projectId, status])
 }
 
 model VideoAsset {
-  id      String @id @default(cuid())
-  videoId String
-  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  videoId  String
+  video    Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   // File information
-  fileName    String // Original filename (e.g., "project.prproj", "music.mp3", "photo.jpg")
-  fileSize    BigInt
-  fileType    String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
-  storagePath String // Path in storage system
-  category    String? // Optional category: "image", "audio", "project", "other"
+  fileName     String // Original filename (e.g., "project.prproj", "music.mp3", "photo.jpg")
+  fileSize     BigInt
+  fileType     String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
+  storagePath  String // Path in storage system
+  category     String? // Optional category: "image", "audio", "project", "other"
 
   // Upload metadata
-  uploadedBy     String? // User ID or "client" for client uploads
+  uploadedBy   String? // User ID or "client" for client uploads
   uploadedByName String? // Display name of uploader
 
   createdAt DateTime @default(now())
@@ -213,7 +218,7 @@ model Comment {
   parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies  Comment[] @relation("CommentReplies")
 
-  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   files   CommentFile[] // Files uploaded with this comment
 
   @@index([projectId])
@@ -223,13 +228,13 @@ model Comment {
 }
 
 model NotificationQueue {
-  id        String @id @default(cuid())
+  id        String   @id @default(cuid())
   projectId String
   type      String // CLIENT_COMMENT, ADMIN_REPLY
 
   // Dual tracking for admin vs client notifications
-  sentToClients Boolean   @default(false)
-  sentToAdmins  Boolean   @default(false)
+  sentToClients Boolean  @default(false)
+  sentToAdmins  Boolean  @default(false)
   clientSentAt  DateTime?
   adminSentAt   DateTime?
 
@@ -256,6 +261,9 @@ model Settings {
 
   // Company Branding
   companyName String? @default("Studio") // Displayed in feedback/comments
+  companyLogoMode CompanyLogoMode @default(NONE)
+  companyLogoPath String? // Stored logo for email communications (storage path)
+  companyLogoUrl  String? // Direct URL to a hosted logo (PNG/JPG)
 
   // SMTP Email Configuration
   smtpServer      String?
@@ -271,11 +279,14 @@ model Settings {
   // Domain Configuration
   appDomain String? // e.g., "https://yourdomain.com"
 
+  // Upload Settings
+  maxUploadSizeGB Int @default(1) // Max upload size in GB
+
   // Default Video Processing Settings
-  defaultPreviewResolution       String? @default("720p")
-  defaultWatermarkEnabled        Boolean @default(true)
+  defaultPreviewResolution String?  @default("720p")
+  defaultWatermarkEnabled  Boolean  @default(true)
   defaultTimelinePreviewsEnabled Boolean @default(false)
-  defaultWatermarkText           String?
+  defaultWatermarkText     String?
 
   // Default project behavior
   defaultAllowClientDeleteComments   Boolean @default(false)
@@ -296,22 +307,28 @@ model Settings {
   updatedAt DateTime @updatedAt
 }
 
+enum CompanyLogoMode {
+  NONE
+  UPLOAD
+  LINK
+}
+
 model PushNotificationSettings {
   id String @id @default("default")
 
-  enabled    Boolean @default(false)
-  provider   String? // 'GOTIFY' or others
+  enabled Boolean @default(false)
+  provider String? // 'GOTIFY' or others
   webhookUrl String?
-  title      String? // Optional custom notification title prefix
+  title String? // Optional custom notification title prefix
 
   // Event toggles
-  notifyUnauthorizedOTP       Boolean @default(true)
-  notifyFailedAdminLogin      Boolean @default(true)
-  notifySuccessfulAdminLogin  Boolean @default(true)
+  notifyUnauthorizedOTP Boolean @default(true)
+  notifyFailedAdminLogin Boolean @default(true)
+  notifySuccessfulAdminLogin Boolean @default(true)
   notifyFailedSharePasswordAttempt Boolean @default(true)
   notifySuccessfulShareAccess Boolean @default(true)
-  notifyClientComments        Boolean @default(true)
-  notifyVideoApproval         Boolean @default(true)
+  notifyClientComments Boolean @default(true)
+  notifyVideoApproval Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -320,12 +337,12 @@ model PushNotificationSettings {
 model PushNotificationLog {
   id String @id @default(cuid())
 
-  type       String // UNAUTHORIZED_OTP, FAILED_LOGIN, SHARE_ACCESS, CLIENT_COMMENT, VIDEO_APPROVAL
-  projectId  String?
-  success    Boolean @default(false)
+  type String // UNAUTHORIZED_OTP, FAILED_LOGIN, SHARE_ACCESS, CLIENT_COMMENT, VIDEO_APPROVAL
+  projectId String?
+  success Boolean @default(false)
   statusCode Int?
-  message    String?
-  details    Json?
+  message String?
+  details Json?
 
   sentAt DateTime @default(now())
 
@@ -341,11 +358,11 @@ model SecuritySettings {
   hotlinkProtection String @default("LOG_ONLY")
 
   // Rate Limiting (global only - per minute)
-  ipRateLimit           Int  @default(1000) // requests per minute per IP (video streaming requires high limit)
-  sessionRateLimit      Int  @default(600) // requests per minute per admin session (10/sec for seeking/buffering)
-  shareSessionRateLimit Int  @default(300) // requests per minute per share session (client access)
-  passwordAttempts      Int  @default(5) // password attempts before lockout
-  shareTokenTtlSeconds  Int? // optional override for share JWT expiry (60-86400 seconds, null = use session timeout)
+  ipRateLimit             Int  @default(1000) // requests per minute per IP (video streaming requires high limit)
+  sessionRateLimit        Int  @default(600)  // requests per minute per admin session (10/sec for seeking/buffering)
+  shareSessionRateLimit   Int  @default(300)  // requests per minute per share session (client access)
+  passwordAttempts        Int  @default(5)    // password attempts before lockout
+  shareTokenTtlSeconds    Int? // optional override for share JWT expiry (60-86400 seconds, null = use session timeout)
 
   // Session Timeout (for client share sessions, not admin JWT)
   sessionTimeoutValue Int    @default(15) // Numeric value (15, 30, 1, 2, etc.)
@@ -438,20 +455,20 @@ model VideoAnalytics {
 }
 
 model ProjectEmailEvent {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
 
   projectId String
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   // Email notification type: ALL_READY_VIDEOS or SPECIFIC_VIDEO_VERSION
-  type String
+  type      String
 
   // Optional idempotency key to dedupe log entries (allows multiple NULLs)
-  dedupeKey String? @unique
+  dedupeKey String?  @unique
 
   // Optional link to a specific video/version when applicable
-  videoId String?
-  video   Video?  @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  videoId   String?
+  video     Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
 
   // JSON array of recipient email addresses
   recipientEmails String
@@ -526,16 +543,16 @@ model PasskeyCredential {
   counter      BigInt // Signature counter (prevents replay attacks)
 
   // UX and security metadata
-  transports     String[] // ['internal', 'usb', 'nfc', 'ble', 'hybrid']
-  deviceType     String // 'singleDevice' | 'multiDevice' (cloud-synced passkey)
-  backedUp       Boolean  @default(false) // Indicates key material is backed up
-  aaguid         String? // Authenticator Attestation GUID (optional)
-  userAgent      String? // Browser/device info for admin reference
-  credentialName String? // User-friendly name: "MacBook Touch ID", "iPhone Passkey"
+  transports        String[] // ['internal', 'usb', 'nfc', 'ble', 'hybrid']
+  deviceType        String // 'singleDevice' | 'multiDevice' (cloud-synced passkey)
+  backedUp          Boolean  @default(false) // Indicates key material is backed up
+  aaguid            String? // Authenticator Attestation GUID (optional)
+  userAgent         String? // Browser/device info for admin reference
+  credentialName    String? // User-friendly name: "MacBook Touch ID", "iPhone Passkey"
 
   // Security tracking
-  createdAt  DateTime @default(now())
-  lastUsedAt DateTime @default(now())
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
   lastUsedIP String?
 
   @@index([userId])

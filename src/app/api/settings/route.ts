@@ -90,6 +90,8 @@ export async function PATCH(request: NextRequest) {
 
     const {
       companyName,
+      companyLogoMode,
+      companyLogoUrl,
       smtpServer,
       smtpPort,
       smtpUsername,
@@ -110,6 +112,43 @@ export async function PATCH(request: NextRequest) {
       adminNotificationTime,
       adminNotificationDay,
     } = body
+
+    // SECURITY: Validate companyLogoMode
+    if (companyLogoMode !== undefined && companyLogoMode !== null) {
+      const validModes = ['NONE', 'UPLOAD', 'LINK']
+      if (!validModes.includes(companyLogoMode)) {
+        return NextResponse.json(
+          { error: 'Invalid companyLogoMode. Must be NONE, UPLOAD, or LINK.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // SECURITY: Validate companyLogoUrl when using LINK mode
+    if (companyLogoMode === 'LINK') {
+      const url = typeof companyLogoUrl === 'string' ? companyLogoUrl.trim() : ''
+      if (!url) {
+        return NextResponse.json(
+          { error: 'companyLogoUrl is required when companyLogoMode is LINK.' },
+          { status: 400 }
+        )
+      }
+
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return NextResponse.json(
+            { error: 'companyLogoUrl must start with http:// or https://.' },
+            { status: 400 }
+          )
+        }
+      } catch {
+        return NextResponse.json(
+          { error: 'Invalid companyLogoUrl. Please enter a valid URL.' },
+          { status: 400 }
+        )
+      }
+    }
 
     // SECURITY: Validate defaultTimelinePreviewsEnabled is boolean
     if (defaultTimelinePreviewsEnabled !== undefined && typeof defaultTimelinePreviewsEnabled !== 'boolean') {
@@ -232,6 +271,11 @@ export async function PATCH(request: NextRequest) {
     // Build update data (only include password if it should be updated)
     const updateData: any = {
       companyName,
+      companyLogoMode,
+      companyLogoUrl:
+        companyLogoMode === 'LINK'
+          ? (typeof companyLogoUrl === 'string' ? companyLogoUrl.trim() : null)
+          : (companyLogoMode !== undefined ? null : undefined),
       smtpServer,
       smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,
       smtpUsername,
@@ -264,6 +308,11 @@ export async function PATCH(request: NextRequest) {
       create: {
         id: 'default',
         companyName,
+        companyLogoMode: companyLogoMode || 'NONE',
+        companyLogoUrl:
+          companyLogoMode === 'LINK'
+            ? (typeof companyLogoUrl === 'string' ? companyLogoUrl.trim() : null)
+            : null,
         smtpServer,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,
         smtpUsername,

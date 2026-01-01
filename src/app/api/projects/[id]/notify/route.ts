@@ -139,7 +139,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             projectTitle: project.title,
             videoName: video!.name,
             versionLabel: video!.versionLabel,
-            videoNotes: (video as any).videoNotes || '',
+            videoNotes: video!.videoNotes || null,
             shareUrl,
             isPasswordProtected,
             trackingToken: trackingToken.token,
@@ -149,10 +149,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const results = await Promise.allSettled(emailPromises)
     const recipientsWithEmails = recipients.filter(r => r.email)
+
+    const isSendEmailSuccess = (value: unknown): value is { success: true } => {
+      if (!value || typeof value !== 'object') return false
+      return (value as Record<string, unknown>).success === true
+    }
+
     // Map successes to actual recipient emails using positional alignment
     const successfulRecipientEmails: string[] = []
     results.forEach((r, idx) => {
-      if (r.status === 'fulfilled' && (r.value as any).success) {
+      if (r.status === 'fulfilled' && isSendEmailSuccess(r.value)) {
         const rec = recipientsWithEmails[idx]
         if (rec?.email) successfulRecipientEmails.push(rec.email)
       }
@@ -182,7 +188,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         const passwordResults = await Promise.allSettled(passwordPromises)
         passwordResults.forEach((r, idx) => {
-          if (r.status === 'fulfilled' && (r.value as any).success) {
+          if (r.status === 'fulfilled' && isSendEmailSuccess(r.value)) {
             const rec = recipientsWithEmails[idx]
             if (rec?.email) successfulPasswordRecipientEmails.push(rec.email)
           }

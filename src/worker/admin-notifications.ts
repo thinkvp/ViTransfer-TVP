@@ -1,5 +1,5 @@
 import { prisma } from '../lib/db'
-import { sendEmail } from '../lib/email'
+import { buildCompanyLogoUrl, getEmailSettings, sendEmail } from '../lib/email'
 import { generateAdminSummaryEmail } from '../lib/email-templates'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
@@ -152,10 +152,20 @@ export async function processAdminNotifications() {
       onSuccess: async () => {
         const projects = Object.values(projectGroups)
 
+        const emailSettings = await getEmailSettings()
+        const companyLogoUrl = buildCompanyLogoUrl({
+          appDomain: emailSettings.appDomain,
+          companyLogoMode: emailSettings.companyLogoMode,
+          companyLogoPath: emailSettings.companyLogoPath,
+          companyLogoUrl: emailSettings.companyLogoUrl,
+          updatedAt: emailSettings.updatedAt,
+        })
+
         for (const admin of admins) {
           const html = generateAdminSummaryEmail({
             adminName: admin.name || '',
             period,
+            companyLogoUrl,
             projects
           })
 

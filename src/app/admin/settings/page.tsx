@@ -16,6 +16,9 @@ import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 interface Settings {
   id: string
   companyName: string | null
+  companyLogoMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
+  companyLogoPath?: string | null
+  companyLogoUrl?: string | null
   smtpServer: string | null
   smtpPort: number | null
   smtpUsername: string | null
@@ -99,6 +102,9 @@ export default function GlobalSettingsPage() {
 
   // Form state for global settings
   const [companyName, setCompanyName] = useState('')
+  const [companyLogoVersion, setCompanyLogoVersion] = useState(0)
+  const [companyLogoMode, setCompanyLogoMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
+  const [companyLogoUrl, setCompanyLogoUrl] = useState('')
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
@@ -196,6 +202,12 @@ export default function GlobalSettingsPage() {
 
         // Set form values
         setCompanyName(data.companyName || '')
+        setCompanyLogoVersion(Date.now())
+        {
+          const value = data.companyLogoMode
+          setCompanyLogoMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
+        }
+        setCompanyLogoUrl(data.companyLogoUrl || '')
         setSmtpServer(data.smtpServer || '')
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
@@ -389,6 +401,8 @@ export default function GlobalSettingsPage() {
     try {
       const updates = {
         companyName: companyName || null,
+        companyLogoMode: companyLogoMode || 'NONE',
+        companyLogoUrl: companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
@@ -460,6 +474,8 @@ export default function GlobalSettingsPage() {
         setSettings(refreshedData)
         // Update form state with refreshed data
         setCompanyName(refreshedData.companyName || '')
+        setCompanyLogoMode((refreshedData.companyLogoMode as any) || 'NONE')
+        setCompanyLogoUrl(refreshedData.companyLogoUrl || '')
         setSmtpServer(refreshedData.smtpServer || '')
         setSmtpPort(refreshedData.smtpPort?.toString() || '587')
         setSmtpUsername(refreshedData.smtpUsername || '')
@@ -522,6 +538,9 @@ export default function GlobalSettingsPage() {
         smtpFromAddress: smtpFromAddress || null,
         smtpSecure: smtpSecure || 'STARTTLS',
         companyName: companyName || 'ViTransfer',
+        appDomain: appDomain || null,
+        companyLogoMode,
+        companyLogoUrl: companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null,
       }
 
       // Validate that all required fields are filled
@@ -609,6 +628,29 @@ export default function GlobalSettingsPage() {
           <CompanyBrandingSection
             companyName={companyName}
             setCompanyName={setCompanyName}
+            companyLogoMode={companyLogoMode}
+            setCompanyLogoMode={setCompanyLogoMode}
+            companyLogoLinkUrl={companyLogoUrl}
+            setCompanyLogoLinkUrl={setCompanyLogoUrl}
+            companyLogoConfigured={companyLogoMode === 'UPLOAD' && !!settings?.companyLogoPath}
+            companyLogoUrl={
+              companyLogoMode === 'UPLOAD'
+                ? (settings?.companyLogoPath ? `/api/branding/logo?v=${companyLogoVersion}` : null)
+                : (companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null)
+            }
+            onCompanyLogoUploaded={() => {
+              setCompanyLogoVersion(Date.now())
+              // Force settings refresh so other parts relying on settings stay accurate
+              apiFetch('/api/settings')
+                .then((r) => r.ok ? r.json() : null)
+                .then((d) => {
+                  if (!d) return
+                  setSettings(d)
+                  setCompanyLogoMode((d.companyLogoMode as any) || 'NONE')
+                  setCompanyLogoUrl(d.companyLogoUrl || '')
+                })
+                .catch(() => {})
+            }}
             show={showCompanyBranding}
             setShow={setShowCompanyBranding}
           />

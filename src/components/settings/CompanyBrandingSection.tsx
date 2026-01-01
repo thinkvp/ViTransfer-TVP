@@ -1,16 +1,122 @@
+import { useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { apiFetch } from '@/lib/api-client'
 
 interface CompanyBrandingSectionProps {
   companyName: string
   setCompanyName: (value: string) => void
+  companyLogoMode: 'NONE' | 'UPLOAD' | 'LINK'
+  setCompanyLogoMode: (value: 'NONE' | 'UPLOAD' | 'LINK') => void
+  companyLogoLinkUrl: string
+  setCompanyLogoLinkUrl: (value: string) => void
+  companyLogoConfigured: boolean
+  companyLogoUrl: string | null
+  onCompanyLogoUploaded: () => void
   show: boolean
   setShow: (value: boolean) => void
 }
 
-export function CompanyBrandingSection({ companyName, setCompanyName, show, setShow }: CompanyBrandingSectionProps) {
+const COMPANY_LOGO_MAX_WIDTH = 300
+const COMPANY_LOGO_MAX_HEIGHT = 300
+
+export function CompanyBrandingSection({
+  companyName,
+  setCompanyName,
+  companyLogoMode,
+  setCompanyLogoMode,
+  companyLogoLinkUrl,
+  setCompanyLogoLinkUrl,
+  companyLogoConfigured,
+  companyLogoUrl,
+  onCompanyLogoUploaded,
+  show,
+  setShow,
+}: CompanyBrandingSectionProps) {
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoError, setLogoError] = useState<string | null>(null)
+  const [logoSuccess, setLogoSuccess] = useState<string | null>(null)
+
+  const logoHelpText = useMemo(() => {
+    return `This logo will be displayed on email communications. You can test it using “Send Test Email” in the SMTP settings section.`
+  }, [])
+
+  const uploadHelpText = useMemo(() => {
+    return `Upload a PNG or JPG logo (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px).`
+  }, [])
+
+  const linkHelpText = useMemo(() => {
+    return `Link directly to a PNG or JPG image (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px, <= 1MB). Use an https:// URL that is publicly accessible.`
+  }, [])
+
+  async function validateDimensions(file: File): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const objectUrl = URL.createObjectURL(file)
+      try {
+        const img = new Image()
+        const loaded = await new Promise<boolean>((resolve) => {
+          img.onload = () => resolve(true)
+          img.onerror = () => resolve(false)
+          img.src = objectUrl
+        })
+        if (!loaded) return { ok: false, error: 'Unable to read image. Please upload a valid PNG or JPG.' }
+        if (img.naturalWidth > COMPANY_LOGO_MAX_WIDTH || img.naturalHeight > COMPANY_LOGO_MAX_HEIGHT) {
+          return { ok: false, error: `Invalid logo resolution. Max allowed: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px.` }
+        }
+        return { ok: true }
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+    } catch {
+      return { ok: false, error: 'Unable to validate image. Please try again.' }
+    }
+  }
+
+  async function handleLogoSelected(file: File | null) {
+    setLogoError(null)
+    setLogoSuccess(null)
+    if (!file) return
+
+    const type = (file.type || '').toLowerCase()
+    if (type !== 'image/png' && type !== 'image/jpeg') {
+      setLogoError('Invalid file type. Please upload a PNG or JPG.')
+      return
+    }
+
+    const dimCheck = await validateDimensions(file)
+    if (!dimCheck.ok) {
+      setLogoError(dimCheck.error || 'Invalid image dimensions.')
+      return
+    }
+
+    try {
+      setLogoUploading(true)
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await apiFetch('/api/settings/company-logo', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setLogoError(data?.error || 'Failed to upload logo')
+        return
+      }
+
+      setLogoSuccess('Logo uploaded successfully.')
+      onCompanyLogoUploaded()
+    } catch {
+      setLogoError('Failed to upload logo')
+    } finally {
+      setLogoUploading(false)
+    }
+  }
+
   return (
     <Card className="border-border">
       <CardHeader
@@ -46,6 +152,77 @@ export function CompanyBrandingSection({ companyName, setCompanyName, show, setS
             <p className="text-xs text-muted-foreground">
               This name will be displayed in feedback messages and comments instead of &quot;Studio&quot;
             </p>
+
+            <div className="pt-3 border-t space-y-2">
+              <Label htmlFor="companyLogo">Company Logo</Label>
+              <select
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={companyLogoMode}
+                onChange={(e) => {
+                  setLogoError(null)
+                  setLogoSuccess(null)
+                  const value = e.target.value
+                  if (value === 'NONE' || value === 'UPLOAD' || value === 'LINK') {
+                    setCompanyLogoMode(value)
+                  }
+                }}
+              >
+                <option value="NONE">None</option>
+                <option value="UPLOAD">Upload</option>
+                <option value="LINK">Link</option>
+              </select>
+              <p className="text-xs text-muted-foreground">{logoHelpText}</p>
+
+              {companyLogoMode === 'UPLOAD' ? (
+                <div className="space-y-2">
+                  <Input
+                    id="companyLogo"
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    disabled={logoUploading}
+                    onChange={(e) => handleLogoSelected(e.target.files?.[0] || null)}
+                  />
+                  <p className="text-xs text-muted-foreground">{uploadHelpText}</p>
+                </div>
+              ) : null}
+
+              {companyLogoMode === 'LINK' ? (
+                <div className="space-y-2">
+                  <Input
+                    id="companyLogoLink"
+                    type="url"
+                    value={companyLogoLinkUrl}
+                    onChange={(e) => setCompanyLogoLinkUrl(e.target.value)}
+                    placeholder="https://example.com/logo.png"
+                  />
+                  <p className="text-xs text-muted-foreground">{linkHelpText}</p>
+                </div>
+              ) : null}
+
+              {companyLogoMode !== 'NONE' && companyLogoUrl ? (
+                <div className="mt-2 rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground mb-2">Current logo preview</p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={companyLogoUrl}
+                    alt="Company logo"
+                    style={{ width: 'auto', height: 'auto', maxWidth: 300 }}
+                  />
+                </div>
+              ) : null}
+
+              {logoError ? <p className="text-xs text-destructive">{logoError}</p> : null}
+              {logoSuccess ? <p className="text-xs text-success">{logoSuccess}</p> : null}
+
+              {companyLogoMode !== 'NONE' ? (
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="secondary" disabled={logoUploading} onClick={() => onCompanyLogoUploaded()}>
+                    Refresh Preview
+                  </Button>
+                  {logoUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
+                </div>
+              ) : null}
+            </div>
           </div>
         </CardContent>
       )}
