@@ -188,6 +188,18 @@ export default function ProjectPage() {
   const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
+  const formatProjectDate = (date: string | Date) => {
+    try {
+      const d = new Date(date)
+      const yyyy = d.getFullYear()
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const dd = String(d.getDate()).padStart(2, '0')
+      return `${yyyy}-${mm}-${dd}`
+    } catch {
+      return ''
+    }
+  }
+
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
@@ -251,6 +263,13 @@ export default function ProjectPage() {
                           {project.recipients[0].email}
                         </p>
                       )}
+                    </div>
+                  </div>
+
+                  <div className="text-sm">
+                    <div className="min-w-0">
+                      <p className="text-muted-foreground">Project Created</p>
+                      <p className="font-medium tabular-nums">{formatProjectDate(project.createdAt)}</p>
                     </div>
                   </div>
 

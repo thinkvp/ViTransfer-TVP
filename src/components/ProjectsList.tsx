@@ -13,7 +13,8 @@ interface Project {
   title: string
   companyName: string | null
   status: string
-  updatedAt: Date
+  createdAt: string | Date
+  updatedAt: string | Date
   maxRevisions: number
   enableRevisions: boolean
   videos: any[]
@@ -30,6 +31,18 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
+
+  const formatProjectDate = (date: string | Date) => {
+    try {
+      const d = new Date(date)
+      const yyyy = d.getFullYear()
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const dd = String(d.getDate()).padStart(2, '0')
+      return `${yyyy}-${mm}-${dd}`
+    } catch {
+      return ''
+    }
+  }
 
   useEffect(() => {
     const storageKey = 'admin_projects_view'
@@ -101,7 +114,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
 
             return (
               <Link key={project.id} href={`/admin/projects/${project.id}`} className="block">
-                <Card className="cursor-pointer transition-all duration-200 hover:border-primary/50 hover:shadow-elevation-lg sm:hover:-translate-y-1">
+                <Card className="relative cursor-pointer transition-all duration-200 hover:border-primary/50 hover:shadow-elevation-lg sm:hover:-translate-y-1">
                   <CardHeader className={cn('p-3 sm:p-4', viewMode === 'grid' && 'p-2 sm:p-3')}>
                     <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
                       <div className="flex-1 min-w-0">
@@ -144,7 +157,12 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent className={cn('p-3 pt-0 sm:p-4 sm:pt-0', viewMode === 'grid' && 'p-2 pt-0 sm:p-3 sm:pt-0')}>
+                  <CardContent
+                    className={cn(
+                      'p-3 pt-0 sm:p-4 sm:pt-0',
+                      viewMode === 'grid' && 'p-2 pt-0 sm:p-3 sm:pt-0 pr-20 sm:pr-24'
+                    )}
+                  >
                     <div className={cn('flex flex-wrap gap-3 sm:gap-6 text-muted-foreground', viewMode === 'grid' ? 'text-xs sm:text-sm' : 'text-sm')}>
                       <div className="inline-flex items-center gap-2">
                         <span className={metricIconWrapperClassName}>
@@ -166,6 +184,22 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
                           {project._count.comments !== 1 ? 's' : ''}
                         </span>
                       </div>
+                    </div>
+
+                    <div
+                      className={cn(
+                        'absolute bottom-2 right-2 text-right text-muted-foreground',
+                        viewMode === 'grid' ? 'text-[10px] sm:text-xs leading-tight' : 'text-xs'
+                      )}
+                    >
+                      {viewMode === 'grid' ? (
+                        <>
+                          <div>Project Created:</div>
+                          <div className="font-medium tabular-nums">{formatProjectDate(project.createdAt)}</div>
+                        </>
+                      ) : (
+                        <div className="tabular-nums">Project Created: <span className="font-medium">{formatProjectDate(project.createdAt)}</span></div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
