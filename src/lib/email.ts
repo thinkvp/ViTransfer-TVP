@@ -17,7 +17,7 @@ export const EMAIL_THEME = {
 } as const
 
 const EMAIL_SELF_HOST_NOTICE_HTML =
-  'We proudly self-host ViTransfer on our private server. The server may not be accessible during power or nbn outages.  If you are unable to access the server, please contact us for assitance.'
+  'We proudly self-host ViTransfer on our private server. The server may not be accessible during power or nbn outages.  If you are unable to access the server, please contact us for assistance.'
 
 export function emailPrimaryButtonStyle({
   fontSizePx = 15,
@@ -1126,7 +1126,7 @@ export async function renderProjectGeneralNotificationEmail({
       </p>
       ${projectDescription ? `
         <div style="${emailCalloutStyle({ borderLeftPx: 4, marginBottomPx: 20 })}">
-          <div style="${emailCardTitleStyle()}">Project Overview</div>
+          <div style="${emailCardTitleStyle()}">Project Description</div>
           <div style="font-size:15px; color:#374151; line-height:1.6;">${escapeHtml(projectDescription)}</div>
         </div>
       ` : ''}
