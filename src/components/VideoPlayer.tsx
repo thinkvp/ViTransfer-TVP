@@ -42,6 +42,10 @@ interface VideoPlayerProps {
   // Optional: used to render comment markers along the timeline (share page).
   // Expected shape matches Comment (and optionally includes `replies`).
   commentsForTimeline?: any[]
+
+  // Optional: when true, VideoPlayer will fill its parent height (non-fullscreen)
+  // and allow the video area to flex/shrink to fit available space.
+  fitToContainerHeight?: boolean
 }
 
 export default function VideoPlayer({
@@ -63,6 +67,7 @@ export default function VideoPlayer({
   shareToken = null,
   hideDownloadButton = false, // Default to false (show download button)
   commentsForTimeline = [],
+  fitToContainerHeight = false,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
@@ -1009,7 +1014,12 @@ export default function VideoPlayer({
   }
 
   return (
-    <div className="space-y-4 flex flex-col max-h-full">
+    <div
+      className={cn(
+        'flex flex-col',
+        fitToContainerHeight ? 'gap-4 min-h-0 h-full' : 'space-y-4 max-h-full'
+      )}
+    >
       <div
         ref={playerContainerRef}
         data-video-player-container="true"
@@ -1017,7 +1027,10 @@ export default function VideoPlayer({
 
           isInFullscreen
             ? 'fixed inset-0 z-50 bg-background flex flex-col p-3'
-            : 'flex flex-col space-y-4'
+            : cn(
+              'flex flex-col',
+              fitToContainerHeight ? 'gap-4 min-h-0 h-full' : 'space-y-4'
+            )
         }
       >
         {/* Video Player */}
@@ -1025,19 +1038,27 @@ export default function VideoPlayer({
           className={
             isInFullscreen
               ? 'relative bg-background overflow-hidden flex-1 min-h-0'
-              : 'bg-background flex-shrink min-h-0 flex items-center justify-center'
+              : cn(
+                'bg-background min-h-0 flex items-center justify-center',
+                fitToContainerHeight ? 'relative overflow-hidden flex-1' : 'flex-shrink'
+              )
           }
         >
           <div
             className={
               isInFullscreen
                 ? 'relative w-full h-full'
-                : 'relative bg-background rounded-lg overflow-hidden max-h-[70vh] max-h-[70dvh]'
+                : cn(
+                  'relative bg-background rounded-lg overflow-hidden',
+                  fitToContainerHeight ? 'w-full h-full' : 'max-h-[70vh] max-h-[70dvh]'
+                )
             }
             style={
               isInFullscreen
                 ? undefined
-                : {
+                : fitToContainerHeight
+                  ? undefined
+                  : {
                     // Keep the correct aspect ratio but ensure portrait videos never exceed the viewport.
                     // If the video is taller than the available height, shrink the width to match.
                     width: `min(100%, calc(70vh * ${videoAspectRatio}))`,

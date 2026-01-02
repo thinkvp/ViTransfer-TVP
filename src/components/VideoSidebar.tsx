@@ -234,8 +234,8 @@ export default function VideoSidebar({
             'group'
           )}
         >
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="w-4 h-4 text-primary" />
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2">
+            <GripVertical className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
           </div>
         </div>
       </aside>

@@ -6,8 +6,8 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
-import { Send, Paperclip, X, Clock, ChevronDown, Check } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Send, Paperclip, X, Clock, ChevronDown, Check, ArrowLeft, ArrowRight } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
 import { secondsToTimecode } from '@/lib/timecode'
@@ -59,7 +59,12 @@ interface CommentInputProps {
 
   // Layout/styling
   containerClassName?: string
+  containerStyle?: CSSProperties
   showTopBorder?: boolean
+
+  // Optional: move the comment input between columns (share pages, desktop only)
+  moveColumnDirection?: 'left' | 'right'
+  onMoveColumn?: () => void
 
   // Optional: portal dialogs into a specific container (needed for element fullscreen)
   dialogPortalContainer?: HTMLElement | null
@@ -97,7 +102,10 @@ export default function CommentInput({
   clientUploadQuota = null,
   onRefreshUploadQuota,
   containerClassName,
+  containerStyle,
   showTopBorder = true,
+  moveColumnDirection = 'right',
+  onMoveColumn,
   dialogPortalContainer = null,
   isInFullscreenMode = false,
 }: CommentInputProps) {
@@ -164,8 +172,9 @@ export default function CommentInput({
 
   return (
     <div
+      style={containerStyle}
       className={cn(
-        'p-4 bg-card flex-shrink-0',
+        'p-4 bg-card flex-shrink-0 min-w-0',
         showTopBorder ? 'border-t border-border' : null,
         containerClassName
       )}
@@ -204,7 +213,7 @@ export default function CommentInput({
 
       {/* Time + Name row */}
       {!currentVideoRestricted && (
-        <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="mb-3 flex items-center gap-3 min-w-0">
           <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 bg-warning-visible text-warning border-2 border-warning-visible flex items-center gap-1">
             <Clock className="w-3 h-3" />
             <span className="tabular-nums">
@@ -215,7 +224,7 @@ export default function CommentInput({
           </span>
 
           {showAuthorInput ? (
-            <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+            <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Name:</span>
               <Dialog open={namePickerOpen} onOpenChange={setNamePickerOpen}>
                 <button
@@ -230,7 +239,7 @@ export default function CommentInput({
                 >
                   <span
                     className={cn(
-                      'truncate',
+                      'truncate whitespace-nowrap min-w-0',
                       authorName.trim() ? 'text-foreground' : 'text-muted-foreground'
                     )}
                   >
@@ -310,7 +319,59 @@ export default function CommentInput({
                   </div>
                 </DialogContent>
               </Dialog>
+
+              {onMoveColumn ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="hidden lg:inline-flex h-9 w-9 flex-shrink-0"
+                  onClick={onMoveColumn}
+                  aria-label={
+                    moveColumnDirection === 'right'
+                      ? 'Move comment box to right column'
+                      : 'Move comment box to left column'
+                  }
+                  title={
+                    moveColumnDirection === 'right'
+                      ? 'Move comment box to right column'
+                      : 'Move comment box to left column'
+                  }
+                >
+                  {moveColumnDirection === 'right' ? (
+                    <ArrowRight className="h-4 w-4" />
+                  ) : (
+                    <ArrowLeft className="h-4 w-4" />
+                  )}
+                </Button>
+              ) : null}
             </div>
+          ) : null}
+
+          {!showAuthorInput && onMoveColumn ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="ml-auto hidden lg:inline-flex h-9 w-9 flex-shrink-0"
+              onClick={onMoveColumn}
+              aria-label={
+                moveColumnDirection === 'right'
+                  ? 'Move comment box to right column'
+                  : 'Move comment box to left column'
+              }
+              title={
+                moveColumnDirection === 'right'
+                  ? 'Move comment box to right column'
+                  : 'Move comment box to left column'
+              }
+            >
+              {moveColumnDirection === 'right' ? (
+                <ArrowRight className="h-4 w-4" />
+              ) : (
+                <ArrowLeft className="h-4 w-4" />
+              )}
+            </Button>
           ) : null}
         </div>
       )}

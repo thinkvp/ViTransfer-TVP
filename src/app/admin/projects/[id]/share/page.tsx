@@ -6,12 +6,14 @@ import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
+import { GripVertical } from 'lucide-react'
 import VideoSidebar from '@/components/VideoSidebar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
+import { cn } from '@/lib/utils'
 
 export default function AdminSharePage() {
   const params = useParams()
@@ -461,7 +463,7 @@ export default function AdminSharePage() {
             <div
               className={`flex-1 min-h-0 ${project.hideFeedback
                 ? 'flex flex-col w-full'
-                : 'grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3 lg:-mx-8 lg:-my-8'}`}
+                : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
             >
               {project.hideFeedback ? (
                 <div className="flex-1 min-h-0 flex flex-col">
@@ -532,9 +534,139 @@ function AdminShareFeedbackGrid({
   adminUser: any
   clientDisplayName: string
 }) {
+  const [isDesktop, setIsDesktop] = useState(false)
+  const [commentsWidth, setCommentsWidth] = useState(420)
+  const [isResizingComments, setIsResizingComments] = useState(false)
+  const [commentInputInRightColumn, setCommentInputInRightColumn] = useState(false)
+  const [commentInputMinWidth, setCommentInputMinWidth] = useState<number | null>(null)
+
+  const feedbackContainerRef = useRef<HTMLDivElement>(null)
+  const leftPaneRef = useRef<HTMLDivElement>(null)
+  const commentInputMeasureRef = useRef<HTMLDivElement>(null)
+
   const [serverComments, setServerComments] = useState<any[]>(filteredComments)
 
   const projectId = String(project?.id || '')
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia('(min-width: 1024px)')
+    const update = () => setIsDesktop(media.matches)
+    update()
+
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', update)
+      return () => media.removeEventListener('change', update)
+    }
+
+    media.addListener(update)
+    return () => media.removeListener(update)
+  }, [])
+
+  // Desktop-only: if we leave desktop, always return input to the left.
+  useEffect(() => {
+    if (isDesktop) return
+    setCommentInputInRightColumn(false)
+  }, [isDesktop])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    // Re-measure when the input moves between columns.
+    setCommentInputMinWidth(null)
+  }, [isDesktop, commentInputInRightColumn])
+
+  // Desktop/right-column only: if the comment input overflows horizontally, lock the panel's minimum width
+  // to whatever is required to avoid clipping.
+  useEffect(() => {
+    if (!isDesktop || !commentInputInRightColumn) return
+
+    const raf = window.requestAnimationFrame(() => {
+      const el = commentInputMeasureRef.current
+      if (!el) return
+
+      const available = Math.round(el.clientWidth)
+      const needed = Math.round(el.scrollWidth)
+
+      if (Number.isFinite(available) && Number.isFinite(needed) && needed > available + 1) {
+        setCommentInputMinWidth((prev) => Math.max(prev ?? 320, needed))
+      }
+    })
+
+    return () => window.cancelAnimationFrame(raf)
+  }, [isDesktop, commentInputInRightColumn, commentsWidth])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    const onResize = () => {
+      setCommentInputMinWidth(null)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [isDesktop])
+
+  // If the input is in the right column, ensure the column width is at least the measured minimum.
+  useEffect(() => {
+    if (!isDesktop) return
+    if (!commentInputInRightColumn) return
+    if (commentInputMinWidth === null) return
+    if (commentsWidth >= commentInputMinWidth) return
+    setCommentsWidth(commentInputMinWidth)
+  }, [isDesktop, commentInputInRightColumn, commentInputMinWidth, commentsWidth])
+
+  // Load saved sizes (desktop only)
+  useEffect(() => {
+    if (!isDesktop) return
+    const savedWidth = localStorage.getItem('share_comments_width')
+    if (savedWidth) {
+      const width = parseInt(savedWidth, 10)
+      if (Number.isFinite(width) && width >= 320 && width <= window.innerWidth * 0.6) {
+        setCommentsWidth(width)
+      }
+    }
+  }, [isDesktop])
+
+  // Handle mouse move for horizontal resizing (comments panel)
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingComments) return
+      if (!feedbackContainerRef.current) return
+
+      const rect = feedbackContainerRef.current.getBoundingClientRect()
+      const nextWidth = rect.right - e.clientX
+      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 320
+      const maxWidth = Math.min(rect.width * 0.6, window.innerWidth * 0.6)
+
+      const clamped = Math.max(minWidth, Math.min(maxWidth, nextWidth))
+      setCommentsWidth(clamped)
+    }
+
+    const handleMouseUp = () => {
+      if (isResizingComments) {
+        setIsResizingComments(false)
+        localStorage.setItem('share_comments_width', Math.round(commentsWidth).toString())
+      }
+    }
+
+    if (isResizingComments) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizingComments, commentsWidth, commentInputInRightColumn, commentInputMinWidth])
+
+  const startResizeComments = (e: React.MouseEvent) => {
+    if (!isDesktop) return
+    e.preventDefault()
+    setIsResizingComments(true)
+  }
 
   useEffect(() => {
     setServerComments(filteredComments)
@@ -616,80 +748,161 @@ function AdminShareFeedbackGrid({
 
   return (
     <>
-      <div className="lg:col-span-2 flex-1 min-h-0 flex flex-col lg:pl-8 lg:py-8">
-        <VideoPlayer
-          videos={readyVideos}
-          projectId={project.id}
-          projectStatus={project.status}
-          defaultQuality={defaultQuality}
-          projectTitle={project.title}
-          projectDescription={project.description}
-          clientName={project.clientName}
-          isPasswordProtected={!!project.sharePassword}
-          watermarkEnabled={project.watermarkEnabled}
-          activeVideoName={activeVideoName}
-          initialSeekTime={initialSeekTime}
-          initialVideoIndex={initialVideoIndex}
-          isAdmin={true}
-          isGuest={false}
-          shareToken={null}
-          onApprove={undefined}
-          hideDownloadButton={true}
-          commentsForTimeline={management.comments as any}
-        />
+      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row flex-1 min-h-0 gap-4 sm:gap-6 lg:gap-0">
+        <div
+          ref={leftPaneRef}
+          className="flex-1 min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height))]"
+        >
+          <div
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <VideoPlayer
+              videos={readyVideos}
+              projectId={project.id}
+              projectStatus={project.status}
+              defaultQuality={defaultQuality}
+              projectTitle={project.title}
+              projectDescription={project.description}
+              clientName={project.clientName}
+              isPasswordProtected={!!project.sharePassword}
+              watermarkEnabled={project.watermarkEnabled}
+              activeVideoName={activeVideoName}
+              initialSeekTime={initialSeekTime}
+              initialVideoIndex={initialVideoIndex}
+              isAdmin={true}
+              isGuest={false}
+              shareToken={null}
+              onApprove={undefined}
+              hideDownloadButton={true}
+              commentsForTimeline={management.comments as any}
+              fitToContainerHeight={isDesktop}
+            />
+          </div>
 
-        <CommentInput
-          newComment={management.newComment}
-          onCommentChange={management.handleCommentChange}
-          onSubmit={management.handleSubmitComment}
-          loading={management.loading}
-          uploadProgress={management.uploadProgress}
-          uploadStatusText={management.uploadStatusText}
-          selectedTimestamp={management.selectedTimestamp}
-          onClearTimestamp={management.handleClearTimestamp}
-          selectedVideoFps={management.selectedVideoFps}
-          useFullTimecode={Boolean(project?.useFullTimecode)}
-          replyingToComment={management.replyingToComment}
-          onCancelReply={management.handleCancelReply}
-          showAuthorInput={false}
-          authorName={management.authorName}
-          onAuthorNameChange={management.setAuthorName}
-          recipients={project.recipients || []}
-          currentVideoRestricted={currentVideoRestricted}
-          restrictionMessage={restrictionMessage}
-          commentsDisabled={commentsDisabled}
-          showShortcutsButton={true}
-          onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
-          containerClassName="mt-4 border border-border rounded-lg"
-          showTopBorder={false}
-        />
-      </div>
+          {!commentInputInRightColumn && (
+            <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
+              <CommentInput
+                newComment={management.newComment}
+                onCommentChange={management.handleCommentChange}
+                onSubmit={management.handleSubmitComment}
+                loading={management.loading}
+                uploadProgress={management.uploadProgress}
+                uploadStatusText={management.uploadStatusText}
+                selectedTimestamp={management.selectedTimestamp}
+                onClearTimestamp={management.handleClearTimestamp}
+                selectedVideoFps={management.selectedVideoFps}
+                useFullTimecode={Boolean(project?.useFullTimecode)}
+                replyingToComment={management.replyingToComment}
+                onCancelReply={management.handleCancelReply}
+                showAuthorInput={false}
+                authorName={management.authorName}
+                onAuthorNameChange={management.setAuthorName}
+                recipients={project.recipients || []}
+                currentVideoRestricted={currentVideoRestricted}
+                restrictionMessage={restrictionMessage}
+                commentsDisabled={commentsDisabled}
+                showShortcutsButton={true}
+                onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
+                containerClassName="border border-border rounded-lg"
+                showTopBorder={false}
+                onMoveColumn={() => setCommentInputInRightColumn(true)}
+                moveColumnDirection="right"
+              />
+            </div>
+          )}
+        </div>
 
-      <div className="lg:sticky lg:top-0 lg:self-stretch lg:h-full min-h-0 overflow-hidden">
-        <CommentSectionView
-          projectId={project.id}
-          projectSlug={project.slug}
-          comments={serverComments as any}
-          clientName={clientDisplayName}
-          clientEmail={project.recipients?.[0]?.email}
-          isApproved={isApproved}
-          restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
-          useFullTimecode={Boolean(project?.useFullTimecode)}
-          videos={readyVideos as any}
-          isAdminView={true}
-          companyName={companyName}
-          clientCompanyName={project.companyName}
-          smtpConfigured={project.smtpConfigured}
-          isPasswordProtected={!!project.sharePassword}
-          adminUser={adminUser}
-          recipients={project.recipients || []}
-          shareToken={null}
-          showShortcutsButton={true}
-          allowClientDeleteComments={project.allowClientDeleteComments}
-          hideInput={true}
-          showApproveButton={false}
-          management={management as any}
-        />
+        <div
+          className={cn(
+            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height))] min-h-0 overflow-hidden flex-shrink-0',
+            'lg:flex lg:flex-col'
+          )}
+          style={
+            isDesktop
+              ? {
+                  width: `${Math.round(commentsWidth)}px`,
+                  minWidth:
+                    commentInputInRightColumn && commentInputMinWidth
+                      ? `${Math.round(commentInputMinWidth)}px`
+                      : undefined,
+                }
+              : undefined
+          }
+        >
+          {/* Horizontal resize handle (desktop only) */}
+          <div
+            onMouseDown={startResizeComments}
+            className={cn(
+              'hidden lg:block',
+              'absolute left-0 top-0 bottom-0 w-1 cursor-col-resize select-none z-10',
+              'hover:bg-primary transition-colors',
+              'group'
+            )}
+          >
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 translate-x-1/2">
+              <GripVertical className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+            </div>
+          </div>
+
+          <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
+            <CommentSectionView
+              projectId={project.id}
+              projectSlug={project.slug}
+              comments={serverComments as any}
+              clientName={clientDisplayName}
+              clientEmail={project.recipients?.[0]?.email}
+              isApproved={isApproved}
+              restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
+              useFullTimecode={Boolean(project?.useFullTimecode)}
+              videos={readyVideos as any}
+              isAdminView={true}
+              companyName={companyName}
+              clientCompanyName={project.companyName}
+              smtpConfigured={project.smtpConfigured}
+              isPasswordProtected={!!project.sharePassword}
+              adminUser={adminUser}
+              recipients={project.recipients || []}
+              shareToken={null}
+              showShortcutsButton={true}
+              allowClientDeleteComments={project.allowClientDeleteComments}
+              hideInput={true}
+              showApproveButton={false}
+              management={management as any}
+            />
+          </div>
+
+          {commentInputInRightColumn ? (
+            <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
+              <CommentInput
+                newComment={management.newComment}
+                onCommentChange={management.handleCommentChange}
+                onSubmit={management.handleSubmitComment}
+                loading={management.loading}
+                uploadProgress={management.uploadProgress}
+                uploadStatusText={management.uploadStatusText}
+                selectedTimestamp={management.selectedTimestamp}
+                onClearTimestamp={management.handleClearTimestamp}
+                selectedVideoFps={management.selectedVideoFps}
+                useFullTimecode={Boolean(project?.useFullTimecode)}
+                replyingToComment={management.replyingToComment}
+                onCancelReply={management.handleCancelReply}
+                showAuthorInput={false}
+                authorName={management.authorName}
+                onAuthorNameChange={management.setAuthorName}
+                recipients={project.recipients || []}
+                currentVideoRestricted={currentVideoRestricted}
+                restrictionMessage={restrictionMessage}
+                commentsDisabled={commentsDisabled}
+                showShortcutsButton={true}
+                onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
+                containerClassName="border border-border rounded-lg"
+                showTopBorder={false}
+                onMoveColumn={() => setCommentInputInRightColumn(false)}
+                moveColumnDirection="left"
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     </>
   )
