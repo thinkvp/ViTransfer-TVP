@@ -840,7 +840,7 @@ export function CommentSectionView({
               className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
               aria-expanded={videoNotesOpen}
             >
-              <span className="font-medium text-foreground">Video Notes</span>
+              <span className="font-medium text-foreground">Version Notes</span>
               {videoNotesOpen ? (
                 <ChevronDown className="w-4 h-4" />
               ) : (

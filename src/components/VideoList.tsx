@@ -133,7 +133,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   const handleSaveNotes = async (videoId: string) => {
     const trimmed = notesEditValue.trim()
     if (trimmed.length > 500) {
-      alert('Video notes must be 500 characters or fewer')
+      alert('Version notes must be 500 characters or fewer')
       return
     }
 
@@ -150,7 +150,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
       setNotesEditValue('')
       onRefresh?.()
     } catch (error) {
-      alert('Failed to update video notes')
+      alert('Failed to update version notes')
     } finally {
       setSavingNotesId(null)
     }
@@ -420,11 +420,11 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
             </div>
           )}
 
-          {/* Video Notes */}
+          {/* Version Notes */}
           {video.status === 'READY' && (
             <div className="pt-3">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-muted-foreground text-xs sm:text-sm">Video Notes</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">Version Notes</p>
                 {isAdmin && editingId !== video.id && (
                   editingNotesId === video.id ? (
                     <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                         className="h-7 w-7 text-success hover:text-success hover:bg-success-visible"
                         onClick={() => handleSaveNotes(video.id)}
                         disabled={savingNotesId === video.id}
-                        title="Save video notes"
+                        title="Save version notes"
                       >
                         <Check className="w-4 h-4" />
                       </Button>
@@ -455,7 +455,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                       size="icon"
                       className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
                       onClick={() => handleStartEditNotes(video.id, ((video as any).videoNotes as string) || '')}
-                      title="Edit video notes"
+                      title="Edit version notes"
                     >
                       <Pencil className="w-3 h-3" />
                     </Button>

@@ -313,7 +313,7 @@ export default function AdminVideoManager({
 
                 <div>
                   <Label htmlFor="videoNotes">
-                    Video Notes <span className="text-muted-foreground">(Optional)</span>
+                    Version Notes <span className="text-muted-foreground">(Optional)</span>
                   </Label>
                   <Textarea
                     id="videoNotes"

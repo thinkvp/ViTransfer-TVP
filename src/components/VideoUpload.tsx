@@ -147,7 +147,7 @@ export default function VideoUpload({
     const trimmedVersionLabel = versionLabel.trim()
     const trimmedVideoNotes = (videoNotes || '').trim()
     if (trimmedVideoNotes.length > 500) {
-      setError('Video notes must be 500 characters or fewer')
+      setError('Version notes must be 500 characters or fewer')
       return
     }
     const contextKey = `${projectId}:${trimmedVideoName}:${trimmedVersionLabel || 'auto'}`
@@ -455,11 +455,11 @@ export default function VideoUpload({
         />
       </div>
 
-      {/* Video Notes */}
+      {/* Version Notes */}
       {showVideoNotesField && (
         <div className="space-y-2">
           <Label htmlFor="videoNotes">
-            Video Notes <span className="text-muted-foreground">(Optional)</span>
+            Version Notes <span className="text-muted-foreground">(Optional)</span>
           </Label>
           <Textarea
             id="videoNotes"

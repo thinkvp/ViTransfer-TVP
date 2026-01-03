@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     const trimmedVideoNotes = typeof videoNotes === 'string' ? videoNotes.trim() : ''
     if (trimmedVideoNotes.length > 500) {
       return NextResponse.json(
-        { error: 'Video notes must be 500 characters or fewer' },
+        { error: 'Version notes must be 500 characters or fewer' },
         { status: 400 }
       )
     }

@@ -39,7 +39,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { id: projectId } = await params
     const body = await request.json()
-    const { videoId, notifyEntireProject, sendPasswordSeparately } = body
+    const { videoId, notifyEntireProject, sendPasswordSeparately, notes } = body
+
+    const trimmedNotes = typeof notes === 'string' ? notes.trim() : ''
 
     // Get project details including password
     const project = await prisma.project.findUnique({
@@ -129,6 +131,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             projectDescription: project.description || '',
             shareUrl,
             readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel })),
+            notes: trimmedNotes ? trimmedNotes : null,
             isPasswordProtected,
             trackingToken: trackingToken.token,
           })

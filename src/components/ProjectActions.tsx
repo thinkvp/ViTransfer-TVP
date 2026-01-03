@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select'
+import { Textarea } from './ui/textarea'
 import { UnapproveModal } from './UnapproveModal'
 import { apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 
@@ -49,6 +50,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video'>('entire-project')
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
+  const [entireProjectNotes, setEntireProjectNotes] = useState<string>('')
   const [sendPasswordSeparately, setSendPasswordSeparately] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -99,6 +101,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setNotificationType(type)
     setSelectedVideoName('')
     setSelectedVideoId('')
+    setEntireProjectNotes('')
   }
 
   // Reset version selection when video name changes
@@ -124,12 +127,14 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     apiPost(`/api/projects/${project.id}/notify`, {
       videoId: notificationType === 'specific-video' ? selectedVideoId : null,
       notifyEntireProject: notificationType === 'entire-project',
+      notes: notificationType === 'entire-project' ? entireProjectNotes : null,
       sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately
     })
       .then((data) => {
         setMessage({ type: 'success', text: data.message || 'Notification sent successfully!' })
         setSelectedVideoName('')
         setSelectedVideoId('')
+        setEntireProjectNotes('')
         setSendPasswordSeparately(false)
       })
       .catch((error) => {
@@ -390,6 +395,23 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Notes (only for entire project notification) */}
+            {notificationType === 'entire-project' && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">
+                  Notes
+                </label>
+                <Textarea
+                  value={entireProjectNotes}
+                  onChange={(e) => setEntireProjectNotes(e.target.value)}
+                  placeholder="Optional notes to include in the email"
+                  className="resize-none"
+                  rows={4}
+                  disabled={loading}
+                />
+              </div>
+            )}
 
             {/* Show video/version selectors only for specific video notification */}
             {notificationType === 'specific-video' && (

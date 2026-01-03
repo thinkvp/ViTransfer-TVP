@@ -446,6 +446,16 @@ export async function sendEmail({
 /**
  * Email template: New version uploaded
  */
+function renderNotesCard(notes: string | null | undefined, opts: { cardStyle: string; cardTitleStyle: string }) {
+  if (!notes || !notes.trim()) return ''
+  return `
+    <div style="${opts.cardStyle}">
+      <div style="${opts.cardTitleStyle}">Notes</div>
+      <div style="font-size: 15px; color: #111827; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(notes)}</div>
+    </div>
+  `
+}
+
 export async function renderNewVersionEmail({
   clientName,
   projectTitle,
@@ -504,12 +514,7 @@ export async function renderNewVersionEmail({
         </div>
       </div>
 
-      ${videoNotes && videoNotes.trim() ? `
-        <div style="${cardStyle}">
-          <div style="${cardTitleStyle}">Notes</div>
-          <div style="font-size: 15px; color: #111827; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(videoNotes)}</div>
-        </div>
-      ` : ''}
+      ${renderNotesCard(videoNotes, { cardStyle, cardTitleStyle })}
 
       ${isPasswordProtected ? `
         <div style="${cardStyle}">
@@ -1075,6 +1080,7 @@ export async function renderProjectGeneralNotificationEmail({
   projectDescription,
   shareUrl,
   readyVideos = [],
+  notes,
   isPasswordProtected = false,
   trackingToken,
   branding,
@@ -1084,6 +1090,7 @@ export async function renderProjectGeneralNotificationEmail({
   projectDescription: string
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
+  notes?: string | null
   isPasswordProtected?: boolean
   trackingToken?: string
   branding?: EmailBrandingOverrides
@@ -1107,6 +1114,8 @@ export async function renderProjectGeneralNotificationEmail({
 
   const headerGradient = EMAIL_THEME.headerBackground
   const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })
+  const notesCardStyle = emailCardStyle({ borderRadiusPx: 8 })
+  const notesCardTitleStyle = emailCardTitleStyle()
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
@@ -1130,6 +1139,7 @@ export async function renderProjectGeneralNotificationEmail({
           <div style="font-size:15px; color:#374151; line-height:1.6;">${escapeHtml(projectDescription)}</div>
         </div>
       ` : ''}
+      ${renderNotesCard(notes, { cardStyle: notesCardStyle, cardTitleStyle: notesCardTitleStyle })}
       ${readyVideos.length > 0 ? `
         <div style="${emailCardStyle({ paddingPx: 20, borderRadiusPx: 8, marginBottomPx: 24 })}">
           <div style="${emailCardTitleStyle()}">Ready to View</div>
@@ -1163,6 +1173,7 @@ export async function sendProjectGeneralNotificationEmail({
   projectDescription,
   shareUrl,
   readyVideos = [],
+  notes,
   isPasswordProtected = false,
   trackingToken,
 }: {
@@ -1172,6 +1183,7 @@ export async function sendProjectGeneralNotificationEmail({
   projectDescription: string
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
+  notes?: string | null
   isPasswordProtected?: boolean
   trackingToken?: string
 }) {
@@ -1181,6 +1193,7 @@ export async function sendProjectGeneralNotificationEmail({
     projectDescription,
     shareUrl,
     readyVideos,
+    notes,
     isPasswordProtected,
     trackingToken,
   })
