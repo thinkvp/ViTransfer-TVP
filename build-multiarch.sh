@@ -29,7 +29,7 @@ NO_CACHE_FLAG=""
 # Check for --no-cache flag
 if [ "$2" = "--no-cache" ] || [ "$1" = "--no-cache" ]; then
     NO_CACHE_FLAG="--no-cache"
-    echo "🔨 Building with --no-cache flag"
+    echo "Building with --no-cache flag"
 fi
 
 # Check if we're building dev version with -dev prefix
@@ -52,30 +52,30 @@ else
     WORKER_TAGS="${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}:latest"
 fi
 
-echo "🏗️  ViTransfer Build (linux/amd64)"
+echo "ViTransfer Build (linux/amd64)"
 echo "========================================"
 echo ""
 
 # Check if logged in to Docker Hub
-echo "🔑 Checking Docker Hub login..."
+echo "Checking Docker Hub login..."
 if ! docker info | grep -q "Username: ${DOCKERHUB_USERNAME}"; then
-    echo "⚠️  Not logged in to Docker Hub"
+    echo "WARNING: Not logged in to Docker Hub"
     echo "Please login:"
     docker login
 else
-    echo "✅ Logged in to Docker Hub as ${DOCKERHUB_USERNAME}"
+    echo "Logged in to Docker Hub as ${DOCKERHUB_USERNAME}"
 fi
 
 echo ""
 
 # Check if buildx is available
-echo "🔧 Checking Docker buildx..."
+echo "Checking Docker buildx..."
 if ! docker buildx version &> /dev/null; then
-    echo "❌ Error: Docker buildx is not available"
+    echo "ERROR: Docker buildx is not available"
     echo "   Install with: docker buildx install"
     exit 1
 fi
-echo "✅ Docker buildx available"
+echo "Docker buildx available"
 
 echo ""
 
@@ -83,7 +83,7 @@ echo ""
 docker buildx inspect --bootstrap
 
 echo ""
-echo "🏗️  Building image..."
+echo "Building image..."
 echo "   Version: ${VERSION}"
 echo "   Platform: linux/amd64"
 if [[ "$VERSION" == dev* ]]; then
@@ -127,17 +127,17 @@ retag_latest_from_version() {
     for i in $(seq 1 "$retries"); do
         echo "Retagging ${image}:latest -> ${image}:${version_tag} (attempt ${i}/${retries})"
         if docker buildx imagetools create --tag "${image}:latest" "${image}:${version_tag}" >/dev/null; then
-            echo "✅ Updated ${image}:latest"
+            echo "Updated ${image}:latest"
             return 0
         fi
         sleep "$sleep_seconds"
     done
 
-    echo "❌ Failed to update ${image}:latest after ${retries} attempts"
+    echo "ERROR: Failed to update ${image}:latest after ${retries} attempts"
     return 1
 }
 
-echo "🏗️  Building + pushing app image..."
+echo "Building + pushing app image..."
 if [[ "$VERSION" == dev* ]] || [ "$VERSION" = "latest" ]; then
     build_and_push "app" "$APP_TAGS"
 else
@@ -145,7 +145,7 @@ else
 fi
 
 echo ""
-echo "🏗️  Building + pushing worker image..."
+echo "Building + pushing worker image..."
 if [[ "$VERSION" == dev* ]] || [ "$VERSION" = "latest" ]; then
     build_and_push "worker" "$WORKER_TAGS"
 else
@@ -155,15 +155,15 @@ fi
 # If this is a normal version, update :latest as a separate, lightweight manifest operation
 if [[ "$VERSION" != dev* ]] && [ "$VERSION" != "latest" ]; then
     echo ""
-    echo "🏷️  Updating :latest tags (manifest-only)..."
+    echo "Updating :latest tags (manifest-only)..."
     retag_latest_from_version "${DOCKERHUB_USERNAME}/${APP_IMAGE_NAME}" "$VERSION"
     retag_latest_from_version "${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}" "$VERSION"
 fi
 
 echo ""
-echo "✅ Build complete!"
+echo "Build complete!"
 echo ""
-echo "📦 Images pushed to Docker Hub:"
+echo "Images pushed to Docker Hub:"
 for tag in $APP_TAGS; do
     echo "   $tag"
 done
@@ -171,17 +171,17 @@ for tag in $WORKER_TAGS; do
     echo "   $tag"
 done
 echo ""
-echo "🔍 Platform: linux/amd64 (x86_64)"
+echo "Platform: linux/amd64 (x86_64)"
 echo ""
 if [ "$VERSION" != "latest" ]; then
-    echo "📥 Pull specific version:"
+    echo "Pull specific version:"
     echo "   docker pull ${DOCKERHUB_USERNAME}/${APP_IMAGE_NAME}:${VERSION}"
     echo "   docker pull ${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}:${VERSION}"
     echo ""
-    echo "📥 Or pull latest:"
+    echo "Or pull latest:"
 fi
 echo "   docker pull ${DOCKERHUB_USERNAME}/${APP_IMAGE_NAME}:latest"
 echo "   docker pull ${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}:latest"
 echo "   (will automatically select the correct architecture)"
 echo ""
-echo "🎉 Done!"
+echo "Done!"
