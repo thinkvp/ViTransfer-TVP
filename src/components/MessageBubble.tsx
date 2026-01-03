@@ -89,7 +89,8 @@ export default function MessageBubble({
       ((comment as any).user.name || (comment as any).user.email) :
       null)
 
-  const borderColor = comment.isInternal ? 'border-l-green-500' : 'border-l-orange-500'
+  const fallbackBorderColorClass = comment.isInternal ? 'border-l-green-500' : 'border-l-orange-500'
+  const displayColor = (comment as any)?.displayColor as string | null | undefined
 
   const textColor = 'text-foreground'
 
@@ -105,7 +106,11 @@ export default function MessageBubble({
   return (
     <div className="w-full" id={`comment-${comment.id}`}>
       <div className="w-full">
-        <div data-comment-block className={`bg-card border border-border ${borderColor} border-l-4 rounded-lg p-3`}>
+        <div
+          data-comment-block
+          className={`bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`}
+          style={displayColor ? { borderLeftColor: displayColor } : undefined}
+        >
           {/* Header row: name left, time right */}
           <div className="flex items-start justify-between gap-3 mb-2">
             <div className="min-w-0">
@@ -186,7 +191,7 @@ export default function MessageBubble({
               {/* Collapsible Header */}
               <button
                 onClick={onToggleReplies}
-                className="flex items-center justify-between w-full mb-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center justify-between w-full mb-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50 hover:bg-muted/70 hover:text-foreground transition-colors"
               >
                 <span>
                   {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}

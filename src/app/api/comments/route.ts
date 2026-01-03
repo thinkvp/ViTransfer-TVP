@@ -12,7 +12,10 @@ import {
   resolveCommentAuthor,
   sanitizeAndValidateContent,
   handleCommentNotifications,
-  fetchProjectComments
+  fetchProjectComments,
+  backfillCommentRecipientIdsByAuthorName,
+  backfillCommentDisplayColorSnapshots,
+  resolveCommentDisplayColorSnapshot
 
 } from '@/lib/comment-helpers'
 export const runtime = 'nodejs'
@@ -91,6 +94,10 @@ export async function GET(request: NextRequest) {
     // Priority: companyName → primary recipient → 'Client'
     const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
 
+    // Best-effort legacy backfill: link older client comments to a recipient by authorName.
+    await backfillCommentRecipientIdsByAuthorName(projectId)
+    await backfillCommentDisplayColorSnapshots(projectId)
+
     // Fetch all comments for the project
     const allComments = await prisma.comment.findMany({
       where: {
@@ -104,6 +111,13 @@ export async function GET(request: NextRequest) {
             name: true,
             username: true,
             email: true,
+            displayColor: true,
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            displayColor: true,
           }
         },
         files: {
@@ -123,6 +137,13 @@ export async function GET(request: NextRequest) {
                 name: true,
                 username: true,
                 email: true,
+                displayColor: true,
+              }
+            },
+            recipient: {
+              select: {
+                id: true,
+                displayColor: true,
               }
             },
             files: {
@@ -275,6 +296,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Create comment in database
+    const displayColorSnapshot = await resolveCommentDisplayColorSnapshot({
+      projectId,
+      isInternal: isInternal || false,
+      userId: authContext.user?.id || null,
+      recipientId: recipientId || null,
+    })
+
     const comment = await prisma.comment.create({
       data: {
         projectId,
@@ -287,6 +315,8 @@ export async function POST(request: NextRequest) {
         isInternal: isInternal || false,
         parentId: parentId || null,
         userId: authContext.user?.id || null,
+        recipientId: recipientId || null,
+        displayColorSnapshot,
       },
       include: {
         user: {
@@ -295,6 +325,13 @@ export async function POST(request: NextRequest) {
             name: true,
             username: true,
             email: true,
+            displayColor: true,
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            displayColor: true,
           }
         },
         replies: {
@@ -305,6 +342,14 @@ export async function POST(request: NextRequest) {
                 name: true,
                 username: true,
                 email: true,
+                displayColor: true,
+              }
+            }
+            ,
+            recipient: {
+              select: {
+                id: true,
+                displayColor: true,
               }
             }
           },

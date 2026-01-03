@@ -9,7 +9,10 @@ import { sendPushNotification } from './push-notifications'
 import { createHash } from 'crypto'
 
 interface NotificationContext {
-  comment: Comment
+  comment: Comment & {
+    user?: { displayColor?: string | null } | null
+    recipient?: { displayColor?: string | null } | null
+  }
   project: { id: string; title: string; slug: string }
   video: { name: string; versionLabel: string } | null
   isReply: boolean
@@ -109,6 +112,7 @@ export async function sendImmediateNotification(context: NotificationContext) {
         commentContent: comment.content,
         timecode: comment.timecode,
         shareUrl,
+        displayColor: comment.user?.displayColor || null,
         trackingToken: trackingToken?.token,
         unsubscribeUrl,
       })
@@ -169,6 +173,7 @@ export async function sendImmediateNotification(context: NotificationContext) {
       commentContent: comment.content,
       timecode: comment.timecode,
       shareUrl,
+      displayColor: comment.recipient?.displayColor || null,
     })
 
     if (result.success) {

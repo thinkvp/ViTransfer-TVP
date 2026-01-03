@@ -6,11 +6,13 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Mail, Edit, Trash2, Plus, Star, Check, Bell, BellOff } from 'lucide-react'
 import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
+import { generateRandomHexDisplayColor } from '@/lib/display-color'
 
 interface Recipient {
   id?: string
   email: string | null
   name: string | null
+  displayColor?: string | null
   isPrimary: boolean
   receiveNotifications: boolean
 }
@@ -27,9 +29,11 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
   const [showAddForm, setShowAddForm] = useState(false)
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
+  const [newDisplayColor, setNewDisplayColor] = useState(() => generateRandomHexDisplayColor())
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editEmail, setEditEmail] = useState('')
   const [editName, setEditName] = useState('')
+  const [editDisplayColor, setEditDisplayColor] = useState('#22C55E')
 
   useEffect(() => {
     loadRecipients()
@@ -67,11 +71,13 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
       await apiPost(`/api/projects/${projectId}/recipients`, {
         email: newEmail || null,
         name: newName || null,
+        displayColor: newDisplayColor || null,
         isPrimary: recipients.length === 0,
       })
 
       setNewEmail('')
       setNewName('')
+      setNewDisplayColor(generateRandomHexDisplayColor())
       setShowAddForm(false)
       await loadRecipients()
     } catch (error) {
@@ -114,12 +120,14 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
     setEditingId(recipient.id!)
     setEditEmail(recipient.email || '')
     setEditName(recipient.name || '')
+    setEditDisplayColor(recipient.displayColor || '#F97316')
   }
 
   const cancelEdit = () => {
     setEditingId(null)
     setEditEmail('')
     setEditName('')
+    setEditDisplayColor('#22C55E')
   }
 
   const saveEdit = async () => {
@@ -138,7 +146,8 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
     try {
       await apiPatch(`/api/projects/${projectId}/recipients/${editingId}`, {
         name: editName || null,
-        email: editEmail || null
+        email: editEmail || null,
+        displayColor: editDisplayColor || null,
       })
 
       cancelEdit()
@@ -208,6 +217,27 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                       placeholder="email@example.com"
                     />
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor={`edit-displayColor-${recipient.id}`}>Display Colour</Label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        id={`edit-displayColor-${recipient.id}`}
+                        type="color"
+                        value={editDisplayColor}
+                        onChange={(e) => setEditDisplayColor(e.target.value)}
+                        className="h-10 w-14 rounded-md border border-input bg-background p-1"
+                        aria-label="Display colour"
+                      />
+                      <Input
+                        type="text"
+                        value={editDisplayColor}
+                        onChange={(e) => setEditDisplayColor(e.target.value)}
+                        placeholder="#RRGGBB"
+                        className="max-w-[140px]"
+                      />
+                    </div>
+                  </div>
                   <div className="flex gap-2">
                     <Button type="button" onClick={saveEdit} size="sm">
                       <Check className="w-4 h-4 mr-2" />
@@ -267,6 +297,14 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                         )}
                       </Button>
                     )}
+
+                    <span
+                      className="h-4 w-4 rounded-sm border border-border bg-muted/40"
+                      style={recipient.displayColor ? { backgroundColor: recipient.displayColor } : undefined}
+                      title={recipient.displayColor ? `Display colour: ${recipient.displayColor}` : 'Display colour: not set'}
+                      aria-label={recipient.displayColor ? `Display colour ${recipient.displayColor}` : 'Display colour not set'}
+                    />
+
                     <Button
                       type="button"
                       variant="outline"
@@ -315,6 +353,27 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                   placeholder="email@example.com"
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="newRecipientDisplayColor">Display Colour</Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="newRecipientDisplayColor"
+                    type="color"
+                    value={newDisplayColor}
+                    onChange={(e) => setNewDisplayColor(e.target.value)}
+                    className="h-10 w-14 rounded-md border border-input bg-background p-1"
+                    aria-label="Display colour"
+                  />
+                  <Input
+                    type="text"
+                    value={newDisplayColor}
+                    onChange={(e) => setNewDisplayColor(e.target.value)}
+                    placeholder="#RRGGBB"
+                    className="max-w-[140px]"
+                  />
+                </div>
+              </div>
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -333,6 +392,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                     setShowAddForm(false)
                     setNewEmail('')
                     setNewName('')
+                    setNewDisplayColor(generateRandomHexDisplayColor())
                   }}
                 >
                   Cancel

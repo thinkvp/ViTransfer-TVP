@@ -1,9 +1,11 @@
 import { prisma } from './db'
+import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from './display-color'
 
 export interface Recipient {
   id?: string
   email: string | null
   name: string | null
+  displayColor?: string | null
   isPrimary: boolean
   receiveNotifications: boolean
 }
@@ -24,6 +26,7 @@ export async function getProjectRecipients(projectId: string): Promise<Recipient
     id: r.id,
     email: r.email,
     name: r.name,
+    displayColor: r.displayColor,
     isPrimary: r.isPrimary,
     receiveNotifications: r.receiveNotifications
   }))
@@ -44,6 +47,7 @@ export async function getPrimaryRecipient(projectId: string): Promise<Recipient 
       id: primary.id,
       email: primary.email,
       name: primary.name,
+      displayColor: primary.displayColor,
       isPrimary: primary.isPrimary,
       receiveNotifications: primary.receiveNotifications
     }
@@ -63,6 +67,7 @@ export async function getPrimaryRecipient(projectId: string): Promise<Recipient 
     id: fallback.id,
     email: fallback.email,
     name: fallback.name,
+    displayColor: fallback.displayColor,
     isPrimary: fallback.isPrimary,
     receiveNotifications: fallback.receiveNotifications
   }
@@ -75,7 +80,8 @@ export async function addRecipient(
   projectId: string,
   email: string | null = null,
   name: string | null = null,
-  isPrimary: boolean = false
+  isPrimary: boolean = false,
+  displayColor?: string | null
 ): Promise<Recipient> {
   // If setting as primary, unset other primary recipients
   if (isPrimary) {
@@ -85,12 +91,17 @@ export async function addRecipient(
     })
   }
 
+  const normalizedColor = displayColor === undefined
+    ? null
+    : (displayColor === null ? null : (normalizeHexDisplayColor(displayColor) || null))
+
   const recipient = await prisma.projectRecipient.create({
     data: {
       projectId,
       email,
       name,
-      isPrimary
+      isPrimary,
+      displayColor: normalizedColor ?? generateRandomHexDisplayColor(),
     }
   })
 
@@ -98,6 +109,7 @@ export async function addRecipient(
     id: recipient.id,
     email: recipient.email,
     name: recipient.name,
+    displayColor: recipient.displayColor,
     isPrimary: recipient.isPrimary,
     receiveNotifications: recipient.receiveNotifications
   }
@@ -108,7 +120,7 @@ export async function addRecipient(
  */
 export async function updateRecipient(
   recipientId: string,
-  data: { name?: string | null; email?: string | null; isPrimary?: boolean; receiveNotifications?: boolean }
+  data: { name?: string | null; email?: string | null; displayColor?: string | null; isPrimary?: boolean; receiveNotifications?: boolean }
 ): Promise<Recipient> {
   // If setting as primary, get projectId and unset other primaries
   if (data.isPrimary) {
@@ -129,15 +141,29 @@ export async function updateRecipient(
     }
   }
 
+  const updateData: any = { ...data }
+  if (Object.prototype.hasOwnProperty.call(data, 'displayColor')) {
+    if (data.displayColor === null || data.displayColor === '') {
+      updateData.displayColor = null
+    } else {
+      const normalized = normalizeHexDisplayColor(data.displayColor)
+      if (!normalized) {
+        throw new Error('Invalid display colour. Use a hex value like #RRGGBB.')
+      }
+      updateData.displayColor = normalized
+    }
+  }
+
   const recipient = await prisma.projectRecipient.update({
     where: { id: recipientId },
-    data
+    data: updateData
   })
 
   return {
     id: recipient.id,
     email: recipient.email,
     name: recipient.name,
+    displayColor: recipient.displayColor,
     isPrimary: recipient.isPrimary,
     receiveNotifications: recipient.receiveNotifications
   }

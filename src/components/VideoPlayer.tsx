@@ -279,7 +279,7 @@ export default function VideoPlayer({
   const timelineCommentMarkers = useMemo(() => {
     const duration = effectiveDurationSeconds
     if (!selectedVideo?.id || !duration || duration <= 0) {
-      return [] as Array<{ id: string; seconds: number; isInternal: boolean }>
+      return [] as Array<{ id: string; seconds: number; isInternal: boolean; displayColor?: string | null }>
     }
 
     const fps = (selectedVideo as any)?.fps || 24
@@ -292,7 +292,7 @@ export default function VideoPlayer({
       }
     }
 
-    const markers: Array<{ id: string; seconds: number; isInternal: boolean }> = []
+    const markers: Array<{ id: string; seconds: number; isInternal: boolean; displayColor?: string | null }> = []
     for (const comment of flattened) {
       if (!comment) continue
       if (comment.videoId !== selectedVideo.id) continue
@@ -306,6 +306,7 @@ export default function VideoPlayer({
           id: String(comment.id),
           seconds: clamped,
           isInternal: Boolean((comment as any).isInternal),
+          displayColor: (comment as any).displayColor || null,
         })
       } catch {
         // ignore invalid timecodes
@@ -1235,7 +1236,10 @@ export default function VideoPlayer({
                   <div className="absolute inset-0 z-10">
                     {timelineCommentMarkers.map((m) => {
                       const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
-                      const markerColorClass = m.isInternal ? 'bg-green-500' : 'bg-orange-500'
+                      const markerColorClass = m.displayColor
+                        ? ''
+                        : (m.isInternal ? 'bg-green-500' : 'bg-orange-500')
+                      const markerStyle = m.displayColor ? { backgroundColor: m.displayColor } : undefined
                       return (
                         <button
                           key={m.id}
@@ -1294,8 +1298,14 @@ export default function VideoPlayer({
                             e.stopPropagation()
                           }}
                         >
-                          <span className={`absolute left-1/2 top-0 h-8 w-0.5 -translate-x-1/2 ${markerColorClass}`} />
-                          <span className={`absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${markerColorClass}`} />
+                          <span
+                            className={`absolute left-1/2 top-0 h-8 w-0.5 -translate-x-1/2 ${markerColorClass}`}
+                            style={markerStyle}
+                          />
+                          <span
+                            className={`absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${markerColorClass}`}
+                            style={markerStyle}
+                          />
                         </button>
                       )
                     })}

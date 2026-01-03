@@ -155,6 +155,9 @@ export function useCommentManagement({
   const [authorName, setAuthorName] = useState(
     typeof persistedName?.authorName === 'string' ? persistedName.authorName : ''
   )
+  const [recipientId, setRecipientId] = useState<string | null>(
+    typeof persistedName?.recipientId === 'string' ? persistedName.recipientId : null
+  )
 
   // Merge real comments with optimistic comments
   // Remove optimistic comments that have been confirmed by the server
@@ -251,6 +254,10 @@ export function useCommentManagement({
       const { videoId } = e.detail
       if (videoId && videoId !== selectedVideoId) {
         setSelectedVideoId(videoId)
+        // When switching between different videos, the new video's playhead starts at 0:00.
+        // Ensure the comment timecode resets too (VideoPlayer may not emit a time update until playback/seek).
+        setSelectedTimestamp(0)
+        setHasAutoFilledTimestamp(false)
       }
     }
 
@@ -383,6 +390,8 @@ export function useCommentManagement({
         : (isPasswordProtected ? authorName : 'Client'),
       authorEmail: isInternalComment ? null : (clientEmail || null),
       isInternal: isInternalComment,
+      recipientId: isInternalComment ? null : (recipientId || null),
+      displayColorSnapshot: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       parentId: replyingToCommentId,
@@ -420,6 +429,7 @@ export function useCommentManagement({
       } else {
         if (authorName) requestBody.authorName = authorName
         if (clientEmail) requestBody.authorEmail = clientEmail
+        if (recipientId) requestBody.recipientId = recipientId
       }
 
       // Only include parentId if replying (not null)
@@ -622,9 +632,21 @@ export function useCommentManagement({
   // Wrapper for setAuthorName that also persists to sessionStorage
   const handleAuthorNameChange = (name: string) => {
     setAuthorName(name)
+    setRecipientId(null)
 
     try {
-      sessionStorage.setItem(storageKey, JSON.stringify({ authorName: name }))
+      sessionStorage.setItem(storageKey, JSON.stringify({ authorName: name, recipientId: null }))
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  const handleRecipientSelection = (name: string, selectedRecipientId: string | null) => {
+    setAuthorName(name)
+    setRecipientId(selectedRecipientId)
+
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify({ authorName: name, recipientId: selectedRecipientId }))
     } catch {
       // Ignore storage errors
     }
@@ -672,6 +694,7 @@ export function useCommentManagement({
     replyingToCommentId,
     replyingToComment,
     authorName,
+    recipientId,
     handleCommentChange,
     handleSubmitComment,
     handleReply,
@@ -679,6 +702,7 @@ export function useCommentManagement({
     handleClearTimestamp,
     handleDeleteComment,
     setAuthorName: handleAuthorNameChange,
+    setRecipient: handleRecipientSelection,
     attachedFiles,
     onFileSelect,
     onRemoveFile,

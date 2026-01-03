@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { safeStringSchema, cuidSchema } from '@/lib/validation'
+import { generateRandomHexDisplayColor } from '@/lib/display-color'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -98,6 +99,7 @@ export async function POST(
         name,
         email: null,
         isPrimary: false,
+        displayColor: generateRandomHexDisplayColor(),
       },
       select: { id: true, name: true, createdAt: true },
     })

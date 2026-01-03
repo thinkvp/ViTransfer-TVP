@@ -63,6 +63,13 @@ export function sanitizeComment(
     parentId: comment.parentId,
   }
 
+  // Non-PII: expose display color for UI highlights.
+  // - Internal/admin: from user.displayColor
+  // - Client: from recipient.displayColor
+  sanitized.displayColor = comment?.isInternal
+    ? (comment?.user?.displayColor || comment?.displayColorSnapshot || null)
+    : (comment?.recipient?.displayColor || comment?.displayColorSnapshot || null)
+
   // Attachments: safe metadata only (no storage paths)
   if (comment.files && Array.isArray(comment.files)) {
     sanitized.files = comment.files.map((file: any) => ({

@@ -4,6 +4,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
+import { backfillCommentRecipientIdsByAuthorName, backfillCommentDisplayColorSnapshots } from '@/lib/comment-helpers'
 import { getRateLimitSettings } from '@/lib/settings'
 export const runtime = 'nodejs'
 
@@ -77,6 +78,10 @@ export async function GET(
       return NextResponse.json([])
     }
 
+    // Best-effort legacy backfill: link older client comments to a recipient by authorName.
+    await backfillCommentRecipientIdsByAuthorName(project.id)
+    await backfillCommentDisplayColorSnapshots(project.id)
+
     // Fetch comments with nested replies
     const comments = await prisma.comment.findMany({
       where: {
@@ -90,6 +95,13 @@ export async function GET(
             name: true,
             username: true,
             email: true,
+            displayColor: true,
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            displayColor: true,
           }
         },
         files: {
@@ -107,6 +119,13 @@ export async function GET(
                 name: true,
                 username: true,
                 email: true,
+                displayColor: true,
+              }
+            },
+            recipient: {
+              select: {
+                id: true,
+                displayColor: true,
               }
             },
             files: {

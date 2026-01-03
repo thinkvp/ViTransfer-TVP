@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer'
 import { prisma } from './db'
 import { decrypt } from './encryption'
+import { normalizeHexDisplayColor } from './display-color'
 
 export const EMAIL_THEME = {
   headerBackground: '#1F1F1F',
@@ -73,13 +74,16 @@ export function emailCardTitleStyle(): string {
 export function emailCalloutStyle({
   borderLeftPx = 3,
   marginBottomPx = 24,
+  accentColor,
 }: {
   borderLeftPx?: number
   marginBottomPx?: number
+  accentColor?: string | null
 } = {}): string {
+  const resolvedAccentColor = normalizeHexDisplayColor(accentColor) || EMAIL_THEME.accent
   return [
     `background:${EMAIL_THEME.surfaceMuted}`,
-    `border-left:${borderLeftPx}px solid ${EMAIL_THEME.accent}`,
+    `border-left:${borderLeftPx}px solid ${resolvedAccentColor}`,
     `border-radius:8px`,
     'padding:16px',
     `margin-bottom:${marginBottomPx}px`,
@@ -697,6 +701,7 @@ export async function renderCommentNotificationEmail({
   commentContent,
   timecode,
   shareUrl,
+  displayColor,
   trackingToken,
   unsubscribeUrl,
   branding,
@@ -709,6 +714,7 @@ export async function renderCommentNotificationEmail({
   commentContent: string
   timecode?: string | null
   shareUrl: string
+  displayColor?: string | null
   trackingToken?: string
   unsubscribeUrl?: string
   branding?: EmailBrandingOverrides
@@ -722,7 +728,7 @@ export async function renderCommentNotificationEmail({
   const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
-  const calloutStyle = emailCalloutStyle({ borderLeftPx: 3 })
+  const calloutStyle = emailCalloutStyle({ borderLeftPx: 3, accentColor: displayColor || null })
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
@@ -788,6 +794,7 @@ export async function sendCommentNotificationEmail({
   commentContent,
   timecode,
   shareUrl,
+  displayColor,
   trackingToken,
   unsubscribeUrl,
 }: {
@@ -800,6 +807,7 @@ export async function sendCommentNotificationEmail({
   commentContent: string
   timecode?: string | null
   shareUrl: string
+  displayColor?: string | null
   trackingToken?: string
   unsubscribeUrl?: string
 }) {
@@ -812,6 +820,7 @@ export async function sendCommentNotificationEmail({
     commentContent,
     timecode,
     shareUrl,
+    displayColor,
     trackingToken,
     unsubscribeUrl,
   })
@@ -835,6 +844,7 @@ export async function renderAdminCommentNotificationEmail({
   commentContent,
   timecode,
   shareUrl,
+  displayColor,
   branding,
 }: {
   clientName: string
@@ -845,6 +855,7 @@ export async function renderAdminCommentNotificationEmail({
   commentContent: string
   timecode?: string | null
   shareUrl: string
+  displayColor?: string | null
   branding?: EmailBrandingOverrides
 }): Promise<RenderedEmail> {
   const resolved = await resolveEmailBranding(branding)
@@ -856,7 +867,7 @@ export async function renderAdminCommentNotificationEmail({
   const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
-  const calloutStyle = emailCalloutStyle({ borderLeftPx: 3 })
+  const calloutStyle = emailCalloutStyle({ borderLeftPx: 3, accentColor: displayColor || null })
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
@@ -915,6 +926,7 @@ export async function sendAdminCommentNotificationEmail({
   commentContent,
   timecode,
   shareUrl,
+  displayColor,
 }: {
   adminEmails: string[]
   clientName: string
@@ -925,6 +937,7 @@ export async function sendAdminCommentNotificationEmail({
   commentContent: string
   timecode?: string | null
   shareUrl: string
+  displayColor?: string | null
 }) {
   const { subject, html } = await renderAdminCommentNotificationEmail({
     clientName,
@@ -935,6 +948,7 @@ export async function sendAdminCommentNotificationEmail({
     commentContent,
     timecode,
     shareUrl,
+    displayColor,
   })
 
   // Send to all admin emails

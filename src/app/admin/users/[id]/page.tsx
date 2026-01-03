@@ -27,6 +27,7 @@ export default function EditUserPage() {
     email: '',
     username: '',
     name: '',
+    displayColor: '#22C55E',
     oldPassword: '',
     password: '',
     confirmPassword: '',
@@ -125,6 +126,7 @@ export default function EditUserPage() {
         email: data.user.email,
         username: data.user.username || '',
         name: data.user.name || '',
+        displayColor: data.user.displayColor || '#22C55E',
         oldPassword: '',
         password: '',
         confirmPassword: '',
@@ -215,6 +217,7 @@ export default function EditUserPage() {
         email: formData.email,
         username: formData.username || null,
         name: formData.name || null,
+        displayColor: formData.displayColor || null,
       }
 
       // Only include password if it's being changed
@@ -285,6 +288,30 @@ export default function EditUserPage() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Optional"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="displayColor">Display Colour</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="displayColor"
+                  type="color"
+                  value={formData.displayColor}
+                  onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
+                  className="h-10 w-14 rounded-md border border-input bg-background p-1"
+                  aria-label="Display colour"
+                />
+                <Input
+                  type="text"
+                  value={formData.displayColor}
+                  onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
+                  placeholder="#RRGGBB"
+                  className="max-w-[140px]"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Used for this admin’s comment highlight and timeline markers.
+              </p>
             </div>
 
             <div className="border-t pt-4 mt-4">

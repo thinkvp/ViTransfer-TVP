@@ -16,6 +16,7 @@ model User {
   username  String?  @unique
   password  String
   name      String?
+  displayColor String? @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   role      UserRole @default(ADMIN)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -101,9 +102,12 @@ model ProjectRecipient {
   project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   email                String?
   name                 String?
+  displayColor         String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   isPrimary            Boolean  @default(false)
   receiveNotifications Boolean  @default(true) // Per-recipient notification toggle
   createdAt            DateTime @default(now())
+
+  comments             Comment[]
 
   @@index([projectId])
   @@index([projectId, email])
@@ -209,6 +213,14 @@ model Comment {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // Snapshot display colour at creation time.
+  // Used as a fallback if the linked user/recipient is later deleted (FK will set ids to null).
+  displayColorSnapshot String? @db.VarChar(7)
+
+  // Client recipient tracking (for share-page comments)
+  recipientId String? // ProjectRecipient who authored this client comment
+  recipient   ProjectRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+
   // Admin user tracking (for internal comments)
   userId String? // Admin user who created this comment
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -225,6 +237,7 @@ model Comment {
   @@index([videoId])
   @@index([parentId])
   @@index([userId])
+  @@index([recipientId])
 }
 
 model NotificationQueue {

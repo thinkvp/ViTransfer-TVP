@@ -4,6 +4,7 @@ import { requireApiAdmin, getCurrentUserFromRequest } from '@/lib/auth'
 import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption'
 import { revokeAllUserTokens, clearUserRevocation } from '@/lib/token-revocation'
 import { rateLimit } from '@/lib/rate-limit'
+import { normalizeHexDisplayColor } from '@/lib/display-color'
 export const runtime = 'nodejs'
 
 
@@ -41,6 +42,7 @@ export async function GET(
         email: true,
         username: true,
         name: true,
+        displayColor: true,
         role: true,
         createdAt: true,
         updatedAt: true,
@@ -79,7 +81,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { email, username, name, password, oldPassword, role } = body
+    const { email, username, name, displayColor, password, oldPassword, role } = body
 
     // Build update data
     const updateData: any = {}
@@ -127,6 +129,22 @@ export async function PATCH(
 
     if (name !== undefined) {
       updateData.name = name
+    }
+
+    if (displayColor !== undefined) {
+      // Allow null/empty to clear, or a valid #RRGGBB
+      if (displayColor === null || displayColor === '') {
+        updateData.displayColor = null
+      } else {
+        const normalized = normalizeHexDisplayColor(displayColor)
+        if (!normalized) {
+          return NextResponse.json(
+            { error: 'Invalid display colour. Use a hex value like #RRGGBB.' },
+            { status: 400 }
+          )
+        }
+        updateData.displayColor = normalized
+      }
     }
 
     if (role !== undefined) {
@@ -207,6 +225,7 @@ export async function PATCH(
         email: true,
         username: true,
         name: true,
+        displayColor: true,
         role: true,
         createdAt: true,
         updatedAt: true,

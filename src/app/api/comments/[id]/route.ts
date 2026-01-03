@@ -154,6 +154,13 @@ export async function PATCH(
             name: true,
             username: true,
             email: true,
+            displayColor: true,
+          }
+        },
+        recipient: {
+          select: {
+            id: true,
+            displayColor: true,
           }
         },
         replies: {
@@ -164,6 +171,14 @@ export async function PATCH(
                 name: true,
                 username: true,
                 email: true,
+                displayColor: true,
+              }
+            }
+            ,
+            recipient: {
+              select: {
+                id: true,
+                displayColor: true,
               }
             }
           },

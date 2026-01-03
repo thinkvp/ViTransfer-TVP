@@ -1256,6 +1256,8 @@ function ShareFeedbackGrid({
                 showAuthorInput={Boolean(isPasswordProtected)}
                 authorName={management.authorName}
                 onAuthorNameChange={management.setAuthorName}
+                recipientId={management.recipientId}
+                onRecipientSelect={(name, id) => management.setRecipient(name, id)}
                 recipients={project.recipients || []}
                 currentVideoRestricted={currentVideoRestricted}
                 restrictionMessage={restrictionMessage}
@@ -1358,6 +1360,8 @@ function ShareFeedbackGrid({
                 showAuthorInput={Boolean(isPasswordProtected)}
                 authorName={management.authorName}
                 onAuthorNameChange={management.setAuthorName}
+                recipientId={management.recipientId}
+                onRecipientSelect={(name, id) => management.setRecipient(name, id)}
                 recipients={project.recipients || []}
                 currentVideoRestricted={currentVideoRestricted}
                 restrictionMessage={restrictionMessage}

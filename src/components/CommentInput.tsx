@@ -42,6 +42,9 @@ interface CommentInputProps {
   showAuthorInput: boolean
   authorName: string
   onAuthorNameChange: (value: string) => void
+  recipientId?: string | null
+  onRecipientIdChange?: (value: string | null) => void
+  onRecipientSelect?: (name: string, recipientId: string | null) => void
   recipients?: Array<{ id?: string; name?: string | null; email?: string | null }>
 
   // Optional share auth context (share pages)
@@ -97,6 +100,9 @@ export default function CommentInput({
   showAuthorInput,
   authorName,
   onAuthorNameChange,
+  recipientId = null,
+  onRecipientIdChange,
+  onRecipientSelect,
   recipients = [],
   shareSlug,
   shareToken,
@@ -175,6 +181,22 @@ export default function CommentInput({
 
     return result
   }, [baseRecipientOptions, customRecipients])
+
+  // Keep recipientId in sync if authorName changes externally.
+  // (Example: restoring from storage, or user typing a custom name.)
+  useEffect(() => {
+    if (!authorName.trim()) return
+    // If the selected name matches a known option with an id, prefer that id.
+    const match = recipientOptions.find((o) => o.name === authorName.trim() && o.id)
+    if (match?.id) {
+      if (recipientId === match.id) return
+      if (onRecipientSelect) {
+        onRecipientSelect(match.name, match.id)
+      } else {
+        onRecipientIdChange?.(match.id)
+      }
+    }
+  }, [authorName, onRecipientIdChange, onRecipientSelect, recipientId, recipientOptions])
 
   useEffect(() => {
     if (!namePickerOpen) return
@@ -451,7 +473,13 @@ export default function CommentInput({
                               variant="outline"
                               className="w-full justify-between"
                               onClick={() => {
-                                onAuthorNameChange(name)
+                                const pickedId = opt.id ? String(opt.id) : null
+                                if (onRecipientSelect) {
+                                  onRecipientSelect(name, pickedId)
+                                } else {
+                                  onAuthorNameChange(name)
+                                  onRecipientIdChange?.(pickedId)
+                                }
                                 setNamePickerOpen(false)
                               }}
                             >

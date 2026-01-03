@@ -6,6 +6,158 @@ import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml 
 import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
 import { sendPushNotification } from '@/lib/push-notifications'
 
+const normalizeRecipientName = (value: string): string => {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+/**
+ * Best-effort backfill for legacy client comments.
+ *
+ * If a client comment is missing recipientId, try to match its authorName to a
+ * ProjectRecipient.name (case-insensitive) and persist recipientId.
+ *
+ * This allows displayColor to update retroactively for older comments.
+ */
+export async function backfillCommentRecipientIdsByAuthorName(projectId: string): Promise<void> {
+  try {
+    const recipients = await prisma.projectRecipient.findMany({
+      where: { projectId, name: { not: null } },
+      select: { id: true, name: true },
+    })
+
+    const nameToRecipientId = new Map<string, string>()
+    for (const recipient of recipients) {
+      const name = typeof recipient.name === 'string' ? normalizeRecipientName(recipient.name) : ''
+      if (!name) continue
+      // Only map unique names; if duplicates exist, skip to avoid incorrect linking.
+      if (nameToRecipientId.has(name)) {
+        nameToRecipientId.delete(name)
+        continue
+      }
+      nameToRecipientId.set(name, recipient.id)
+    }
+
+    if (nameToRecipientId.size === 0) return
+
+    // Find legacy client comments missing recipientId.
+    // Includes replies as well (not just top-level).
+    const commentsNeedingBackfill = await prisma.comment.findMany({
+      where: {
+        projectId,
+        isInternal: false,
+        recipientId: null,
+        authorName: { not: null },
+      },
+      select: { id: true, authorName: true },
+      take: 500,
+    })
+
+    if (commentsNeedingBackfill.length === 0) return
+
+    const updates: Array<ReturnType<typeof prisma.comment.update>> = []
+
+    for (const comment of commentsNeedingBackfill) {
+      const author = typeof comment.authorName === 'string' ? normalizeRecipientName(comment.authorName) : ''
+      if (!author) continue
+      const matchedRecipientId = nameToRecipientId.get(author)
+      if (!matchedRecipientId) continue
+
+      updates.push(
+        prisma.comment.update({
+          where: { id: comment.id },
+          data: { recipientId: matchedRecipientId },
+        })
+      )
+    }
+
+    if (updates.length === 0) return
+
+    await prisma.$transaction(updates)
+  } catch {
+    // Best-effort only; ignore failures.
+  }
+}
+
+export async function resolveCommentDisplayColorSnapshot(params: {
+  projectId: string
+  isInternal: boolean
+  userId?: string | null
+  recipientId?: string | null
+}): Promise<string | null> {
+  const { projectId, isInternal, userId, recipientId } = params
+
+  if (isInternal) {
+    if (!userId) return null
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayColor: true },
+    })
+    return user?.displayColor || null
+  }
+
+  if (!recipientId) return null
+
+  const recipient = await prisma.projectRecipient.findUnique({
+    where: { id: recipientId },
+    select: { displayColor: true, projectId: true },
+  })
+
+  if (!recipient || recipient.projectId !== projectId) return null
+  return recipient.displayColor || null
+}
+
+/**
+ * Best-effort backfill for legacy comments.
+ *
+ * If a comment is already linked to a user/recipient but missing a snapshot,
+ * copy the current linked displayColor into displayColorSnapshot.
+ */
+export async function backfillCommentDisplayColorSnapshots(projectId: string): Promise<void> {
+  try {
+    const candidates = await prisma.comment.findMany({
+      where: {
+        projectId,
+        displayColorSnapshot: null,
+        OR: [{ userId: { not: null } }, { recipientId: { not: null } }],
+      },
+      select: {
+        id: true,
+        isInternal: true,
+        user: { select: { displayColor: true } },
+        recipient: { select: { displayColor: true } },
+      },
+      take: 500,
+    })
+
+    if (candidates.length === 0) return
+
+    const updates: Array<ReturnType<typeof prisma.comment.update>> = []
+
+    for (const comment of candidates) {
+      const snapshot = comment.isInternal
+        ? (comment.user?.displayColor || null)
+        : (comment.recipient?.displayColor || null)
+
+      if (!snapshot) continue
+
+      updates.push(
+        prisma.comment.update({
+          where: { id: comment.id },
+          data: { displayColorSnapshot: snapshot },
+        })
+      )
+    }
+
+    if (updates.length === 0) return
+    await prisma.$transaction(updates)
+  } catch {
+    // Best-effort only; ignore failures.
+  }
+}
+
 /**
  * Validate comment permissions
  * Checks if user can create comments based on project settings
@@ -321,6 +473,13 @@ export async function fetchProjectComments(projectId: string) {
           name: true,
           username: true,
           email: true,
+          displayColor: true,
+        }
+      },
+      recipient: {
+        select: {
+          id: true,
+          displayColor: true,
         }
       },
       files: {
@@ -338,6 +497,13 @@ export async function fetchProjectComments(projectId: string) {
               name: true,
               username: true,
               email: true,
+              displayColor: true,
+            }
+          },
+          recipient: {
+            select: {
+              id: true,
+              displayColor: true,
             }
           },
           files: {

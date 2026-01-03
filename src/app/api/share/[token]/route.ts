@@ -190,7 +190,7 @@ export async function GET(
       getPrimaryRecipient(project.id)
     ])
 
-    let allRecipients: Array<{ id: string; name: string | null; email: string | null }> = []
+    let allRecipients: Array<{ id: string; name: string | null; email: string | null; displayColor?: string | null }> = []
     // Include recipients for all authenticated users (guest mode is the only restriction)
     if (!isGuest) {
       const recipients = await getProjectRecipients(project.id)
@@ -200,6 +200,7 @@ export async function GET(
           id: r.id!,
           name: r.name,
           email: r.email || null,
+          displayColor: (r as any).displayColor ?? null,
         }))
     }
 
