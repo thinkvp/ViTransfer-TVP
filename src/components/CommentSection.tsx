@@ -52,7 +52,7 @@ interface CommentSectionProps {
   smtpConfigured?: boolean
   isPasswordProtected?: boolean
   adminUser?: any
-  recipients?: Array<{ id: string; name: string | null }>
+  recipients?: Array<{ id: string; name: string | null; email?: string | null }>
   shareToken?: string | null
   showShortcutsButton?: boolean
   allowClientDeleteComments?: boolean

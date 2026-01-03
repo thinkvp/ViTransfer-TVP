@@ -54,6 +54,19 @@ export default function SharePage() {
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
 
+  const otpEmailStorageKey = token ? `share-otp-email:${token}` : null
+
+  const otpSessionEmail = (() => {
+    if (typeof window === 'undefined') return null
+    if (!otpEmailStorageKey) return null
+    try {
+      const stored = sessionStorage.getItem(otpEmailStorageKey)
+      return stored && typeof stored === 'string' ? stored : null
+    } catch {
+      return null
+    }
+  })()
+
   // Load stored token once (persist across refresh)
   useEffect(() => {
     if (!storageKey) return
@@ -463,6 +476,17 @@ export default function SharePage() {
           setShareToken(data.shareToken)
           saveShareToken(storageKey, data.shareToken)
         }
+
+        // Remember the email used for OTP in this tab session (no cookies)
+        const normalizedEmail = email.toLowerCase().trim()
+        try {
+          if (otpEmailStorageKey) {
+            sessionStorage.setItem(otpEmailStorageKey, normalizedEmail)
+          }
+        } catch {
+          // ignore
+        }
+
         setIsAuthenticated(true)
         setIsGuest(false)
 
@@ -816,6 +840,7 @@ export default function SharePage() {
                   initialVideoIndex={initialVideoIndex}
                   isPasswordProtected={isPasswordProtected || false}
                   shareToken={shareToken}
+                  otpSessionEmail={otpSessionEmail}
                   companyName={companyName}
                   onApprove={fetchProjectData}
                 />
@@ -839,6 +864,7 @@ function ShareFeedbackGrid({
   initialVideoIndex,
   isPasswordProtected,
   shareToken,
+  otpSessionEmail,
   companyName,
   onApprove,
 }: {
@@ -851,6 +877,7 @@ function ShareFeedbackGrid({
   initialVideoIndex: number
   isPasswordProtected: boolean
   shareToken: string | null
+  otpSessionEmail: string | null
   companyName: string
   onApprove: () => void
 }) {
@@ -1035,7 +1062,8 @@ function ShareFeedbackGrid({
     projectId: String(project.id),
     initialComments: serverComments as any,
     videos: readyVideos as any,
-    clientEmail: project.clientEmail,
+    // Use the OTP-authenticated email as the comment author email when available.
+    clientEmail: otpSessionEmail || project.clientEmail,
     isPasswordProtected: Boolean(isPasswordProtected),
     adminUser: null,
     recipients: (project.recipients || []) as any,
@@ -1047,6 +1075,32 @@ function ShareFeedbackGrid({
     allowClientDeleteComments: Boolean(project.allowClientDeleteComments),
     allowClientUploadFiles: Boolean(project.allowClientUploadFiles),
   })
+
+  const { authorName, setAuthorName } = management
+
+  // Auto-select client display name based on OTP email matching a project recipient.
+  // Only runs if the user hasn't already chosen a name.
+  useEffect(() => {
+    if (!isPasswordProtected) return
+    if (!project?.recipients || !Array.isArray(project.recipients)) return
+    if (authorName.trim()) return
+
+    if (!otpSessionEmail) return
+
+    const normalizedEmail = otpSessionEmail.toLowerCase().trim()
+    if (!normalizedEmail) return
+
+    const match = (project.recipients as any[]).find((r) => {
+      const rEmail = String(r?.email || '').toLowerCase().trim()
+      return rEmail && rEmail === normalizedEmail
+    })
+
+    if (!match) return
+
+    const nextName = String(match?.name || '').trim() || normalizedEmail
+    if (!nextName) return
+    setAuthorName(nextName)
+  }, [isPasswordProtected, project?.recipients, authorName, setAuthorName, otpSessionEmail])
 
   const isApproved = project.status === 'APPROVED' || project.status === 'SHARE_ONLY'
 

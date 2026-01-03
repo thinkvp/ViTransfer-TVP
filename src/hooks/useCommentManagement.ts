@@ -19,7 +19,7 @@ interface UseCommentManagementProps {
   clientEmail?: string
   isPasswordProtected: boolean
   adminUser?: any
-  recipients: Array<{ id: string; name: string | null }>
+  recipients: Array<{ id: string; name: string | null; email?: string | null }>
   clientName: string
   restrictToLatestVersion: boolean
   shareToken?: string | null

@@ -42,7 +42,7 @@ interface CommentInputProps {
   showAuthorInput: boolean
   authorName: string
   onAuthorNameChange: (value: string) => void
-  recipients?: Array<{ id?: string; name?: string | null }>
+  recipients?: Array<{ id?: string; name?: string | null; email?: string | null }>
 
   // Restrictions
   currentVideoRestricted: boolean
