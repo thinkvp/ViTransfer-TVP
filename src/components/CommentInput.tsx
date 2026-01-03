@@ -663,7 +663,7 @@ export default function CommentInput({
                   }}
                   variant="outline"
                   size="icon"
-                  className="bg-orange-600 text-white border-orange-600 hover:bg-orange-600 hover:text-white hover:border-orange-600 shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation"
+                  className="shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation"
                   title="Attach file"
                   disabled={loading || uploading || attachedFiles.length >= MAX_FILES_PER_COMMENT}
                 >

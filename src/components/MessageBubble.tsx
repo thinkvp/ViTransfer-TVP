@@ -79,8 +79,8 @@ export default function MessageBubble({
 
   // Flat blocks (no chat bubbles).
   // Border colors match the timeline marker colors:
-  // - internal/studio/admin: green
-  // - client: orange
+  // - internal/studio/admin: neutral foreground
+  // - client: neutral muted-foreground
 
   // Get effective author name
   // For internal comments without authorName, fall back to user.name or user.email
@@ -89,7 +89,7 @@ export default function MessageBubble({
       ((comment as any).user.name || (comment as any).user.email) :
       null)
 
-  const fallbackBorderColorClass = comment.isInternal ? 'border-l-green-500' : 'border-l-orange-500'
+  const fallbackBorderColorClass = comment.isInternal ? 'border-l-foreground' : 'border-l-muted-foreground'
   const displayColor = (comment as any)?.displayColor as string | null | undefined
 
   const textColor = 'text-foreground'

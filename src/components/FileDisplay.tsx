@@ -85,7 +85,7 @@ export function CommentFileDisplay({
         type="button"
         onClick={handleDownload}
         disabled={isLoading}
-        className="inline-flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors text-sm font-medium disabled:opacity-50"
+        className="inline-flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border text-foreground rounded-lg hover:bg-muted/50 transition-colors text-sm font-medium disabled:opacity-50"
       >
         <Download className="w-4 h-4" />
         {fileName} ({formatFileSize(fileSize)})
@@ -96,7 +96,7 @@ export function CommentFileDisplay({
   return (
     <a
       href={`/api/comments/${commentId}/files/${fileId}`}
-      className="inline-flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors text-sm font-medium"
+      className="inline-flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border text-foreground rounded-lg hover:bg-muted/50 transition-colors text-sm font-medium"
       download
     >
       <Download className="w-4 h-4" />

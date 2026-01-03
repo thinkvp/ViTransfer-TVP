@@ -1231,14 +1231,14 @@ export default function VideoPlayer({
                   }}
                 />
 
-                {/* Comment markers (orange ticks) */}
+                {/* Comment markers */}
                 {timelineCommentMarkers.length > 0 && effectiveDurationSeconds > 0 && (
                   <div className="absolute inset-0 z-10">
                     {timelineCommentMarkers.map((m) => {
                       const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
                       const markerColorClass = m.displayColor
                         ? ''
-                        : (m.isInternal ? 'bg-green-500' : 'bg-orange-500')
+                        : (m.isInternal ? 'bg-foreground' : 'bg-muted-foreground')
                       const markerStyle = m.displayColor ? { backgroundColor: m.displayColor } : undefined
                       return (
                         <button
