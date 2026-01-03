@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
-import { Send, Paperclip, X, Clock, ChevronDown, Check, ArrowLeft, ArrowRight } from 'lucide-react'
+import { Send, Paperclip, X, Clock, ChevronDown, Check, ArrowLeft, ArrowRight, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
@@ -43,6 +43,10 @@ interface CommentInputProps {
   authorName: string
   onAuthorNameChange: (value: string) => void
   recipients?: Array<{ id?: string; name?: string | null; email?: string | null }>
+
+  // Optional share auth context (share pages)
+  shareSlug?: string
+  shareToken?: string | null
 
   // Restrictions
   currentVideoRestricted: boolean
@@ -94,6 +98,8 @@ export default function CommentInput({
   authorName,
   onAuthorNameChange,
   recipients = [],
+  shareSlug,
+  shareToken,
   currentVideoRestricted,
   restrictionMessage,
   commentsDisabled,
@@ -115,39 +121,202 @@ export default function CommentInput({
   const [fullscreenUploadNotSupportedOpen, setFullscreenUploadNotSupportedOpen] = useState(false)
   const [namePickerOpen, setNamePickerOpen] = useState(false)
   const [customName, setCustomName] = useState('')
+  const [customNameError, setCustomNameError] = useState('')
+  const [addingCustomName, setAddingCustomName] = useState(false)
+  const [deletingCustomRecipientIds, setDeletingCustomRecipientIds] = useState<Set<string>>(
+    () => new Set()
+  )
+  const [customRecipients, setCustomRecipients] = useState<
+    Array<{ id: string; name: string; createdAtMs: number }>
+  >([])
+  const [deleteTick, setDeleteTick] = useState(0)
   const customNameInputRef = useRef<HTMLInputElement>(null)
 
-  const recipientNames = useMemo(() => {
-    const uniqueNames: string[] = []
+  const baseRecipientOptions = useMemo(() => {
+    const unique: Array<{ id?: string; name: string }> = []
     const seen = new Set<string>()
 
     for (const recipient of recipients) {
       const trimmed = (recipient?.name || '').trim()
       if (!trimmed) continue
-      if (seen.has(trimmed)) continue
-      seen.add(trimmed)
-      uniqueNames.push(trimmed)
+      const key = trimmed.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      unique.push({ id: recipient?.id, name: trimmed })
     }
 
-    return uniqueNames
+    return unique
   }, [recipients])
+
+  const recipientOptions = useMemo(() => {
+    const customIdSet = new Set(customRecipients.map((r) => r.id))
+    const seenName = new Set<string>()
+    const result: Array<{ id?: string; name: string; isCustom: boolean }> = []
+
+    const push = (opt: { id?: string; name: string; isCustom: boolean }) => {
+      const trimmed = opt.name.trim()
+      if (!trimmed) return
+      const key = trimmed.toLowerCase()
+      if (seenName.has(key)) return
+      seenName.add(key)
+      result.push({ ...opt, name: trimmed })
+    }
+
+    // Base recipients first, excluding any custom IDs so custom entries always render at the bottom.
+    for (const opt of baseRecipientOptions) {
+      if (opt.id && customIdSet.has(opt.id)) continue
+      push({ ...opt, isCustom: false })
+    }
+
+    // Custom entries last
+    for (const custom of customRecipients) {
+      push({ id: custom.id, name: custom.name, isCustom: true })
+    }
+
+    return result
+  }, [baseRecipientOptions, customRecipients])
 
   useEffect(() => {
     if (!namePickerOpen) return
 
     const trimmedAuthor = authorName.trim()
-    const isRecipientName = Boolean(trimmedAuthor) && recipientNames.includes(trimmedAuthor)
+    const isRecipientName =
+      Boolean(trimmedAuthor) && recipientOptions.some((o) => o.name === trimmedAuthor)
 
     // If they previously entered a custom name, keep it editable.
     // If they selected a recipient name, start with an empty custom name.
     setCustomName(isRecipientName ? '' : trimmedAuthor)
+    setCustomNameError('')
 
     // Focus the custom name input on open (handy if there are no recipients, or they want a custom entry).
     setTimeout(() => {
       customNameInputRef.current?.focus()
       customNameInputRef.current?.select()
     }, 0)
-  }, [namePickerOpen, authorName, recipientNames])
+  }, [namePickerOpen, authorName, recipientOptions])
+
+  useEffect(() => {
+    if (!namePickerOpen) return
+    const hasDeletable = customRecipients.some((r) => Date.now() - r.createdAtMs < 60 * 1000)
+    if (!hasDeletable) return
+
+    const id = setInterval(() => setDeleteTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [namePickerOpen, customRecipients])
+
+  const addCustomNameAsRecipient = async () => {
+    const trimmed = customName.trim()
+    if (!trimmed) return
+
+    // Prevent duplicates by name (case-insensitive). This mirrors server-side enforcement.
+    const normalized = trimmed.toLowerCase()
+    const alreadyExists = recipientOptions.some((o) => o.name.trim().toLowerCase() === normalized)
+    if (alreadyExists) {
+      setCustomNameError('That name is already in the list. Please select it instead.')
+      return
+    }
+
+    // If this CommentInput instance isn't on a share page with auth, fall back to the old behavior.
+    if (!shareSlug || !shareToken) {
+      onAuthorNameChange(trimmed)
+      setNamePickerOpen(false)
+      return
+    }
+
+    setAddingCustomName(true)
+    setCustomNameError('')
+    try {
+      const response = await fetch(`/api/share/${encodeURIComponent(shareSlug)}/recipients`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${shareToken}`,
+        },
+        body: JSON.stringify({ name: trimmed }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setCustomNameError(String(data?.error || 'Failed to add custom name'))
+        return
+      }
+
+      const id = String(data?.recipient?.id || '')
+      const name = String(data?.recipient?.name || trimmed).trim()
+      const createdAtMs = data?.recipient?.createdAt
+        ? new Date(String(data.recipient.createdAt)).getTime()
+        : Date.now()
+
+      if (!id || !name) {
+        setCustomNameError('Failed to add custom name')
+        return
+      }
+
+      setCustomRecipients((prev) => {
+        if (prev.some((r) => r.id === id)) return prev
+        return [...prev, { id, name, createdAtMs }]
+      })
+
+      window.dispatchEvent(
+        new CustomEvent('shareRecipientsChanged', {
+          detail: { action: 'add', recipient: { id, name } },
+        })
+      )
+
+      setCustomName('')
+      setCustomNameError('')
+    } catch {
+      setCustomNameError('Failed to add custom name')
+    } finally {
+      setAddingCustomName(false)
+    }
+  }
+
+  const deleteCustomRecipient = async (recipientId: string) => {
+    if (!shareSlug || !shareToken) return
+
+    const deletedName = customRecipients.find((r) => r.id === recipientId)?.name
+
+    setDeletingCustomRecipientIds((prev) => {
+      const next = new Set(prev)
+      next.add(recipientId)
+      return next
+    })
+
+    try {
+      const response = await fetch(`/api/share/${encodeURIComponent(shareSlug)}/recipients`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${shareToken}`,
+        },
+        body: JSON.stringify({ recipientId }),
+      })
+
+      if (!response.ok) {
+        return
+      }
+
+      setCustomRecipients((prev) => prev.filter((r) => r.id !== recipientId))
+
+      window.dispatchEvent(
+        new CustomEvent('shareRecipientsChanged', {
+          detail: { action: 'delete', recipientId },
+        })
+      )
+
+      // If they had selected this name, clear it so they can choose again.
+      if (deletedName && authorName.trim() === deletedName.trim()) {
+        onAuthorNameChange('')
+      }
+    } finally {
+      setDeletingCustomRecipientIds((prev) => {
+        const next = new Set(prev)
+        next.delete(recipientId)
+        return next
+      })
+    }
+  }
 
   if (commentsDisabled) return null
 
@@ -259,13 +428,25 @@ export default function CommentInput({
                   </DialogHeader>
 
                   <div className="space-y-4">
-                    {recipientNames.length > 0 ? (
+                    {recipientOptions.length > 0 ? (
                       <div className="space-y-2">
-                        {recipientNames.map((name) => {
+                        {recipientOptions.map((opt) => {
+                          const name = opt.name
                           const isSelected = authorName.trim() === name
+                          const customMeta = opt.id
+                            ? customRecipients.find((r) => r.id === opt.id)
+                            : null
+                          const canDelete = Boolean(
+                            opt.isCustom &&
+                              opt.id &&
+                              customMeta &&
+                              Date.now() - customMeta.createdAtMs < 60 * 1000
+                          )
+                          // Force a re-render while the 60s window is active
+                          void deleteTick
                           return (
                             <Button
-                              key={name}
+                              key={opt.id ? `${opt.id}:${name}` : name}
                               type="button"
                               variant="outline"
                               className="w-full justify-between"
@@ -275,7 +456,24 @@ export default function CommentInput({
                               }}
                             >
                               <span className="truncate">{name}</span>
-                              {isSelected ? <Check className="h-4 w-4 flex-shrink-0" /> : null}
+                              <span className="flex items-center gap-2">
+                                {canDelete && opt.id ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center justify-center rounded-sm text-destructive hover:text-destructive/90"
+                                    aria-label={`Delete ${name}`}
+                                    disabled={deletingCustomRecipientIds.has(opt.id)}
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      deleteCustomRecipient(opt.id!)
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                ) : null}
+                                {isSelected ? <Check className="h-4 w-4 flex-shrink-0" /> : null}
+                              </span>
                             </Button>
                           )
                         })}
@@ -289,14 +487,12 @@ export default function CommentInput({
                           ref={customNameInputRef}
                           placeholder="Enter a custom name"
                           value={customName}
+                          maxLength={30}
                           onChange={(e) => setCustomName(e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault()
-                              const trimmed = customName.trim()
-                              if (!trimmed) return
-                              onAuthorNameChange(trimmed)
-                              setNamePickerOpen(false)
+                              addCustomNameAsRecipient()
                             }
                           }}
                           className="text-sm"
@@ -304,16 +500,14 @@ export default function CommentInput({
                         <Button
                           type="button"
                           variant="default"
-                          disabled={!customName.trim()}
-                          onClick={() => {
-                            const trimmed = customName.trim()
-                            if (!trimmed) return
-                            onAuthorNameChange(trimmed)
-                            setNamePickerOpen(false)
-                          }}
+                          disabled={!customName.trim() || addingCustomName}
+                          onClick={addCustomNameAsRecipient}
                         >
-                          Use custom name
+                          Add a custom name
                         </Button>
+                        {customNameError ? (
+                          <div className="text-xs text-destructive">{customNameError}</div>
+                        ) : null}
                       </div>
                     </div>
                   </div>

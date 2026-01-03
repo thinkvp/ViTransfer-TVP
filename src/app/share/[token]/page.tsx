@@ -123,6 +123,50 @@ export default function SharePage() {
     }
   }, [token, shareToken])
 
+  // Keep recipients in sync when a client adds/deletes a custom name.
+  // This avoids losing the newly-added option when switching videos (CommentInput can remount).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as any
+      if (!detail) return
+
+      if (detail.action === 'add' && detail.recipient?.id) {
+        const id = String(detail.recipient.id)
+        const name = String(detail.recipient.name || '').trim()
+        if (!id || !name) return
+
+        setProject((prev: any) => {
+          if (!prev) return prev
+          const prevRecipients = Array.isArray(prev.recipients) ? prev.recipients : []
+          if (prevRecipients.some((r: any) => String(r?.id || '') === id)) return prev
+          return {
+            ...prev,
+            recipients: [...prevRecipients, { id, name, email: null }],
+          }
+        })
+
+        return
+      }
+
+      if (detail.action === 'delete' && detail.recipientId) {
+        const recipientId = String(detail.recipientId)
+        if (!recipientId) return
+
+        setProject((prev: any) => {
+          if (!prev) return prev
+          const prevRecipients = Array.isArray(prev.recipients) ? prev.recipients : []
+          return {
+            ...prev,
+            recipients: prevRecipients.filter((r: any) => String(r?.id || '') !== recipientId),
+          }
+        })
+      }
+    }
+
+    window.addEventListener('shareRecipientsChanged', handler)
+    return () => window.removeEventListener('shareRecipientsChanged', handler)
+  }, [])
+
   // Fetch project data function (for refresh after approval)
   const fetchProjectData = async (tokenOverride?: string | null) => {
     try {
@@ -839,6 +883,7 @@ export default function SharePage() {
                   initialSeekTime={initialSeekTime}
                   initialVideoIndex={initialVideoIndex}
                   isPasswordProtected={isPasswordProtected || false}
+                  shareSlug={token}
                   shareToken={shareToken}
                   otpSessionEmail={otpSessionEmail}
                   companyName={companyName}
@@ -863,6 +908,7 @@ function ShareFeedbackGrid({
   initialSeekTime,
   initialVideoIndex,
   isPasswordProtected,
+  shareSlug,
   shareToken,
   otpSessionEmail,
   companyName,
@@ -876,6 +922,7 @@ function ShareFeedbackGrid({
   initialSeekTime: number | null
   initialVideoIndex: number
   isPasswordProtected: boolean
+  shareSlug: string
   shareToken: string | null
   otpSessionEmail: string | null
   companyName: string
@@ -1190,6 +1237,8 @@ function ShareFeedbackGrid({
                 onCommentChange={management.handleCommentChange}
                 onSubmit={management.handleSubmitComment}
                 loading={management.loading}
+                shareSlug={shareSlug}
+                shareToken={shareToken}
                 uploadProgress={management.uploadProgress}
                 uploadStatusText={management.uploadStatusText}
                 onFileSelect={management.onFileSelect}
@@ -1290,6 +1339,8 @@ function ShareFeedbackGrid({
                 onCommentChange={management.handleCommentChange}
                 onSubmit={management.handleSubmitComment}
                 loading={management.loading}
+                shareSlug={shareSlug}
+                shareToken={shareToken}
                 uploadProgress={management.uploadProgress}
                 uploadStatusText={management.uploadStatusText}
                 onFileSelect={management.onFileSelect}
