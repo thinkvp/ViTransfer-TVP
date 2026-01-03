@@ -190,6 +190,7 @@ export function CommentSectionView({
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [exportingSrt, setExportingSrt] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [videoNotesOpen, setVideoNotesOpen] = useState(true)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
@@ -223,6 +224,57 @@ export function CommentSectionView({
       URL.revokeObjectURL(objectUrl)
     } catch (error) {
       alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  const parseDownloadFilename = (contentDisposition: string | null): string | null => {
+    if (!contentDisposition) return null
+
+    // Handle RFC5987: filename*=UTF-8''...
+    const rfc5987 = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+    if (rfc5987?.[1]) {
+      try {
+        return decodeURIComponent(rfc5987[1].replace(/(^\"|\"$)/g, ''))
+      } catch {
+        return rfc5987[1].replace(/(^\"|\"$)/g, '')
+      }
+    }
+
+    const simple = contentDisposition.match(/filename=\"?([^\";]+)\"?/i)
+    return simple?.[1] || null
+  }
+
+  const handleExportCommentsSrt = async () => {
+    try {
+      if (!selectedVideoId) {
+        alert('No video selected to export comments for.')
+        return
+      }
+
+      setExportingSrt(true)
+
+      const url = `/api/comments/export-srt?projectId=${encodeURIComponent(projectId)}&videoId=${encodeURIComponent(selectedVideoId)}`
+      const response = await apiFetch(url)
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to export comments')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+
+      const a = document.createElement('a')
+      a.href = objectUrl
+      a.download = parseDownloadFilename(response.headers.get('content-disposition')) || 'comments.srt'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (error) {
+      alert(`Failed to export comments: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setExportingSrt(false)
     }
   }
 
@@ -938,7 +990,19 @@ export function CommentSectionView({
         {/* List Controls (directly above the message list) */}
         <div className="px-4 py-2 border-b border-border bg-card flex-shrink-0">
           <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 w-full sm:w-auto justify-center sm:justify-start">
+              {isAdminView && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleExportCommentsSrt}
+                  disabled={exportingSrt}
+                  className="whitespace-nowrap"
+                >
+                  {exportingSrt ? 'Exporting...' : 'Export Comments'}
+                </Button>
+              )}
+
               {showVideoActions && (
                 <>
                   {showApproveButton && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup ? (
@@ -973,7 +1037,7 @@ export function CommentSectionView({
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto w-full sm:w-auto justify-center sm:justify-end">
               <div className="flex-shrink-0">
                 <Select
                   value={commentSortMode}
