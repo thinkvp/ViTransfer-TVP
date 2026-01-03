@@ -858,6 +858,7 @@ function ShareFeedbackGrid({
   const [commentsWidth, setCommentsWidth] = useState(420)
   const [isResizingComments, setIsResizingComments] = useState(false)
   const [commentInputInRightColumn, setCommentInputInRightColumn] = useState(false)
+  const [commentInputPlacementManuallySet, setCommentInputPlacementManuallySet] = useState(false)
   const [commentInputMinWidth, setCommentInputMinWidth] = useState<number | null>(null)
 
   const feedbackContainerRef = useRef<HTMLDivElement>(null)
@@ -888,6 +889,7 @@ function ShareFeedbackGrid({
   useEffect(() => {
     if (isDesktop) return
     setCommentInputInRightColumn(false)
+    setCommentInputPlacementManuallySet(false)
   }, [isDesktop])
 
   useEffect(() => {
@@ -1057,6 +1059,32 @@ function ShareFeedbackGrid({
   const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
   const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved)
 
+  // Desktop-only: default placement based on selected video aspect ratio.
+  // - Between 16:9 and 1:1 (inclusive of 1:1): keep under video player (left column)
+  // - Taller than 1:1 (e.g., 4:5, 9:16): place under comments (right column)
+  // Manual moves override this for the rest of the session.
+  useEffect(() => {
+    if (!isDesktop) return
+    if (commentInputPlacementManuallySet) return
+    if (!selectedVideo) return
+
+    const width = Number(
+      (selectedVideo as any).width ??
+        (selectedVideo as any).videoWidth ??
+        (selectedVideo as any).metadata?.width
+    )
+    const height = Number(
+      (selectedVideo as any).height ??
+        (selectedVideo as any).videoHeight ??
+        (selectedVideo as any).metadata?.height
+    )
+
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+
+    const aspect = width / height
+    setCommentInputInRightColumn(aspect < 1)
+  }, [isDesktop, commentInputPlacementManuallySet, selectedVideo])
+
   const currentVideoRestricted = Boolean(
     project.restrictCommentsToLatestVersion &&
       management.selectedVideoId &&
@@ -1133,7 +1161,10 @@ function ShareFeedbackGrid({
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-lg"
                 showTopBorder={false}
-                onMoveColumn={() => setCommentInputInRightColumn(true)}
+                onMoveColumn={() => {
+                  setCommentInputPlacementManuallySet(true)
+                  setCommentInputInRightColumn(true)
+                }}
                 moveColumnDirection="right"
               />
             </div>
@@ -1230,7 +1261,10 @@ function ShareFeedbackGrid({
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-lg"
                 showTopBorder={false}
-                onMoveColumn={() => setCommentInputInRightColumn(false)}
+                onMoveColumn={() => {
+                  setCommentInputPlacementManuallySet(true)
+                  setCommentInputInRightColumn(false)
+                }}
                 moveColumnDirection="left"
               />
             </div>
