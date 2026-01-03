@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
@@ -61,11 +61,7 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
     }
   }
 
-  useEffect(() => {
-    bootstrap()
-  }, [pathname])
-
-  async function bootstrap() {
+  const bootstrap = useCallback(async () => {
     setLoading(true)
     const refreshToken = getRefreshToken()
     const hasAccess = getAccessToken()
@@ -75,7 +71,11 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
     }
 
     await checkAuth()
-  }
+  }, [])
+
+  useEffect(() => {
+    bootstrap()
+  }, [bootstrap])
 
   useEffect(() => {
     if (requireAuth && !loading && !user) {

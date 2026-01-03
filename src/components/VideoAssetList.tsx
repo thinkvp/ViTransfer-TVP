@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   FileIcon,
   FileImage,
@@ -48,11 +48,7 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
   const [error, setError] = useState<string | null>(null)
   const [currentThumbnailPath, setCurrentThumbnailPath] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchAssets()
-  }, [videoId, refreshTrigger])
-
-  const fetchAssets = async () => {
+  const fetchAssets = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
@@ -71,7 +67,11 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
     } finally {
       setLoading(false)
     }
-  }
+  }, [videoId])
+
+  useEffect(() => {
+    fetchAssets()
+  }, [fetchAssets, refreshTrigger])
 
   const handleDelete = async (assetId: string, fileName: string) => {
     if (!confirm(`Are you sure you want to delete "${fileName}"? This action cannot be undone.`)) {

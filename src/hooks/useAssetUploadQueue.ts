@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import * as tus from 'tus-js-client'
 import { apiPost, apiDelete } from '@/lib/api-client'
-import { getAccessToken } from '@/lib/token-store'
+import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
 import {
   ensureFreshUploadOnContextChange,
   clearFileContext,
@@ -47,12 +47,56 @@ export function useAssetUploadQueue({
   const [queue, setQueue] = useState<QueuedUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
   const assetIdsMap = useRef<Map<string, string>>(new Map())
+  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
+  const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queueRef = useRef(queue)
 
   // Keep queueRef in sync with queue state
   useEffect(() => {
     queueRef.current = queue
   }, [queue])
+
+  const attemptRefresh = useCallback(async (): Promise<boolean> => {
+    if (refreshInFlightRef.current) return refreshInFlightRef.current
+
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) return false
+
+    refreshInFlightRef.current = (async () => {
+      try {
+        const response = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${refreshToken}`,
+          },
+        })
+
+        if (!response.ok) {
+          clearTokens()
+          return false
+        }
+
+        const data = await response.json()
+        if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
+          setTokens({
+            accessToken: data.tokens.accessToken,
+            refreshToken: data.tokens.refreshToken,
+          })
+          return true
+        }
+
+        clearTokens()
+        return false
+      } catch {
+        clearTokens()
+        return false
+      } finally {
+        refreshInFlightRef.current = null
+      }
+    })()
+
+    return refreshInFlightRef.current
+  }, [])
 
   // Add file to queue
   const addToQueue = useCallback((file: File, category: string): string => {
@@ -78,43 +122,6 @@ export function useAssetUploadQueue({
 
     return uploadId
   }, [videoId])
-
-  // Auto-start queued uploads when slots are available
-  useEffect(() => {
-    const currentUploading = queue.filter(u => u.status === 'uploading').length
-    const queuedUploads = queue.filter(u => u.status === 'queued')
-
-    // Start queued uploads if we have available slots
-    if (currentUploading < maxConcurrent && queuedUploads.length > 0) {
-      const slotsAvailable = maxConcurrent - currentUploading
-      const uploadsToStart = queuedUploads.slice(0, slotsAvailable)
-
-      uploadsToStart.forEach(upload => {
-        startUpload(upload.id)
-      })
-    }
-  }, [queue, maxConcurrent])
-
-  // Warn before leaving page if uploads are in progress
-  useEffect(() => {
-    const hasActiveUploads = queue.some(u =>
-      u.status === 'uploading' || u.status === 'queued' || u.status === 'paused'
-    )
-
-    if (hasActiveUploads) {
-      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        e.preventDefault()
-        e.returnValue = '' // Chrome requires returnValue to be set
-        return '' // Some browsers use the return value
-      }
-
-      window.addEventListener('beforeunload', handleBeforeUnload)
-
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload)
-      }
-    }
-  }, [queue])
 
   // Start an upload
   const startUpload = useCallback(async (uploadId: string) => {
@@ -223,6 +230,7 @@ export function useAssetUploadQueue({
 
           uploadRefsMap.current.delete(uploadId)
           assetIdsMap.current.delete(uploadId)
+          refreshAttemptsRef.current.delete(uploadId)
 
           // Clear file context since upload completed
           clearFileContext(upload.file)
@@ -255,6 +263,23 @@ export function useAssetUploadQueue({
 
           const statusCode = (error as any)?.originalResponse?.getStatus?.()
 
+          // If auth failed, attempt a single refresh and resume the upload.
+          if (statusCode === 401 || statusCode === 403) {
+            const attempts = refreshAttemptsRef.current.get(uploadId) || 0
+            if (attempts < 1) {
+              refreshAttemptsRef.current.set(uploadId, attempts + 1)
+              const refreshed = await attemptRefresh()
+              if (refreshed) {
+                try {
+                  tusUpload.start()
+                  return
+                } catch {
+                  // fall through to normal error handling
+                }
+              }
+            }
+          }
+
           // Clean up asset record on error
           const currentAssetId = assetIdsMap.current.get(uploadId)
           if (currentAssetId) {
@@ -280,16 +305,21 @@ export function useAssetUploadQueue({
           ))
 
           uploadRefsMap.current.delete(uploadId)
+          refreshAttemptsRef.current.delete(uploadId)
         },
 
         onBeforeRequest: (req) => {
           const xhr = req.getUnderlyingObject()
           xhr.withCredentials = true
 
-          // Add authorization token for admin uploads
+          // Always use the latest access token (it may rotate on refresh)
           const token = getAccessToken()
           if (token) {
-            xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+            if (xhr?.setRequestHeader) {
+              xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+            } else {
+              req.setHeader('Authorization', `Bearer ${token}`)
+            }
           }
         },
       })
@@ -312,8 +342,46 @@ export function useAssetUploadQueue({
           ? { ...u, status: 'error' as const, error: errorMessage }
           : u
       ))
+      refreshAttemptsRef.current.delete(uploadId)
     }
-  }, [queue, videoId, onUploadComplete])
+  }, [videoId, onUploadComplete, attemptRefresh])
+
+  // Auto-start queued uploads when slots are available
+  useEffect(() => {
+    const currentUploading = queue.filter(u => u.status === 'uploading').length
+    const queuedUploads = queue.filter(u => u.status === 'queued')
+
+    // Start queued uploads if we have available slots
+    if (currentUploading < maxConcurrent && queuedUploads.length > 0) {
+      const slotsAvailable = maxConcurrent - currentUploading
+      const uploadsToStart = queuedUploads.slice(0, slotsAvailable)
+
+      uploadsToStart.forEach(upload => {
+        startUpload(upload.id)
+      })
+    }
+  }, [queue, maxConcurrent, startUpload])
+
+  // Warn before leaving page if uploads are in progress
+  useEffect(() => {
+    const hasActiveUploads = queue.some(u =>
+      u.status === 'uploading' || u.status === 'queued' || u.status === 'paused'
+    )
+
+    if (hasActiveUploads) {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault()
+        e.returnValue = '' // Chrome requires returnValue to be set
+        return '' // Some browsers use the return value
+      }
+
+      window.addEventListener('beforeunload', handleBeforeUnload)
+
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload)
+      }
+    }
+  }, [queue])
 
   // Pause an upload
   const pauseUpload = useCallback((uploadId: string) => {
@@ -354,6 +422,7 @@ export function useAssetUploadQueue({
 
     uploadRefsMap.current.delete(uploadId)
     assetIdsMap.current.delete(uploadId)
+    refreshAttemptsRef.current.delete(uploadId)
 
     // Remove from queue
     setQueue(prev => prev.filter(u => u.id !== uploadId))

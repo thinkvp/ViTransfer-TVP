@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Shield, AlertTriangle, Info, XCircle, Trash2, RefreshCw, ChevronRight, Unlock, Tag } from 'lucide-react'
@@ -90,7 +90,7 @@ export default function SecurityEventsClient() {
   const [showRateLimits, setShowRateLimits] = useState(false)
   const [cleanupDays, setCleanupDays] = useState<0 | 7 | 30 | 90>(90)
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams({
@@ -113,7 +113,7 @@ export default function SecurityEventsClient() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [pagination.page, pagination.limit, filterType, filterSeverity])
 
   const loadRateLimits = async () => {
     try {
@@ -147,7 +147,7 @@ export default function SecurityEventsClient() {
 
   useEffect(() => {
     loadEvents()
-  }, [pagination.page, filterType, filterSeverity])
+  }, [loadEvents])
 
   useEffect(() => {
     if (showRateLimits) {

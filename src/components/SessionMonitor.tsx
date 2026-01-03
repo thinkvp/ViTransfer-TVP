@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { getAccessToken, getRefreshToken, clearTokens } from '@/lib/token-store'
 
@@ -11,9 +11,34 @@ export default function SessionMonitor() {
   const router = useRouter()
   const [showWarning, setShowWarning] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
-  const lastActivityRef = useRef<number>(Date.now())
+  const lastActivityRef = useRef<number>(0)
+
+  const handleLogout = useCallback(async () => {
+    const accessToken = getAccessToken()
+    const refreshToken = getRefreshToken()
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(refreshToken ? { 'X-Refresh-Token': `Bearer ${refreshToken}` } : {}),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refreshToken }),
+      })
+    } catch (error) {
+      // Continue with logout even if API call fails
+    }
+
+    clearTokens()
+    setShowWarning(false)
+    router.push('/login?sessionExpired=true')
+  }, [router])
 
   useEffect(() => {
+    // Initialize last activity time
+    lastActivityRef.current = Date.now()
+
     const onActivity = () => {
       lastActivityRef.current = Date.now()
       setShowWarning(false)
@@ -44,28 +69,7 @@ export default function SessionMonitor() {
       })
       clearInterval(inactivityTimer)
     }
-  }, [])
-
-  async function handleLogout() {
-    const accessToken = getAccessToken()
-    const refreshToken = getRefreshToken()
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: {
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          ...(refreshToken ? { 'X-Refresh-Token': `Bearer ${refreshToken}` } : {}),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refreshToken }),
-      })
-    } catch (error) {
-      // ignore
-    } finally {
-      clearTokens()
-      router.push('/login?sessionExpired=true')
-    }
-  }
+  }, [handleLogout])
 
   if (!showWarning) {
     return null

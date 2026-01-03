@@ -43,7 +43,7 @@ export default function AdminSharePage() {
   const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
 
   // Fetch comments separately for security (same pattern as public share)
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     if (!id) return
 
     setCommentsLoading(true)
@@ -58,7 +58,7 @@ export default function AdminSharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }
+  }, [id])
 
   const transformProjectData = (projectData: any) => {
     const videosByName = projectData.videos.reduce((acc: any, video: any) => {
@@ -81,7 +81,7 @@ export default function AdminSharePage() {
     }
   }
 
-  const fetchTokensForVideos = async (videos: any[]) => {
+  const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     const sessionId = sessionIdRef.current
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
@@ -165,7 +165,7 @@ export default function AdminSharePage() {
         }
       })
     )
-  }
+  }, [id, project])
 
   // Load project data, settings, and admin user
   useEffect(() => {
@@ -227,7 +227,7 @@ export default function AdminSharePage() {
     return () => {
       isMounted = false
     }
-  }, [id])
+  }, [id, fetchComments])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -251,7 +251,7 @@ export default function AdminSharePage() {
       window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
       window.removeEventListener('commentDeleted', handleCommentDeleted)
     }
-  }, [id])
+  }, [fetchComments])
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
@@ -333,7 +333,7 @@ export default function AdminSharePage() {
     return () => {
       isMounted = false
     }
-  }, [activeVideosRaw])
+  }, [activeVideosRaw, fetchTokensForVideos])
 
   // Handle video selection (identical to public share)
   const handleVideoSelect = (videoName: string) => {

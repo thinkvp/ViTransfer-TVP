@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X, Download, FileIcon, Loader2 } from 'lucide-react'
 import { Button } from './ui/button'
@@ -41,13 +41,7 @@ export function VideoAssetDownloadModal({
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchAssets()
-    }
-  }, [isOpen, videoId])
-
-  const fetchAssets = async () => {
+  const fetchAssets = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
@@ -67,7 +61,13 @@ export function VideoAssetDownloadModal({
     } finally {
       setLoading(false)
     }
-  }
+  }, [videoId, shareToken, isAdmin])
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchAssets()
+    }
+  }, [isOpen, fetchAssets])
 
   const toggleAsset = (assetId: string) => {
     const newSelected = new Set(selectedAssets)

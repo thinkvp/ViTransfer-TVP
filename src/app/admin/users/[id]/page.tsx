@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { X, Save, RefreshCw, Eye, EyeOff, Copy, Check, Fingerprint, Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -40,11 +40,31 @@ export default function EditUserPage() {
   const [passkeyLoading, setPasskeyLoading] = useState(false)
   const [passkeyError, setPasskeyError] = useState('')
 
+  const fetchUser = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/users/${userId}`)
+      if (!res.ok) throw new Error('Failed to fetch user')
+      const data = await res.json()
+      setCurrentUser(data.user)
+      setFormData({
+        email: data.user.email,
+        username: data.user.username || '',
+        name: data.user.name || '',
+        displayColor: data.user.displayColor || '#22C55E',
+        oldPassword: '',
+        password: '',
+        confirmPassword: '',
+      })
+    } catch (err: any) {
+      setError(err.message)
+    }
+  }, [userId])
+
   useEffect(() => {
     fetchUser()
     fetchPasskeyStatus()
     fetchPasskeys()
-  }, [userId])
+  }, [fetchUser])
 
   const fetchPasskeyStatus = async () => {
     try {
@@ -113,26 +133,6 @@ export default function EditUserPage() {
       await fetchPasskeys()
     } catch (err: any) {
       setPasskeyError(err.message)
-    }
-  }
-
-  const fetchUser = async () => {
-    try {
-      const res = await apiFetch(`/api/users/${userId}`)
-      if (!res.ok) throw new Error('Failed to fetch user')
-      const data = await res.json()
-      setCurrentUser(data.user)
-      setFormData({
-        email: data.user.email,
-        username: data.user.username || '',
-        name: data.user.name || '',
-        displayColor: data.user.displayColor || '#22C55E',
-        oldPassword: '',
-        password: '',
-        confirmPassword: '',
-      })
-    } catch (err: any) {
-      setError(err.message)
     }
   }
 

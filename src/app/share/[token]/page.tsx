@@ -78,7 +78,7 @@ export default function SharePage() {
 
 
   // Fetch comments separately for security
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     if (!token || !shareToken) return
 
     setCommentsLoading(true)
@@ -97,7 +97,7 @@ export default function SharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }
+  }, [token, shareToken])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -121,7 +121,7 @@ export default function SharePage() {
       window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
       window.removeEventListener('commentDeleted', handleCommentDeleted)
     }
-  }, [token, shareToken])
+  }, [fetchComments])
 
   // Keep recipients in sync when a client adds/deletes a custom name.
   // This avoids losing the newly-added option when switching videos (CommentInput can remount).
@@ -297,7 +297,7 @@ export default function SharePage() {
     return () => {
       isMounted = false
     }
-  }, [token, shareToken])
+  }, [token, shareToken, storageKey, fetchComments])
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
@@ -356,7 +356,7 @@ export default function SharePage() {
     }
   }, [project?.videosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp])
 
-  const fetchVideoToken = async (videoId: string, quality: string) => {
+  const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
     const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
       headers: {
@@ -366,9 +366,9 @@ export default function SharePage() {
     if (!response.ok) return ''
     const data = await response.json()
     return data.token || ''
-  }
+  }, [token, shareToken])
 
-  const fetchTokensForVideos = async (videos: any[]) => {
+  const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (!shareToken) return videos
 
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
@@ -435,7 +435,7 @@ export default function SharePage() {
         }
       })
     )
-  }
+  }, [shareToken, project, fetchVideoToken])
 
   useEffect(() => {
     let isMounted = true
@@ -462,7 +462,7 @@ export default function SharePage() {
     return () => {
       isMounted = false
     }
-  }, [activeVideosRaw, shareToken])
+  }, [activeVideosRaw, shareToken, fetchTokensForVideos])
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {
