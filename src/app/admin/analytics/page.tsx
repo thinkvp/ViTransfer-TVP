@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { BarChart3, FolderKanban, Video, Eye, Download, RefreshCw, ArrowUpDown } from 'lucide-react'
+import { BarChart3, FolderKanban, Video, Eye, Download, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
 import { cn } from '@/lib/utils'
@@ -25,14 +25,16 @@ interface ProjectAnalytics {
     NONE: number
   }
   totalDownloads: number
-  updatedAt: Date
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 export default function AnalyticsDashboard() {
   const [projects, setProjects] = useState<ProjectAnalytics[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
+  const [sortMode, setSortMode] = useState<'status' | 'alphabetical' | 'created'>('alphabetical')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
 
@@ -67,8 +69,25 @@ export default function AnalyticsDashboard() {
   }, [])
 
   useEffect(() => {
+    const storedMode = localStorage.getItem('admin_analytics_sort_mode')
+    if (storedMode === 'alphabetical' || storedMode === 'status' || storedMode === 'created') {
+      setSortMode(storedMode)
+    }
+
+    const storedDirection = localStorage.getItem('admin_analytics_sort_direction')
+    if (storedDirection === 'asc' || storedDirection === 'desc') {
+      setSortDirection(storedDirection)
+    }
+  }, [])
+
+  useEffect(() => {
     localStorage.setItem('admin_analytics_view', viewMode)
   }, [viewMode])
+
+  useEffect(() => {
+    localStorage.setItem('admin_analytics_sort_mode', sortMode)
+    localStorage.setItem('admin_analytics_sort_direction', sortDirection)
+  }, [sortMode, sortDirection])
 
   // Calculate aggregate stats
   const totalProjects = projects.length
@@ -78,15 +97,52 @@ export default function AnalyticsDashboard() {
 
   // Filter projects
   const sortedProjects = [...projects].sort((a, b) => {
+    const directionMultiplier = sortDirection === 'asc' ? 1 : -1
+
     if (sortMode === 'alphabetical') {
-      return a.title.localeCompare(b.title)
+      return directionMultiplier * a.title.localeCompare(b.title)
+    }
+
+    if (sortMode === 'created') {
+      return directionMultiplier * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     }
 
     const statusPriority = { IN_REVIEW: 1, SHARE_ONLY: 2, APPROVED: 3 } as const
     const priorityDiff = (statusPriority[a.status as keyof typeof statusPriority] ?? 99) - (statusPriority[b.status as keyof typeof statusPriority] ?? 99)
-    if (priorityDiff !== 0) return priorityDiff
-    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    if (priorityDiff !== 0) return directionMultiplier * priorityDiff
+    return directionMultiplier * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
   })
+
+  const sortModeLabel = sortMode === 'alphabetical' ? 'Alphabetical' : sortMode === 'status' ? 'Status' : 'Created'
+  const SortDirectionIcon = sortDirection === 'asc' ? ArrowUp : ArrowDown
+
+  const cycleSort = () => {
+    if (sortMode === 'alphabetical' && sortDirection === 'asc') {
+      setSortDirection('desc')
+      return
+    }
+    if (sortMode === 'alphabetical' && sortDirection === 'desc') {
+      setSortMode('status')
+      setSortDirection('asc')
+      return
+    }
+    if (sortMode === 'status' && sortDirection === 'asc') {
+      setSortDirection('desc')
+      return
+    }
+    if (sortMode === 'status' && sortDirection === 'desc') {
+      setSortMode('created')
+      setSortDirection('asc')
+      return
+    }
+    if (sortMode === 'created' && sortDirection === 'asc') {
+      setSortDirection('desc')
+      return
+    }
+
+    setSortMode('alphabetical')
+    setSortDirection('asc')
+  }
 
   if (loading) {
     return (
@@ -175,16 +231,17 @@ export default function AnalyticsDashboard() {
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
-              <ViewModeToggle value={viewMode} onChange={setViewMode} />
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-                className="text-muted-foreground hover:text-foreground"
-                title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
+                onClick={cycleSort}
+                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                title="Change sort"
               >
-                <ArrowUpDown className="w-4 h-4" />
+                <span>{sortModeLabel}</span>
+                <SortDirectionIcon className="w-4 h-4" />
               </Button>
+              <ViewModeToggle value={viewMode} onChange={setViewMode} />
               <Button
                 onClick={loadAnalytics}
                 variant="ghost"

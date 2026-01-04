@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Plus, ArrowUpDown, Video, MessageSquare } from 'lucide-react'
+import { Plus, Video, MessageSquare, ArrowUp, ArrowDown } from 'lucide-react'
 import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
 import { cn } from '@/lib/utils'
 
@@ -27,7 +27,8 @@ interface ProjectsListProps {
 }
 
 export default function ProjectsList({ projects }: ProjectsListProps) {
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
+  const [sortMode, setSortMode] = useState<'status' | 'alphabetical' | 'created'>('alphabetical')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
@@ -57,35 +58,91 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
   }, [])
 
   useEffect(() => {
+    const storedMode = localStorage.getItem('admin_projects_sort_mode')
+    if (storedMode === 'alphabetical' || storedMode === 'status' || storedMode === 'created') {
+      setSortMode(storedMode)
+    }
+
+    const storedDirection = localStorage.getItem('admin_projects_sort_direction')
+    if (storedDirection === 'asc' || storedDirection === 'desc') {
+      setSortDirection(storedDirection)
+    }
+  }, [])
+
+  useEffect(() => {
     localStorage.setItem('admin_projects_view', viewMode)
   }, [viewMode])
 
+  useEffect(() => {
+    localStorage.setItem('admin_projects_sort_mode', sortMode)
+    localStorage.setItem('admin_projects_sort_direction', sortDirection)
+  }, [sortMode, sortDirection])
+
   const sortedProjects = [...projects].sort((a, b) => {
+    const directionMultiplier = sortDirection === 'asc' ? 1 : -1
+
     if (sortMode === 'alphabetical') {
-      return a.title.localeCompare(b.title)
-    } else {
-      // Status sorting
-      const statusPriority = { IN_REVIEW: 1, SHARE_ONLY: 2, APPROVED: 3 }
-      const priorityDiff = statusPriority[a.status as keyof typeof statusPriority] - statusPriority[b.status as keyof typeof statusPriority]
-      if (priorityDiff !== 0) return priorityDiff
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      return directionMultiplier * a.title.localeCompare(b.title)
     }
+
+    if (sortMode === 'created') {
+      return directionMultiplier * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    }
+
+    // Status sorting
+    const statusPriority = { IN_REVIEW: 1, SHARE_ONLY: 2, APPROVED: 3 } as const
+    const priorityDiff = (statusPriority[a.status as keyof typeof statusPriority] ?? 99) - (statusPriority[b.status as keyof typeof statusPriority] ?? 99)
+    if (priorityDiff !== 0) return directionMultiplier * priorityDiff
+
+    return directionMultiplier * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
   })
+
+  const sortModeLabel = sortMode === 'alphabetical' ? 'Alphabetical' : sortMode === 'status' ? 'Status' : 'Created'
+  const SortDirectionIcon = sortDirection === 'asc' ? ArrowUp : ArrowDown
+
+  const cycleSort = () => {
+    if (sortMode === 'alphabetical' && sortDirection === 'asc') {
+      setSortDirection('desc')
+      return
+    }
+    if (sortMode === 'alphabetical' && sortDirection === 'desc') {
+      setSortMode('status')
+      setSortDirection('asc')
+      return
+    }
+    if (sortMode === 'status' && sortDirection === 'asc') {
+      setSortDirection('desc')
+      return
+    }
+    if (sortMode === 'status' && sortDirection === 'desc') {
+      setSortMode('created')
+      setSortDirection('asc')
+      return
+    }
+    if (sortMode === 'created' && sortDirection === 'asc') {
+      setSortDirection('desc')
+      return
+    }
+
+    setSortMode('alphabetical')
+    setSortDirection('asc')
+  }
 
   return (
     <>
       {projects.length > 0 && (
         <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
-          <ViewModeToggle value={viewMode} onChange={setViewMode} />
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-            className="text-muted-foreground hover:text-foreground"
-            title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
+            onClick={cycleSort}
+            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+            title="Change sort"
           >
-            <ArrowUpDown className="w-4 h-4" />
+            <span>{sortModeLabel}</span>
+            <SortDirectionIcon className="w-4 h-4" />
           </Button>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
         </div>
       )}
 
@@ -189,6 +246,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
                     <div
                       className={cn(
                         'absolute bottom-2 right-2 text-right text-muted-foreground',
+                        'hidden sm:block',
                         viewMode === 'grid' ? 'text-[10px] sm:text-xs leading-tight' : 'text-xs'
                       )}
                     >

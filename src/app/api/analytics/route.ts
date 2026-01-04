@@ -80,6 +80,7 @@ export async function GET(request: NextRequest) {
         uniqueVisits: uniqueSessions,
         accessByMethod,
         totalDownloads,
+        createdAt: project.createdAt,
         updatedAt: project.updatedAt,
       }
     })
