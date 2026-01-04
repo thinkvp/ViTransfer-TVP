@@ -79,6 +79,8 @@ export default function VideoPlayer({
   const [isMuted, setIsMuted] = useState(false)
   const [volume, setVolume] = useState(1)
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
+  const lastNonZeroVolumeRef = useRef(1)
+  const volumeSliderCloseTimeoutRef = useRef<number | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(DEFAULT_ASPECT_RATIO)
   const [showPosterOverlay, setShowPosterOverlay] = useState(true)
 
@@ -988,6 +990,50 @@ export default function VideoPlayer({
     }
   }
 
+  useEffect(() => {
+    if (volume > 0) {
+      lastNonZeroVolumeRef.current = volume
+    }
+  }, [volume])
+
+  useEffect(() => {
+    return () => {
+      if (volumeSliderCloseTimeoutRef.current) {
+        window.clearTimeout(volumeSliderCloseTimeoutRef.current)
+        volumeSliderCloseTimeoutRef.current = null
+      }
+    }
+  }, [])
+
+  const openVolumeSlider = () => {
+    if (volumeSliderCloseTimeoutRef.current) {
+      window.clearTimeout(volumeSliderCloseTimeoutRef.current)
+      volumeSliderCloseTimeoutRef.current = null
+    }
+    setShowVolumeSlider(true)
+  }
+
+  const scheduleCloseVolumeSlider = () => {
+    if (volumeSliderCloseTimeoutRef.current) {
+      window.clearTimeout(volumeSliderCloseTimeoutRef.current)
+    }
+    volumeSliderCloseTimeoutRef.current = window.setTimeout(() => {
+      setShowVolumeSlider(false)
+      volumeSliderCloseTimeoutRef.current = null
+    }, 120)
+  }
+
+  const toggleMute = () => {
+    setIsMuted((prev) => {
+      const nextMuted = !prev
+      if (!nextMuted) {
+        // If unmuting from volume 0, restore a usable volume.
+        setVolume((v) => (v > 0 ? v : (lastNonZeroVolumeRef.current > 0 ? lastNonZeroVolumeRef.current : 0.5)))
+      }
+      return nextMuted
+    })
+  }
+
   const handleControlsPointerDownCapture = (e: any) => {
     // Close the volume slider whenever the user interacts with other controls.
     // Keep it open when interacting with the volume button/slider itself.
@@ -1372,13 +1418,18 @@ export default function VideoPlayer({
 
             {/* Desktop/tablet: right controls */}
             <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-              <div className="relative flex-shrink-0" data-volume-control="true">
+              <div
+                className="relative flex-shrink-0"
+                data-volume-control="true"
+                onMouseEnter={openVolumeSlider}
+                onMouseLeave={scheduleCloseVolumeSlider}
+              >
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowVolumeSlider((s) => !s)}
-                  aria-label={showVolumeSlider ? 'Hide volume' : 'Show volume'}
+                  onClick={toggleMute}
+                  aria-label={isMuted ? 'Unmute' : 'Mute'}
                   className="relative overflow-hidden w-14 px-0"
                 >
                   {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
@@ -1389,12 +1440,16 @@ export default function VideoPlayer({
                     />
                   )}
                   <span className="relative z-10">
-                    {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                    {isMuted ? <VolumeX className="w-4 h-4 text-destructive" /> : <Volume2 className="w-4 h-4" />}
                   </span>
                 </Button>
 
                 {showVolumeSlider && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm">
+                  <div
+                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm"
+                    onMouseEnter={openVolumeSlider}
+                    onMouseLeave={scheduleCloseVolumeSlider}
+                  >
                     <div className="h-28 w-10 flex items-center justify-center">
                     <input
                       type="range"
@@ -1493,8 +1548,8 @@ export default function VideoPlayer({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setShowVolumeSlider((s) => !s)}
-                    aria-label={showVolumeSlider ? 'Hide volume' : 'Show volume'}
+                    onClick={toggleMute}
+                    aria-label={isMuted ? 'Unmute' : 'Mute'}
                     className="relative overflow-hidden w-14 px-0"
                   >
                     {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
@@ -1505,33 +1560,9 @@ export default function VideoPlayer({
                       />
                     )}
                     <span className="relative z-10">
-                      {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                      {isMuted ? <VolumeX className="w-4 h-4 text-destructive" /> : <Volume2 className="w-4 h-4" />}
                     </span>
                   </Button>
-
-                  {showVolumeSlider && (
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm">
-                      <div className="h-24 w-10 flex items-center justify-center">
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={Math.round(volume * 100)}
-                          onChange={(e) => {
-                            const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
-                            const nextVolume = next / 100
-                            setVolume(nextVolume)
-                            if (nextVolume > 0) {
-                              setIsMuted(false)
-                            }
-                          }}
-                          className="w-24 h-4 -rotate-90 accent-primary touch-none"
-                          style={{ touchAction: 'none' }}
-                          aria-label="Volume"
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <Button
