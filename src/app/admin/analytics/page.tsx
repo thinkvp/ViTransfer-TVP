@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
-import { BarChart3, FolderKanban, Video, Eye, Download, RefreshCw, ArrowUp, ArrowDown, ChevronDown, Filter, ChevronsDown, ChevronsUp } from 'lucide-react'
+import { BarChart3, FolderKanban, Video, Eye, Download, RefreshCw, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Filter, ChevronsDown, ChevronsUp } from 'lucide-react'
 import { apiFetch, apiPatch } from '@/lib/api-client'
 import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
 import { cn } from '@/lib/utils'
@@ -38,6 +38,8 @@ interface ProjectAnalytics {
 
 export default function AnalyticsDashboard() {
   const router = useRouter()
+  const [isMobile, setIsMobile] = useState(false)
+  const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
   const [projects, setProjects] = useState<ProjectAnalytics[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
@@ -62,6 +64,14 @@ export default function AnalyticsDashboard() {
   })
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)')
+    const update = () => setIsMobile(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
 
   const loadAnalytics = async () => {
     setLoading(true)
@@ -586,16 +596,17 @@ export default function AnalyticsDashboard() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
+                        <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-muted-foreground w-8 md:hidden" aria-label="Expand" />
                         {(
                           [
-                            { key: 'title', label: 'Project Name', className: 'min-w-[220px]' },
-                            { key: 'client', label: 'Client', className: 'min-w-[180px]' },
-                            { key: 'status', label: 'Status', className: 'min-w-[120px]' },
-                            { key: 'videos', label: 'Videos', className: 'w-[90px] text-right' },
-                            { key: 'versions', label: 'Versions', className: 'w-[95px] text-right' },
-                            { key: 'comments', label: 'Comments', className: 'w-[110px] text-right' },
-                            { key: 'createdAt', label: 'Date Created', className: 'w-[130px]' },
-                            { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px]' },
+                            { key: 'title', label: 'Project Name', className: 'min-w-[220px]', mobile: true },
+                            { key: 'client', label: 'Client', className: 'min-w-[180px] hidden md:table-cell', mobile: false },
+                            { key: 'status', label: 'Status', className: 'min-w-[120px]', mobile: true },
+                            { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
+                            { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
+                            { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
+                            { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false },
+                            { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px] hidden md:table-cell', mobile: false },
                           ] as const
                         ).map((col) => (
                           <th key={col.key} scope="col" className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground', col.className)}>
@@ -618,11 +629,18 @@ export default function AnalyticsDashboard() {
                     </thead>
                     <tbody>
                       {visibleTableProjects.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
-                            No projects found.
-                          </td>
-                        </tr>
+                        <>
+                          <tr className="md:hidden">
+                            <td colSpan={3} className="px-3 py-10 text-center text-muted-foreground">
+                              No projects found.
+                            </td>
+                          </tr>
+                          <tr className="hidden md:table-row">
+                            <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
+                              No projects found.
+                            </td>
+                          </tr>
+                        </>
                       ) : (
                         visibleTableProjects.map((project) => {
                           const effectiveStatus = statusOverrides[project.id] ?? project.status
@@ -653,6 +671,11 @@ export default function AnalyticsDashboard() {
 
                           const versionsCount = (project.videos || []).length
                           const commentsCount = project.commentsCount || 0
+
+                          const isExpanded = Boolean(expandedProjectRows[project.id])
+                          const toggleExpanded = () => {
+                            setExpandedProjectRows((prev) => ({ ...prev, [project.id]: !prev[project.id] }))
+                          }
                           const setStatus = async (nextStatus: string) => {
                             setStatusToggleLoading((prev) => ({ ...prev, [project.id]: true }))
                             try {
@@ -666,35 +689,110 @@ export default function AnalyticsDashboard() {
                           }
 
                           return (
-                            <tr
-                              key={project.id}
-                              className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
-                              onClick={() => router.push(`/admin/analytics/${project.id}`)}
-                              role="link"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key !== 'Enter') return
-                                router.push(`/admin/analytics/${project.id}`)
-                              }}
-                            >
-                              <td className="px-3 py-2 font-medium">{project.title}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{project.recipientName}</td>
-                              <td className="px-3 py-2">
-                                <ProjectStatusPicker
-                                  value={effectiveStatus}
-                                  disabled={isUpdatingStatus}
-                                  canApprove={canApproveProject}
-                                  stopPropagation
-                                  className={isUpdatingStatus ? 'opacity-70' : undefined}
-                                  onChange={(next) => setStatus(next)}
-                                />
-                              </td>
-                              <td className="px-3 py-2 text-right tabular-nums">{uniqueVideos}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{versionsCount}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{commentsCount}</td>
-                              <td className="px-3 py-2 tabular-nums">{formatProjectDate(project.createdAt)}</td>
-                              <td className="px-3 py-2 tabular-nums">{formatProjectDate(project.updatedAt)}</td>
-                            </tr>
+                            <>
+                              <tr
+                                key={project.id}
+                                className={cn(
+                                  'border-b border-border last:border-b-0 hover:bg-muted/40',
+                                  !isMobile && 'cursor-pointer'
+                                )}
+                                onClick={
+                                  isMobile
+                                    ? undefined
+                                    : () => router.push(`/admin/analytics/${project.id}`)
+                                }
+                                role={isMobile ? undefined : 'link'}
+                                tabIndex={isMobile ? undefined : 0}
+                                onKeyDown={
+                                  isMobile
+                                    ? undefined
+                                    : (e) => {
+                                        if (e.key !== 'Enter') return
+                                        router.push(`/admin/analytics/${project.id}`)
+                                      }
+                                }
+                              >
+                                <td className="px-2 py-2 md:hidden">
+                                  <button
+                                    type="button"
+                                    aria-label={isExpanded ? 'Collapse row' : 'Expand row'}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm hover:bg-muted/60"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      toggleExpanded()
+                                    }}
+                                  >
+                                    <ChevronRight className={cn('h-4 w-4 transition-transform', isExpanded && 'rotate-90')} />
+                                  </button>
+                                </td>
+
+                                <td className="px-3 py-2 font-medium">
+                                  <button
+                                    type="button"
+                                    className="text-left hover:underline"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      router.push(`/admin/analytics/${project.id}`)
+                                    }}
+                                  >
+                                    {project.title}
+                                  </button>
+                                </td>
+
+                                <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{project.recipientName}</td>
+
+                                <td className="px-3 py-2">
+                                  <ProjectStatusPicker
+                                    value={effectiveStatus}
+                                    disabled={isUpdatingStatus}
+                                    canApprove={canApproveProject}
+                                    stopPropagation
+                                    className={isUpdatingStatus ? 'opacity-70' : undefined}
+                                    onChange={(next) => setStatus(next)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
+                                <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
+                                <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
+                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
+                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.updatedAt)}</td>
+                              </tr>
+
+                              {isMobile && isExpanded && (
+                                <tr className="md:hidden border-b border-border last:border-b-0">
+                                  <td
+                                    colSpan={3}
+                                    className="px-3 py-2 bg-muted/40 dark:bg-muted/10"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <div className="space-y-1 text-sm">
+                                      <div className="text-muted-foreground">
+                                        <span className="text-foreground">Client:</span> {project.recipientName}
+                                      </div>
+                                      <div className="grid grid-cols-3 gap-2 tabular-nums">
+                                        <div className="text-left">
+                                          <span className="text-muted-foreground">Videos:</span> {uniqueVideos}
+                                        </div>
+                                        <div className="text-center">
+                                          <span className="text-muted-foreground">Versions:</span> {versionsCount}
+                                        </div>
+                                        <div className="text-right">
+                                          <span className="text-muted-foreground">Comments:</span> {commentsCount}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-4 tabular-nums">
+                                        <div className="text-left">
+                                          <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
+                                        </div>
+                                        <div className="text-right">
+                                          <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(project.updatedAt)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
                           )
                         })
                       )}
