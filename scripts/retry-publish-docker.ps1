@@ -1,7 +1,8 @@
 param(
   [int]$MaxAttempts = 4,
   [int]$SleepSeconds = 8,
-  [string]$Version = $(if (Test-Path -LiteralPath "VERSION") { (Get-Content -LiteralPath "VERSION" -Raw).Trim() } else { "latest" })
+  [string]$Version = $(if (Test-Path -LiteralPath "VERSION") { (Get-Content -LiteralPath "VERSION" -Raw).Trim() } else { "latest" }),
+  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,7 +18,7 @@ try {
 for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
   Write-Host "`nPublish attempt $attempt/$MaxAttempts" -ForegroundColor Cyan
   try {
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-docker.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-docker.ps1 -DockerHubUser $DockerHubUser -Version $Version
     Write-Host "Publish script completed." -ForegroundColor Green
     break
   } catch {
@@ -29,7 +30,10 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
 
 Write-Host "`nVerifying tags on Docker Hub..." -ForegroundColor Cyan
 
-docker buildx imagetools inspect "simbamcsimba/vitransfer-app:$Version"
-docker buildx imagetools inspect "simbamcsimba/vitransfer-worker:$Version"
-docker buildx imagetools inspect "simbamcsimba/vitransfer-app:latest"
-docker buildx imagetools inspect "simbamcsimba/vitransfer-worker:latest"
+$appRepo = "$DockerHubUser/vitransfer-app"
+$workerRepo = "$DockerHubUser/vitransfer-worker"
+
+docker buildx imagetools inspect "${appRepo}:$Version"
+docker buildx imagetools inspect "${workerRepo}:$Version"
+docker buildx imagetools inspect "${appRepo}:latest"
+docker buildx imagetools inspect "${workerRepo}:latest"
