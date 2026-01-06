@@ -1,10 +1,10 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { LayoutGrid, List } from 'lucide-react'
+import { LayoutGrid, List, Table2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
-export type ViewMode = 'grid' | 'list'
+export type ViewMode = 'grid' | 'list' | 'table'
 
 interface ViewModeToggleProps {
   value: ViewMode
@@ -44,6 +44,22 @@ export default function ViewModeToggle({ value, onChange, className }: ViewModeT
       >
         <List className="h-4 w-4" />
         <span className="sr-only">List view</span>
+      </Button>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={() => onChange('table')}
+        aria-pressed={value === 'table'}
+        className={cn(
+          'h-8 w-8 text-muted-foreground hover:bg-accent hover:text-foreground',
+          value === 'table' && 'bg-accent text-foreground'
+        )}
+        title="Table view"
+      >
+        <Table2 className="h-4 w-4" />
+        <span className="sr-only">Table view</span>
       </Button>
     </div>
   )

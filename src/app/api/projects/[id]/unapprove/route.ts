@@ -21,6 +21,7 @@ export async function POST(
   if (authResult instanceof Response) {
     return authResult
   }
+  const admin = authResult
 
   // Rate limiting: 20 unapproval actions per minute
   const rateLimitResult = await rateLimit(request, {
@@ -83,6 +84,18 @@ export async function POST(
         approvedVideoId: null
       }
     })
+
+    if (project.status !== 'IN_REVIEW') {
+      await prisma.projectStatusChange.create({
+        data: {
+          projectId,
+          previousStatus: project.status as any,
+          currentStatus: 'IN_REVIEW' as any,
+          source: 'ADMIN',
+          changedById: admin.id,
+        },
+      })
+    }
 
     return NextResponse.json({
       success: true,

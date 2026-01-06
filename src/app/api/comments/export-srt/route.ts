@@ -241,7 +241,7 @@ export async function GET(request: NextRequest) {
 
   const srt = srtBlocks.join('\r\n')
 
-  const filename = `${safeFilenamePart(project.slug || project.title || 'project')}-${safeFilenamePart(video.name)}-${safeFilenamePart(video.versionLabel || 'video')}-comments.srt`
+  const filename = `${safeFilenamePart(video.name)}${video.versionLabel ? `-${safeFilenamePart(video.versionLabel)}` : ''}-comments.srt`
 
   return new NextResponse(srt, {
     status: 200,

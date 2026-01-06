@@ -41,10 +41,21 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
 
   // Close projects
   const ids = dueProjects.map((p: { id: string }) => p.id)
-  await prisma.project.updateMany({
-    where: { id: { in: ids } },
-    data: { status: 'CLOSED' },
-  })
+  await prisma.$transaction([
+    prisma.project.updateMany({
+      where: { id: { in: ids } },
+      data: { status: 'CLOSED' },
+    }),
+    prisma.projectStatusChange.createMany({
+      data: ids.map((projectId) => ({
+        projectId,
+        previousStatus: 'APPROVED',
+        currentStatus: 'CLOSED',
+        source: 'SYSTEM',
+        changedById: null,
+      })),
+    }),
+  ])
 
   // Invalidate client sessions/share sessions so closed projects are immediately inaccessible
   await Promise.allSettled(

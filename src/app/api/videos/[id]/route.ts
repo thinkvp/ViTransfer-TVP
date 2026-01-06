@@ -84,7 +84,8 @@ async function updateProjectStatus(
   projectId: string,
   videoId: string,
   approved: boolean,
-  currentStatus: string
+  currentStatus: string,
+  changedById: string
 ): Promise<void> {
   const allApproved = await checkAllVideosApproved(projectId)
 
@@ -93,24 +94,58 @@ async function updateProjectStatus(
 
   if (allApproved && approved && autoApprove) {
     // All videos approved AND auto-approve enabled → mark project as approved
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: 'APPROVED',
-        approvedAt: new Date(),
-        approvedVideoId: videoId
-      }
-    })
+    if (currentStatus === 'APPROVED') {
+      // Already approved: keep behavior of refreshing approvedAt/approvedVideoId,
+      // but do not emit a status-change event.
+      await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          approvedAt: new Date(),
+          approvedVideoId: videoId,
+        },
+      })
+    } else {
+      await prisma.$transaction([
+        prisma.project.update({
+          where: { id: projectId },
+          data: {
+            status: 'APPROVED',
+            approvedAt: new Date(),
+            approvedVideoId: videoId,
+          },
+        }),
+        prisma.projectStatusChange.create({
+          data: {
+            projectId,
+            previousStatus: currentStatus as any,
+            currentStatus: 'APPROVED',
+            source: 'ADMIN',
+            changedById,
+          },
+        }),
+      ])
+    }
   } else if (!approved && currentStatus === 'APPROVED') {
     // Unapproving when project was approved → revert to IN_REVIEW
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: 'IN_REVIEW',
-        approvedAt: null,
-        approvedVideoId: null
-      }
-    })
+    await prisma.$transaction([
+      prisma.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'IN_REVIEW',
+          approvedAt: null,
+          approvedVideoId: null,
+        },
+      }),
+      prisma.projectStatusChange.create({
+        data: {
+          projectId,
+          previousStatus: 'APPROVED',
+          currentStatus: 'IN_REVIEW',
+          source: 'ADMIN',
+          changedById,
+        },
+      }),
+    ])
   }
 }
 
@@ -123,6 +158,7 @@ export async function PATCH(
   if (authResult instanceof Response) {
     return authResult
   }
+  const admin = authResult
 
   // Rate limit admin toggles
   const rateLimitResult = await rateLimit(request, {
@@ -236,7 +272,7 @@ export async function PATCH(
     // Update project status if approval changed
     if (approved !== undefined) {
       console.log(`[VIDEO-APPROVAL] Admin toggled approval for video ${id} to ${approved}`)
-      await updateProjectStatus(video.projectId, id, approved, video.project.status)
+      await updateProjectStatus(video.projectId, id, approved, video.project.status, admin.id)
 
       // NOTE: Admin-toggled approvals/unapprovals do NOT send email notifications
       // Only client-initiated approvals (via /approve route) send emails immediately

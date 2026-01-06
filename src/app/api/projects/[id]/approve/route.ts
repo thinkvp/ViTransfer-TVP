@@ -126,12 +126,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     // If all unique videos are approved AND auto-approve enabled, approve the project
     if (allApproved && autoApprove) {
+      const previousStatus = project.status
       await prisma.project.update({
         where: { id: projectId },
         data: {
           status: 'APPROVED',
           approvedAt: new Date(),
           approvedVideoId: selectedVideoId, // Keep for backward compatibility
+        },
+      })
+
+      await prisma.projectStatusChange.create({
+        data: {
+          projectId,
+          previousStatus,
+          currentStatus: 'APPROVED',
+          source: 'CLIENT',
+          changedById: null,
         },
       })
 

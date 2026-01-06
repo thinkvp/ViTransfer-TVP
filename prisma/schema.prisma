@@ -24,6 +24,7 @@ model User {
   projects Project[]
   comments Comment[]
   passkeys PasskeyCredential[]
+  projectStatusChanges ProjectStatusChange[]
 }
 
 enum UserRole {
@@ -88,6 +89,28 @@ model Project {
   emailEvents       ProjectEmailEvent[] // Logged client email notifications
   emailTracking     EmailTracking[] // Email open tracking pixels
   commentFiles      CommentFile[] // Files uploaded with comments
+
+  statusChanges      ProjectStatusChange[]
+}
+
+model ProjectStatusChange {
+  id             String        @id @default(cuid())
+  projectId       String
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  previousStatus  ProjectStatus
+  currentStatus   ProjectStatus
+  source         ProjectStatusChangeSource @default(SYSTEM)
+  changedById     String?
+  changedBy       User?         @relation(fields: [changedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+enum ProjectStatusChangeSource {
+  ADMIN
+  CLIENT
+  SYSTEM
 }
 
 enum ProjectStatus {

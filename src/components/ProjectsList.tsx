@@ -11,6 +11,8 @@ import { cn } from '@/lib/utils'
 import { apiPatch } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { PROJECT_STATUS_OPTIONS, projectStatusDotClass, projectStatusLabel, type ProjectStatus } from '@/lib/project-status'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useRouter } from 'next/navigation'
 
 interface Project {
   id: string
@@ -31,12 +33,19 @@ interface ProjectsListProps {
 }
 
 export default function ProjectsList({ projects }: ProjectsListProps) {
+  const router = useRouter()
   const [sortMode, setSortMode] = useState<'activity' | 'alphabetical' | 'created'>('alphabetical')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({})
   const [statusToggleLoading, setStatusToggleLoading] = useState<Record<string, boolean>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<ProjectStatus>>(new Set())
+  const [tableSortKey, setTableSortKey] = useState<
+    'title' | 'client' | 'status' | 'videos' | 'versions' | 'comments' | 'createdAt' | 'updatedAt'
+  >('updatedAt')
+  const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
+  const [tablePage, setTablePage] = useState(1)
   const [sectionOpenInitialized, setSectionOpenInitialized] = useState(false)
   const [sectionOpen, setSectionOpen] = useState<Record<ProjectStatus, boolean>>(() => {
     const initial = {} as Record<ProjectStatus, boolean>
@@ -64,7 +73,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
     const storageKey = 'admin_projects_view'
     const stored = localStorage.getItem(storageKey)
 
-    if (stored === 'grid' || stored === 'list') {
+    if (stored === 'grid' || stored === 'list' || stored === 'table') {
       setViewMode(stored)
       return
     }
@@ -112,6 +121,12 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
   useEffect(() => {
     localStorage.setItem('admin_projects_view', viewMode)
   }, [viewMode])
+
+  useEffect(() => {
+    // Reset paging when switching to table view or when the table settings change.
+    if (viewMode !== 'table') return
+    setTablePage(1)
+  }, [recordsPerPage, tableSortDirection, tableSortKey, statusFilterSelected, viewMode])
 
   useEffect(() => {
     localStorage.setItem('admin_projects_sort_mode', sortMode)
@@ -199,6 +214,96 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
     return buckets
   }, [compareProjects, projects, statusOverrides])
 
+  const tableProjects = useMemo(() => {
+    const filtered = statusFilterSelected.size === 0
+      ? projects
+      : projects.filter((p) => {
+          const effectiveStatus = (statusOverrides[p.id] ?? p.status) as ProjectStatus
+          return statusFilterSelected.has(effectiveStatus)
+        })
+
+    const getClientName = (project: Project) => {
+      const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
+      return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+    }
+
+    const getUniqueVideosCount = (project: Project) => {
+      const set = new Set<string>()
+      for (const v of project.videos || []) {
+        const name = String((v as any)?.name || '')
+        if (name) set.add(`name:${name}`)
+        else set.add(`id:${String((v as any)?.id || '')}`)
+      }
+      return set.size
+    }
+
+    const getVersionsCount = (project: Project) => (project.videos || []).length
+
+    const sorted = [...filtered].sort((a, b) => {
+      const dir = tableSortDirection === 'asc' ? 1 : -1
+
+      const aStatus = String(statusOverrides[a.id] ?? a.status)
+      const bStatus = String(statusOverrides[b.id] ?? b.status)
+
+      const getStatusRank = (status: string) => {
+        switch (status) {
+          case 'NOT_STARTED': return 0
+          case 'IN_REVIEW': return 1
+          case 'ON_HOLD': return 2
+          case 'SHARE_ONLY': return 3
+          case 'APPROVED': return 4
+          case 'CLOSED': return 5
+          default: return 999
+        }
+      }
+
+      if (tableSortKey === 'title') return dir * a.title.localeCompare(b.title)
+      if (tableSortKey === 'client') return dir * getClientName(a).localeCompare(getClientName(b))
+      if (tableSortKey === 'status') {
+        const delta = getStatusRank(aStatus) - getStatusRank(bStatus)
+        if (delta !== 0) return dir * delta
+        return dir * a.title.localeCompare(b.title)
+      }
+      if (tableSortKey === 'videos') return dir * (getUniqueVideosCount(a) - getUniqueVideosCount(b))
+      if (tableSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
+      if (tableSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
+      if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      if (tableSortKey === 'updatedAt') return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
+      return 0
+    })
+
+    return sorted
+  }, [projects, statusFilterSelected, statusOverrides, tableSortDirection, tableSortKey])
+
+  const tableTotalPages = useMemo(() => {
+    if (viewMode !== 'table') return 1
+    return Math.max(1, Math.ceil(tableProjects.length / recordsPerPage))
+  }, [recordsPerPage, tableProjects.length, viewMode])
+
+  useEffect(() => {
+    if (viewMode !== 'table') return
+    setTablePage((p) => Math.min(Math.max(1, p), tableTotalPages))
+  }, [tableTotalPages, viewMode])
+
+  const visibleTableProjects = useMemo(() => {
+    if (viewMode !== 'table') return [] as Project[]
+    const start = (tablePage - 1) * recordsPerPage
+    const end = start + recordsPerPage
+    return tableProjects.slice(start, end)
+  }, [recordsPerPage, tablePage, tableProjects, viewMode])
+
+  const toggleTableSort = (key: typeof tableSortKey) => {
+    setTablePage(1)
+    setTableSortKey((prev) => {
+      if (prev !== key) {
+        setTableSortDirection('asc')
+        return key
+      }
+      setTableSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+      return prev
+    })
+  }
+
   const visibleStatusOptions = useMemo(() => {
     if (statusFilterSelected.size === 0) return PROJECT_STATUS_OPTIONS
     return PROJECT_STATUS_OPTIONS.filter((s) => statusFilterSelected.has(s.value))
@@ -243,34 +348,61 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
     <>
       {projects.length > 0 && (
         <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={cycleSort}
-            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-            title="Change sort"
-          >
-            <span>{sortModeLabel}</span>
-            <SortDirectionIcon className="w-4 h-4" />
-          </Button>
+          {viewMode !== 'table' && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={cycleSort}
+                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                title="Change sort"
+              >
+                <span>{sortModeLabel}</span>
+                <SortDirectionIcon className="w-4 h-4" />
+              </Button>
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground hover:text-foreground inline-flex items-center"
-            aria-label={areAllSectionsOpen ? 'Collapse all status sections' : 'Expand all status sections'}
-            title={areAllSectionsOpen ? 'Collapse all status sections' : 'Expand all status sections'}
-            onClick={() => {
-              const next = {} as Record<ProjectStatus, boolean>
-              PROJECT_STATUS_OPTIONS.forEach((s) => {
-                next[s.value] = !areAllSectionsOpen
-              })
-              setSectionOpen(next)
-            }}
-          >
-            {areAllSectionsOpen ? <ChevronsUp className="w-4 h-4" /> : <ChevronsDown className="w-4 h-4" />}
-          </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground inline-flex items-center"
+                aria-label={areAllSectionsOpen ? 'Collapse all status sections' : 'Expand all status sections'}
+                title={areAllSectionsOpen ? 'Collapse all status sections' : 'Expand all status sections'}
+                onClick={() => {
+                  const next = {} as Record<ProjectStatus, boolean>
+                  PROJECT_STATUS_OPTIONS.forEach((s) => {
+                    next[s.value] = !areAllSectionsOpen
+                  })
+                  setSectionOpen(next)
+                }}
+              >
+                {areAllSectionsOpen ? <ChevronsUp className="w-4 h-4" /> : <ChevronsDown className="w-4 h-4" />}
+              </Button>
+            </>
+          )}
+
+          {viewMode === 'table' && (
+            <div className="inline-flex items-center">
+              <Select
+                value={String(recordsPerPage)}
+                onValueChange={(v) => {
+                  const parsed = Number(v)
+                  if (parsed === 20 || parsed === 50 || parsed === 100) {
+                    setRecordsPerPage(parsed)
+                  }
+                }}
+              >
+                <SelectTrigger className="h-9 w-[88px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -332,6 +464,165 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
               </Link>
             </CardContent>
           </Card>
+        ) : viewMode === 'table' ? (
+          <div className="rounded-md border border-border bg-card overflow-hidden">
+            <div className="w-full overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr className="border-b border-border">
+                    {(
+                      [
+                        { key: 'title', label: 'Project Name', className: 'min-w-[220px]' },
+                        { key: 'client', label: 'Client', className: 'min-w-[180px]' },
+                        { key: 'status', label: 'Status', className: 'min-w-[120px]' },
+                        { key: 'videos', label: 'Videos', className: 'w-[90px] text-right' },
+                        { key: 'versions', label: 'Versions', className: 'w-[95px] text-right' },
+                        { key: 'comments', label: 'Comments', className: 'w-[110px] text-right' },
+                        { key: 'createdAt', label: 'Date Created', className: 'w-[130px]' },
+                        { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px]' },
+                      ] as const
+                    ).map((col) => (
+                      <th key={col.key} scope="col" className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground', col.className)}>
+                        <button
+                          type="button"
+                          onClick={() => toggleTableSort(col.key)}
+                          className="inline-flex items-center gap-1 hover:text-foreground"
+                          title="Sort"
+                        >
+                          <span>{col.label}</span>
+                          {tableSortKey === col.key && (
+                            tableSortDirection === 'asc'
+                              ? <ArrowUp className="h-3.5 w-3.5" />
+                              : <ArrowDown className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleTableProjects.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
+                        No projects found.
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleTableProjects.map((project) => {
+                      const effectiveStatus = statusOverrides[project.id] ?? project.status
+                      const isUpdatingStatus = Boolean(statusToggleLoading[project.id])
+
+                      const readyVideos = (project.videos || []).filter((v: any) => v?.status === 'READY')
+                      const videosByNameForApproval = readyVideos.reduce((acc: Record<string, any[]>, video: any) => {
+                        const name = String(video?.name || '')
+                        if (!name) return acc
+                        if (!acc[name]) acc[name] = []
+                        acc[name].push(video)
+                        return acc
+                      }, {})
+                      const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions: any[]) =>
+                        versions.some((v: any) => Boolean(v?.approved))
+                      )
+                      const canApproveProject = readyVideos.length > 0 && allVideosHaveApprovedVersion
+
+                      const uniqueVideos = (() => {
+                        const set = new Set<string>()
+                        for (const v of project.videos || []) {
+                          const name = String(v?.name || '')
+                          if (name) set.add(`name:${name}`)
+                          else set.add(`id:${String(v?.id || '')}`)
+                        }
+                        return set.size
+                      })()
+
+                      const versionsCount = (project.videos || []).length
+                      const commentsCount = project._count?.comments || 0
+                      const clientName = (() => {
+                        const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
+                        return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+                      })()
+
+                      const setStatus = async (nextStatus: string) => {
+                        setStatusToggleLoading((prev) => ({ ...prev, [project.id]: true }))
+                        try {
+                          await apiPatch(`/api/projects/${project.id}`, { status: nextStatus })
+                          setStatusOverrides((prev) => ({ ...prev, [project.id]: nextStatus }))
+                        } catch (error) {
+                          alert('Failed to update project status')
+                        } finally {
+                          setStatusToggleLoading((prev) => ({ ...prev, [project.id]: false }))
+                        }
+                      }
+
+                      return (
+                        <tr
+                          key={project.id}
+                          className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
+                          onClick={() => router.push(`/admin/projects/${project.id}`)}
+                          role="link"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return
+                            router.push(`/admin/projects/${project.id}`)
+                          }}
+                        >
+                          <td className="px-3 py-2 font-medium">
+                            {project.title}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">
+                            {clientName}
+                          </td>
+                          <td className="px-3 py-2">
+                            <ProjectStatusPicker
+                              value={effectiveStatus}
+                              disabled={isUpdatingStatus}
+                              canApprove={canApproveProject}
+                              stopPropagation
+                              className={isUpdatingStatus ? 'opacity-70' : undefined}
+                              onChange={(next) => setStatus(next)}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{uniqueVideos}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{versionsCount}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{commentsCount}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatProjectDate(project.createdAt)}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatProjectDate(project.updatedAt)}</td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {tableTotalPages > 1 && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border bg-card">
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  Page {tablePage} of {tableTotalPages}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    disabled={tablePage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
+                    disabled={tablePage === tableTotalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
             {visibleStatusOptions.map((section) => {

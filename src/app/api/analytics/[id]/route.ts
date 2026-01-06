@@ -93,6 +93,23 @@ export async function GET(
             },
           },
         },
+        statusChanges: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            previousStatus: true,
+            currentStatus: true,
+            source: true,
+            createdAt: true,
+            changedBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -221,8 +238,20 @@ export async function GET(
       createdAt: tracking.openedAt!, // Non-null because we filtered for openedAt !== null
     }))
 
+    const statusChangeEvents = project.statusChanges.map((chg) => ({
+      id: chg.id,
+      type: 'STATUS_CHANGE' as const,
+      previousStatus: chg.previousStatus,
+      currentStatus: chg.currentStatus,
+      source: chg.source,
+      changedBy: chg.changedBy
+        ? { id: chg.changedBy.id, name: chg.changedBy.name, email: chg.changedBy.email }
+        : null,
+      createdAt: chg.createdAt,
+    }))
+
     // Merge and sort all activity by timestamp (newest first)
-    const allActivity = [...authEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents].sort(
+    const allActivity = [...authEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents, ...statusChangeEvents].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 

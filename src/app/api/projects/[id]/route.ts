@@ -172,6 +172,7 @@ export async function PATCH(
   if (authResult instanceof Response) {
     return authResult
   }
+  const admin = authResult
 
   // Rate limiting: mutation throttle
   const rateLimitResult = await rateLimit(request, {
@@ -451,6 +452,19 @@ export async function PATCH(
       where: { id },
       data: updateData,
     })
+
+    // Record status change in analytics activity feed
+    if (validatedBody.status !== undefined && previousStatus && previousStatus !== validatedBody.status) {
+      await prisma.projectStatusChange.create({
+        data: {
+          projectId: project.id,
+          previousStatus: previousStatus as any,
+          currentStatus: validatedBody.status as any,
+            source: 'ADMIN',
+          changedById: admin.id,
+        },
+      })
+    }
 
     // When an admin manually marks a project APPROVED, send the Project Approved email immediately.
     // (Client-driven approvals have their own notification path in /api/projects/[id]/approve.)

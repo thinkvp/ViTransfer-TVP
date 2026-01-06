@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { BarChart3, Video, Eye, Download, Calendar, Clock, ArrowLeft, Mail, Lock, UserCircle, Users, Globe, ChevronDown, ChevronRight } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
+import { cn } from '@/lib/utils'
+import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
 
 interface VideoStats {
   videoName: string
@@ -58,7 +60,17 @@ interface EmailOpenActivity {
   createdAt: Date
 }
 
-type Activity = AuthActivity | DownloadActivity | EmailActivity | EmailOpenActivity
+interface StatusChangeActivity {
+  id: string
+  type: 'STATUS_CHANGE'
+  previousStatus: string
+  currentStatus: string
+  source: 'ADMIN' | 'CLIENT' | 'SYSTEM'
+  changedBy: { id: string; name: string | null; email: string } | null
+  createdAt: Date
+}
+
+type Activity = AuthActivity | DownloadActivity | EmailActivity | EmailOpenActivity | StatusChangeActivity
 
 interface AnalyticsData {
   project: {
@@ -87,6 +99,19 @@ interface AnalyticsData {
 function getAccessMethodColor(method: string): string {
   // All auth/visit events use primary (blue) color for easy visual distinction from downloads
   return 'bg-primary-visible text-primary border-2 border-primary-visible'
+}
+
+function StatusPill({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        'px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0',
+        projectStatusBadgeClass(status)
+      )}
+    >
+      {projectStatusLabel(status)}
+    </span>
+  )
 }
 
 export default function AnalyticsClient({ id }: { id: string }) {
@@ -284,13 +309,16 @@ export default function AnalyticsClient({ id }: { id: string }) {
                       >
                         <div className="flex items-center gap-3 p-3">
                           {/* Badge - left aligned */}
+                          {event.type === 'STATUS_CHANGE' ? (
+                            <StatusPill status={(event as StatusChangeActivity).currentStatus} />
+                          ) : (
                           <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
                             event.type === 'AUTH'
                               ? getAccessMethodColor((event as AuthActivity).accessMethod)
                               : event.type === 'EMAIL' || event.type === 'EMAIL_OPEN'
                               ? 'bg-warning-visible text-warning border-2 border-warning-visible'
                               : 'bg-success-visible text-success border-2 border-success-visible'
-                          }`}>
+                          }`}> 
                             {event.type === 'AUTH' ? (
                               (event as AuthActivity).accessMethod === 'OTP' ? 'Email OTP' :
                               (event as AuthActivity).accessMethod === 'PASSWORD' ? 'Password' :
@@ -313,6 +341,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
                               </>
                             )}
                           </span>
+                          )}
 
                           {/* Text - centered, grows to fill space */}
                           <div className="flex-1 min-w-0 flex items-center justify-center">
@@ -327,6 +356,8 @@ export default function AnalyticsClient({ id }: { id: string }) {
                                 (event as EmailActivity).description
                               ) : event.type === 'EMAIL_OPEN' ? (
                                 (event as EmailOpenActivity).description
+                              ) : event.type === 'STATUS_CHANGE' ? (
+                                'Status Changed'
                               ) : (
                                 isExpanded ? (event as DownloadActivity).videoName : `${(event as DownloadActivity).videoName.substring(0, 25)}${(event as DownloadActivity).videoName.length > 25 ? '...' : ''}`
                               )}
@@ -411,6 +442,30 @@ export default function AnalyticsClient({ id }: { id: string }) {
                                 <div className="flex items-start gap-2">
                                   <span className="text-xs font-semibold text-foreground min-w-[80px]">Email</span>
                                   <span className="text-sm text-muted-foreground break-all">{(event as EmailOpenActivity).recipientEmail}</span>
+                                </div>
+                              </div>
+                            ) : event.type === 'STATUS_CHANGE' ? (
+                              <div className="space-y-2">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
+                                  <span className="text-sm text-muted-foreground">
+                                    Project changed from <span className="font-medium">{projectStatusLabel((event as StatusChangeActivity).previousStatus)}</span> to{' '}
+                                    <span className="font-medium">{projectStatusLabel((event as StatusChangeActivity).currentStatus)}</span>
+                                  </span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">By</span>
+                                  <span className="text-sm text-muted-foreground">
+                                    {(() => {
+                                      const statusEvent = event as StatusChangeActivity
+                                      if (statusEvent.source === 'SYSTEM') return 'System'
+                                      if (statusEvent.source === 'CLIENT') return 'Client'
+                                      const actor = statusEvent.changedBy
+                                      if (!actor) return 'Admin'
+                                      if (actor.name && actor.email) return `${actor.name} (${actor.email})`
+                                      return actor.name || actor.email
+                                    })()}
+                                  </span>
                                 </div>
                               </div>
                             ) : (

@@ -28,7 +28,12 @@ export async function GET(request: NextRequest) {
     const projects = await prisma.project.findMany({
       include: {
         videos: {
-          where: { status: 'READY' },
+          select: {
+            id: true,
+            status: true,
+            name: true,
+            approved: true,
+          },
         },
         recipients: {
           where: { isPrimary: true },
@@ -46,6 +51,11 @@ export async function GET(request: NextRequest) {
             eventType: true,
           },
         },
+        _count: {
+          select: {
+            comments: true,
+          },
+        },
       },
       orderBy: {
         updatedAt: 'desc',
@@ -55,6 +65,8 @@ export async function GET(request: NextRequest) {
     const projectsWithAnalytics = projects.map(project => {
       const totalDownloads = project.analytics.length
       const displayName = project.companyName || project.recipients[0]?.name || project.recipients[0]?.email || 'Client'
+
+      const readyVideos = project.videos.filter(v => v.status === 'READY')
 
       // Calculate unique sessions (unique users who accessed the share page)
       const uniqueSessions = new Set(
@@ -75,7 +87,9 @@ export async function GET(request: NextRequest) {
         recipientName: displayName,
         recipientEmail: project.companyName ? null : project.recipients[0]?.email || null,
         status: project.status,
-        videoCount: project.videos.length,
+        videoCount: readyVideos.length,
+        videos: project.videos,
+        commentsCount: project._count.comments,
         totalVisits: project.sharePageAccesses.length,
         uniqueVisits: uniqueSessions,
         accessByMethod,

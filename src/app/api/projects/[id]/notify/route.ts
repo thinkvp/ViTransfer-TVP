@@ -212,6 +212,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             where: { id: projectId },
             data: { status: 'IN_REVIEW' },
           })
+
+          await prisma.projectStatusChange.create({
+            data: {
+              projectId,
+              previousStatus: 'NOT_STARTED',
+              currentStatus: 'IN_REVIEW',
+              source: 'SYSTEM',
+              changedById: null,
+            },
+          })
         } catch (e) {
           // Non-blocking: do not fail the email send response
           console.error('Failed to update project status to IN_REVIEW:', e)
