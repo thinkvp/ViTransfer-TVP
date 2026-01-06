@@ -51,6 +51,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         description: true,
         slug: true,
         sharePassword: true,
+        status: true,
         videos: {
           where: { status: 'READY' },
           select: {
@@ -203,6 +204,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     if (successCount > 0) {
+      // If this is the first time we notify clients, move NOT_STARTED → IN_REVIEW
+      // (Display-only state; does not block auto-approval.)
+      if (project.status === 'NOT_STARTED') {
+        try {
+          await prisma.project.update({
+            where: { id: projectId },
+            data: { status: 'IN_REVIEW' },
+          })
+        } catch (e) {
+          // Non-blocking: do not fail the email send response
+          console.error('Failed to update project status to IN_REVIEW:', e)
+        }
+      }
+
       // Log analytics email event (clients only)
       try {
         const recipientEmailsJson = JSON.stringify(successfulRecipientEmails)

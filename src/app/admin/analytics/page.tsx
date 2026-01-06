@@ -1,13 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
-import { BarChart3, FolderKanban, Video, Eye, Download, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react'
+import { BarChart3, FolderKanban, Video, Eye, Download, RefreshCw, ArrowUp, ArrowDown, ChevronDown, Filter, ChevronsDown, ChevronsUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
 import { cn } from '@/lib/utils'
+import { PROJECT_STATUS_OPTIONS, projectStatusDotClass, projectStatusLabel, type ProjectStatus } from '@/lib/project-status'
 
 interface ProjectAnalytics {
   id: string
@@ -33,8 +35,17 @@ export default function AnalyticsDashboard() {
   const [projects, setProjects] = useState<ProjectAnalytics[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical' | 'created'>('alphabetical')
+  const [sortMode, setSortMode] = useState<'activity' | 'alphabetical' | 'created'>('alphabetical')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [statusFilterSelected, setStatusFilterSelected] = useState<Set<ProjectStatus>>(new Set())
+  const [sectionOpenInitialized, setSectionOpenInitialized] = useState(false)
+  const [sectionOpen, setSectionOpen] = useState<Record<ProjectStatus, boolean>>(() => {
+    const initial = {} as Record<ProjectStatus, boolean>
+    PROJECT_STATUS_OPTIONS.forEach((s) => {
+      initial[s.value] = true
+    })
+    return initial
+  })
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
 
@@ -70,13 +81,36 @@ export default function AnalyticsDashboard() {
 
   useEffect(() => {
     const storedMode = localStorage.getItem('admin_analytics_sort_mode')
-    if (storedMode === 'alphabetical' || storedMode === 'status' || storedMode === 'created') {
+    if (storedMode === 'alphabetical' || storedMode === 'created' || storedMode === 'activity') {
       setSortMode(storedMode)
+    }
+    if (storedMode === 'status') {
+      // Back-compat: old value
+      setSortMode('activity')
     }
 
     const storedDirection = localStorage.getItem('admin_analytics_sort_direction')
     if (storedDirection === 'asc' || storedDirection === 'desc') {
       setSortDirection(storedDirection)
+    }
+  }, [])
+
+  useEffect(() => {
+    const storageKey = 'admin_analytics_status_filter'
+    const stored = localStorage.getItem(storageKey)
+    if (!stored) return
+
+    try {
+      const parsed = JSON.parse(stored)
+      if (!Array.isArray(parsed)) return
+
+      const valid = parsed.filter((value) =>
+        PROJECT_STATUS_OPTIONS.some((s) => s.value === value)
+      ) as ProjectStatus[]
+
+      setStatusFilterSelected(new Set(valid))
+    } catch {
+      // ignore
     }
   }, [])
 
@@ -89,32 +123,120 @@ export default function AnalyticsDashboard() {
     localStorage.setItem('admin_analytics_sort_direction', sortDirection)
   }, [sortMode, sortDirection])
 
+  useEffect(() => {
+    const storageKey = 'admin_analytics_sections_open'
+    const stored = localStorage.getItem(storageKey)
+
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        if (parsed && typeof parsed === 'object') {
+          const next = {} as Record<ProjectStatus, boolean>
+          PROJECT_STATUS_OPTIONS.forEach((s) => {
+            next[s.value] = Boolean((parsed as any)[s.value])
+          })
+          setSectionOpen(next)
+          setSectionOpenInitialized(true)
+          return
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (sectionOpenInitialized) return
+    if (loading) return
+
+    const counts: Record<ProjectStatus, number> = {} as Record<ProjectStatus, number>
+    PROJECT_STATUS_OPTIONS.forEach((s) => {
+      counts[s.value] = 0
+    })
+
+    for (const project of projects) {
+      const status = (project.status as ProjectStatus)
+      if (status in counts) counts[status] += 1
+      else counts['IN_REVIEW'] += 1
+    }
+
+    const next = {} as Record<ProjectStatus, boolean>
+    PROJECT_STATUS_OPTIONS.forEach((s) => {
+      next[s.value] = counts[s.value] > 0
+    })
+    setSectionOpen(next)
+    setSectionOpenInitialized(true)
+  }, [loading, projects, sectionOpenInitialized])
+
+  useEffect(() => {
+    if (!sectionOpenInitialized) return
+    localStorage.setItem('admin_analytics_sections_open', JSON.stringify(sectionOpen))
+  }, [sectionOpen, sectionOpenInitialized])
+
+  useEffect(() => {
+    const storageKey = 'admin_analytics_status_filter'
+    if (statusFilterSelected.size === 0) {
+      localStorage.removeItem(storageKey)
+      return
+    }
+    localStorage.setItem(storageKey, JSON.stringify(Array.from(statusFilterSelected)))
+  }, [statusFilterSelected])
+
   // Calculate aggregate stats
   const totalProjects = projects.length
   const totalVisits = projects.reduce((sum, p) => sum + p.totalVisits, 0)
   const totalDownloads = projects.reduce((sum, p) => sum + p.totalDownloads, 0)
   const totalVideos = projects.reduce((sum, p) => sum + p.videoCount, 0)
 
-  // Filter projects
-  const sortedProjects = [...projects].sort((a, b) => {
+  const compareProjects = useMemo(() => {
     const directionMultiplier = sortDirection === 'asc' ? 1 : -1
+    return (a: ProjectAnalytics, b: ProjectAnalytics) => {
+      if (sortMode === 'alphabetical') {
+        return directionMultiplier * a.title.localeCompare(b.title)
+      }
+      if (sortMode === 'created') {
+        return directionMultiplier * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      }
+      // Activity sorting (updatedAt)
+      return directionMultiplier * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
+    }
+  }, [sortDirection, sortMode])
 
-    if (sortMode === 'alphabetical') {
-      return directionMultiplier * a.title.localeCompare(b.title)
+  const groupedProjects = useMemo(() => {
+    const buckets: Record<ProjectStatus, ProjectAnalytics[]> = {} as Record<ProjectStatus, ProjectAnalytics[]>
+    PROJECT_STATUS_OPTIONS.forEach((s) => {
+      buckets[s.value] = []
+    })
+
+    for (const project of projects) {
+      const status = project.status as ProjectStatus
+      if (status in buckets) {
+        buckets[status].push(project)
+      } else {
+        buckets['IN_REVIEW'].push(project)
+      }
     }
 
-    if (sortMode === 'created') {
-      return directionMultiplier * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-    }
+    PROJECT_STATUS_OPTIONS.forEach((s) => {
+      buckets[s.value] = [...buckets[s.value]].sort(compareProjects)
+    })
 
-    const statusPriority = { IN_REVIEW: 1, SHARE_ONLY: 2, APPROVED: 3 } as const
-    const priorityDiff = (statusPriority[a.status as keyof typeof statusPriority] ?? 99) - (statusPriority[b.status as keyof typeof statusPriority] ?? 99)
-    if (priorityDiff !== 0) return directionMultiplier * priorityDiff
-    return directionMultiplier * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
-  })
+    return buckets
+  }, [compareProjects, projects])
 
-  const sortModeLabel = sortMode === 'alphabetical' ? 'Alphabetical' : sortMode === 'status' ? 'Status' : 'Created'
+  const visibleStatusOptions = useMemo(() => {
+    if (statusFilterSelected.size === 0) return PROJECT_STATUS_OPTIONS
+    return PROJECT_STATUS_OPTIONS.filter((s) => statusFilterSelected.has(s.value))
+  }, [statusFilterSelected])
+
+  const totalListed = projects.length
+
+  const sortModeLabel = sortMode === 'alphabetical' ? 'Alphabetical' : sortMode === 'activity' ? 'Activity' : 'Created'
   const SortDirectionIcon = sortDirection === 'asc' ? ArrowUp : ArrowDown
+  const areAllSectionsOpen = useMemo(
+    () => PROJECT_STATUS_OPTIONS.every((s) => Boolean(sectionOpen[s.value])),
+    [sectionOpen]
+  )
 
   const cycleSort = () => {
     if (sortMode === 'alphabetical' && sortDirection === 'asc') {
@@ -122,15 +244,15 @@ export default function AnalyticsDashboard() {
       return
     }
     if (sortMode === 'alphabetical' && sortDirection === 'desc') {
-      setSortMode('status')
+      setSortMode('activity')
       setSortDirection('asc')
       return
     }
-    if (sortMode === 'status' && sortDirection === 'asc') {
+    if (sortMode === 'activity' && sortDirection === 'asc') {
       setSortDirection('desc')
       return
     }
-    if (sortMode === 'status' && sortDirection === 'desc') {
+    if (sortMode === 'activity' && sortDirection === 'desc') {
       setSortMode('created')
       setSortDirection('asc')
       return
@@ -216,7 +338,7 @@ export default function AnalyticsDashboard() {
         </Card>
 
         {/* Projects List */}
-        {sortedProjects.length === 0 ? (
+        {totalListed === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
               <BarChart3 className="w-12 h-12 mx-auto text-muted-foreground opacity-50 mb-4" />
@@ -241,6 +363,68 @@ export default function AnalyticsDashboard() {
                 <span>{sortModeLabel}</span>
                 <SortDirectionIcon className="w-4 h-4" />
               </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground inline-flex items-center"
+                aria-label={areAllSectionsOpen ? 'Collapse all status sections' : 'Expand all status sections'}
+                title={areAllSectionsOpen ? 'Collapse all status sections' : 'Expand all status sections'}
+                onClick={() => {
+                  const next = {} as Record<ProjectStatus, boolean>
+                  PROJECT_STATUS_OPTIONS.forEach((s) => {
+                    next[s.value] = !areAllSectionsOpen
+                  })
+                  setSectionOpen(next)
+                }}
+              >
+                {areAllSectionsOpen ? <ChevronsUp className="w-4 h-4" /> : <ChevronsDown className="w-4 h-4" />}
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={statusFilterSelected.size > 0 ? 'default' : 'ghost'}
+                    size="sm"
+                    className={cn(
+                      'inline-flex items-center',
+                      statusFilterSelected.size > 0
+                        ? 'text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                    aria-label="Filter statuses"
+                    title="Filter statuses"
+                  >
+                    <Filter className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
+                  {PROJECT_STATUS_OPTIONS.map((s) => {
+                    const checked = statusFilterSelected.has(s.value)
+                    return (
+                      <DropdownMenuCheckboxItem
+                        key={s.value}
+                        checked={checked}
+                        onSelect={(e) => e.preventDefault()}
+                        onCheckedChange={() => {
+                          setStatusFilterSelected((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(s.value)) next.delete(s.value)
+                            else next.add(s.value)
+                            return next
+                          })
+                        }}
+                      >
+                        {s.label}
+                      </DropdownMenuCheckboxItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <ViewModeToggle value={viewMode} onChange={setViewMode} />
               <Button
                 onClick={loadAnalytics}
@@ -254,79 +438,113 @@ export default function AnalyticsDashboard() {
               </Button>
             </div>
 
-            <div
-              className={
-                viewMode === 'grid'
-                  ? 'grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4'
-                  : 'space-y-3'
-              }
-            >
-              {sortedProjects.map((project) => (
-              <Link
-                key={project.id}
-                href={`/admin/analytics/${project.id}`}
-                className="block group"
-              >
-                <Card className="cursor-pointer transition-all duration-200 hover:border-primary/50 hover:shadow-elevation-lg sm:hover:-translate-y-1">
-                  <CardHeader className={cn('p-3 sm:p-4', viewMode === 'grid' && 'p-2 sm:p-3')}>
-                    <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
-                      <div className="flex-1 min-w-0">
-                        <CardTitle
-                          className={cn(
-                            'font-semibold transition-colors group-hover:text-primary',
-                            viewMode === 'grid' ? 'text-sm sm:text-base break-words' : 'text-base sm:text-lg'
-                          )}
+            {visibleStatusOptions.map((section) => {
+              const sectionStatus = section.value
+              const sectionProjects = groupedProjects[sectionStatus] || []
+              const isOpen = sectionOpen[sectionStatus]
+
+              return (
+                <div key={sectionStatus} className="mb-3 rounded-md border border-border bg-card">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-between px-3 py-2 text-foreground rounded-none rounded-t-md hover:bg-muted/40"
+                    onClick={() => setSectionOpen(prev => ({ ...prev, [sectionStatus]: !prev[sectionStatus] }))}
+                  >
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <ChevronDown className={cn('w-4 h-4 transition-transform', !isOpen && '-rotate-90')} />
+                      <span
+                        className={cn(
+                          'h-3 w-3 rounded-full border border-border flex-shrink-0 bg-current',
+                          projectStatusDotClass(sectionStatus)
+                        )}
+                      />
+                      <span className="font-semibold text-base sm:text-lg truncate">{projectStatusLabel(sectionStatus)}</span>
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums">{sectionProjects.length}</span>
+                  </Button>
+
+                  {isOpen && (
+                    <div className="border-t border-border p-2 bg-foreground/5 dark:bg-foreground/10">
+                      <div
+                        className={cn(
+                          viewMode === 'grid'
+                            ? 'grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4'
+                            : 'space-y-3'
+                        )}
+                      >
+                      {sectionProjects.map((project) => (
+                        <Link
+                          key={project.id}
+                          href={`/admin/analytics/${project.id}`}
+                          className="block group"
                         >
-                          {project.title}
-                        </CardTitle>
-                        <CardDescription className={cn('mt-1 break-words', viewMode === 'grid' ? 'text-xs sm:text-sm' : 'text-sm')}>
-                          {project.recipientEmail ? (
-                            <>
-                              Client: {project.recipientName}
-                              <span className="hidden sm:inline"> ({project.recipientEmail})</span>
-                              <span className="block sm:hidden text-xs mt-1">{project.recipientEmail}</span>
-                            </>
-                          ) : (
-                            `Client: ${project.recipientName}`
-                          )}
-                        </CardDescription>
+                          <Card className="cursor-pointer transition-all duration-200 hover:border-primary/50 hover:shadow-elevation-lg sm:hover:-translate-y-1">
+                            <CardHeader className={cn('p-3 sm:p-4', viewMode === 'grid' && 'p-2 sm:p-3')}>
+                              <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <CardTitle
+                                    className={cn(
+                                      'font-semibold transition-colors group-hover:text-primary',
+                                      viewMode === 'grid' ? 'text-sm sm:text-base break-words' : 'text-base sm:text-lg'
+                                    )}
+                                  >
+                                    {project.title}
+                                  </CardTitle>
+                                  <CardDescription className={cn('mt-1 break-words', viewMode === 'grid' ? 'text-xs sm:text-sm' : 'text-sm')}>
+                                    {project.recipientEmail ? (
+                                      <>
+                                        Client: {project.recipientName}
+                                        <span className="hidden sm:inline"> ({project.recipientEmail})</span>
+                                        <span className="block sm:hidden text-xs mt-1">{project.recipientEmail}</span>
+                                      </>
+                                    ) : (
+                                      `Client: ${project.recipientName}`
+                                    )}
+                                  </CardDescription>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent className={cn('p-3 pt-0 sm:p-4 sm:pt-0', viewMode === 'grid' && 'p-2 pt-0 sm:p-3 sm:pt-0')}>
+                              <div className={cn('flex flex-wrap gap-3 sm:gap-6 text-muted-foreground', viewMode === 'grid' ? 'text-xs sm:text-sm' : 'text-sm')}>
+                                <div className="inline-flex items-center gap-2">
+                                  <span className={metricIconWrapperClassName}>
+                                    <Video className={metricIconClassName} />
+                                  </span>
+                                  <span className="font-medium tabular-nums">{project.videoCount}</span>
+                                  <span>
+                                    video
+                                    {project.videoCount !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+
+                                <div className="inline-flex items-center gap-2">
+                                  <span className={metricIconWrapperClassName}>
+                                    <Eye className={metricIconClassName} />
+                                  </span>
+                                  <span className="font-medium tabular-nums">{project.totalVisits}</span>
+                                  <span>visits</span>
+                                </div>
+
+                                <div className="inline-flex items-center gap-2">
+                                  <span className={metricIconWrapperClassName}>
+                                    <Download className={metricIconClassName} />
+                                  </span>
+                                  <span className="font-medium tabular-nums">{project.totalDownloads}</span>
+                                  <span>downloads</span>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </Link>
+                      ))}
                       </div>
                     </div>
-                  </CardHeader>
-                  <CardContent className={cn('p-3 pt-0 sm:p-4 sm:pt-0', viewMode === 'grid' && 'p-2 pt-0 sm:p-3 sm:pt-0')}>
-                    <div className={cn('flex flex-wrap gap-3 sm:gap-6 text-muted-foreground', viewMode === 'grid' ? 'text-xs sm:text-sm' : 'text-sm')}>
-                      <div className="inline-flex items-center gap-2">
-                        <span className={metricIconWrapperClassName}>
-                          <Video className={metricIconClassName} />
-                        </span>
-                        <span className="font-medium tabular-nums">{project.videoCount}</span>
-                        <span>
-                          video
-                          {project.videoCount !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-
-                      <div className="inline-flex items-center gap-2">
-                        <span className={metricIconWrapperClassName}>
-                          <Eye className={metricIconClassName} />
-                        </span>
-                        <span className="font-medium tabular-nums">{project.totalVisits}</span>
-                        <span>visits</span>
-                      </div>
-
-                      <div className="inline-flex items-center gap-2">
-                        <span className={metricIconWrapperClassName}>
-                          <Download className={metricIconClassName} />
-                        </span>
-                        <span className="font-medium tabular-nums">{project.totalDownloads}</span>
-                        <span>downloads</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-              ))}
-            </div>
+                  )}
+                </div>
+              )
+            })}
           </>
         )}
       </div>

@@ -868,6 +868,13 @@ export default function ProjectSettingsPage() {
 
             {showFeedback && (
               <CardContent className="space-y-6 border-t pt-4">
+              {(project as any)?.status === 'SHARE_ONLY' && (
+                <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
+                  <p className="text-sm text-warning font-medium">
+                    This project is currently set to <b>Share Only</b> mode, which overrides some settings. The Feedback Section is always hidden in this mode and videos are restricted to their latest version. If a video is manually approved by Admin, authenticated clients (i.e. OTP and Password users) will be able to download the video.
+                  </p>
+                </div>
+              )}
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">

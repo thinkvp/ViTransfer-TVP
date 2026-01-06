@@ -84,6 +84,7 @@ export default function SharePage() {
     setCommentsLoading(true)
     try {
       const response = await fetch(`/api/share/${token}/comments`, {
+        cache: 'no-store',
         headers: {
           Authorization: `Bearer ${shareToken}`
         }
@@ -168,10 +169,11 @@ export default function SharePage() {
   }, [])
 
   // Fetch project data function (for refresh after approval)
-  const fetchProjectData = async (tokenOverride?: string | null) => {
+  const fetchProjectData = useCallback(async (tokenOverride?: string | null) => {
     try {
       const authToken = tokenOverride || shareToken
       const projectResponse = await fetch(`/api/share/${token}`, {
+        cache: 'no-store',
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined
       })
       if (projectResponse.ok) {
@@ -190,19 +192,21 @@ export default function SharePage() {
         tokenCacheRef.current.clear()
 
         // Fetch comments after project loads (if not hidden)
-        if (!projectData.hideFeedback) {
+        if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
           fetchComments()
         }
       }
     } catch (error) {
       // Failed to load project data
     }
-  }
+  }, [fetchComments, shareToken, storageKey, token])
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
     const handleApprovalChanged = () => {
-      fetchProjectData()
+      // Use the latest persisted token; fall back to current in-memory token.
+      const persisted = loadShareToken(storageKey)
+      fetchProjectData(persisted || shareToken)
     }
 
     window.addEventListener('videoApprovalChanged', handleApprovalChanged)
@@ -210,8 +214,7 @@ export default function SharePage() {
       window.removeEventListener('videoApprovalChanged', handleApprovalChanged)
     }
     // Intentionally omit fetchProjectData from deps; it's stable enough for this usage and avoids re-binding.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [fetchProjectData, shareToken, storageKey])
 
   // Company name and default quality now loaded from project settings
   // This ensures they're only accessible after authentication
@@ -223,6 +226,7 @@ export default function SharePage() {
     async function loadProject() {
       try {
         const response = await fetch(`/api/share/${token}`, {
+          cache: 'no-store',
           headers: shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined
         })
 
@@ -260,8 +264,23 @@ export default function SharePage() {
           return
         }
 
+        if (response.status === 403) {
+          const data = await response.json().catch(() => null)
+          const message = (data && typeof data === 'object' && 'error' in data) ? String((data as any).error || '') : ''
+          if (message.toLowerCase().includes('closed')) {
+            // Treat closed share links like not-found for external users.
+            setError('')
+            setIsAuthenticated(false)
+            setIsPasswordProtected(false)
+            setProject(null)
+            return
+          }
+        }
+
         if (response.status === 403 || response.status === 404) {
-          window.location.href = '/'
+          setIsAuthenticated(false)
+          setIsPasswordProtected(false)
+          setProject(null)
           return
         }
 
@@ -282,13 +301,16 @@ export default function SharePage() {
               setDefaultQuality(projectData.settings.defaultPreviewResolution || '720p')
             }
 
-            if (!projectData.hideFeedback) {
+            if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
               fetchComments()
             }
           }
         }
       } catch (error) {
-        // Silent fail
+        if (!isMounted) return
+        setIsAuthenticated(false)
+        setIsPasswordProtected(false)
+        setProject(null)
       }
     }
 
@@ -793,9 +815,10 @@ export default function SharePage() {
   if (!project) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
-        <Card className="bg-card border-border">
+        <Card className="bg-card border-border w-full max-w-md">
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Project not found</p>
+            <p className="text-foreground font-semibold">Share Link Not Found</p>
+            <p className="text-muted-foreground mt-2 text-sm">This link may be incorrect or the project may no longer be available.</p>
           </CardContent>
         </Card>
       </div>
@@ -805,10 +828,18 @@ export default function SharePage() {
   // Filter to READY videos first
   let readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
 
+  const shareOnlyMode = project.status === 'SHARE_ONLY'
+
   // If any video is approved, show ONLY approved videos (for both admin and client)
   const hasApprovedVideo = readyVideos.some((v: any) => v.approved)
   if (hasApprovedVideo) {
     readyVideos = readyVideos.filter((v: any) => v.approved)
+  }
+
+  // Share Only mode: hide version selection by only showing the newest ready version.
+  if (shareOnlyMode && readyVideos.length > 1) {
+    const latestVersion = Math.max(...readyVideos.map((v: any) => Number(v.version) || 0))
+    readyVideos = readyVideos.filter((v: any) => (Number(v.version) || 0) === latestVersion)
   }
 
   const hasMultipleVideos = project.videosByName && Object.keys(project.videosByName).length > 1
@@ -847,11 +878,11 @@ export default function SharePage() {
             </Card>
           ) : (
             <div
-              className={`flex-1 min-h-0 ${(project.hideFeedback || isGuest)
+              className={`flex-1 min-h-0 ${((project.hideFeedback || project.status === 'SHARE_ONLY') || isGuest)
                 ? 'flex flex-col max-w-7xl mx-auto w-full'
                 : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
             >
-              {(project.hideFeedback || isGuest) ? (
+              {((project.hideFeedback || project.status === 'SHARE_ONLY') || isGuest) ? (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <VideoPlayer
                     videos={readyVideos}

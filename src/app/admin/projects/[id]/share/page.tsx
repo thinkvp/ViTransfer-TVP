@@ -208,7 +208,7 @@ export default function AdminSharePage() {
             // Use project/company fallback for studio name and preview quality
             setDefaultQuality(projectData.previewResolution || '720p')
 
-            if (!projectData.hideFeedback) {
+            if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
               fetchComments()
             }
           }
@@ -450,7 +450,7 @@ export default function AdminSharePage() {
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
           <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
-          {/* Main Content */}
+            {/* Main Content */}
             {readyVideos.length === 0 ? (
               <Card className="bg-card border-border rounded-lg">
                 <CardContent className="py-12 text-center">
@@ -460,50 +460,50 @@ export default function AdminSharePage() {
                 </CardContent>
               </Card>
             ) : (
-            <div
-              className={`flex-1 min-h-0 ${project.hideFeedback
-                ? 'flex flex-col w-full'
-                : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
-            >
-              {project.hideFeedback ? (
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <VideoPlayer
-                    videos={readyVideos}
-                    projectId={project.id}
-                    projectStatus={project.status}
+              <div
+                className={`flex-1 min-h-0 ${(project.hideFeedback || project.status === 'SHARE_ONLY')
+                  ? 'flex flex-col max-w-7xl mx-auto w-full'
+                  : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
+              >
+                {(project.hideFeedback || project.status === 'SHARE_ONLY') ? (
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <VideoPlayer
+                      videos={readyVideos}
+                      projectId={project.id}
+                      projectStatus={project.status}
+                      defaultQuality={defaultQuality}
+                      projectTitle={project.title}
+                      projectDescription={project.description}
+                      clientName={project.clientName}
+                      isPasswordProtected={!!project.sharePassword}
+                      watermarkEnabled={project.watermarkEnabled}
+                      activeVideoName={activeVideoName}
+                      initialSeekTime={initialSeekTime}
+                      initialVideoIndex={initialVideoIndex}
+                      isAdmin={true}
+                      isGuest={false}
+                      shareToken={null}
+                      onApprove={undefined}
+                      hideDownloadButton={true}
+                      commentsForTimeline={filteredComments}
+                    />
+                  </div>
+                ) : (
+                  <AdminShareFeedbackGrid
+                    project={project}
+                    readyVideos={readyVideos}
+                    filteredComments={filteredComments}
                     defaultQuality={defaultQuality}
-                    projectTitle={project.title}
-                    projectDescription={project.description}
-                    clientName={project.clientName}
-                    isPasswordProtected={!!project.sharePassword}
-                    watermarkEnabled={project.watermarkEnabled}
                     activeVideoName={activeVideoName}
                     initialSeekTime={initialSeekTime}
                     initialVideoIndex={initialVideoIndex}
-                    isAdmin={true}
-                    isGuest={false}
-                    shareToken={null}
-                    onApprove={undefined}
-                    hideDownloadButton={true}
-                    commentsForTimeline={filteredComments}
+                    companyName={companyName}
+                    adminUser={adminUser}
+                    clientDisplayName={clientDisplayName}
                   />
-                </div>
-              ) : (
-                <AdminShareFeedbackGrid
-                  project={project}
-                  readyVideos={readyVideos}
-                  filteredComments={filteredComments}
-                  defaultQuality={defaultQuality}
-                  activeVideoName={activeVideoName}
-                  initialSeekTime={initialSeekTime}
-                  initialVideoIndex={initialVideoIndex}
-                  companyName={companyName}
-                  adminUser={adminUser}
-                  clientDisplayName={clientDisplayName}
-                />
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

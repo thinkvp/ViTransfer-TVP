@@ -44,6 +44,37 @@ export async function verifyProjectAccess(
     }
   }
 
+  // If the project is CLOSED, block all external/share access.
+  // (Admins can still access via the early-return above.)
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    })
+    if (project?.status === 'CLOSED') {
+      return {
+        authorized: false,
+        isAdmin: false,
+        isAuthenticated: false,
+        errorResponse: NextResponse.json(
+          { error: 'Project is closed' },
+          { status: 403 }
+        ),
+      }
+    }
+  } catch (e) {
+    // If we cannot verify status, be conservative and deny.
+    return {
+      authorized: false,
+      isAdmin: false,
+      isAuthenticated: false,
+      errorResponse: NextResponse.json(
+        { error: 'Unable to verify project access' },
+        { status: 403 }
+      ),
+    }
+  }
+
   const isUnauthenticated = authMode === 'NONE'
   if (isUnauthenticated) {
     return {

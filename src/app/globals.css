@@ -44,6 +44,11 @@
     --warning-foreground: 0 0% 13%;
     --warning-visible: 33 100% 95%;
 
+    /* Pending - Yellow (for Not Started) */
+    --pending: 48 100% 40%;
+    --pending-foreground: 0 0% 13%;
+    --pending-visible: 48 100% 93%;
+
     /* Destructive - Red (#FF3B30) */
     --destructive: 4 90% 58%;
     --destructive-foreground: 0 0% 100%;
@@ -116,6 +121,11 @@
     --warning: 37 100% 52%;
     --warning-foreground: 0 0% 13%;
     --warning-visible: 37 100% 20%;
+
+    /* Pending - Yellow (for Not Started) */
+    --pending: 48 100% 55%;
+    --pending-foreground: 0 0% 13%;
+    --pending-visible: 48 100% 20%;
 
     /* Destructive - Bright Red (#FF453A) */
     --destructive: 3 100% 61%;

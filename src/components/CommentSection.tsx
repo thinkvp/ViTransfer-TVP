@@ -907,7 +907,7 @@ export function CommentSectionView({
           </div>
         ) : null}
 
-        {showVideoActions && isAdminView && (headerVideo as any)?.approved && !isApproved ? (
+        {showVideoActions && isAdminView && (headerVideo as any)?.approved ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="default"
@@ -989,8 +989,8 @@ export function CommentSectionView({
 
         {/* List Controls (directly above the message list) */}
         <div className="px-4 py-2 border-b border-border bg-card flex-shrink-0">
-          <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2 min-w-0 w-full sm:w-auto justify-center sm:justify-start">
+          <div className="flex flex-wrap items-center gap-2 justify-between">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               {isAdminView && (
                 <Button
                   variant="default"
@@ -1016,7 +1016,7 @@ export function CommentSectionView({
                       Approve Video
                     </Button>
                   ) : (
-                    !isAdminView && (headerVideo as any)?.approved && !isApproved && (
+                    !isAdminView && (headerVideo as any)?.approved && (
                       <Button
                         variant="default"
                         size="sm"
@@ -1037,7 +1037,7 @@ export function CommentSectionView({
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 sm:ml-auto w-full sm:w-auto justify-center sm:justify-end">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <div className="flex-shrink-0">
                 <Select
                   value={commentSortMode}

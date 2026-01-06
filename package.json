@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "rimraf .next",
+    "prebuild": "prisma generate && rimraf .next",
     "build": "next build --webpack",
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-progress": "^1.1.8",
     "@radix-ui/react-select": "^2.1.2",

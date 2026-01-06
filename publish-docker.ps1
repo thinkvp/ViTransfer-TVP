@@ -48,6 +48,9 @@ Write-Host ""
 
 # Verify buildx
 & docker buildx version | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "docker buildx is not available (exit code $LASTEXITCODE)"
+}
 
 # Prefer using the current/desktop builder (avoids extra buildkit container DNS flakiness)
 $builders = & docker buildx ls | Out-String
@@ -60,7 +63,14 @@ if ($Builder) {
   & docker buildx use default | Out-Null
 }
 
+if ($LASTEXITCODE -ne 0) {
+  throw "docker buildx use failed (exit code $LASTEXITCODE)"
+}
+
 & docker buildx inspect --bootstrap | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "docker buildx inspect --bootstrap failed (exit code $LASTEXITCODE)"
+}
 
 $noCacheFlag = @()
 if ($NoCache) { $noCacheFlag = @('--no-cache') }
@@ -79,6 +89,10 @@ function BuildPushTarget([string]$target, [string[]]$tags) {
     @noCacheFlag `
     --push `
     .
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "docker buildx build failed for target '$target' (exit code $LASTEXITCODE)"
+  }
 }
 
 function RetagLatestFromVersion([string]$repo, [string]$versionTag, [int]$maxRetries = 30, [int]$sleepSeconds = 3) {
@@ -89,6 +103,9 @@ function RetagLatestFromVersion([string]$repo, [string]$versionTag, [int]$maxRet
     try {
       Write-Host "Retagging $dst -> $src (attempt $i/$maxRetries)" -ForegroundColor Yellow
       & docker buildx imagetools create --tag $dst $src | Out-Null
+      if ($LASTEXITCODE -ne 0) {
+        throw "docker buildx imagetools create failed (exit code $LASTEXITCODE)"
+      }
       Write-Host "Updated $dst" -ForegroundColor Green
       return
     } catch {

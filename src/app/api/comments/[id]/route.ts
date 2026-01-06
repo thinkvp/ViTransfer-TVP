@@ -72,6 +72,7 @@ export async function PATCH(
             authMode: true,
             companyName: true,
             hideFeedback: true,
+            status: true,
             guestMode: true,
             recipients: {
               where: { isPrimary: true },
@@ -92,8 +93,8 @@ export async function PATCH(
       )
     }
 
-    // SECURITY: If feedback is hidden, reject comment updates
-    if (existingComment.project.hideFeedback) {
+    // SECURITY: If feedback is hidden (or Share Only mode), reject comment updates
+    if (existingComment.project.hideFeedback || existingComment.project.status === 'SHARE_ONLY') {
       return NextResponse.json(
         { error: 'Comments are disabled for this project' },
         { status: 403 }
@@ -236,6 +237,7 @@ export async function DELETE(
             sharePassword: true,
             authMode: true,
             hideFeedback: true,
+            status: true,
             allowClientDeleteComments: true,
           }
         }
@@ -246,6 +248,13 @@ export async function DELETE(
       return NextResponse.json(
         { error: 'Comment not found' },
         { status: 404 }
+      )
+    }
+
+    if (existingComment.project.status === 'SHARE_ONLY') {
+      return NextResponse.json(
+        { error: 'Comments are disabled for this project' },
+        { status: 403 }
       )
     }
 

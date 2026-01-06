@@ -5,9 +5,9 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import Image from 'next/image'
 // Avoid importing Prisma runtime types in client components.
 type Video = any
-type ProjectStatus = 'IN_REVIEW' | 'APPROVED' | 'SHARE_ONLY'
+type ProjectStatus = 'NOT_STARTED' | 'IN_REVIEW' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Rewind, FastForward, MessageSquare } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import {
@@ -530,6 +530,13 @@ export default function VideoPlayer({
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
   const isProjectApproved = projectStatus === 'APPROVED' || projectStatus === 'SHARE_ONLY'
+  const approvedDownloadUrl = (selectedVideo as any)?.downloadUrl as string | null | undefined
+  const canShowApprovedDownload =
+    !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && Boolean(approvedDownloadUrl)
+
+  // Speed controls should be hidden only when an approved video is selected in the client view.
+  // This keeps the mobile controls row from getting too cramped once Download is shown.
+  const shouldHideSpeedControls = !isAdmin && !isGuest && isVideoApproved
 
   // Load video URL with optimization
   useEffect(() => {
@@ -1473,27 +1480,31 @@ export default function VideoPlayer({
                 )}
               </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleDecreaseSpeed}
-                aria-label="Decrease playback speed"
-                className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-              >
-                <Rewind className="w-4 h-4" />
-              </Button>
+              {!shouldHideSpeedControls && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDecreaseSpeed}
+                    aria-label="Decrease playback speed"
+                    className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                  >
+                    <Rewind className="w-4 h-4" />
+                  </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleIncreaseSpeed}
-                aria-label="Increase playback speed"
-                className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-              >
-                <FastForward className="w-4 h-4" />
-              </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleIncreaseSpeed}
+                    aria-label="Increase playback speed"
+                    className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                  >
+                    <FastForward className="w-4 h-4" />
+                  </Button>
+                </>
+              )}
 
               {isInFullscreen && canShowTimelineHover && (
                 <Button
@@ -1522,6 +1533,14 @@ export default function VideoPlayer({
               >
                 {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
               </Button>
+
+              {canShowApprovedDownload && approvedDownloadUrl && (
+                <Button asChild type="button" variant="default" size="sm" aria-label="Download approved video" title="Download approved video">
+                  <a href={approvedDownloadUrl} download>
+                    Download
+                  </a>
+                </Button>
+              )}
             </div>
 
             {/* Mobile: row 2 controls (left: play/time, right: volume/speed/fullscreen) */}
@@ -1565,27 +1584,31 @@ export default function VideoPlayer({
                   </Button>
                 </div>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDecreaseSpeed}
-                  aria-label="Decrease playback speed"
-                  className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                >
-                  <Rewind className="w-4 h-4" />
-                </Button>
+                {!shouldHideSpeedControls && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDecreaseSpeed}
+                      aria-label="Decrease playback speed"
+                      className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                    >
+                      <Rewind className="w-4 h-4" />
+                    </Button>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleIncreaseSpeed}
-                  aria-label="Increase playback speed"
-                  className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                >
-                  <FastForward className="w-4 h-4" />
-                </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleIncreaseSpeed}
+                      aria-label="Increase playback speed"
+                      className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                    >
+                      <FastForward className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
 
                 <Button
                   type="button"
@@ -1596,6 +1619,14 @@ export default function VideoPlayer({
                 >
                   {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </Button>
+
+                {canShowApprovedDownload && approvedDownloadUrl && (
+                  <Button asChild type="button" variant="default" size="sm" aria-label="Download approved video" title="Download approved video">
+                    <a href={approvedDownloadUrl} download>
+                      Download
+                    </a>
+                  </Button>
+                )}
               </div>
             </div>
           </div>

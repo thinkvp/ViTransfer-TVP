@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
         authMode: true,
         companyName: true,
         hideFeedback: true,
+        status: true,
         guestMode: true,
       }
     })
@@ -71,8 +72,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // SECURITY: If feedback is hidden, return empty array (don't expose comments)
-    if (project.hideFeedback) {
+    // SECURITY: If feedback is hidden (or Share Only mode), return empty array (don't expose comments)
+    if (project.hideFeedback || project.status === 'SHARE_ONLY') {
       return NextResponse.json([])
     }
 

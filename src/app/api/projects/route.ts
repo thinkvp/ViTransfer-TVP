@@ -54,6 +54,8 @@ export async function GET(request: NextRequest) {
           select: {
             id: true,
             status: true,
+            name: true,
+            approved: true,
           },
         },
         recipients: {
@@ -184,7 +186,7 @@ export async function POST(request: NextRequest) {
           allowClientDeleteComments: isShareOnly ? false : (allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false),
           allowClientUploadFiles: isShareOnly ? false : (settings?.defaultAllowClientUploadFiles ?? false),
           maxClientUploadAllocationMB: settings?.defaultMaxClientUploadAllocationMB ?? 1000,
-          status: isShareOnly ? 'SHARE_ONLY' : 'IN_REVIEW',
+          status: isShareOnly ? 'SHARE_ONLY' : 'NOT_STARTED',
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,
           previewResolution: settings?.defaultPreviewResolution || '720p',

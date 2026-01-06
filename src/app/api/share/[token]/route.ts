@@ -43,7 +43,7 @@ export async function GET(
     })
 
     if (!projectMeta) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
     const shareContext = await getShareContext(request)
@@ -77,12 +77,13 @@ export async function GET(
     )
 
     if (!project) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
     const accessCheck = await verifyProjectAccess(request, projectMeta.id, projectMeta.sharePassword, projectMeta.authMode)
 
     if (!accessCheck.authorized) {
+      if (accessCheck.errorResponse) return accessCheck.errorResponse
       return NextResponse.json({
         error: 'Authentication required',
         requiresPassword: true,
@@ -265,7 +266,7 @@ export async function GET(
         enableRevisions: project.enableRevisions,
         maxRevisions: project.maxRevisions,
         restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
-        hideFeedback: project.hideFeedback,
+        hideFeedback: project.hideFeedback || project.status === 'SHARE_ONLY',
         useFullTimecode: (project as any).useFullTimecode ?? false,
         allowClientDeleteComments: project.allowClientDeleteComments,
         allowClientUploadFiles: project.allowClientUploadFiles,

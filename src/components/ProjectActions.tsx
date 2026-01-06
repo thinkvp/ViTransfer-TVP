@@ -136,6 +136,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         setSelectedVideoId('')
         setEntireProjectNotes('')
         setSendPasswordSeparately(false)
+
+        // Sending a notification can auto-transition NOT_STARTED → IN_REVIEW.
+        // Refresh the project data so the status pill updates immediately.
+        onRefresh?.()
+        router.refresh()
       })
       .catch((error) => {
         setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to send notification' })

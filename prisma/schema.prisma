@@ -45,7 +45,7 @@ model Project {
   enableRevisions Boolean @default(false)
   maxRevisions    Int     @default(3)
 
-  status          ProjectStatus @default(IN_REVIEW)
+  status          ProjectStatus @default(NOT_STARTED)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   approvedAt      DateTime?
@@ -92,8 +92,11 @@ model Project {
 
 enum ProjectStatus {
   IN_REVIEW
+  ON_HOLD
   APPROVED
   SHARE_ONLY
+  NOT_STARTED
+  CLOSED
 }
 
 model ProjectRecipient {

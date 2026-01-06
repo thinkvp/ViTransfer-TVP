@@ -11,6 +11,8 @@ import ShareLink from '@/components/ShareLink'
 import CommentSection from '@/components/CommentSection'
 import { ArrowLeft, Settings, ArrowUpDown, FolderKanban, Video } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { apiPatch } from '@/lib/api-client'
+import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -27,6 +29,7 @@ export default function ProjectPage() {
   const [activeVideoName, setActiveVideoName] = useState<string>('')
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [adminUser, setAdminUser] = useState<any>(null)
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
 
   // Derive active videos from selected video name (synchronous, no useEffect delay)
   const activeVideos = useMemo(() => {
@@ -185,6 +188,7 @@ export default function ProjectPage() {
   }) || []
 
   const hideFeedback = (project as any).hideFeedback === true
+  const hideFeedbackEffective = hideFeedback || project.status === 'SHARE_ONLY'
   const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
@@ -197,6 +201,37 @@ export default function ProjectPage() {
       return `${yyyy}-${mm}-${dd}`
     } catch {
       return ''
+    }
+  }
+
+  const readyVideosForApproval = (project?.videos || []).filter((v: any) => v?.status === 'READY')
+  const videosByNameForApproval = (readyVideosForApproval as any[]).reduce(
+    (acc: Record<string, any[]>, video: any) => {
+    const name = String(video?.name || '')
+    if (!name) return acc
+    if (!acc[name]) acc[name] = []
+    acc[name].push(video)
+    return acc
+    },
+    {} as Record<string, any[]>
+  )
+
+  const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions) =>
+    versions.some((v) => Boolean((v as any)?.approved))
+  )
+
+  const canApproveProject = readyVideosForApproval.length > 0 && allVideosHaveApprovedVersion
+
+  const setProjectStatus = async (nextStatus: string) => {
+    if (!project || isUpdatingStatus) return
+    setIsUpdatingStatus(true)
+    try {
+      await apiPatch(`/api/projects/${id}`, { status: nextStatus })
+      setProject((prev: any) => prev ? { ...prev, status: nextStatus } : prev)
+    } catch (error) {
+      alert('Failed to update project status')
+    } finally {
+      setIsUpdatingStatus(false)
     }
   }
 
@@ -232,19 +267,13 @@ export default function ProjectPage() {
 	                    </CardTitle>
                     <p className="text-sm text-muted-foreground mt-2 break-words">{project.description}</p>
                   </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
-                      project.status === 'APPROVED'
-                        ? 'bg-success-visible text-success border-2 border-success-visible'
-                        : project.status === 'SHARE_ONLY'
-                        ? 'bg-info-visible text-info border-2 border-info-visible'
-                        : project.status === 'IN_REVIEW'
-                        ? 'bg-primary-visible text-primary border-2 border-primary-visible'
-                        : 'bg-muted text-muted-foreground border border-border'
-                    }`}
-                  >
-                    {project.status.replace('_', ' ')}
-                  </span>
+                  <ProjectStatusPicker
+                    value={project.status}
+                    disabled={isUpdatingStatus}
+                    canApprove={canApproveProject}
+                    className={isUpdatingStatus ? 'opacity-70' : 'px-3 py-1'}
+                    onChange={(next) => setProjectStatus(next)}
+                  />
                 </div>
               </CardHeader>
               <CardContent>
@@ -273,7 +302,11 @@ export default function ProjectPage() {
                     </div>
                   </div>
 
-                  <ShareLink shareUrl={shareUrl} />
+                  <ShareLink
+                    shareUrl={shareUrl}
+                    disabled={project.status === 'CLOSED'}
+                    label={project.status === 'CLOSED' ? 'Share Link - Inaccessible (Project is Closed)' : 'Share Link'}
+                  />
                 </div>
               </CardContent>
           </Card>
@@ -320,7 +353,7 @@ export default function ProjectPage() {
             </div>
           </div>
 
-          {!hideFeedback && activeVideos.length > 0 && (
+          {!hideFeedbackEffective && activeVideos.length > 0 && (
             <div className="min-w-0 order-4 lg:order-3 lg:col-span-1 lg:col-start-3 lg:row-start-2">
               <div className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
                 <CommentSection

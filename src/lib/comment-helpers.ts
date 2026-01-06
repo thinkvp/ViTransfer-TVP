@@ -184,6 +184,7 @@ export async function validateCommentPermissions(params: {
       sharePassword: true,
       authMode: true,
       hideFeedback: true,
+      status: true,
       guestMode: true,
     }
   })
@@ -192,8 +193,8 @@ export async function validateCommentPermissions(params: {
     return { valid: false, error: 'Access denied', errorStatus: 403 }
   }
 
-  // SECURITY: If feedback is hidden, reject comment creation
-  if (project.hideFeedback) {
+  // SECURITY: If feedback is hidden (or Share Only mode), reject comment creation
+  if (project.hideFeedback || project.status === 'SHARE_ONLY') {
     return { valid: false, error: 'Comments are disabled for this project', errorStatus: 403 }
   }
 

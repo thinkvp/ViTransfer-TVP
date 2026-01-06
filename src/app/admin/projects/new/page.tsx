@@ -45,7 +45,6 @@ function generateSecurePassword(): string {
 export default function NewProjectPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
-  const [isShareOnly, setIsShareOnly] = useState(false)
   const [passwordProtected, setPasswordProtected] = useState(true)
   const [sharePassword, setSharePassword] = useState('')
   const [showPassword, setShowPassword] = useState(true)
@@ -99,7 +98,6 @@ export default function NewProjectPage() {
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
-    const isShareOnlyValue = formData.get('isShareOnly') === 'on'
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
@@ -108,7 +106,6 @@ export default function NewProjectPage() {
       recipientEmail: formData.get('recipientEmail') as string,
       sharePassword: (authMode === 'PASSWORD' || authMode === 'BOTH') && passwordProtected ? sharePassword : '',
       authMode: passwordProtected ? authMode : 'NONE',
-      isShareOnly: isShareOnlyValue,
     }
 
     try {
@@ -350,28 +347,7 @@ export default function NewProjectPage() {
                 )}
               </div>
 
-              <div className="space-y-4 border-t pt-4">
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      id="isShareOnly"
-                      name="isShareOnly"
-                      type="checkbox"
-                      checked={isShareOnly}
-                      onChange={(e) => setIsShareOnly(e.target.checked)}
-                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    />
-                    <Label htmlFor="isShareOnly" className="font-normal cursor-pointer">
-                      Share Only
-                    </Label>
-                  </div>
-                  <p className="text-xs text-muted-foreground ml-6">
-                    Create an approved project for simple video sharing. Disables feedback and revision tracking.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2 border-t pt-4">
+              <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
                   <strong>Note:</strong> Additional options like revision tracking, comment restrictions, and feedback settings can be configured after project creation in Project Settings.
                 </p>
