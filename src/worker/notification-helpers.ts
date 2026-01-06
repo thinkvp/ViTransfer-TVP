@@ -37,11 +37,8 @@ export function shouldSendNow(
   const getTargetTime = (): Date | null => {
     switch (schedule) {
       case 'HOURLY':
-        // Only send at the top of the hour (:00 or :01 minutes to account for cron timing)
-        // This ensures messages accumulate during the hour and send at the next :00
-        if (now.getMinutes() > 1) return null
-
-        // Target is the current hour (already at :00 or :01)
+        // Target is the most recent top-of-hour boundary.
+        // This allows the scheduler to run hourly (or any interval) without missing sends.
         const hourTarget = new Date(now)
         hourTarget.setMinutes(0, 0, 0)
         return hourTarget
@@ -49,16 +46,29 @@ export function shouldSendNow(
       case 'DAILY':
         if (!time) return null
         const [dailyHour, dailyMin] = time.split(':').map(Number)
+        // Target is the most recent scheduled time (today, or yesterday if not reached yet).
         const dailyTarget = new Date(now)
         dailyTarget.setHours(dailyHour, dailyMin, 0, 0)
+        if (now < dailyTarget) {
+          dailyTarget.setDate(dailyTarget.getDate() - 1)
+        }
         return dailyTarget
 
       case 'WEEKLY':
         if (!time || day === null) return null
-        if (now.getDay() !== day) return null
         const [weeklyHour, weeklyMin] = time.split(':').map(Number)
+        // Target is the most recent occurrence of the chosen day+time.
         const weeklyTarget = new Date(now)
         weeklyTarget.setHours(weeklyHour, weeklyMin, 0, 0)
+
+        const daysBack = (now.getDay() - day + 7) % 7
+        weeklyTarget.setDate(weeklyTarget.getDate() - daysBack)
+
+        // If it's the correct weekday but the time hasn't occurred yet, use last week.
+        if (weeklyTarget > now) {
+          weeklyTarget.setDate(weeklyTarget.getDate() - 7)
+        }
+
         return weeklyTarget
 
       default:

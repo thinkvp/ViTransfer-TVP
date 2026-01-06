@@ -591,6 +591,7 @@ export async function renderProjectApprovedEmail({
   shareUrl,
   approvedVideos = [],
   isComplete = true,
+  autoCloseInfo,
   branding,
 }: {
   clientName: string
@@ -598,6 +599,7 @@ export async function renderProjectApprovedEmail({
   shareUrl: string
   approvedVideos?: Array<{ name: string; id: string }>
   isComplete?: boolean
+  autoCloseInfo?: { closeDate: Date; days: number } | null
   branding?: EmailBrandingOverrides
 }): Promise<RenderedEmail> {
   const resolved = await resolveEmailBranding(branding)
@@ -616,6 +618,27 @@ export async function renderProjectApprovedEmail({
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
+  const formatLongDate = (date: Date): string => {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ]
+    const d = date.getDate()
+    const m = months[date.getMonth()] || ''
+    const y = date.getFullYear()
+    return `${d} ${m} ${y}`.trim()
+  }
+
+  const autoCloseCalloutHtml = autoCloseInfo && autoCloseInfo.days > 0
+    ? `
+      <div style="background:#663F00; border:2px solid #663F00; border-radius:8px; padding:16px; margin: 0 0 24px 0;">
+        <div style="font-size: 14px; color: #FF9805; line-height: 1.6;">
+          <strong style="color:#FF9805;">Auto-close enabled:</strong> This project will automatically close on <strong style="color:#FF9805;">${escapeHtml(formatLongDate(autoCloseInfo.closeDate))}</strong>. Please download your video/s before this date.
+        </div>
+      </div>
+    `
+    : ''
+
   const html = renderEmailShell({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
@@ -632,6 +655,8 @@ export async function renderProjectApprovedEmail({
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
         Great news! Your project <strong>${escapeHtml(projectTitle)}</strong> has been approved. You can now download the final version without watermarks.
       </p>
+
+      ${autoCloseCalloutHtml}
 
       ${approvedVideos.length > 0 ? `
         <div style="${cardStyle}">
@@ -666,6 +691,7 @@ export async function sendProjectApprovedEmail({
   shareUrl,
   approvedVideos = [],
   isComplete = true,
+  autoCloseInfo,
 }: {
   clientEmail: string
   clientName: string
@@ -673,6 +699,7 @@ export async function sendProjectApprovedEmail({
   shareUrl: string
   approvedVideos?: Array<{ name: string; id: string }>
   isComplete?: boolean
+  autoCloseInfo?: { closeDate: Date; days: number } | null
 }) {
   const { subject, html } = await renderProjectApprovedEmail({
     clientName,
@@ -680,6 +707,7 @@ export async function sendProjectApprovedEmail({
     shareUrl,
     approvedVideos,
     isComplete,
+    autoCloseInfo,
   })
 
   return sendEmail({

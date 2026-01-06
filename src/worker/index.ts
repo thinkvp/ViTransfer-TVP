@@ -3,16 +3,42 @@ import { VideoProcessingJob, AssetProcessingJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
+import { prisma } from '../lib/db'
 import os from 'os'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
+import { processAutoCloseApprovedProjects } from './auto-close-projects'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000
+const NOTIFICATION_RETRY_DELAY_MS = 2 * 60 * 1000
+
+async function hasRetriableNotificationFailures(): Promise<boolean> {
+  const count = await prisma.notificationQueue.count({
+    where: {
+      OR: [
+        {
+          sentToAdmins: false,
+          adminFailed: false,
+          adminAttempts: { lt: 3 },
+          lastError: { not: null },
+        },
+        {
+          sentToClients: false,
+          clientFailed: false,
+          clientAttempts: { lt: 3 },
+          lastError: { not: null },
+        },
+      ],
+    },
+  })
+
+  return count > 0
+}
 
 async function main() {
   console.log('[WORKER] Initializing video processing worker...')
@@ -129,22 +155,67 @@ async function main() {
     connection: getRedisForQueue(),
   })
 
-  // Add repeatable job to check notification schedules every minute
+  // Clean up any existing repeatable notification processor jobs (e.g. old every-minute schedule)
+  try {
+    const repeatables = await notificationQueue.getRepeatableJobs()
+    const toRemove = repeatables.filter(
+      (job) => job.name === 'process-notifications' || job.pattern === '* * * * *'
+    )
+
+    for (const job of toRemove) {
+      await notificationQueue.removeRepeatableByKey(job.key)
+    }
+
+    if (toRemove.length > 0) {
+      console.log(`Removed ${toRemove.length} existing repeatable notification processor job(s)`)
+    }
+
+    const remaining = await notificationQueue.getRepeatableJobs()
+    if (remaining.length > 0) {
+      console.log(
+        'Remaining repeatable notification-processing jobs:',
+        remaining.map((j) => ({ name: j.name, pattern: j.pattern, key: j.key }))
+      )
+    }
+  } catch (e) {
+    console.warn('Failed to clean up repeatable notification jobs (continuing):', e)
+  }
+
+  // Add repeatable job to check notification schedules on the hour
   await notificationQueue.add(
     'process-notifications',
     {},
     {
       repeat: {
-        pattern: '* * * * *',
+        pattern: '0 * * * *',
       },
       jobId: 'notification-processor',
+    }
+  )
+
+  // Add repeatable daily job to auto-close approved projects (if enabled)
+  await notificationQueue.add(
+    'auto-close-approved-projects',
+    {},
+    {
+      repeat: {
+        pattern: '5 0 * * *',
+      },
+      jobId: 'auto-close-approved-projects',
     }
   )
 
   // Create worker to process notification jobs
   const notificationWorker = new Worker(
     'notification-processing',
-    async () => {
+    async (job) => {
+      if (job.name === 'auto-close-approved-projects') {
+        console.log('Running scheduled auto-close check...')
+        const result = await processAutoCloseApprovedProjects()
+        console.log(`Auto-close check completed (closed=${result.closedCount})`)
+        return
+      }
+
       console.log('Running scheduled notification check...')
 
       await Promise.all([
@@ -153,6 +224,26 @@ async function main() {
       ])
 
       console.log('Notification check completed')
+
+      // Fast retry: only schedule a retry when there are failures and remaining attempts.
+      // This keeps the normal cadence hourly, but recovers quickly from transient SMTP/DNS issues.
+      if (await hasRetriableNotificationFailures()) {
+        try {
+          await notificationQueue.add(
+            'process-notifications-retry',
+            {},
+            {
+              delay: NOTIFICATION_RETRY_DELAY_MS,
+              jobId: 'notification-processor-retry',
+              removeOnComplete: true,
+              removeOnFail: true,
+            }
+          )
+          console.log(`Scheduled notification retry in ${Math.round(NOTIFICATION_RETRY_DELAY_MS / 60000)} minutes`)
+        } catch {
+          // Ignore duplicate scheduling (retry job already queued)
+        }
+      }
     },
     {
       connection: getRedisForQueue(),
@@ -169,7 +260,8 @@ async function main() {
   })
 
   console.log('Notification worker started')
-  console.log('  → Checks every 1 minute for scheduled summaries')
+  console.log('  → Checks on the hour for scheduled summaries')
+  console.log('  → Retries every 2 minutes when sends fail (max 3 attempts)')
   console.log('  → IMMEDIATE notifications sent instantly (not in batches)')
 
   // Run cleanup on startup

@@ -103,8 +103,8 @@ export async function processClientNotifications() {
 
       // Filter out cancelled notifications
       const redis = getRedis()
-      const validNotifications = []
-      const cancelledNotificationIds = []
+      const validNotifications: typeof project.notificationQueue = []
+      const cancelledNotificationIds: string[] = []
 
       for (const notification of project.notificationQueue) {
         const commentId = (notification.data as any).commentId
@@ -195,6 +195,7 @@ export async function processClientNotifications() {
               : null
 
             const html = generateNotificationSummaryEmail({
+              companyName: emailSettings.companyName || 'ViTransfer',
               projectTitle: project.title,
               useFullTimecode: project.useFullTimecode,
               shareUrl,
@@ -206,7 +207,7 @@ export async function processClientNotifications() {
               trackingToken: trackingToken?.token,
               trackingPixelsEnabled,
               appDomain,
-               companyLogoUrl,
+              companyLogoUrl: companyLogoUrl || undefined,
             })
 
             const result = await sendEmail({

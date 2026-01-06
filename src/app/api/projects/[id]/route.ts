@@ -3,8 +3,10 @@ import { prisma } from '@/lib/db'
 import { deleteFile, deleteDirectory } from '@/lib/storage'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
-import { isSmtpConfigured } from '@/lib/email'
+import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib/session-invalidation'
+import { getProjectRecipients } from '@/lib/recipients'
+import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { z } from 'zod'
@@ -187,6 +189,19 @@ export async function PATCH(
       return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
     }
     const validatedBody = parsed.data
+
+    // Track status transitions so we can trigger side effects (e.g. sending approval email)
+    let previousStatus: string | null = null
+    if (validatedBody.status !== undefined) {
+      const current = await prisma.project.findUnique({
+        where: { id },
+        select: { status: true },
+      })
+      if (!current) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+      }
+      previousStatus = current.status
+    }
 
     // Build update data object
     const updateData: any = {}
@@ -436,6 +451,74 @@ export async function PATCH(
       where: { id },
       data: updateData,
     })
+
+    // When an admin manually marks a project APPROVED, send the Project Approved email immediately.
+    // (Client-driven approvals have their own notification path in /api/projects/[id]/approve.)
+    if (validatedBody.status === 'APPROVED' && previousStatus !== 'APPROVED') {
+      try {
+        const smtpConfigured = await isSmtpConfigured()
+        if (!smtpConfigured) {
+          console.log('[PROJECT UPDATE] SMTP not configured; skipping Project Approved email')
+        } else {
+          const allRecipients = await getProjectRecipients(project.id)
+          const recipients = allRecipients.filter((r) => r.receiveNotifications && r.email)
+
+          if (recipients.length === 0) {
+            console.log('[PROJECT UPDATE] No recipients opted in; skipping Project Approved email')
+          } else {
+            const shareUrl = await generateShareUrl(project.slug)
+            const approvedVideos = await prisma.video.findMany({
+              where: { projectId: project.id, approved: true },
+              select: { id: true, name: true },
+            })
+
+            const settings = await prisma.settings.findUnique({
+              where: { id: 'default' },
+              select: {
+                autoCloseApprovedProjectsEnabled: true,
+                autoCloseApprovedProjectsAfterDays: true,
+              },
+            })
+
+            let autoCloseInfo: { closeDate: Date; days: number } | null = null
+            if (settings?.autoCloseApprovedProjectsEnabled) {
+              const days = settings.autoCloseApprovedProjectsAfterDays
+              if (Number.isInteger(days) && days > 0) {
+                const base = project.approvedAt || new Date()
+                const closeDate = new Date(base)
+                closeDate.setDate(closeDate.getDate() + days)
+                autoCloseInfo = { closeDate, days }
+              }
+            }
+
+            console.log(`[PROJECT UPDATE] Sending Project Approved email to ${recipients.length} recipient(s)`) 
+
+            const results = await Promise.allSettled(
+              recipients.map((recipient) =>
+                sendProjectApprovedEmail({
+                  clientEmail: recipient.email!,
+                  clientName: recipient.name || 'Client',
+                  projectTitle: project.title,
+                  shareUrl,
+                  approvedVideos,
+                  isComplete: true,
+                  autoCloseInfo,
+                })
+              )
+            )
+
+            const failures = results.filter(
+              (r) => r.status === 'fulfilled' && r.value && (r.value as any).success === false
+            ).length
+            console.log(
+              `[PROJECT UPDATE] Project Approved emails attempted=${recipients.length} failures=${failures}`
+            )
+          }
+        }
+      } catch (error) {
+        console.error('[PROJECT UPDATE] Failed sending Project Approved email:', error)
+      }
+    }
 
     // SECURITY: After password, authMode, guestMode, or guestLatestOnly is updated in DB, invalidate ALL sessions for this project
     // This prevents clients from using old authentication/authorization even though security rules changed

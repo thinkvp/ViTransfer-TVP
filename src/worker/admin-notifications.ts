@@ -74,8 +74,8 @@ export async function processAdminNotifications() {
 
     // Filter out cancelled notifications
     const redis = getRedis()
-    const validNotifications = []
-    const cancelledNotificationIds = []
+    const validNotifications: typeof pendingNotifications = []
+    const cancelledNotificationIds: string[] = []
 
     for (const notification of pendingNotifications) {
       const commentId = (notification.data as any).commentId
@@ -163,9 +163,10 @@ export async function processAdminNotifications() {
 
         for (const admin of admins) {
           const html = generateAdminSummaryEmail({
+            companyName: emailSettings.companyName || 'ViTransfer',
             adminName: admin.name || '',
             period,
-            companyLogoUrl,
+            companyLogoUrl: companyLogoUrl || undefined,
             projects
           })
 

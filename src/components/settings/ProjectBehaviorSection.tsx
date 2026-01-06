@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
@@ -6,6 +7,10 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 interface ProjectBehaviorSectionProps {
   autoApproveProject: boolean
   setAutoApproveProject: (value: boolean) => void
+  autoCloseApprovedProjectsEnabled: boolean
+  setAutoCloseApprovedProjectsEnabled: (value: boolean) => void
+  autoCloseApprovedProjectsAfterDays: number | ''
+  setAutoCloseApprovedProjectsAfterDays: (value: number | '') => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -13,6 +18,10 @@ interface ProjectBehaviorSectionProps {
 export function ProjectBehaviorSection({
   autoApproveProject,
   setAutoApproveProject,
+  autoCloseApprovedProjectsEnabled,
+  setAutoCloseApprovedProjectsEnabled,
+  autoCloseApprovedProjectsAfterDays,
+  setAutoCloseApprovedProjectsAfterDays,
   show,
   setShow,
 }: ProjectBehaviorSectionProps) {
@@ -53,6 +62,52 @@ export function ProjectBehaviorSection({
                 id="autoApproveProject"
                 checked={autoApproveProject}
                 onCheckedChange={setAutoApproveProject}
+              />
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="autoCloseApprovedProjectsEnabled">Auto-close Approved projects</Label>
+                <p className="text-xs text-muted-foreground">
+                  The Project Approved email will warn recipients they have {typeof autoCloseApprovedProjectsAfterDays === 'number' ? autoCloseApprovedProjectsAfterDays : 7} days to download their video/s. Afterwards the project status will be set Closed and no longer be accessible on their Share link.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  id="autoCloseApprovedProjectsAfterDays"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={99}
+                  step={1}
+                  className="w-14"
+                  disabled={!autoCloseApprovedProjectsEnabled}
+                  value={autoCloseApprovedProjectsAfterDays}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    if (raw === '') {
+                      setAutoCloseApprovedProjectsAfterDays('')
+                      return
+                    }
+
+                    const num = parseInt(raw, 10)
+                    if (Number.isNaN(num)) return
+                    setAutoCloseApprovedProjectsAfterDays(Math.max(1, Math.min(99, num)))
+                  }}
+                  onBlur={() => {
+                    if (autoCloseApprovedProjectsAfterDays === '' || autoCloseApprovedProjectsAfterDays < 1) {
+                      setAutoCloseApprovedProjectsAfterDays(7)
+                    }
+                  }}
+                />
+                <span className="text-sm text-muted-foreground">days</span>
+              </div>
+
+              <Switch
+                id="autoCloseApprovedProjectsEnabled"
+                checked={autoCloseApprovedProjectsEnabled}
+                onCheckedChange={setAutoCloseApprovedProjectsEnabled}
               />
             </div>
           </div>

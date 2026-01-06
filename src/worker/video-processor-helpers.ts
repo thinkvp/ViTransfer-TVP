@@ -1,6 +1,7 @@
 import { prisma } from '../lib/db'
 import { downloadFile, uploadFile } from '../lib/storage'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite } from '../lib/ffmpeg'
+import type { VideoStatus } from '@prisma/client'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -112,8 +113,21 @@ export async function downloadAndValidateVideo(
   // Validate file content (magic bytes)
   debugLog('Validating magic bytes...')
 
-  const { fileTypeFromFile } = await import('file-type')
-  const fileType = await fileTypeFromFile(tempInputPath)
+  // Note: `file-type` exports a Node-only `fileTypeFromFile` under the `node` condition.
+  // During Next.js build/typecheck this can resolve to the default (core) export instead.
+  // Using the core API keeps it compatible across bundler conditions.
+  const { fileTypeFromBuffer } = await import('file-type/core')
+
+  const sampleSize = 4100
+  const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
+  const fileHandle = await fs.promises.open(tempInputPath, 'r')
+  try {
+    await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
+  } finally {
+    await fileHandle.close()
+  }
+
+  const fileType = await fileTypeFromBuffer(sampleBuffer)
   if (!fileType) {
     throw new Error('Could not determine file type from content')
   }
@@ -516,7 +530,7 @@ export async function finalizeVideo(
  */
 export async function updateVideoStatus(
   videoId: string,
-  status: string,
+  status: VideoStatus,
   progress: number
 ): Promise<void> {
   debugLog(`Updating video status to ${status}...`)

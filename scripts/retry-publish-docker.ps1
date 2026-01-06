@@ -19,6 +19,9 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
   Write-Host "`nPublish attempt $attempt/$MaxAttempts" -ForegroundColor Cyan
   try {
     powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-docker.ps1 -DockerHubUser $DockerHubUser -Version $Version
+    if ($LASTEXITCODE -ne 0) {
+      throw "publish-docker.ps1 failed (exit code $LASTEXITCODE)"
+    }
     Write-Host "Publish script completed." -ForegroundColor Green
     break
   } catch {

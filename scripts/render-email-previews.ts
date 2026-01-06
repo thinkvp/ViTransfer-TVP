@@ -149,6 +149,7 @@ async function main() {
 		outDir,
 		'09-notification-summary.html',
 		generateNotificationSummaryEmail({
+			companyName: branding.companyName,
 			projectTitle: 'Winter Campaign',
 			useFullTimecode: false,
 			shareUrl: 'http://localhost:3000/share/demo',
@@ -185,6 +186,7 @@ async function main() {
 		outDir,
 		'10-admin-summary.html',
 		generateAdminSummaryEmail({
+			companyName: branding.companyName,
 			adminName: 'Morgan',
 			period: '(last 24 hours)',
 			companyLogoUrl: branding.companyLogoUrl ?? undefined,

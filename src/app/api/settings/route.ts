@@ -108,10 +108,29 @@ export async function PATCH(request: NextRequest) {
       defaultAllowClientUploadFiles,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
+      autoCloseApprovedProjectsEnabled,
+      autoCloseApprovedProjectsAfterDays,
       adminNotificationSchedule,
       adminNotificationTime,
       adminNotificationDay,
     } = body
+
+    // SECURITY: Validate auto-close settings
+    if (autoCloseApprovedProjectsEnabled !== undefined && typeof autoCloseApprovedProjectsEnabled !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid value for autoCloseApprovedProjectsEnabled. Must be a boolean.' },
+        { status: 400 }
+      )
+    }
+
+    if (autoCloseApprovedProjectsAfterDays !== undefined && autoCloseApprovedProjectsAfterDays !== null) {
+      if (!Number.isInteger(autoCloseApprovedProjectsAfterDays) || autoCloseApprovedProjectsAfterDays < 1 || autoCloseApprovedProjectsAfterDays > 99) {
+        return NextResponse.json(
+          { error: 'Invalid value for autoCloseApprovedProjectsAfterDays. Must be an integer between 1 and 99.' },
+          { status: 400 }
+        )
+      }
+    }
 
     // SECURITY: Validate companyLogoMode
     if (companyLogoMode !== undefined && companyLogoMode !== null) {
@@ -291,6 +310,8 @@ export async function PATCH(request: NextRequest) {
       defaultAllowClientUploadFiles,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
+      autoCloseApprovedProjectsEnabled,
+      autoCloseApprovedProjectsAfterDays,
       adminNotificationSchedule,
       adminNotificationTime,
       adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
@@ -325,6 +346,8 @@ export async function PATCH(request: NextRequest) {
         defaultWatermarkText,
         defaultAllowClientDeleteComments,
         autoApproveProject,
+        autoCloseApprovedProjectsEnabled,
+        autoCloseApprovedProjectsAfterDays,
         adminNotificationSchedule: adminNotificationSchedule || 'IMMEDIATE',
         adminNotificationTime,
         adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,

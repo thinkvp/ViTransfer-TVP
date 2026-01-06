@@ -312,6 +312,10 @@ model Settings {
   // Project Behavior
   autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved
 
+  // Auto-close approved projects
+  autoCloseApprovedProjectsEnabled   Boolean @default(false)
+  autoCloseApprovedProjectsAfterDays Int     @default(7) // 1-99 days
+
   // Admin notification settings (global)
   // Note: Approval emails and manual admin notifications are always IMMEDIATE regardless of this setting
   adminNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, WEEKLY

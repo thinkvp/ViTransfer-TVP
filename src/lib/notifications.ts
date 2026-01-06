@@ -279,6 +279,30 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   if (recipients.length > 0 && isComplete && approved) {
     console.log(`[IMMEDIATE→CLIENT] Sending complete project approval to ${recipients.length} recipient(s)`)
 
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: {
+        autoCloseApprovedProjectsEnabled: true,
+        autoCloseApprovedProjectsAfterDays: true,
+      },
+    })
+
+    let autoCloseInfo: { closeDate: Date; days: number } | null = null
+    if (settings?.autoCloseApprovedProjectsEnabled) {
+      const days = settings.autoCloseApprovedProjectsAfterDays
+      if (Number.isInteger(days) && days > 0) {
+        const approvedAt = await prisma.project.findUnique({
+          where: { id: project.id },
+          select: { approvedAt: true },
+        })
+
+        const base = approvedAt?.approvedAt || new Date()
+        const closeDate = new Date(base)
+        closeDate.setDate(closeDate.getDate() + days)
+        autoCloseInfo = { closeDate, days }
+      }
+    }
+
     const emailPromises = recipients.map(recipient =>
       sendProjectApprovedEmail({
         clientEmail: recipient.email!,
@@ -287,6 +311,7 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
         approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),
         shareUrl,
         isComplete: true, // Only send when complete
+        autoCloseInfo,
       }).then(result => {
         if (result.success) {
           console.log(`[IMMEDIATE→CLIENT]   Sent to ${recipient.email}`)

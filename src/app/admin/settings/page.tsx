@@ -35,6 +35,8 @@ interface Settings {
   defaultAllowClientUploadFiles: boolean | null
   defaultMaxClientUploadAllocationMB: number | null
   autoApproveProject: boolean | null
+  autoCloseApprovedProjectsEnabled?: boolean | null
+  autoCloseApprovedProjectsAfterDays?: number | null
   adminNotificationSchedule: string | null
   adminNotificationTime: string | null
   adminNotificationDay: number | null
@@ -121,6 +123,9 @@ export default function GlobalSettingsPage() {
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
   const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
+
+  const [autoCloseApprovedProjectsEnabled, setAutoCloseApprovedProjectsEnabled] = useState(false)
+  const [autoCloseApprovedProjectsAfterDays, setAutoCloseApprovedProjectsAfterDays] = useState<number | ''>(7)
 
   // Form state for admin notification settings
   const [adminNotificationSchedule, setAdminNotificationSchedule] = useState('HOURLY')
@@ -224,6 +229,8 @@ export default function GlobalSettingsPage() {
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
         setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(data.autoApproveProject ?? true)
+        setAutoCloseApprovedProjectsEnabled(data.autoCloseApprovedProjectsEnabled ?? false)
+        setAutoCloseApprovedProjectsAfterDays(data.autoCloseApprovedProjectsAfterDays ?? 7)
         setTestEmailAddress(data.smtpFromAddress || '')
 
         // Set notification settings
@@ -421,6 +428,10 @@ export default function GlobalSettingsPage() {
           ? defaultMaxClientUploadAllocationMB
           : parseInt(String(defaultMaxClientUploadAllocationMB), 10) || 0,
         autoApproveProject: autoApproveProject,
+        autoCloseApprovedProjectsEnabled: autoCloseApprovedProjectsEnabled,
+        autoCloseApprovedProjectsAfterDays: typeof autoCloseApprovedProjectsAfterDays === 'number'
+          ? autoCloseApprovedProjectsAfterDays
+          : parseInt(String(autoCloseApprovedProjectsAfterDays), 10) || 7,
         adminNotificationSchedule: adminNotificationSchedule,
         adminNotificationTime: (adminNotificationSchedule === 'DAILY' || adminNotificationSchedule === 'WEEKLY') ? adminNotificationTime : null,
         adminNotificationDay: adminNotificationSchedule === 'WEEKLY' ? adminNotificationDay : null,
@@ -492,6 +503,8 @@ export default function GlobalSettingsPage() {
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
         setDefaultMaxClientUploadAllocationMB(refreshedData.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
+        setAutoCloseApprovedProjectsEnabled(refreshedData.autoCloseApprovedProjectsEnabled ?? false)
+        setAutoCloseApprovedProjectsAfterDays(refreshedData.autoCloseApprovedProjectsAfterDays ?? 7)
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
         setAdminNotificationDay(refreshedData.adminNotificationDay ?? 1)
@@ -714,6 +727,10 @@ export default function GlobalSettingsPage() {
           <ProjectBehaviorSection
             autoApproveProject={autoApproveProject}
             setAutoApproveProject={setAutoApproveProject}
+            autoCloseApprovedProjectsEnabled={autoCloseApprovedProjectsEnabled}
+            setAutoCloseApprovedProjectsEnabled={setAutoCloseApprovedProjectsEnabled}
+            autoCloseApprovedProjectsAfterDays={autoCloseApprovedProjectsAfterDays}
+            setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
             show={showProjectBehavior}
             setShow={setShowProjectBehavior}
           />

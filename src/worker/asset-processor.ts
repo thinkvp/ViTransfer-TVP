@@ -55,8 +55,21 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
       console.log('[WORKER DEBUG] Validating asset magic bytes...')
     }
 
-    const { fileTypeFromFile } = await import('file-type')
-    const fileType = await fileTypeFromFile(tempFilePath)
+    // Note: `file-type` exports a Node-only `fileTypeFromFile` under the `node` condition.
+    // During Next.js build/typecheck this can resolve to the default (core) export instead.
+    // Using the core API keeps it compatible across bundler conditions.
+    const { fileTypeFromBuffer } = await import('file-type/core')
+
+    const sampleSize = 4100
+    const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
+    const fileHandle = await fs.promises.open(tempFilePath, 'r')
+    try {
+      await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
+    } finally {
+      await fileHandle.close()
+    }
+
+    const fileType = await fileTypeFromBuffer(sampleBuffer)
 
     if (!fileType) {
       // Some files (like .prproj, .txt) don't have magic bytes

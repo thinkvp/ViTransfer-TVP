@@ -25,6 +25,7 @@ interface NotificationData {
 }
 
 interface NotificationSummaryData {
+  companyName: string
   projectTitle: string
   useFullTimecode: boolean
   shareUrl: string
@@ -40,6 +41,7 @@ interface NotificationSummaryData {
 }
 
 interface AdminSummaryData {
+  companyName: string
   adminName: string
   period: string
   companyLogoUrl?: string
@@ -121,7 +123,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
   `
 
   return renderEmailShell({
-    companyName: 'Project Updates',
+    companyName: data.companyName,
     companyLogoUrl: data.companyLogoUrl,
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Project Update',
@@ -129,7 +131,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     trackingToken: data.trackingToken,
     trackingPixelsEnabled: data.trackingPixelsEnabled,
     appDomain: data.appDomain,
-    footerNote: 'Project Updates',
+    footerNote: data.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
         Hi <strong>${escapeHtml(greeting)}</strong>,
@@ -190,12 +192,12 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
   const adminUrl = data.projects[0]?.shareUrl ? escapeHtml(data.projects[0].shareUrl.replace(/\/share\/[^/]+/, '/admin/projects')) : '#'
 
   return renderEmailShell({
-    companyName: 'Admin Dashboard',
+    companyName: data.companyName,
     companyLogoUrl: data.companyLogoUrl,
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Client Activity Summary',
     subtitle: `${totalComments} ${totalComments === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
-    footerNote: 'Admin Notifications',
+    footerNote: data.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
         Hi <strong>${escapeHtml(greeting)}</strong>,
