@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
     // Test email connection and send test email with provided config or saved config
     const result = await testEmailConnection(testEmail, smtpConfig)
 
-    return NextResponse.json(result)
+    const response = NextResponse.json(result)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error: any) {
     let errorMessage = 'Failed to send test email'
 

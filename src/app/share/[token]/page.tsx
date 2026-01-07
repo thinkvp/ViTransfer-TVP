@@ -78,15 +78,16 @@ export default function SharePage() {
 
 
   // Fetch comments separately for security
-  const fetchComments = useCallback(async () => {
-    if (!token || !shareToken) return
+  const fetchComments = useCallback(async (tokenOverride?: string | null) => {
+    const authToken = tokenOverride || shareToken
+    if (!token || !authToken) return
 
     setCommentsLoading(true)
     try {
       const response = await fetch(`/api/share/${token}/comments`, {
         cache: 'no-store',
         headers: {
-          Authorization: `Bearer ${shareToken}`
+          Authorization: `Bearer ${authToken}`
         }
       })
       if (response.ok) {
@@ -193,7 +194,7 @@ export default function SharePage() {
 
         // Fetch comments after project loads (if not hidden)
         if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
-          fetchComments()
+          fetchComments(projectData.shareToken || tokenOverride)
         }
       }
     } catch (error) {
@@ -302,7 +303,7 @@ export default function SharePage() {
             }
 
             if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
-              fetchComments()
+              fetchComments(projectData.shareToken)
             }
           }
         }

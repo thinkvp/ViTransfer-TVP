@@ -90,7 +90,7 @@ export async function POST(
     // Handle archive errors
     archive.on('error', (err) => {
       console.error('Archive error:', err)
-      throw err
+      archive.destroy(err)
     })
 
     // Add files to archive
@@ -120,6 +120,8 @@ export async function POST(
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${zipFilename}"`,
+        'Cache-Control': 'private, no-cache',
+        'X-Content-Type-Options': 'nosniff',
       },
     })
   } catch (error) {

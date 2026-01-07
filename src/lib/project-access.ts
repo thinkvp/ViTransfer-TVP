@@ -21,7 +21,8 @@ export async function verifyProjectAccess(
   request: NextRequest,
   projectId: string,
   sharePassword: string | null,
-  authMode: string = 'PASSWORD'
+  authMode: string = 'PASSWORD',
+  options?: { allowAnonymousNone?: boolean }
 ): Promise<{
   authorized: boolean
   isAdmin: boolean
@@ -75,13 +76,15 @@ export async function verifyProjectAccess(
     }
   }
 
-  const isUnauthenticated = authMode === 'NONE'
-  if (isUnauthenticated) {
+  const isNoneAuthMode = authMode === 'NONE'
+  if (isNoneAuthMode && !shareContext && options?.allowAnonymousNone) {
+    // "NONE" means no password/OTP barrier, but we still prefer a signed share token
+    // for subsequent API calls (revocation/auditing/consistent gating).
     return {
       authorized: true,
       isAdmin: false,
-      isAuthenticated: true,
-      isGuest: false
+      isAuthenticated: false,
+      isGuest: false,
     }
   }
 

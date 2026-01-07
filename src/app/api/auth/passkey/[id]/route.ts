@@ -41,7 +41,10 @@ export async function DELETE(
       )
     }
 
-    return NextResponse.json({ success: true })
+    const response = NextResponse.json({ success: true })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Delete error:', error)
 
@@ -106,7 +109,10 @@ export async function PATCH(
       )
     }
 
-    return NextResponse.json({ success: true })
+    const response = NextResponse.json({ success: true })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Update name error:', error)
 

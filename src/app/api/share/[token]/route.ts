@@ -80,16 +80,39 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
-    const accessCheck = await verifyProjectAccess(request, projectMeta.id, projectMeta.sharePassword, projectMeta.authMode)
+    const accessCheck = await verifyProjectAccess(
+      request,
+      projectMeta.id,
+      projectMeta.sharePassword,
+      projectMeta.authMode,
+      { allowAnonymousNone: true }
+    )
 
     if (!accessCheck.authorized) {
-      if (accessCheck.errorResponse) return accessCheck.errorResponse
-      return NextResponse.json({
-        error: 'Authentication required',
-        requiresPassword: true,
-        authMode: project.authMode || 'PASSWORD',
-        guestMode: project.guestMode || false
-      }, { status: 401 })
+      // IMPORTANT: verifyProjectAccess() returns a 401 errorResponse without guestMode.
+      // The share page UI needs guestMode on 401 to show the guest entry option.
+      if (accessCheck.errorResponse?.status === 403) {
+        const response = accessCheck.errorResponse
+        response.headers.set('Cache-Control', 'no-store')
+        response.headers.set('Pragma', 'no-cache')
+        return response
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Authentication required',
+          requiresPassword: true,
+          authMode: projectMeta.authMode || 'PASSWORD',
+          guestMode: projectMeta.guestMode || false,
+        },
+        {
+          status: 401,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Pragma': 'no-cache',
+          },
+        }
+      )
     }
 
     const { isAdmin } = accessCheck
@@ -314,7 +337,10 @@ export async function GET(
       responseBody.shareToken = shareToken
     }
 
-    return NextResponse.json(responseBody)
+    const response = NextResponse.json(responseBody)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json({
       error: 'Unable to process request'

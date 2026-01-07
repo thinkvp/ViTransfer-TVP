@@ -41,7 +41,10 @@ export async function GET(request: NextRequest) {
     // Get passkey configuration status
     const status = await getPasskeyConfigStatus()
 
-    return NextResponse.json(status)
+    const response = NextResponse.json(status)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Status check error:', error)
 

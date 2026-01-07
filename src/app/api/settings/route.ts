@@ -64,11 +64,14 @@ export async function GET(request: NextRequest) {
     // Check SMTP configuration status (reuse centralized helper)
     const smtpConfigured = await isSmtpConfigured()
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ...decryptedSettings,
       security: securitySettings,
       smtpConfigured,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching settings:', error)
     return NextResponse.json(
@@ -363,7 +366,10 @@ export async function PATCH(request: NextRequest) {
       smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
     }
 
-    return NextResponse.json(decryptedSettings)
+    const response = NextResponse.json(decryptedSettings)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error updating settings:', error)
     return NextResponse.json(

@@ -84,7 +84,10 @@ export async function POST(
       })
     }
 
-    return NextResponse.json({ success: true, shareToken })
+    const response = NextResponse.json({ success: true, shareToken })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json(
       { error: 'Unable to process request' },

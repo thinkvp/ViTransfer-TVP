@@ -3,6 +3,7 @@ import { buildCompanyLogoUrl, getEmailSettings, sendEmail } from '../lib/email'
 import { generateAdminSummaryEmail } from '../lib/email-templates'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
+import { redactEmailForLogs } from '../lib/log-sanitization'
 import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
 
 /**
@@ -177,9 +178,9 @@ export async function processAdminNotifications() {
           })
 
           if (result.success) {
-            console.log(`[ADMIN]   Sent to ${admin.email}`)
+            console.log(`[ADMIN]   Sent to ${redactEmailForLogs(admin.email)}`)
           } else {
-            throw new Error(`Failed to send to ${admin.email}: ${result.error}`)
+            throw new Error(`Failed to send to ${redactEmailForLogs(admin.email)}: ${result.error}`)
           }
         }
       }

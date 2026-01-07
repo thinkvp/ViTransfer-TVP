@@ -62,7 +62,10 @@ export async function GET(
       sessionId
     )
 
-    return NextResponse.json({ token: tokenValue })
+    const response = NextResponse.json({ token: tokenValue })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[SHARE] Failed to generate video token', { videoId, quality, error })
     return NextResponse.json({ error: 'Failed to generate token' }, { status: 500 })

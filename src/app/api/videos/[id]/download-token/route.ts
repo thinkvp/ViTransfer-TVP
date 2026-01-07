@@ -57,9 +57,12 @@ export async function POST(
     )
 
     // Return download URL (uses /api/content endpoint with download flag)
-    return NextResponse.json({
+    const response = NextResponse.json({
       url: `/api/content/${token}?download=true`,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Download token generation error:', error)
     return NextResponse.json(

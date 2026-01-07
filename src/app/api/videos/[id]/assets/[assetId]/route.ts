@@ -8,6 +8,14 @@ import { createReadStream } from 'fs'
 import fs from 'fs'
 export const runtime = 'nodejs'
 
+function isValidMimeType(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 255) return false
+  // Basic type/subtype check; disallow parameters and obviously invalid placeholders.
+  return /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(trimmed)
+}
+
 
 
 
@@ -75,6 +83,10 @@ export async function GET(
 
     const sanitizedFilename = sanitizeFilenameForHeader(asset.fileName)
 
+    const contentType = isValidMimeType(asset.fileType)
+      ? asset.fileType
+      : 'application/octet-stream'
+
     // Stream file with proper Node.js to Web API stream conversion
     const fileStream = createReadStream(fullPath)
 
@@ -92,7 +104,7 @@ export async function GET(
 
     return new NextResponse(readableStream, {
       headers: {
-        'Content-Type': asset.fileType,
+        'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${sanitizedFilename}"`,
         'Content-Length': stat.size.toString(),
         'X-Content-Type-Options': 'nosniff',

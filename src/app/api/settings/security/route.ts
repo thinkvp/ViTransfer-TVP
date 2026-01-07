@@ -69,7 +69,10 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return NextResponse.json(settings)
+    const response = NextResponse.json(settings)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching security settings:', error)
     return NextResponse.json(
@@ -228,10 +231,13 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Return settings with invalidation summary
-    return NextResponse.json({
+    const response = NextResponse.json({
       ...settings,
       _invalidation: invalidationLog.length > 0 ? invalidationLog : undefined
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error updating security settings:', error)
     return NextResponse.json(

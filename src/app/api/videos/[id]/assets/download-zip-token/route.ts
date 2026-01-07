@@ -110,9 +110,12 @@ export async function POST(
     )
 
     // Return download URL
-    return NextResponse.json({
+    const response = NextResponse.json({
       url: `/api/content/zip/${token}`,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('ZIP download token generation error:', error)
     return NextResponse.json(

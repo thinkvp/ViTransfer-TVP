@@ -35,9 +35,9 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json()
-    const response = body as RegistrationResponseJSON
+    const registrationResponse = body as RegistrationResponseJSON
 
-    if (!response || !response.id) {
+    if (!registrationResponse || !registrationResponse.id) {
       return NextResponse.json(
         { success: false, error: 'Invalid registration response' },
         { status: 400 }
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     // Verify registration
     const result = await verifyPasskeyRegistration(
       user,
-      response,
+      registrationResponse,
       userAgent,
       ipAddress
     )
@@ -63,10 +63,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       credentialId: result.credentialId,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Registration verification error:', error)
 

@@ -34,7 +34,11 @@ export function verifyUnsubscribe(projectId: string, recipientId: string, signat
 
 export function buildUnsubscribeUrl(baseUrl: string, projectId: string, recipientId: string): string {
   const sig = signUnsubscribe(projectId, recipientId)
-  const url = new URL('/unsubscribe', baseUrl)
+  const parsedBase = new URL(baseUrl)
+  if (parsedBase.protocol !== 'http:' && parsedBase.protocol !== 'https:') {
+    throw new Error('Unsubscribe baseUrl must be http(s)')
+  }
+  const url = new URL('/unsubscribe', parsedBase.origin)
   url.searchParams.set('projectId', projectId)
   url.searchParams.set('recipientId', recipientId)
   url.searchParams.set('sig', sig)

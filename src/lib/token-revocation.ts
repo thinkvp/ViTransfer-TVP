@@ -14,6 +14,8 @@
 
 import { getRedis } from './redis'
 
+const REFRESH_TOKEN_TTL_SECONDS = Number(process.env.ADMIN_REFRESH_TTL_SECONDS || 7 * 24 * 60 * 60)
+
 /**
  * Revoke a JWT token by adding it to the blacklist
  * 
@@ -96,8 +98,8 @@ export async function revokeAllUserTokens(userId: string): Promise<void> {
   // Store a flag that user's session is invalidated
   // This can be checked before validating any token
   const key = `blacklist:user:${userId}`
-  // Set for 3 days (max refresh token lifetime)
-  await redis.setex(key, 3 * 24 * 60 * 60, Date.now().toString())
+  // Set for at least the maximum refresh token lifetime
+  await redis.setex(key, REFRESH_TOKEN_TTL_SECONDS, Date.now().toString())
 }
 
 /**

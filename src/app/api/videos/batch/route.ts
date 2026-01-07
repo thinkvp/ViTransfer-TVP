@@ -56,10 +56,13 @@ export async function PATCH(request: NextRequest) {
       data: { name: name.trim() }
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       updated: result.count
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error batch updating videos:', error)
     return NextResponse.json(

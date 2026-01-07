@@ -2,6 +2,36 @@ import { z } from 'zod'
 import DOMPurify from 'isomorphic-dompurify'
 import { isValidTimecode } from '@/lib/timecode'
 
+let domPurifyConfigured = false
+
+function configureDomPurifyOnce() {
+  if (domPurifyConfigured) return
+  domPurifyConfigured = true
+
+  DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
+    if (!node || node.tagName !== 'A') return
+
+    const href = (node.getAttribute?.('href') || '').toString()
+    const target = (node.getAttribute?.('target') || '').toString()
+
+    const isInternal = href.startsWith('/') || href.startsWith('#')
+    const isHttpLink = href.startsWith('http://') || href.startsWith('https://')
+
+    if (isHttpLink && !isInternal) {
+      node.setAttribute?.('target', '_blank')
+      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
+      return
+    }
+
+    if (target === '_blank') {
+      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
+    } else {
+      node.removeAttribute?.('target')
+      node.removeAttribute?.('rel')
+    }
+  })
+}
+
 /**
  * Input Validation Schemas
  * Comprehensive validation for all user inputs
@@ -56,11 +86,12 @@ export const contentSchema = z
   .max(10000, 'Content must not exceed 10,000 characters')
   .trim()
   .transform(content => {
+    configureDomPurifyOnce()
     // Sanitize HTML to prevent XSS attacks
     // Allow only safe formatting tags
     return DOMPurify.sanitize(content, {
       ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a', 'p', 'br', 'ul', 'ol', 'li'],
-      ALLOWED_ATTR: ['href', 'target'],
+      ALLOWED_ATTR: ['href', 'target', 'rel'],
       ALLOW_DATA_ATTR: false,
       ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i
     })

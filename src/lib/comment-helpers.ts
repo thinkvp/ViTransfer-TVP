@@ -158,6 +158,27 @@ export async function backfillCommentDisplayColorSnapshots(projectId: string): P
   }
 }
 
+export async function maybeRunLegacyCommentBackfills(projectId: string): Promise<void> {
+  // Legacy cleanup/backfill is useful but potentially expensive.
+  // Gate it per-project so we don't do DB write work on every GET /comments.
+  let shouldRun = true
+
+  try {
+    const redis = getRedis()
+    const lockKey = `comment_backfill:v1:${projectId}`
+    const acquired = await redis.set(lockKey, '1', 'EX', 60 * 60 * 24 * 7, 'NX')
+    shouldRun = acquired === 'OK'
+  } catch {
+    // If Redis is unavailable, fall back to current behavior (best-effort).
+    shouldRun = true
+  }
+
+  if (!shouldRun) return
+
+  await backfillCommentRecipientIdsByAuthorName(projectId)
+  await backfillCommentDisplayColorSnapshots(projectId)
+}
+
 /**
  * Validate comment permissions
  * Checks if user can create comments based on project settings

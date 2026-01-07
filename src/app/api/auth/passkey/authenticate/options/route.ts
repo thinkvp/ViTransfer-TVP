@@ -64,10 +64,13 @@ export async function POST(request: NextRequest) {
     // Generate authentication options
     const { options, sessionId } = await generatePasskeyAuthenticationOptions(email)
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       options,
       sessionId, // Return sessionId for usernameless auth
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Authentication options error:', error)
 

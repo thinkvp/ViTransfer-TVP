@@ -98,9 +98,28 @@ export function useAssetUploadQueue({
     return refreshInFlightRef.current
   }, [])
 
+  const generateUploadId = useCallback((): string => {
+    const cryptoObj: Crypto | undefined = (globalThis as any).crypto
+    if (cryptoObj?.randomUUID) {
+      return `upload-${Date.now()}-${cryptoObj.randomUUID()}`
+    }
+
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint8Array(16)
+      cryptoObj.getRandomValues(bytes)
+      const hex = Array.from(bytes)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+      return `upload-${Date.now()}-${hex}`
+    }
+
+    // Fallback: non-crypto randomness (should be rare)
+    return `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }, [])
+
   // Add file to queue
   const addToQueue = useCallback((file: File, category: string): string => {
-    const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const uploadId = generateUploadId()
 
     const newUpload: QueuedUpload = {
       id: uploadId,
@@ -121,7 +140,7 @@ export function useAssetUploadQueue({
     setQueue(prev => [...prev, newUpload])
 
     return uploadId
-  }, [videoId])
+  }, [generateUploadId, videoId])
 
   // Start an upload
   const startUpload = useCallback(async (uploadId: string) => {

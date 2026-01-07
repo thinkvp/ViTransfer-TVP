@@ -111,9 +111,12 @@ export async function POST(request: NextRequest) {
     })
 
     // Return videoId - TUS will handle upload directly
-    return NextResponse.json({
+    const response = NextResponse.json({
       videoId: video.id,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error creating video:', error)
     return NextResponse.json({ error: 'Failed to create video' }, { status: 500 })

@@ -8,6 +8,7 @@ import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
 import { createHash } from 'crypto'
+import { redactEmailForLogs } from '../lib/log-sanitization'
 
 /**
  * Process client notification summaries
@@ -156,9 +157,19 @@ export async function processClientNotifications() {
 
           const emailSettings = await getEmailSettings()
           const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
-          const appDomain = emailSettings.appDomain || new URL(shareUrl).origin
+          let appDomain = new URL(shareUrl).origin
+          if (emailSettings.appDomain) {
+            try {
+              const parsed = new URL(emailSettings.appDomain)
+              if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                appDomain = parsed.origin
+              }
+            } catch {
+              // Fallback to shareUrl origin
+            }
+          }
           const companyLogoUrl = buildCompanyLogoUrl({
-            appDomain: emailSettings.appDomain || appDomain,
+            appDomain,
             companyLogoMode: emailSettings.companyLogoMode,
             companyLogoPath: emailSettings.companyLogoPath,
             companyLogoUrl: emailSettings.companyLogoUrl,
@@ -218,9 +229,13 @@ export async function processClientNotifications() {
 
             if (result.success) {
               successfulRecipientEmails.push(recipient.email!)
-              console.log(`[CLIENT]     Sent to ${recipient.name || recipient.email}`)
+              console.log(
+                `[CLIENT]     Sent to ${recipient.name || redactEmailForLogs(recipient.email)}`
+              )
             } else {
-              throw new Error(`Failed to send to ${recipient.email}: ${result.error}`)
+              throw new Error(
+                `Failed to send to ${redactEmailForLogs(recipient.email)}: ${result.error}`
+              )
             }
           }
 

@@ -13,8 +13,7 @@ import {
   sanitizeAndValidateContent,
   handleCommentNotifications,
   fetchProjectComments,
-  backfillCommentRecipientIdsByAuthorName,
-  backfillCommentDisplayColorSnapshots,
+  maybeRunLegacyCommentBackfills,
   resolveCommentDisplayColorSnapshot
 
 } from '@/lib/comment-helpers'
@@ -23,6 +22,11 @@ export const runtime = 'nodejs'
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
+
+const noStoreHeaders = {
+  'Cache-Control': 'no-store',
+  Pragma: 'no-cache',
+} as const
 
 /**
  * GET /api/comments?projectId=xxx
@@ -47,7 +51,7 @@ export async function GET(request: NextRequest) {
     if (!projectId) {
       return NextResponse.json(
         { error: 'Project ID is required' },
-        { status: 400 }
+        { status: 400, headers: noStoreHeaders }
       )
     }
 
@@ -68,13 +72,13 @@ export async function GET(request: NextRequest) {
     if (!project) {
       return NextResponse.json(
         { error: 'Access denied' },
-        { status: 403 }
+        { status: 403, headers: noStoreHeaders }
       )
     }
 
     // SECURITY: If feedback is hidden (or Share Only mode), return empty array (don't expose comments)
     if (project.hideFeedback || project.status === 'SHARE_ONLY') {
-      return NextResponse.json([])
+      return NextResponse.json([], { headers: noStoreHeaders })
     }
 
     // Verify project access using dual auth pattern
@@ -87,7 +91,7 @@ export async function GET(request: NextRequest) {
     const { isAdmin, isAuthenticated, isGuest } = accessCheck
 
     if (project.guestMode && isGuest) {
-      return NextResponse.json([])
+      return NextResponse.json([], { headers: noStoreHeaders })
     }
 
     // Get primary recipient for author name fallback
@@ -96,8 +100,7 @@ export async function GET(request: NextRequest) {
     const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
 
     // Best-effort legacy backfill: link older client comments to a recipient by authorName.
-    await backfillCommentRecipientIdsByAuthorName(projectId)
-    await backfillCommentDisplayColorSnapshots(projectId)
+    await maybeRunLegacyCommentBackfills(projectId)
 
     // Fetch all comments for the project
     const allComments = await prisma.comment.findMany({
@@ -173,9 +176,12 @@ export async function GET(request: NextRequest) {
       )
     )
 
-    return NextResponse.json(sanitizedComments)
+    return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })
   } catch (error) {
-    return NextResponse.json({ error: 'Operation failed' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Operation failed' },
+      { status: 500, headers: noStoreHeaders }
+    )
   }
 }
 
@@ -201,7 +207,7 @@ export async function POST(request: NextRequest) {
     if (!validation.success) {
       return NextResponse.json(
         { error: validation.error, details: validation.details },
-        { status: 400 }
+        { status: 400, headers: noStoreHeaders }
       )
     }
 
@@ -231,7 +237,7 @@ export async function POST(request: NextRequest) {
     if (!permissionCheck.valid) {
       return NextResponse.json(
         { error: permissionCheck.error },
-        { status: permissionCheck.errorStatus || 403 }
+        { status: permissionCheck.errorStatus || 403, headers: noStoreHeaders }
       )
     }
 
@@ -248,7 +254,7 @@ export async function POST(request: NextRequest) {
     if (!project) {
       return NextResponse.json(
         { error: 'Access denied' },
-        { status: 403 }
+        { status: 403, headers: noStoreHeaders }
       )
     }
 
@@ -258,7 +264,7 @@ export async function POST(request: NextRequest) {
     if (!accessCheck.authorized) {
       return NextResponse.json(
         { error: 'Unable to process request' },
-        { status: 400 }
+        { status: 400, headers: noStoreHeaders }
       )
     }
 
@@ -280,7 +286,7 @@ export async function POST(request: NextRequest) {
     if (!contentValidation.valid) {
       return NextResponse.json(
         { error: contentValidation.error },
-        { status: contentValidation.errorStatus || 400 }
+        { status: contentValidation.errorStatus || 400, headers: noStoreHeaders }
       )
     }
 
@@ -375,8 +381,11 @@ export async function POST(request: NextRequest) {
       sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName)
     )
 
-    return NextResponse.json(sanitizedComments)
+    return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })
   } catch (error) {
-    return NextResponse.json({ error: 'Operation failed' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Operation failed' },
+      { status: 500, headers: noStoreHeaders }
+    )
   }
 }

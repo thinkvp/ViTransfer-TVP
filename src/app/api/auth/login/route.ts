@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Return user data (without password)
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id: user.id,
@@ -161,6 +161,9 @@ export async function POST(request: NextRequest) {
         refreshExpiresAt: tokens.refreshExpiresAt,
       },
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json(
       { error: 'An error occurred during login' },

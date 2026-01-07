@@ -48,7 +48,7 @@ interface SharePayload extends jwt.JwtPayload {
 
 const ADMIN_ACCESS_SECRET = process.env.JWT_SECRET
 const ADMIN_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET
-const SHARE_TOKEN_SECRET = process.env.SHARE_TOKEN_SECRET || ADMIN_ACCESS_SECRET
+const SHARE_TOKEN_SECRET = process.env.SHARE_TOKEN_SECRET
 
 const ACCESS_TOKEN_DURATION = Number(process.env.ADMIN_ACCESS_TTL_SECONDS || 15 * 60) // 15 minutes
 const REFRESH_TOKEN_DURATION = Number(process.env.ADMIN_REFRESH_TTL_SECONDS || 7 * 24 * 60 * 60) // 7 days
@@ -399,18 +399,46 @@ function remainingTtl(token: string, secret: string | undefined | null): number 
     return fallbackTtl
   }
 
-  const decoded = jwt.decode(token) as jwt.JwtPayload | null
-  if (!decoded?.exp) {
+  // Do not trust jwt.decode() here: an attacker can craft an arbitrary `exp`
+  // that would cause long-lived revocation keys in Redis.
+  // Verify signature (ignoring expiration) so `exp` can be trusted.
+  let decoded: jwt.JwtPayload | null = null
+  try {
+    decoded = jwt.verify(token, secret, {
+      algorithms: ['HS256'],
+      ignoreExpiration: true,
+    }) as jwt.JwtPayload
+  } catch {
+    return fallbackTtl
+  }
+
+  if (!decoded?.exp || typeof decoded.exp !== 'number') {
     console.warn('[AUTH] Token missing exp claim while computing remaining TTL')
     return fallbackTtl
   }
 
   const now = Math.floor(Date.now() / 1000)
-  const ttl = decoded.exp - now
+  let ttl = decoded.exp - now
   if (ttl <= 0) {
     return 0
   }
 
+  // Clamp TTL to configured max for the secret type.
+  // This prevents Redis bloat even if something upstream issues a token with an unusually long exp.
+  const maxTtl =
+    secret === ADMIN_ACCESS_SECRET
+      ? ACCESS_TOKEN_DURATION
+      : secret === ADMIN_REFRESH_SECRET
+        ? REFRESH_TOKEN_DURATION
+        : secret === SHARE_TOKEN_SECRET
+          ? SHARE_TOKEN_DURATION
+          : fallbackTtl
+
+  if (!Number.isFinite(maxTtl) || maxTtl <= 0) {
+    return Math.min(ttl, fallbackTtl)
+  }
+
+  ttl = Math.min(ttl, maxTtl)
   return ttl
 }
 

@@ -42,6 +42,18 @@ interface VideoAccessToken {
   createdAt: number
 }
 
+function normalizeHostHeader(hostHeader: string | null): string | null {
+  if (!hostHeader) return null
+  // Strip port if present.
+  return hostHeader.split(':')[0].trim().toLowerCase() || null
+}
+
+function isSameSiteReferer(refererHost: string, requestHost: string): boolean {
+  const rh = refererHost.toLowerCase()
+  const h = requestHost.toLowerCase()
+  return rh === h || rh.endsWith(`.${h}`) || h.endsWith(`.${rh}`)
+}
+
 /**
  * Generate a time-limited video access token with session binding
  * Tokens are cached per session to prevent token proliferation
@@ -164,6 +176,26 @@ export async function verifyVideoAccessToken(
 
       return null
     }
+
+    // Optional defense-in-depth: token is bound to the original request IP.
+    // Only enforce in BLOCK_STRICT mode to avoid breaking legitimate sessions on IP churn.
+    const requestIp = getClientIpAddress(request)
+    if (tokenData.ipAddress && requestIp && tokenData.ipAddress !== requestIp) {
+      await logSecurityEvent({
+        type: 'TOKEN_IP_MISMATCH',
+        severity: 'WARNING',
+        projectId: tokenData.projectId,
+        videoId: tokenData.videoId,
+        sessionId,
+        ipAddress: requestIp,
+        details: { expectedIp: tokenData.ipAddress }
+      })
+
+      const settings = await getSecuritySettings()
+      if (settings.hotlinkProtection === 'BLOCK_STRICT') {
+        return null
+      }
+    }
   }
 
   tokenVerificationCache.set(cacheKey, {
@@ -196,16 +228,21 @@ export async function detectHotlinking(
   projectId: string
 ): Promise<{ isHotlinking: boolean; reason?: string; severity?: string }> {
   const redis = getRedis()
+
+  const settings = await getSecuritySettings()
+  if (settings.hotlinkProtection === 'DISABLED') {
+    return { isHotlinking: false }
+  }
   
   const referer = request.headers.get('referer') || request.headers.get('origin')
-  const host = request.headers.get('host')
+  const host = normalizeHostHeader(request.headers.get('host'))
 
   if (referer && host) {
     try {
       const refererUrl = new URL(referer)
       const refererHost = refererUrl.hostname
 
-      if (host && !refererHost.includes(host) && !host.includes(refererHost)) {
+      if (refererHost && !isSameSiteReferer(refererHost, host)) {
         const blockedDomains = await getBlockedDomains()
         if (blockedDomains.some(domain => refererHost.includes(domain))) {
           return {
@@ -232,7 +269,9 @@ export async function detectHotlinking(
           severity: 'WARNING'
         }
       }
-    } catch (error) {}
+    } catch (error) {
+      // Ignore malformed/absent referer values; other checks still apply.
+    }
   }
 
   const freqKey = `video_freq:${sessionId}:${videoId}`
@@ -376,10 +415,15 @@ export async function getSecuritySettings() {
   const cached = await redis.get(REDIS_KEY)
 
   if (cached) {
-    const parsed = JSON.parse(cached)
-    securitySettingsCache.value = parsed
-    securitySettingsCache.expiresAt = now + SECURITY_SETTINGS_CACHE_TTL_MS
-    return parsed
+    try {
+      const parsed = JSON.parse(cached)
+      securitySettingsCache.value = parsed
+      securitySettingsCache.expiresAt = now + SECURITY_SETTINGS_CACHE_TTL_MS
+      return parsed
+    } catch (error) {
+      console.error('[SECURITY_SETTINGS] Failed to parse cached settings, ignoring cache:', error)
+      await redis.del(REDIS_KEY).catch(() => {})
+    }
   }
 
   // Fetch from database (slowest, only when both caches miss)
@@ -408,7 +452,10 @@ export async function getSecuritySettings() {
   securitySettingsCache.expiresAt = now + SECURITY_SETTINGS_CACHE_TTL_MS
   securitySettingsCache.version = settings?.updatedAt?.toISOString()
 
-  await redis.setex(REDIS_KEY, 300, JSON.stringify(value)) // 5 min Redis cache
+  // Cache in Redis (best-effort)
+  await redis.setex(REDIS_KEY, 300, JSON.stringify(value)).catch((error) => {
+    console.error('[SECURITY_SETTINGS] Failed to cache in Redis:', error)
+  })
 
   return value
 }
@@ -442,7 +489,9 @@ async function getBlockedIPs(): Promise<string[]> {
   const ipList = blockedIPs.map(entry => entry.ipAddress)
 
   // Cache in Redis
-  await redis.setex(BLOCKLIST_CACHE_KEY_IPS, BLOCKLIST_CACHE_TTL, JSON.stringify(ipList))
+  await redis.setex(BLOCKLIST_CACHE_KEY_IPS, BLOCKLIST_CACHE_TTL, JSON.stringify(ipList)).catch((error) => {
+    console.error('[BLOCKLIST] Failed to cache IPs in Redis:', error)
+  })
 
   return ipList
 }
@@ -472,7 +521,9 @@ async function getBlockedDomains(): Promise<string[]> {
   const domainList = blockedDomains.map(entry => entry.domain)
 
   // Cache in Redis
-  await redis.setex(BLOCKLIST_CACHE_KEY_DOMAINS, BLOCKLIST_CACHE_TTL, JSON.stringify(domainList))
+  await redis.setex(BLOCKLIST_CACHE_KEY_DOMAINS, BLOCKLIST_CACHE_TTL, JSON.stringify(domainList)).catch((error) => {
+    console.error('[BLOCKLIST] Failed to cache domains in Redis:', error)
+  })
 
   return domainList
 }
@@ -489,37 +540,33 @@ export async function invalidateBlocklistCache(): Promise<void> {
 export async function revokeProjectVideoTokens(projectId: string): Promise<void> {
   const redis = getRedis()
 
-  const stream = redis.scanStream({
-    match: 'video_access:*',
-    count: 100
-  })
-
+  const stream = redis.scanStream({ match: 'video_access:*', count: 100 })
   const keysToDelete: string[] = []
 
-  stream.on('data', async (keys: string[]) => {
+  for await (const keys of stream) {
     for (const key of keys) {
       const data = await redis.get(key)
-      if (data) {
-        try {
-          const tokenData: VideoAccessToken = JSON.parse(data)
-          if (tokenData.projectId === projectId) {
-            keysToDelete.push(key)
-          }
-        } catch (error) {
-          console.error('[SECURITY] Corrupted token data during revocation, will delete', {
-            key,
-            error: error instanceof Error ? error.message : 'Unknown error'
-          })
+      if (!data) continue
+
+      try {
+        const tokenData: VideoAccessToken = JSON.parse(data)
+        if (tokenData.projectId === projectId) {
           keysToDelete.push(key)
         }
+      } catch (error) {
+        console.error('[SECURITY] Corrupted token data during revocation, will delete', {
+          key,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+        keysToDelete.push(key)
       }
     }
-  })
+  }
 
-  stream.on('end', async () => {
-    if (keysToDelete.length > 0) {
-      await redis.del(...keysToDelete)
-    }
-    await redis.incr(TOKEN_REV_VERSION_KEY)
-  })
+  if (keysToDelete.length > 0) {
+    await redis.del(...keysToDelete)
+  }
+
+  // Bump version so in-memory token verification cache cannot accept old tokens.
+  await redis.incr(TOKEN_REV_VERSION_KEY)
 }

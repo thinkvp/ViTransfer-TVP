@@ -7,6 +7,7 @@ import { generateShareUrl } from './url'
 import { getRedis } from './redis'
 import { sendPushNotification } from './push-notifications'
 import { createHash } from 'crypto'
+import { redactEmailForLogs } from './log-sanitization'
 
 interface NotificationContext {
   comment: Comment & {
@@ -66,7 +67,17 @@ export async function sendImmediateNotification(context: NotificationContext) {
 
     const emailSettings = await getEmailSettings()
     const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
-    const appDomain = emailSettings.appDomain || new URL(shareUrl).origin
+    let appDomain = new URL(shareUrl).origin
+    if (emailSettings.appDomain) {
+      try {
+        const parsed = new URL(emailSettings.appDomain)
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          appDomain = parsed.origin
+        }
+      } catch {
+        // Fallback to shareUrl origin
+      }
+    }
 
     console.log(`[IMMEDIATE→CLIENT] Sending to ${recipients.length} recipient(s) for "${project.title}"`)
     console.log(`[IMMEDIATE→CLIENT]   Video: ${videoName} (${versionLabel})`)
@@ -118,9 +129,11 @@ export async function sendImmediateNotification(context: NotificationContext) {
       })
 
       if (result.success) {
-        console.log(`[IMMEDIATE→CLIENT]   Sent to ${recipientEmail}`)
+        console.log(`[IMMEDIATE→CLIENT]   Sent to ${redactEmailForLogs(recipientEmail)}`)
       } else {
-        console.error(`[IMMEDIATE→CLIENT]   Failed to ${recipientEmail}: ${result.error}`)
+        console.error(
+          `[IMMEDIATE→CLIENT]   Failed to ${redactEmailForLogs(recipientEmail)}: ${result.error}`
+        )
       }
 
       return { recipientEmail: recipientEmail.toLowerCase(), success: result.success }
@@ -314,9 +327,11 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
         autoCloseInfo,
       }).then(result => {
         if (result.success) {
-          console.log(`[IMMEDIATE→CLIENT]   Sent to ${recipient.email}`)
+          console.log(`[IMMEDIATE→CLIENT]   Sent to ${redactEmailForLogs(recipient.email)}`)
         } else {
-          console.error(`[IMMEDIATE→CLIENT]   Failed to ${recipient.email}: ${result.error}`)
+          console.error(
+            `[IMMEDIATE→CLIENT]   Failed to ${redactEmailForLogs(recipient.email)}: ${result.error}`
+          )
         }
         return result
       })

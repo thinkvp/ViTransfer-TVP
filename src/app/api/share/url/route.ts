@@ -35,7 +35,10 @@ export async function GET(request: NextRequest) {
 
     const shareUrl = await generateShareUrl(slug, request)
 
-    return NextResponse.json({ shareUrl })
+    const response = NextResponse.json({ shareUrl })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error generating share URL:', error)
     return NextResponse.json(

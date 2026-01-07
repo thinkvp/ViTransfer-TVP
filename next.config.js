@@ -20,18 +20,37 @@ const nextConfig = {
   async headers() {
     // Check if HTTPS is enabled (via environment variable)
     const isHttpsEnabled = process.env.HTTPS_ENABLED === 'true' || process.env.HTTPS_ENABLED === '1';
-    const tusEndpoint = process.env.NEXT_PUBLIC_TUS_ENDPOINT
+    const isProd = process.env.NODE_ENV === 'production'
+
+    // Sanitize env-provided endpoint to an origin to avoid CSP injection.
+    // Accept only http/https absolute URLs; ignore relative paths.
+    const sanitizeOrigin = (value) => {
+      if (!value || typeof value !== 'string') return ''
+      try {
+        const url = new URL(value)
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+        return url.origin
+      } catch {
+        return ''
+      }
+    }
+
+    const tusOrigin = sanitizeOrigin(process.env.NEXT_PUBLIC_TUS_ENDPOINT)
+
     const cspDirectives = [
       {
         key: 'Content-Security-Policy',
         value: [
           "default-src 'self'",
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
+          // Keep 'unsafe-inline' for the theme bootstrap inline script in src/app/layout.tsx.
+          // Avoid 'unsafe-eval' in production to reduce XSS blast radius (dev tooling may require it).
+          `script-src 'self' 'unsafe-inline'${isProd ? '' : " 'unsafe-eval'"}`,
           "style-src 'self' 'unsafe-inline' https:",
-          "img-src * data: blob:",
-          "font-src * data:",
-          `connect-src 'self' blob: ${tusEndpoint || ''} https:`,
-          "media-src * blob:",
+          // Avoid wildcard origins where possible; allow https for externally hosted images/assets.
+          "img-src 'self' data: blob: https:",
+          "font-src 'self' data: https:",
+          `connect-src 'self' blob:${tusOrigin ? ` ${tusOrigin}` : ''} https:`,
+          "media-src 'self' blob: https:",
           "object-src 'none'",
           "base-uri 'self'",
           "form-action 'self'",

@@ -10,6 +10,44 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 
 const TUS_UPLOAD_DIR = '/tmp/vitransfer-tus-uploads'
 
+const BYTES_PER_GB = 1024 * 1024 * 1024
+const DEFAULT_MAX_UPLOAD_SIZE_GB = 1
+const HARD_MAX_UPLOAD_SIZE_GB = 50
+const MAX_UPLOAD_SIZE_CACHE_TTL_MS = 60_000
+
+const cachedMaxUploadSizeBytes: { value: number; expiresAt: number } = {
+  value: DEFAULT_MAX_UPLOAD_SIZE_GB * BYTES_PER_GB,
+  expiresAt: 0,
+}
+
+async function getMaxUploadSizeBytes(): Promise<number> {
+  const now = Date.now()
+  if (cachedMaxUploadSizeBytes.expiresAt > now) {
+    return cachedMaxUploadSizeBytes.value
+  }
+
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { maxUploadSizeGB: true },
+    })
+
+    const gb = Math.max(
+      1,
+      Math.min(HARD_MAX_UPLOAD_SIZE_GB, settings?.maxUploadSizeGB ?? DEFAULT_MAX_UPLOAD_SIZE_GB)
+    )
+
+    cachedMaxUploadSizeBytes.value = gb * BYTES_PER_GB
+    cachedMaxUploadSizeBytes.expiresAt = now + MAX_UPLOAD_SIZE_CACHE_TTL_MS
+    return cachedMaxUploadSizeBytes.value
+  } catch (err) {
+    // Fail closed-ish: keep a conservative default, but do not block uploads due to transient DB issues.
+    cachedMaxUploadSizeBytes.value = DEFAULT_MAX_UPLOAD_SIZE_GB * BYTES_PER_GB
+    cachedMaxUploadSizeBytes.expiresAt = now + MAX_UPLOAD_SIZE_CACHE_TTL_MS
+    return cachedMaxUploadSizeBytes.value
+  }
+}
+
 if (!fs.existsSync(TUS_UPLOAD_DIR)) {
   fs.mkdirSync(TUS_UPLOAD_DIR, { recursive: true })
 }
@@ -20,7 +58,8 @@ const tusServer: Server = new Server({
     directory: TUS_UPLOAD_DIR,
   }),
 
-  maxSize: Infinity,
+  // Hard upper bound to prevent unlimited disk usage even if DB/config is mis-set.
+  maxSize: HARD_MAX_UPLOAD_SIZE_GB * BYTES_PER_GB,
   respectForwardedHeaders: true,
   relativeLocation: true,
 
@@ -47,6 +86,22 @@ const tusServer: Server = new Server({
 
       const videoId = upload.metadata?.videoId as string
       const assetId = upload.metadata?.assetId as string
+
+      const declaredSize = Number(upload.size)
+      if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
+        throw {
+          status_code: 400,
+          body: 'Upload size required'
+        }
+      }
+
+      const maxUploadSizeBytes = await getMaxUploadSizeBytes()
+      if (declaredSize > maxUploadSizeBytes) {
+        throw {
+          status_code: 413,
+          body: `Upload exceeds max allowed size of ${Math.ceil(maxUploadSizeBytes / BYTES_PER_GB)}GB`
+        }
+      }
 
       if (!videoId && !assetId) {
         throw {
@@ -101,10 +156,11 @@ const tusServer: Server = new Server({
     const assetId = upload.metadata?.assetId as string
 
     try {
+      const maxUploadSizeBytes = await getMaxUploadSizeBytes()
       if (videoId) {
-        return await handleVideoUploadFinish(tusFilePath, upload, videoId, tusServer)
+        return await handleVideoUploadFinish(tusFilePath, upload, videoId, tusServer, maxUploadSizeBytes)
       } else if (assetId) {
-        return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer)
+        return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer, maxUploadSizeBytes)
       } else {
         console.error('[UPLOAD] No videoId or assetId in upload metadata')
         return {}
@@ -122,7 +178,13 @@ const tusServer: Server = new Server({
   }
 })
 
-async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId: string, tusServer: any) {
+async function handleVideoUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  videoId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
   const video = await prisma.video.findUnique({
     where: { id: videoId }
   })
@@ -132,7 +194,7 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
     return {}
   }
 
-  const fileSize = await verifyUploadedFile(tusFilePath, upload.size)
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
 
   await validateVideoFile(tusFilePath, upload.metadata?.filename as string)
 
@@ -172,7 +234,13 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
   return {}
 }
 
-async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId: string, tusServer: any) {
+async function handleAssetUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  assetId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
   const asset = await prisma.videoAsset.findUnique({
     where: { id: assetId }
   })
@@ -182,7 +250,7 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
     return {}
   }
 
-  const fileSize = await verifyUploadedFile(tusFilePath, upload.size)
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
 
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
@@ -191,7 +259,8 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
 
   const fileStream = (tusServer.datastore as any).read(upload.id)
 
-  const actualFileType = upload.metadata?.filetype as string || 'application/octet-stream'
+  // Do not trust client-supplied MIME from upload metadata; worker will set verified type after magic-byte validation
+  const actualFileType = 'application/octet-stream'
   await uploadFile(
     asset.storagePath,
     fileStream,
@@ -223,7 +292,11 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
   return {}
 }
 
-async function verifyUploadedFile(tusFilePath: string, expectedSize?: number): Promise<number> {
+async function verifyUploadedFile(
+  tusFilePath: string,
+  expectedSize: unknown,
+  maxUploadSizeBytes: number
+): Promise<number> {
   if (!fs.existsSync(tusFilePath)) {
     throw new Error('Uploaded file not found on disk')
   }
@@ -231,11 +304,19 @@ async function verifyUploadedFile(tusFilePath: string, expectedSize?: number): P
   const fileStats = fs.statSync(tusFilePath)
   const fileSize = fileStats.size
 
-  if (expectedSize && fileSize !== expectedSize) {
+  const expected = typeof expectedSize === 'number' ? expectedSize : Number(expectedSize)
+  if (Number.isFinite(expected) && expected > 0 && fileSize !== expected) {
     await cleanupTUSFile(tusFilePath)
     throw new Error(
       `File size mismatch: expected ${expectedSize} bytes, got ${fileSize} bytes. ` +
       `Upload may have been interrupted.`
+    )
+  }
+
+  if (fileSize > maxUploadSizeBytes) {
+    await cleanupTUSFile(tusFilePath)
+    throw new Error(
+      `File too large: ${fileSize} bytes exceeds configured max of ${maxUploadSizeBytes} bytes.`
     )
   }
 
@@ -318,9 +399,17 @@ export const config = {
 }
 
 function toWebRequest(req: NextApiRequest): Request {
-  const protocol = req.headers['x-forwarded-proto'] || 'http'
-  const host = req.headers['x-forwarded-host'] || req.headers.host
-  const url = `${protocol}://${host}${req.url}`
+  const rawProto = req.headers['x-forwarded-proto']
+  const protoValue = (Array.isArray(rawProto) ? rawProto[0] : rawProto)?.split(',')[0]?.trim().toLowerCase()
+  const protocol = protoValue === 'https' ? 'https' : 'http'
+
+  const rawHost = req.headers['x-forwarded-host'] || req.headers.host
+  const hostValue = (Array.isArray(rawHost) ? rawHost[0] : rawHost)?.split(',')[0]?.trim()
+
+  // Accept only a conservative host[:port] shape.
+  const safeHost = hostValue && /^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(hostValue) ? hostValue : 'localhost'
+
+  const url = `${protocol}://${safeHost}${req.url || '/'}`
 
   const headers = new Headers()
   Object.entries(req.headers).forEach(([key, value]) => {

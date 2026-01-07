@@ -103,7 +103,10 @@ export async function POST(request: NextRequest) {
 
     invalidateEmailSettingsCache()
 
-    return NextResponse.json({ success: true, companyLogoPath: storagePath })
+    const response = NextResponse.json({ success: true, companyLogoPath: storagePath })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error uploading company logo:', error)
     return NextResponse.json({ error: 'Failed to upload logo' }, { status: 500 })

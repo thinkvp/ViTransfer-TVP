@@ -67,7 +67,10 @@ export async function GET(request: NextRequest) {
       sessionId
     )
 
-    return NextResponse.json({ token })
+    const response = NextResponse.json({ token })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[API] Failed to generate admin video token:', error)
     return NextResponse.json(

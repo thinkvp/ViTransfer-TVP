@@ -158,12 +158,21 @@ export function buildCompanyLogoUrl({
 
   // UPLOAD
   if (!companyLogoPath) return null
-  const base = appDomain || process.env.APP_DOMAIN
+  const base = (appDomain || process.env.APP_DOMAIN || '').trim()
   if (!base) return null
+
+  let origin: string
+  try {
+    const parsed = new URL(base)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    origin = parsed.origin
+  } catch {
+    return null
+  }
 
   // Cache-bust for email clients using Settings.updatedAt.
   const version = updatedAt ? updatedAt.getTime() : Date.now()
-  return `${base.replace(/\/$/, '')}/api/branding/logo?v=${version}`
+  return `${origin}/api/branding/logo?v=${version}`
 }
 
 export function renderEmailShell({
@@ -178,9 +187,21 @@ export function renderEmailShell({
   trackingPixelsEnabled,
   appDomain,
 }: EmailShellOptions) {
-  const domain = appDomain || process.env.APP_DOMAIN || 'http://localhost:3000'
-  const trackingPixel = trackingPixelsEnabled && trackingToken
-    ? `<img src="${domain}/api/track/email/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />`
+  const rawDomain = (appDomain || process.env.APP_DOMAIN || '').trim()
+  let trackingDomain: string | null = null
+  if (rawDomain) {
+    try {
+      const parsed = new URL(rawDomain)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        trackingDomain = parsed.origin
+      }
+    } catch {
+      trackingDomain = null
+    }
+  }
+
+  const trackingPixel = trackingPixelsEnabled && trackingToken && trackingDomain
+    ? `<img src="${trackingDomain}/api/track/email/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />`
     : ''
   
   return `

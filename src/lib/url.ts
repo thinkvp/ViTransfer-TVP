@@ -2,6 +2,49 @@ import { prisma } from './db'
 import { NextRequest } from 'next/server'
 import { headers } from 'next/headers'
 
+function firstForwardedValue(value: string | null): string | null {
+  if (!value) return null
+  const first = value.split(',')[0]?.trim()
+  return first || null
+}
+
+function normalizeProto(value: string | null, fallback: 'http' | 'https'): 'http' | 'https' {
+  const proto = firstForwardedValue(value)?.toLowerCase()
+  return proto === 'https' ? 'https' : proto === 'http' ? 'http' : fallback
+}
+
+function normalizeHost(value: string | null): string | null {
+  const host = firstForwardedValue(value)
+  if (!host) return null
+
+  // Disallow whitespace, slashes, and CRLF to prevent header injection.
+  if (host.length > 255 || /[\s\r\n\\/]/.test(host)) return null
+
+  // Allow IPv6 in brackets: [::1]:3000
+  const ipv6 = /^\[[0-9a-fA-F:]+\](?::\d{1,5})?$/
+  // Allow hostname / IPv4 with optional port
+  const hostPort = /^[A-Za-z0-9.-]+(?::\d{1,5})?$/
+
+  if (!ipv6.test(host) && !hostPort.test(host)) return null
+  return host
+}
+
+function sanitizeConfiguredAppDomain(appDomain: string): string {
+  const url = new URL(appDomain)
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Invalid appDomain protocol')
+  }
+
+  // Avoid surprising/unsafe URL forms
+  url.username = ''
+  url.password = ''
+  url.hash = ''
+  url.search = ''
+
+  return url.toString().replace(/\/$/, '')
+}
+
 /**
  * Get the application URL from request headers
  * Priority: DB settings → Request headers (NextRequest or Server Component) → Error
@@ -16,7 +59,12 @@ export async function getAppUrl(request?: NextRequest): Promise<string> {
     })
 
     if (settings?.appDomain) {
-      return settings.appDomain
+      try {
+        return sanitizeConfiguredAppDomain(settings.appDomain)
+      } catch (error) {
+        console.error('[URL] Invalid configured appDomain:', error)
+        // Continue to request detection
+      }
     }
   } catch (error) {
     // DB not available, continue to request detection
@@ -24,10 +72,11 @@ export async function getAppUrl(request?: NextRequest): Promise<string> {
 
   // 2. Extract from request headers if available (API routes)
   if (request) {
-    const proto = request.headers.get('x-forwarded-proto') ||
-                  (request.url.startsWith('https') ? 'https' : 'http')
-    const host = request.headers.get('x-forwarded-host') ||
-                 request.headers.get('host')
+    const fallbackProto: 'http' | 'https' = request.url.startsWith('https') ? 'https' : 'http'
+    const proto = normalizeProto(request.headers.get('x-forwarded-proto'), fallbackProto)
+    const host =
+      normalizeHost(request.headers.get('x-forwarded-host')) ||
+      normalizeHost(request.headers.get('host'))
 
     if (host) {
       return `${proto}://${host}`
@@ -37,9 +86,10 @@ export async function getAppUrl(request?: NextRequest): Promise<string> {
   // 3. Try to get headers from Server Component context
   try {
     const headersList = await headers()
-    const proto = headersList.get('x-forwarded-proto') || 'http'
-    const host = headersList.get('x-forwarded-host') ||
-                 headersList.get('host')
+    const proto = normalizeProto(headersList.get('x-forwarded-proto'), 'http')
+    const host =
+      normalizeHost(headersList.get('x-forwarded-host')) ||
+      normalizeHost(headersList.get('host'))
 
     if (host) {
       return `${proto}://${host}`

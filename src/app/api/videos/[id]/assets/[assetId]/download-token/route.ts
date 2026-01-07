@@ -65,9 +65,12 @@ export async function POST(
     )
 
     // Return download URL with asset ID parameter
-    return NextResponse.json({
+    const response = NextResponse.json({
       url: `/api/content/${token}?download=true&assetId=${assetId}`,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Asset download token generation error:', error)
     return NextResponse.json(

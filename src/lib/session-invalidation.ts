@@ -230,6 +230,8 @@ export async function isShareSessionRevoked(sessionId: string): Promise<boolean>
     return exists === 1
   } catch (error) {
     console.error('[SESSION_INVALIDATION] Error checking session revocation:', error)
-    return false // Fail open to avoid blocking legitimate access on Redis errors
+    // Fail closed: if we cannot verify revocation state (e.g., Redis outage),
+    // treat the session as revoked to prevent bypassing invalidation.
+    return true
   }
 }

@@ -36,10 +36,10 @@ export async function POST(request: NextRequest) {
   try {
     // Parse request body
     const body = await request.json()
-    const response = body.response as AuthenticationResponseJSON
+    const authResponse = body.response as AuthenticationResponseJSON
     const sessionId = body.sessionId as string | undefined
 
-    if (!response || !response.id) {
+    if (!authResponse || !authResponse.id) {
       return NextResponse.json(
         { success: false, error: 'Invalid authentication response' },
         { status: 400 }
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     const ipAddress = getClientIpAddress(request)
 
     // Verify authentication
-    const result = await verifyPasskeyAuthentication(response, sessionId, ipAddress)
+    const result = await verifyPasskeyAuthentication(authResponse, sessionId, ipAddress)
 
     if (!result.success || !result.user) {
       // FAILED LOGIN: Increment rate limit counter
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Return user data (without password)
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id: result.user.id,
@@ -113,6 +113,9 @@ export async function POST(request: NextRequest) {
         refreshExpiresAt: tokens.refreshExpiresAt,
       },
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Authentication verification error:', error)
 

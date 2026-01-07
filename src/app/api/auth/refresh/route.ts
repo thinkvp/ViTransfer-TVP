@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid or expired refresh token' }, { status: 401 })
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       tokens: {
         accessToken: tokens.accessToken,
@@ -73,6 +73,9 @@ export async function POST(request: NextRequest) {
         refreshExpiresAt: tokens.refreshExpiresAt,
       }
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[AUTH] Token refresh error:', error)
     return NextResponse.json(

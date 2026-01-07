@@ -11,6 +11,7 @@ const cachedRateLimits: CachedValue<{
 }> = { value: { ipRateLimit: 1000, sessionRateLimit: 600 }, expiresAt: 0 }
 const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0 }
 const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
+const cachedAutoApproveProject: CachedValue<boolean> = { value: true, expiresAt: 0 }
 
 /**
  * Get the company name from settings
@@ -92,16 +93,24 @@ export async function isSmtpConfigured(): Promise<boolean> {
  * Returns true as default if not set
  */
 export async function getAutoApproveProject(): Promise<boolean> {
+  const now = Date.now()
+  if (cachedAutoApproveProject.expiresAt > now) {
+    return cachedAutoApproveProject.value
+  }
+
   try {
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
       select: { autoApproveProject: true },
     })
 
-    return settings?.autoApproveProject ?? true
+    const value = settings?.autoApproveProject ?? true
+    cachedAutoApproveProject.value = value
+    cachedAutoApproveProject.expiresAt = now + SETTINGS_CACHE_TTL_MS
+    return value
   } catch (error) {
     console.error('Error fetching auto-approve setting:', error)
-    return true // Default to enabled on error
+    return cachedAutoApproveProject.value
   }
 }
 

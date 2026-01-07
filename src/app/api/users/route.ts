@@ -45,7 +45,10 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return NextResponse.json({ users })
+    const response = NextResponse.json({ users })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json(
       { error: 'Unable to process request' },
@@ -142,7 +145,10 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    return NextResponse.json({ user }, { status: 201 })
+    const response = NextResponse.json({ user }, { status: 201 })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json(
       { error: 'Operation failed' },

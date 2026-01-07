@@ -21,6 +21,10 @@ export function sanitizeCommentHtml(html: string): string {
     return ''
   }
 
+  // Configure once: enforce safe link attributes after DOMPurify sanitizes.
+  // (DOMPurify hooks are global per instance.)
+  configureDomPurifyOnce()
+
   // Configure DOMPurify with strict settings
   const clean = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
@@ -41,6 +45,7 @@ export function sanitizeCommentHtml(html: string): string {
       'href', // For links
       'title', // For link titles
       'target', // For link targets (will be sanitized below)
+      'rel',
     ],
     ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
     ALLOW_DATA_ATTR: false,
@@ -51,20 +56,37 @@ export function sanitizeCommentHtml(html: string): string {
     FORCE_BODY: false,
   })
 
-  // Additional post-processing for links
-  // Force external links to open in new tab and add rel=noopener
-  const withSafeLinks = clean.replace(
-    /<a\s+([^>]*?)href="([^"]*)"([^>]*?)>/gi,
-    (match, before, href, after) => {
-      // Only apply to external links (not starting with / or #)
-      if (!href.startsWith('/') && !href.startsWith('#')) {
-        return `<a ${before}href="${href}"${after} target="_blank" rel="noopener noreferrer">`
-      }
-      return match
-    }
-  )
+  return clean.trim()
+}
 
-  return withSafeLinks.trim()
+let domPurifyConfigured = false
+
+function configureDomPurifyOnce() {
+  if (domPurifyConfigured) return
+  domPurifyConfigured = true
+
+  DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
+    if (!node || node.tagName !== 'A') return
+
+    const href = (node.getAttribute?.('href') || '').toString()
+    const target = (node.getAttribute?.('target') || '').toString()
+
+    const isInternal = href.startsWith('/') || href.startsWith('#')
+    const isHttpLink = href.startsWith('http://') || href.startsWith('https://')
+
+    if (isHttpLink && !isInternal) {
+      node.setAttribute?.('target', '_blank')
+      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
+      return
+    }
+
+    if (target === '_blank') {
+      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
+    } else {
+      node.removeAttribute?.('target')
+      node.removeAttribute?.('rel')
+    }
+  })
 }
 
 /**

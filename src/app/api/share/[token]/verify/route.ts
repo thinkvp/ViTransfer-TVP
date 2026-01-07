@@ -115,7 +115,10 @@ export async function POST(
     }
 
     if (!project.sharePassword) {
-      return NextResponse.json({ success: true })
+      const response = NextResponse.json({ success: true })
+      response.headers.set('Cache-Control', 'no-store')
+      response.headers.set('Pragma', 'no-cache')
+      return response
     }
 
     // Decrypt the stored password and compare with provided password using constant-time comparison
@@ -251,7 +254,10 @@ export async function POST(
       })
     }
 
-    return NextResponse.json({ success: true, shareToken })
+    const response = NextResponse.json({ success: true, shareToken })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error verifying share password:', error)
     return NextResponse.json({ error: 'Access denied' }, { status: 403 })

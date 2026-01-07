@@ -34,16 +34,30 @@ function validatePath(filePath: string): string {
   // 3. Normalize path separators (convert backslashes to forward slashes)
   decoded = decoded.replace(/\\/g, '/')
 
-  // 4. Remove any .. sequences anywhere in the path (loop to handle .... → ..)
-  while (decoded.includes('..')) {
-    decoded = decoded.replace(/\.\./g, '')
+  // Storage paths are expected to be *relative* POSIX-style paths like:
+  //   projects/{projectId}/videos/{videoId}/...
+  // Treat anything absolute / drive-letter / UNC as invalid.
+  if (decoded.startsWith('/') || decoded.startsWith('\\')) {
+    throw new Error('Invalid file path - absolute path not allowed')
+  }
+  // Disallow drive letters / schemes (e.g. C:..., file:...)
+  if (/^[a-zA-Z]:/.test(decoded) || decoded.includes(':')) {
+    throw new Error('Invalid file path - invalid characters')
   }
 
-  // 5. Normalize the path to resolve any remaining . or .. sequences
-  const sanitized = path.normalize(decoded)
+  // 4. Normalize using POSIX rules, then reject any traversal segments
+  const posixNormalized = path.posix.normalize(decoded)
+  if (
+    posixNormalized === '.' ||
+    posixNormalized === '..' ||
+    posixNormalized.startsWith('../') ||
+    posixNormalized.includes('/../')
+  ) {
+    throw new Error('Invalid file path - path traversal detected')
+  }
 
-  // 6. Build the full path and resolve it
-  const fullPath = path.join(STORAGE_ROOT, sanitized)
+  // 5. Build the full path and resolve it
+  const fullPath = path.join(STORAGE_ROOT, posixNormalized)
   const realPath = path.resolve(fullPath)
   const realRoot = path.resolve(STORAGE_ROOT)
 

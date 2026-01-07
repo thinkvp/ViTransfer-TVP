@@ -99,7 +99,10 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({ projects: projectsWithAnalytics })
+    const response = NextResponse.json({ projects: projectsWithAnalytics })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json(
       { error: 'Unable to process request' },

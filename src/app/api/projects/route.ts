@@ -78,7 +78,10 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return NextResponse.json({ projects })
+    const response = NextResponse.json({ projects })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     return NextResponse.json(
       { error: 'Unable to process request' },
@@ -212,7 +215,10 @@ export async function POST(request: NextRequest) {
       return newProject
     })
 
-    return NextResponse.json(project)
+    const response = NextResponse.json(project)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[API] Project creation error:', error)
     return NextResponse.json(

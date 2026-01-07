@@ -30,7 +30,10 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return NextResponse.json(settings)
+    const response = NextResponse.json(settings)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching push notification settings:', error)
     return NextResponse.json(
@@ -80,7 +83,10 @@ export async function PATCH(request: NextRequest) {
       },
     })
 
-    return NextResponse.json(settings)
+    const response = NextResponse.json(settings)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error updating push notification settings:', error)
     return NextResponse.json(

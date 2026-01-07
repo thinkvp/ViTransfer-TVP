@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       events,
       pagination: {
         page,
@@ -100,6 +100,9 @@ export async function GET(request: NextRequest) {
         count: s._count.id
       }))
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching security events:', error)
     return NextResponse.json(
@@ -155,11 +158,14 @@ export async function DELETE(request: NextRequest) {
       message = `Deleted ${result.count} events older than ${olderThan} days`
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       deleted: result.count,
       message
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error deleting security events:', error)
     return NextResponse.json(

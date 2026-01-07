@@ -1,5 +1,6 @@
 import { prisma } from './db'
 import { hashPassword } from './encryption'
+import { redactEmailForLogs } from './log-sanitization'
 
 /**
  * Ensure security settings are initialized
@@ -69,7 +70,6 @@ export async function ensureDefaultAdmin() {
       console.error('  ADMIN_PASSWORD=YourSecurePassword123')
       console.error('')
       console.error('Then restart the application.')
-      console.error('===============================================================')
       console.error('')
       throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be set in environment variables for initial setup')
     }
@@ -89,7 +89,7 @@ export async function ensureDefaultAdmin() {
     console.log('===============================================================')
     console.log('Creating initial admin user...')
     console.log('===============================================================')
-    console.log(`Email: ${adminEmail}`)
+    console.log(`Email: ${redactEmailForLogs(adminEmail)}`)
     console.log('Password: ********')
     console.log('===============================================================')
     console.log('')

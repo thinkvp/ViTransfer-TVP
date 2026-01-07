@@ -20,10 +20,13 @@ export async function GET(request: NextRequest) {
   try {
     const entries = await getRateLimitedEntries()
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       entries,
       count: entries.length,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching rate limit entries:', error)
     return NextResponse.json(
@@ -65,10 +68,13 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Rate limit entry cleared successfully',
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error clearing rate limit:', error)
     return NextResponse.json(

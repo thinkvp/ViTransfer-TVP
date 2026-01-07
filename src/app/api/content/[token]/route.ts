@@ -15,6 +15,13 @@ const STREAM_HIGH_WATER_MARK = 1 * 1024 * 1024 // 1MB stream buffer
 const STREAM_CHUNK_SIZE = 4 * 1024 * 1024 // 4MB chunks for smooth scrubbing/streaming
 const DOWNLOAD_CHUNK_SIZE = 50 * 1024 * 1024 // 50MB chunks
 
+function isValidMimeType(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 255) return false
+  return /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(trimmed)
+}
+
 /**
  * Convert Node.js ReadStream to Web ReadableStream
  */
@@ -193,7 +200,9 @@ export async function GET(
 
       filePath = asset.storagePath
       filename = asset.fileName
-      contentType = asset.fileType
+      contentType = isValidMimeType(asset.fileType)
+        ? asset.fileType
+        : 'application/octet-stream'
     } else {
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {

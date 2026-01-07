@@ -97,7 +97,7 @@ export async function GET(
     // Handle archive errors
     archive.on('error', (err) => {
       console.error('ZIP archive error:', err)
-      throw err
+      archive.destroy(err)
     })
 
     // Add files to archive

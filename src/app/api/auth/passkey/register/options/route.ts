@@ -42,7 +42,10 @@ export async function POST(request: NextRequest) {
     // Generate registration options
     const options = await generatePasskeyRegistrationOptions(user)
 
-    return NextResponse.json(options)
+    const response = NextResponse.json(options)
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] Registration options error:', error)
 

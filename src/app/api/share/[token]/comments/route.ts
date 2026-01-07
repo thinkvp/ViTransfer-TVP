@@ -4,7 +4,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
-import { backfillCommentRecipientIdsByAuthorName, backfillCommentDisplayColorSnapshots } from '@/lib/comment-helpers'
+import { maybeRunLegacyCommentBackfills } from '@/lib/comment-helpers'
 import { getRateLimitSettings } from '@/lib/settings'
 export const runtime = 'nodejs'
 
@@ -13,6 +13,11 @@ export const runtime = 'nodejs'
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
+
+const noStoreHeaders = {
+  'Cache-Control': 'no-store',
+  Pragma: 'no-cache',
+} as const
 
 /**
  * GET /api/share/[token]/comments
@@ -52,12 +57,12 @@ export async function GET(
     })
 
     if (!project) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      return NextResponse.json({ error: 'Access denied' }, { status: 403, headers: noStoreHeaders })
     }
 
     // SECURITY: If feedback is hidden (or Share Only mode), return empty array (don't expose comments)
     if (project.hideFeedback || project.status === 'SHARE_ONLY') {
-      return NextResponse.json([])
+      return NextResponse.json([], { headers: noStoreHeaders })
     }
 
     // Get primary recipient for author name
@@ -76,12 +81,11 @@ export async function GET(
 
     // Block guest users from seeing comments
     if (project.guestMode && isGuest) {
-      return NextResponse.json([])
+      return NextResponse.json([], { headers: noStoreHeaders })
     }
 
     // Best-effort legacy backfill: link older client comments to a recipient by authorName.
-    await backfillCommentRecipientIdsByAuthorName(project.id)
-    await backfillCommentDisplayColorSnapshots(project.id)
+    await maybeRunLegacyCommentBackfills(project.id)
 
     // Fetch comments with nested replies
     const comments = await prisma.comment.findMany({
@@ -151,9 +155,12 @@ export async function GET(
       fallbackName,
     ))
 
-    return NextResponse.json(sanitizedComments)
+    return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })
   } catch (error) {
     console.error('Error fetching comments:', error)
-    return NextResponse.json({ error: 'Unable to process request' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Unable to process request' },
+      { status: 500, headers: noStoreHeaders }
+    )
   }
 }

@@ -23,10 +23,13 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' }
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       blockedIPs,
       count: blockedIPs.length,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching blocked IPs:', error)
     return NextResponse.json(
@@ -91,10 +94,13 @@ export async function POST(request: NextRequest) {
     // Invalidate cache
     await invalidateBlocklistCache()
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       blockedIP,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error blocking IP:', error)
     return NextResponse.json(
@@ -134,10 +140,13 @@ export async function DELETE(request: NextRequest) {
     // Invalidate cache
     await invalidateBlocklistCache()
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'IP address unblocked successfully',
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error unblocking IP:', error)
     return NextResponse.json(

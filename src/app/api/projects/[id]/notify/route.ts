@@ -6,6 +6,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { decrypt } from '@/lib/encryption'
 import { getProjectRecipients } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
+import crypto from 'crypto'
 export const runtime = 'nodejs'
 
 
@@ -116,7 +117,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         // Generate unique tracking token for this email/recipient
         const trackingToken = await prisma.emailTracking.create({
           data: {
-            token: `${projectId}-${recipient.email}-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            // Do not embed PII (like emails) in tokens that end up in URLs and logs.
+            token: crypto.randomBytes(32).toString('base64url'),
             projectId,
             type: notifyEntireProject ? 'ALL_READY_VIDEOS' : 'SPECIFIC_VIDEO_VERSION',
             videoId: notifyEntireProject ? null : videoId,

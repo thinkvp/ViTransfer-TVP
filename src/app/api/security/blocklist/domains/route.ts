@@ -23,10 +23,13 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' }
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       blockedDomains,
       count: blockedDomains.length,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching blocked domains:', error)
     return NextResponse.json(
@@ -94,10 +97,13 @@ export async function POST(request: NextRequest) {
     // Invalidate cache
     await invalidateBlocklistCache()
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       blockedDomain,
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error blocking domain:', error)
     return NextResponse.json(
@@ -137,10 +143,13 @@ export async function DELETE(request: NextRequest) {
     // Invalidate cache
     await invalidateBlocklistCache()
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Domain unblocked successfully',
     })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error unblocking domain:', error)
     return NextResponse.json(

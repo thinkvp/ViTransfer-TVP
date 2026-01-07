@@ -39,7 +39,10 @@ export async function GET(request: NextRequest) {
     // Get user's passkeys
     const passkeys = await getUserPasskeys(user.id)
 
-    return NextResponse.json({ passkeys })
+    const response = NextResponse.json({ passkeys })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('[PASSKEY] List error:', error)
 

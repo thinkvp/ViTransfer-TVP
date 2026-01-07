@@ -178,7 +178,8 @@ export async function POST(
         videoId,
         fileName: sanitizedFileName,
         fileSize: BigInt(fileSize),
-        fileType: mimeType || 'application/octet-stream',
+        // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
+        fileType: 'application/octet-stream',
         storagePath,
         category: finalCategory,
         uploadedBy: currentUser.id,
