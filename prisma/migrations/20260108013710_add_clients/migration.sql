@@ -2,8 +2,14 @@
 ALTER TABLE "Project" ADD COLUMN     "clientId" TEXT;
 
 -- AlterTable
-ALTER TABLE "Role" ALTER COLUMN "permissions" DROP DEFAULT,
-ALTER COLUMN "updatedAt" DROP DEFAULT;
+DO $$
+BEGIN
+    IF to_regclass('public."Role"') IS NOT NULL THEN
+        ALTER TABLE "Role"
+            ALTER COLUMN "permissions" DROP DEFAULT,
+            ALTER COLUMN "updatedAt" DROP DEFAULT;
+    END IF;
+END $$;
 
 -- CreateTable
 CREATE TABLE "Client" (
