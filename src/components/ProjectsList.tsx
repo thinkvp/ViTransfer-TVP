@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
 import { Plus, Video, MessageSquare, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Filter, ChevronsDown, ChevronsUp } from 'lucide-react'
@@ -32,13 +33,15 @@ interface Project {
 
 interface ProjectsListProps {
   projects: Project[]
+  onFilteredProjectsChange?: (projects: Project[]) => void
 }
 
-export default function ProjectsList({ projects }: ProjectsListProps) {
+export default function ProjectsList({ projects, onFilteredProjectsChange }: ProjectsListProps) {
   const router = useRouter()
   const { user } = useAuth()
   const [isMobile, setIsMobile] = useState(false)
   const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
+  const [searchQuery, setSearchQuery] = useState('')
   const [sortMode, setSortMode] = useState<'activity' | 'alphabetical' | 'created'>('alphabetical')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
@@ -150,7 +153,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
     // Reset paging when switching to table view or when the table settings change.
     if (viewMode !== 'table') return
     setTablePage(1)
-  }, [recordsPerPage, tableSortDirection, tableSortKey, statusFilterSelected, viewMode])
+  }, [recordsPerPage, searchQuery, tableSortDirection, tableSortKey, statusFilterSelected, viewMode])
 
   useEffect(() => {
     localStorage.setItem('admin_projects_sort_mode', sortMode)
@@ -238,14 +241,36 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
     return buckets
   }, [compareProjects, projects, statusOverrides])
 
-  const tableProjects = useMemo(() => {
-    const filtered = statusFilterSelected.size === 0
+  const filteredProjects = useMemo(() => {
+    const byStatus = statusFilterSelected.size === 0
       ? projects
       : projects.filter((p) => {
           const effectiveStatus = (statusOverrides[p.id] ?? p.status) as ProjectStatus
           return statusFilterSelected.has(effectiveStatus)
         })
 
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return byStatus
+
+    const getClientName = (project: Project) => {
+      const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
+      return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+    }
+
+    return byStatus.filter((p) => {
+      const title = String(p.title || '').toLowerCase()
+      const client = String(getClientName(p) || '').toLowerCase()
+      const primaryRecipient = p.recipients?.find((r) => r.isPrimary) || p.recipients?.[0]
+      const email = String(primaryRecipient?.email || '').toLowerCase()
+      return title.includes(q) || client.includes(q) || email.includes(q)
+    })
+  }, [projects, searchQuery, statusFilterSelected, statusOverrides])
+
+  useEffect(() => {
+    onFilteredProjectsChange?.(filteredProjects)
+  }, [filteredProjects, onFilteredProjectsChange])
+
+  const tableProjects = useMemo(() => {
     const getClientName = (project: Project) => {
       const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
       return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
@@ -263,7 +288,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
 
     const getVersionsCount = (project: Project) => (project.videos || []).length
 
-    const sorted = [...filtered].sort((a, b) => {
+    const sorted = [...filteredProjects].sort((a, b) => {
       const dir = tableSortDirection === 'asc' ? 1 : -1
 
       const aStatus = String(statusOverrides[a.id] ?? a.status)
@@ -297,7 +322,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
     })
 
     return sorted
-  }, [projects, statusFilterSelected, statusOverrides, tableSortDirection, tableSortKey])
+  }, [filteredProjects, statusOverrides, tableSortDirection, tableSortKey])
 
   const tableTotalPages = useMemo(() => {
     if (viewMode !== 'table') return 1
@@ -371,7 +396,18 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
   return (
     <>
       {projects.length > 0 && (
-        <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div className="w-full sm:w-auto sm:flex-1 sm:max-w-sm">
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search projects..."
+              className="h-9"
+              aria-label="Search projects"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
           {viewMode !== 'table' && (
             <>
               <Button
@@ -472,6 +508,7 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
           </DropdownMenu>
 
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          </div>
         </div>
       )}
 

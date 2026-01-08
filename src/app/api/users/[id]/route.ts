@@ -223,34 +223,47 @@ export async function PATCH(
 
     // Only update password if provided
     if (password && password.trim() !== '') {
-      // SECURITY: Verify old password before allowing password change
-      if (!oldPassword || oldPassword.trim() === '') {
+      const isChangingOwnPassword = authResult.id === id
+      const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
+
+      // Only System Admins may change another user's password.
+      if (!isChangingOwnPassword && !isSystemAdmin) {
         return NextResponse.json(
-          { error: 'Current password is required to change password' },
-          { status: 400 }
+          { error: 'Forbidden' },
+          { status: 403 }
         )
       }
 
-      // Get user's current password hash
-      const userWithPassword = await prisma.user.findUnique({
-        where: { id },
-        select: { password: true },
-      })
+      // SECURITY: Users changing their own password must verify current password.
+      if (isChangingOwnPassword) {
+        if (!oldPassword || oldPassword.trim() === '') {
+          return NextResponse.json(
+            { error: 'Current password is required to change password' },
+            { status: 400 }
+          )
+        }
 
-      if (!userWithPassword) {
-        return NextResponse.json(
-          { error: 'User not found' },
-          { status: 404 }
-        )
-      }
+        // Get user's current password hash
+        const userWithPassword = await prisma.user.findUnique({
+          where: { id },
+          select: { password: true },
+        })
 
-      // Verify old password
-      const isOldPasswordValid = await verifyPassword(oldPassword, userWithPassword.password)
-      if (!isOldPasswordValid) {
-        return NextResponse.json(
-          { error: 'Current password is incorrect' },
-          { status: 401 }
-        )
+        if (!userWithPassword) {
+          return NextResponse.json(
+            { error: 'User not found' },
+            { status: 404 }
+          )
+        }
+
+        // Verify old password
+        const isOldPasswordValid = await verifyPassword(oldPassword, userWithPassword.password)
+        if (!isOldPasswordValid) {
+          return NextResponse.json(
+            { error: 'Current password is incorrect' },
+            { status: 401 }
+          )
+        }
       }
 
       // Validate new password

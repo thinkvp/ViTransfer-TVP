@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Download, Eye, FolderKanban, Plus, Video } from 'lucide-react'
@@ -9,6 +9,27 @@ import { apiFetch } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+
+type Project = {
+  id: string
+  title: string
+  companyName: string | null
+  status: string
+  createdAt: string | Date
+  updatedAt: string | Date
+  maxRevisions: number
+  enableRevisions: boolean
+  videos: any[]
+  recipients: any[]
+  _count: { comments: number }
+}
+
+type AnalyticsProject = {
+  id: string
+  totalVisits?: number
+  totalDownloads?: number
+  videoCount?: number
+}
 
 type OverviewStats = {
   totalProjects: number
@@ -19,9 +40,10 @@ type OverviewStats = {
 
 export default function AdminPage() {
   const { user } = useAuth()
-  const [projects, setProjects] = useState<any[] | null>(null)
+  const [projects, setProjects] = useState<Project[] | null>(null)
   const [loading, setLoading] = useState(true)
-  const [overview, setOverview] = useState<OverviewStats>({ totalProjects: 0, totalVideos: 0, totalVisits: 0, totalDownloads: 0 })
+  const [filteredProjects, setFilteredProjects] = useState<Project[] | null>(null)
+  const [analyticsByProjectId, setAnalyticsByProjectId] = useState<Record<string, AnalyticsProject>>({})
 
   const permissions = normalizeRolePermissions(user?.permissions)
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
@@ -29,13 +51,43 @@ export default function AdminPage() {
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
 
+  const overview = useMemo<OverviewStats>(() => {
+    const list = filteredProjects ?? projects ?? []
+
+    const getUniqueVideosCount = (project: Project) => {
+      const set = new Set<string>()
+      for (const v of project.videos || []) {
+        const name = String((v as any)?.name || '')
+        if (name) set.add(`name:${name}`)
+        else set.add(`id:${String((v as any)?.id || '')}`)
+      }
+      return set.size
+    }
+
+    const totals = list.reduce(
+      (acc, project) => {
+        const analytics = analyticsByProjectId[project.id]
+
+        acc.totalProjects += 1
+        acc.totalVideos += getUniqueVideosCount(project)
+        acc.totalVisits += Number(analytics?.totalVisits) || 0
+        acc.totalDownloads += Number(analytics?.totalDownloads) || 0
+        return acc
+      },
+      { totalProjects: 0, totalVideos: 0, totalVisits: 0, totalDownloads: 0 }
+    )
+
+    return totals
+  }, [analyticsByProjectId, filteredProjects, projects])
+
   useEffect(() => {
     const load = async () => {
       try {
         const res = await apiFetch('/api/projects')
         if (!res.ok) throw new Error('Failed to load projects')
         const data = await res.json()
-        setProjects(data.projects || data || [])
+        const loadedProjects = (data.projects || data || []) as Project[]
+        setProjects(loadedProjects)
 
         try {
           const analyticsRes = await apiFetch('/api/analytics')
@@ -43,18 +95,20 @@ export default function AdminPage() {
             const analyticsData = await analyticsRes.json()
             const analyticsProjects = analyticsData.projects || analyticsData || []
 
-            const totalProjects = Array.isArray(analyticsProjects) ? analyticsProjects.length : 0
-            const totalVisits = Array.isArray(analyticsProjects)
-              ? analyticsProjects.reduce((sum: number, p: any) => sum + (Number(p?.totalVisits) || 0), 0)
-              : 0
-            const totalDownloads = Array.isArray(analyticsProjects)
-              ? analyticsProjects.reduce((sum: number, p: any) => sum + (Number(p?.totalDownloads) || 0), 0)
-              : 0
-            const totalVideos = Array.isArray(analyticsProjects)
-              ? analyticsProjects.reduce((sum: number, p: any) => sum + (Number(p?.videoCount) || 0), 0)
-              : 0
-
-            setOverview({ totalProjects, totalVideos, totalVisits, totalDownloads })
+            if (Array.isArray(analyticsProjects)) {
+              const next: Record<string, AnalyticsProject> = {}
+              for (const p of analyticsProjects) {
+                const id = String((p as any)?.id || '')
+                if (!id) continue
+                next[id] = {
+                  id,
+                  totalVisits: Number((p as any)?.totalVisits) || 0,
+                  totalDownloads: Number((p as any)?.totalDownloads) || 0,
+                  videoCount: Number((p as any)?.videoCount) || 0,
+                }
+              }
+              setAnalyticsByProjectId(next)
+            }
           }
         } catch {
           // Analytics totals are optional; fall back to 0s
@@ -217,7 +271,7 @@ export default function AdminPage() {
           </CardContent>
         </Card>
 
-        <ProjectsList projects={projects} />
+        <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} />
       </div>
     </div>
   )

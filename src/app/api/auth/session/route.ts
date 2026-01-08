@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
         email: user.email,
         name: user.name,
         role: user.appRoleName || 'Admin',
+        isSystemAdmin: user.appRoleIsSystemAdmin === true,
         permissions: user.permissions,
       },
     })

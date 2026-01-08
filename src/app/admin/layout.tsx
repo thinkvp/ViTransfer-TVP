@@ -2,6 +2,7 @@
 
 import { AuthProvider } from '@/components/AuthProvider'
 import AdminHeader from '@/components/AdminHeader'
+import AdminMenuAccessGuard from '@/components/AdminMenuAccessGuard'
 import SessionMonitor from '@/components/SessionMonitor'
 import { useEffect, useRef } from 'react'
 
@@ -61,7 +62,9 @@ export default function AdminLayout({
           <AdminHeader />
         </div>
         <div className="flex-1 min-h-0 flex flex-col">
-          {children}
+          <AdminMenuAccessGuard>
+            {children}
+          </AdminMenuAccessGuard>
         </div>
         <SessionMonitor />
       </div>

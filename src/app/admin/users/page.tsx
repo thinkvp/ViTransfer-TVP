@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, UserPlus, Edit, Trash2, Plus, Pencil, Shield, ShieldOff, RefreshCw, Check } from 'lucide-react'
+import { Users, UserPlus, Edit, Trash2, Plus, Pencil, Shield, ShieldOff, Check } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -188,20 +188,11 @@ export default function UsersPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
             <Users className="w-7 h-7 sm:w-8 sm:h-8" />
-            Users
+            User Management
           </h1>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">
             Manage internal users and their roles.
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="default" onClick={() => void fetchUsersAndRoles()}>
-            <RefreshCw className="w-4 h-4" />
-          </Button>
-          <Button variant="default" size="default" onClick={() => router.push('/admin/users/new')}>
-            <UserPlus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Add New User</span>
-          </Button>
         </div>
       </div>
 
@@ -212,8 +203,12 @@ export default function UsersPage() {
       )}
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle>Users</CardTitle>
+            <Button variant="default" size="default" onClick={() => router.push('/admin/users/new')}>
+              <UserPlus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Add New User</span>
+            </Button>
           </CardHeader>
           <CardContent>
             {users.length === 0 ? (
@@ -228,10 +223,10 @@ export default function UsersPage() {
                       <tr className="border-b border-border">
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[180px]">User</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px] hidden md:table-cell">Username</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[220px]">Email</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[220px] hidden md:table-cell">Email</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Role</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[130px]">Colour</th>
-                        <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-[140px]">Actions</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[130px] hidden md:table-cell">Colour</th>
+                        <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-[96px] sm:w-[140px]">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -239,12 +234,12 @@ export default function UsersPage() {
                         <tr key={user.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                           <td className="px-3 py-2">
                             <div className="font-medium">{user.name || user.username || user.email}</div>
-                            <div className="text-xs text-muted-foreground md:hidden">{user.username ? `@${user.username}` : ''}</div>
+                            <div className="text-xs text-muted-foreground md:hidden">{user.email}</div>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
                             {user.username ? `@${user.username}` : '—'}
                           </td>
-                          <td className="px-3 py-2 text-muted-foreground">{user.email}</td>
+                          <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">{user.email}</td>
                           <td className="px-3 py-2">
                             <span className={cn(
                               'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border',
@@ -256,7 +251,7 @@ export default function UsersPage() {
                               {user.appRole?.name || '—'}
                             </span>
                           </td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 hidden md:table-cell">
                             <div className="flex items-center gap-2">
                               <span
                                 className="h-4 w-4 rounded-full border border-border"
@@ -268,11 +263,25 @@ export default function UsersPage() {
                           </td>
                           <td className="px-3 py-2 text-right">
                             <div className="inline-flex items-center gap-2">
-                              <Button variant="outline" size="sm" onClick={() => router.push(`/admin/users/${user.id}`)}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-9 px-0 sm:w-auto sm:px-3"
+                                aria-label="Edit user"
+                                title="Edit"
+                                onClick={() => router.push(`/admin/users/${user.id}`)}
+                              >
                                 <Edit className="w-4 h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Edit</span>
                               </Button>
-                              <Button variant="destructive" size="sm" onClick={() => handleDelete(user.id, user.email)}>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                className="w-9 px-0 sm:w-auto sm:px-3"
+                                aria-label="Delete user"
+                                title="Delete"
+                                onClick={() => handleDelete(user.id, user.email)}
+                              >
                                 <Trash2 className="w-4 h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Delete</span>
                               </Button>
@@ -289,16 +298,15 @@ export default function UsersPage() {
         </Card>
 
       <div className="mt-8">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <h2 className="text-xl font-semibold">Roles</h2>
-          <Button variant="default" onClick={openCreateRole}>
-            <Plus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Add New Role</span>
-          </Button>
-        </div>
-
           <Card>
-            <CardContent className="pt-6">
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <CardTitle>Roles</CardTitle>
+              <Button variant="default" onClick={openCreateRole}>
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Add New Role</span>
+              </Button>
+            </CardHeader>
+            <CardContent>
               {roles.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground">No roles found.</div>
               ) : (
@@ -340,6 +348,9 @@ export default function UsersPage() {
                                   <Button
                                     variant="outline"
                                     size="sm"
+                                    className="w-9 px-0 sm:w-auto sm:px-3"
+                                    aria-label="Edit role"
+                                    title="Edit"
                                     onClick={() => openEditRole(role)}
                                     disabled={!canEdit}
                                   >
@@ -349,6 +360,8 @@ export default function UsersPage() {
                                   <Button
                                     variant="destructive"
                                     size="sm"
+                                    className="w-9 px-0 sm:w-auto sm:px-3"
+                                    aria-label="Delete role"
                                     onClick={() => void deleteRole(role)}
                                     disabled={!canDelete}
                                     title={!canDelete ? (role.userCount > 0 ? 'Role has assigned users' : 'Protected') : 'Delete role'}
@@ -375,7 +388,7 @@ export default function UsersPage() {
             <DialogHeader>
               <DialogTitle>{roleDialogMode === 'create' ? 'Add New Role' : 'Edit Role'}</DialogTitle>
               <DialogDescription>
-                Configure menu visibility, project visibility, and actions.
+                Configure access, project visibility, and actions.
               </DialogDescription>
             </DialogHeader>
 
@@ -392,7 +405,7 @@ export default function UsersPage() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-sm font-medium">Menu Visibility</div>
+                <div className="text-sm font-medium">Access</div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {MENU_ITEMS.map((item) => (
                     <label key={item.key} className="flex items-center gap-2 text-sm">

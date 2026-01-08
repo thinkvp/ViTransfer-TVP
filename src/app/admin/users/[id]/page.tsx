@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiPatch, apiPost, apiDelete, apiFetch } from '@/lib/api-client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useAuth } from '@/components/AuthProvider'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
 
@@ -23,6 +24,7 @@ export default function EditUserPage() {
   const router = useRouter()
   const params = useParams()
   const userId = params?.id as string
+  const { user: sessionUser } = useAuth()
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -223,15 +225,23 @@ export default function EditUserPage() {
     e.preventDefault()
     setError('')
 
+    const isEditingSelf = sessionUser?.id === userId
+    const canAdminResetPassword = !isEditingSelf && sessionUser?.isSystemAdmin === true
+
     // Validation
     if (formData.password && formData.password !== formData.confirmPassword) {
       setError('Passwords do not match')
       return
     }
 
-    // If changing password, old password is required
-    if (formData.password && !formData.oldPassword) {
+    // If changing your own password, current password is required.
+    // Admins can reset another user's password without their current password.
+    if (formData.password && isEditingSelf && !formData.oldPassword) {
       setError('Current password is required to set a new password')
+      return
+    }
+    if (formData.password && !isEditingSelf && !canAdminResetPassword) {
+      setError('Only an Admin can reset another user\'s password')
       return
     }
 
@@ -251,7 +261,9 @@ export default function EditUserPage() {
 
       // Only include password if it's being changed
       if (formData.password) {
-        updateData.oldPassword = formData.oldPassword
+        if (isEditingSelf) {
+          updateData.oldPassword = formData.oldPassword
+        }
         updateData.password = formData.password
       }
 
@@ -367,7 +379,13 @@ export default function EditUserPage() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-medium">Change Password (optional)</h3>
-                  <p className="text-xs text-muted-foreground mt-1">Leave blank to keep current password</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {sessionUser?.id === userId
+                      ? 'Leave blank to keep current password'
+                      : sessionUser?.isSystemAdmin
+                        ? 'Set a new password for this user (they will need to log in again)'
+                        : 'Password can only be changed by the account owner'}
+                  </p>
                 </div>
                 <Button
                   type="button"
@@ -381,16 +399,18 @@ export default function EditUserPage() {
                 </Button>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="oldPassword">Current Password</Label>
-                <Input
-                  id="oldPassword"
-                  type="password"
-                  value={formData.oldPassword}
-                  onChange={(e) => setFormData({ ...formData, oldPassword: e.target.value })}
-                  placeholder="Required to change password"
-                />
-              </div>
+              {sessionUser?.id === userId && (
+                <div className="space-y-2">
+                  <Label htmlFor="oldPassword">Current Password</Label>
+                  <Input
+                    id="oldPassword"
+                    type="password"
+                    value={formData.oldPassword}
+                    onChange={(e) => setFormData({ ...formData, oldPassword: e.target.value })}
+                    placeholder="Required to change password"
+                  />
+                </div>
+              )}
 
               <div className="space-y-2 mt-3">
                 <Label htmlFor="password">New Password</Label>

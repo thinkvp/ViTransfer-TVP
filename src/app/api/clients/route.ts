@@ -29,6 +29,7 @@ const createClientSchema = z.object({
 type ClientListItem = {
   id: string
   name: string
+  contacts: number
   primaryContact: string | null
   primaryEmail: string | null
   createdAt: Date
@@ -80,6 +81,11 @@ export async function GET(request: NextRequest) {
         name: true,
         createdAt: true,
         updatedAt: true,
+        _count: {
+          select: {
+            recipients: true,
+          },
+        },
         recipients: includeRecipients
           ? {
               orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
@@ -113,6 +119,7 @@ export async function GET(request: NextRequest) {
       return {
         id: c.id,
         name: c.name,
+        contacts: Number(c?._count?.recipients ?? 0),
         primaryContact,
         primaryEmail,
         createdAt: c.createdAt,
