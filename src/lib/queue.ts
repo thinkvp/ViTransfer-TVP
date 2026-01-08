@@ -4,6 +4,7 @@ import { getRedisForQueue } from './redis'
 // Lazy initialization to prevent connections during build time
 let videoQueueInstance: Queue<VideoProcessingJob> | null = null
 let assetQueueInstance: Queue<AssetProcessingJob> | null = null
+let clientFileQueueInstance: Queue<ClientFileProcessingJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -13,6 +14,12 @@ export interface VideoProcessingJob {
 
 export interface AssetProcessingJob {
   assetId: string
+  storagePath: string
+  expectedCategory?: string
+}
+
+export interface ClientFileProcessingJob {
+  clientFileId: string
   storagePath: string
   expectedCategory?: string
 }
@@ -69,6 +76,33 @@ export function getAssetQueue(): Queue<AssetProcessingJob> {
     })
   }
   return assetQueueInstance
+}
+
+export function getClientFileQueue(): Queue<ClientFileProcessingJob> {
+  // Don't create queue during build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!clientFileQueueInstance) {
+    clientFileQueueInstance = new Queue<ClientFileProcessingJob>('client-file-processing', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+  return clientFileQueueInstance
 }
 
 // Export for backward compatibility, but use getter in new code

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateUniqueSlug } from '@/lib/utils'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { createProjectSchema, validateRequest } from '@/lib/validation'
+import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -14,10 +15,11 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/projects - List all projects
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireMenuAccess(authResult, 'projects')
+  if (forbidden) return forbidden
 
   // Rate limiting: 100 requests per minute for listing projects
   const rateLimitResult = await rateLimit(request, {
@@ -31,8 +33,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const permissions = getUserPermissions(authResult)
+    const allowedStatuses = permissions.projectVisibility.statuses
+
+    if (!Array.isArray(allowedStatuses) || allowedStatuses.length === 0) {
+      const response = NextResponse.json({ projects: [] })
+      response.headers.set('Cache-Control', 'no-store')
+      response.headers.set('Pragma', 'no-cache')
+      return response
+    }
+
     // Optimized query: only fetch essential fields + minimal video data for list view
     const projects = await prisma.project.findMany({
+      where: {
+        status: { in: allowedStatuses as any },
+      },
       select: {
         id: true,
         title: true,
@@ -92,10 +107,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   // Check authentication
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
+  if (forbiddenAction) return forbiddenAction
+
   const admin = authResult
 
   // Rate limiting: Max 20 projects per hour
@@ -122,6 +142,8 @@ export async function POST(request: NextRequest) {
       title,
       description,
       companyName,
+      clientId,
+      recipients,
       recipientEmail,
       recipientName,
       sharePassword,
@@ -132,6 +154,53 @@ export async function POST(request: NextRequest) {
       allowClientDeleteComments,
       isShareOnly
     } = validation.data
+
+    const normalizeEmail = (email: any): string | null => {
+      const v = typeof email === 'string' ? email.trim().toLowerCase() : ''
+      return v && v.includes('@') ? v : null
+    }
+
+    const normalizeName = (name: any): string | null => {
+      const v = typeof name === 'string' ? name.trim() : ''
+      return v ? v : null
+    }
+
+    const normalizeRecipients = (input: any[] | undefined) => {
+      const list = Array.isArray(input) ? input : []
+      const mapped = list
+        .map((r: any) => ({
+          email: normalizeEmail(r?.email),
+          name: normalizeName(r?.name),
+          isPrimary: Boolean(r?.isPrimary),
+          receiveNotifications: r?.receiveNotifications !== false,
+        }))
+        .filter((r) => r.email || r.name)
+
+      if (mapped.length === 0) return mapped
+
+      const primaryCount = mapped.filter((r) => r.isPrimary).length
+      if (primaryCount === 0) mapped[0].isPrimary = true
+      else if (primaryCount > 1) {
+        let seen = false
+        for (const r of mapped) {
+          if (r.isPrimary) {
+            if (!seen) seen = true
+            else r.isPrimary = false
+          }
+        }
+      }
+
+      return mapped
+    }
+
+    const recipientsFromArray = normalizeRecipients(recipients as any)
+    const legacyEmail = normalizeEmail(recipientEmail)
+    const legacyName = normalizeName(recipientName)
+    const effectiveRecipients = recipientsFromArray.length
+      ? recipientsFromArray
+      : legacyEmail
+        ? [{ email: legacyEmail, name: legacyName, isPrimary: true, receiveNotifications: true }]
+        : []
 
     // Normalize auth/password inputs
     const trimmedPassword = sharePassword?.trim()
@@ -181,6 +250,7 @@ export async function POST(request: NextRequest) {
           slug,
           description,
           companyName: companyName || null,
+          clientId: clientId || null,
           sharePassword: encryptedSharePassword,
           authMode: resolvedAuthMode,
           enableRevisions: isShareOnly ? false : (enableRevisions || false),
@@ -200,15 +270,15 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Create recipient if email provided (validated by schema)
-      if (recipientEmail) {
-        await tx.projectRecipient.create({
-          data: {
+      if (effectiveRecipients.length > 0) {
+        await tx.projectRecipient.createMany({
+          data: effectiveRecipients.map((r) => ({
             projectId: newProject.id,
-            email: recipientEmail,
-            name: recipientName || null,
-            isPrimary: true,
-          },
+            email: r.email,
+            name: r.name,
+            isPrimary: r.isPrimary,
+            receiveNotifications: r.receiveNotifications,
+          })),
         })
       }
 

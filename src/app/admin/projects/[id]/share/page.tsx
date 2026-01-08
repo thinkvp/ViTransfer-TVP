@@ -14,6 +14,7 @@ import { ArrowLeft } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { cn } from '@/lib/utils'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 export default function AdminSharePage() {
   const params = useParams()
@@ -734,7 +735,9 @@ function AdminShareFeedbackGrid({
   const selectedVideo = readyVideos.find((v: any) => v.id === management.selectedVideoId)
   const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
   const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
-  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved)
+  const permissions = normalizeRolePermissions(adminUser?.permissions)
+  const canMakeComments = canDoAction(permissions, 'makeCommentsOnProjects')
+  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved || !canMakeComments)
 
   // Desktop-only: default placement based on selected video aspect ratio.
   // - Between 16:9 and 1:1 (inclusive of 1:1): keep under video player (left column)

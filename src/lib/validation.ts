@@ -144,8 +144,20 @@ export const createProjectSchema = z.object({
       message: 'Company name cannot contain line breaks'
     })
     .optional(),
-  recipientEmail: emailSchema.optional().or(z.literal('')), // Optional recipient email (will create ProjectRecipient if provided)
-  recipientName: safeStringSchema(0, 255).optional(), // Optional recipient name
+  clientId: cuidSchema.optional(),
+  recipients: z
+    .array(
+      z.object({
+        name: safeStringSchema(0, 255).optional().nullable(),
+        email: emailSchema.optional().nullable().or(z.literal('')),
+        isPrimary: z.boolean().optional(),
+        receiveNotifications: z.boolean().optional(),
+      })
+    )
+    .optional(),
+  // Legacy single-recipient inputs (kept for backwards compatibility)
+  recipientEmail: emailSchema.optional().or(z.literal('')),
+  recipientName: safeStringSchema(0, 255).optional(),
   sharePassword: z.string()
     .min(8, 'Share password must be at least 8 characters')
     .max(255, 'Share password must not exceed 255 characters')

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { deleteFile, deleteDirectory } from '@/lib/storage'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib/session-invalidation'
@@ -9,6 +9,7 @@ import { getProjectRecipients } from '@/lib/recipients'
 import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -47,10 +48,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // Check authentication
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -112,6 +117,10 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
     // Check SMTP configuration status
     const smtpConfigured = await isSmtpConfigured()
 
@@ -168,10 +177,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // Check authentication
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
   const admin = authResult
 
   // Rate limiting: mutation throttle
@@ -184,6 +194,18 @@ export async function PATCH(
 
   try {
     const { id } = await params
+
+    const currentProject = await prisma.project.findUnique({
+      where: { id },
+      select: { status: true },
+    })
+    if (!currentProject) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+    if (!isVisibleProjectStatusForUser(authResult, currentProject.status)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
     const body = await request.json()
     const parsed = updateProjectSchema.safeParse(body)
     if (!parsed.success) {
@@ -191,17 +213,22 @@ export async function PATCH(
     }
     const validatedBody = parsed.data
 
+    const isStatusMutation = validatedBody.status !== undefined
+    const isSettingsMutation = Object.keys(validatedBody).some((k) => k !== 'status')
+
+    if (isSettingsMutation) {
+      const forbidden = requireActionAccess(authResult, 'changeProjectSettings')
+      if (forbidden) return forbidden
+    }
+    if (isStatusMutation) {
+      const forbidden = requireActionAccess(authResult, 'changeProjectStatuses')
+      if (forbidden) return forbidden
+    }
+
     // Track status transitions so we can trigger side effects (e.g. sending approval email)
     let previousStatus: string | null = null
     if (validatedBody.status !== undefined) {
-      const current = await prisma.project.findUnique({
-        where: { id },
-        select: { status: true },
-      })
-      if (!current) {
-        return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-      }
-      previousStatus = current.status
+      previousStatus = currentProject.status
     }
 
     // Build update data object
@@ -576,11 +603,14 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // SECURITY: Require admin authentication
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'deleteProjects')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
@@ -600,6 +630,10 @@ export async function DELETE(
     })
 
     if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -16,11 +17,15 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // SECURITY: Require admin authentication
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectStatuses')
+  if (forbiddenAction) return forbiddenAction
+
   const admin = authResult
 
   // Rate limiting: 20 unapproval actions per minute
@@ -56,6 +61,10 @@ export async function POST(
     })
 
     if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 

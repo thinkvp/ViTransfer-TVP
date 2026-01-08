@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/analytics - Get analytics for all projects
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'analytics')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'viewAnalytics')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 100 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -25,7 +30,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const permissions = getUserPermissions(authResult)
+    const allowedStatuses = permissions.projectVisibility.statuses
+
+    if (!Array.isArray(allowedStatuses) || allowedStatuses.length === 0) {
+      const response = NextResponse.json({ projects: [] })
+      response.headers.set('Cache-Control', 'no-store')
+      response.headers.set('Pragma', 'no-cache')
+      return response
+    }
+
     const projects = await prisma.project.findMany({
+      where: {
+        status: { in: allowedStatuses as any },
+      },
       include: {
         videos: {
           select: {

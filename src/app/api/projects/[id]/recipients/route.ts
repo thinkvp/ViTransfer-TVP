@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { prisma } from '@/lib/db'
+import { requireApiAuth } from '@/lib/auth'
 import { getProjectRecipients, addRecipient } from '@/lib/recipients'
 import { z } from 'zod'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -21,10 +23,14 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -39,6 +45,18 @@ export async function GET(
 
   try {
     const { id: projectId } = await params
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    })
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
     const recipients = await getProjectRecipients(projectId)
 
     return NextResponse.json({ recipients })
@@ -55,13 +73,29 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const { id: projectId } = await params
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    })
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
     const body = await request.json()
 
     // Validate input

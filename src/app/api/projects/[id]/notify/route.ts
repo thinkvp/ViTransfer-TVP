@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendPasswordEmail, isSmtpConfigured } from '@/lib/email'
 import { generateShareUrl } from '@/lib/url'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { decrypt } from '@/lib/encryption'
 import { getProjectRecipients } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
+import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -15,11 +16,14 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    // Require admin
-    const authResult = await requireApiAdmin(request)
-    if (authResult instanceof Response) {
-      return authResult
-    }
+    const authResult = await requireApiAuth(request)
+    if (authResult instanceof Response) return authResult
+
+    const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(authResult, 'sendNotificationsToRecipients')
+    if (forbiddenAction) return forbiddenAction
 
     // Throttle to prevent email spam
     const rateLimitResult = await rateLimit(request, {
@@ -67,6 +71,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     })
 
     if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
@@ -209,24 +217,27 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // If this is the first time we notify clients, move NOT_STARTED → IN_REVIEW
       // (Display-only state; does not block auto-approval.)
       if (project.status === 'NOT_STARTED') {
-        try {
-          await prisma.project.update({
-            where: { id: projectId },
-            data: { status: 'IN_REVIEW' },
-          })
+        const permissions = getUserPermissions(authResult)
+        if (permissions.actions.changeProjectStatuses) {
+          try {
+            await prisma.project.update({
+              where: { id: projectId },
+              data: { status: 'IN_REVIEW' },
+            })
 
-          await prisma.projectStatusChange.create({
-            data: {
-              projectId,
-              previousStatus: 'NOT_STARTED',
-              currentStatus: 'IN_REVIEW',
-              source: 'SYSTEM',
-              changedById: null,
-            },
-          })
-        } catch (e) {
-          // Non-blocking: do not fail the email send response
-          console.error('Failed to update project status to IN_REVIEW:', e)
+            await prisma.projectStatusChange.create({
+              data: {
+                projectId,
+                previousStatus: 'NOT_STARTED',
+                currentStatus: 'IN_REVIEW',
+                source: 'SYSTEM',
+                changedById: null,
+              },
+            })
+          } catch (e) {
+            // Non-blocking: do not fail the email send response
+            console.error('Failed to update project status to IN_REVIEW:', e)
+          }
         }
       }
 

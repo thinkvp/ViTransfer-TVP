@@ -1,6 +1,7 @@
+
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { X, UserPlus, RefreshCw, Copy, Check, Eye, EyeOff } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,12 +9,21 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
-import { apiPost } from '@/lib/api-client'
+import { apiFetch, apiPost } from '@/lib/api-client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+interface Role {
+  id: string
+  name: string
+  isSystemAdmin: boolean
+}
 
 export default function NewUserPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [roles, setRoles] = useState<Role[]>([])
+  const [rolesLoading, setRolesLoading] = useState(true)
   const [copiedPassword, setCopiedPassword] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -23,7 +33,30 @@ export default function NewUserPage() {
     password: '',
     confirmPassword: '',
     name: '',
+    appRoleId: 'role_admin',
   })
+
+  useEffect(() => {
+    const loadRoles = async () => {
+      try {
+        const res = await apiFetch('/api/roles')
+        if (!res.ok) throw new Error('Failed to fetch roles')
+        const data = await res.json()
+        const nextRoles = (data.roles || []) as Role[]
+        setRoles(nextRoles)
+
+        const admin = nextRoles.find((r) => r.id === 'role_admin')
+        const fallback = admin?.id || nextRoles[0]?.id || 'role_admin'
+        setFormData((prev) => ({ ...prev, appRoleId: prev.appRoleId || fallback }))
+      } catch (err) {
+        // If roles cannot be loaded, keep the default.
+      } finally {
+        setRolesLoading(false)
+      }
+    }
+
+    void loadRoles()
+  }, [])
 
   const generateRandomPassword = () => {
     // Generate a random password with at least 16 characters
@@ -106,7 +139,7 @@ export default function NewUserPage() {
         username: formData.username || null,
         password: formData.password,
         name: formData.name || null,
-        role: 'ADMIN',
+        appRoleId: formData.appRoleId,
       })
 
       router.push('/admin/users')
@@ -121,8 +154,8 @@ export default function NewUserPage() {
     <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold">Add New Admin User</h1>
-          <p className="text-muted-foreground mt-1 text-sm sm:text-base">Create a new administrator account</p>
+          <h1 className="text-2xl sm:text-3xl font-bold">Add New User</h1>
+          <p className="text-muted-foreground mt-1 text-sm sm:text-base">Create a new internal user account</p>
         </div>
 
         <Card>
@@ -168,6 +201,27 @@ export default function NewUserPage() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Optional"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select
+                value={formData.appRoleId}
+                onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
+                disabled={rolesLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {roles.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
             </div>
 
             <div className="space-y-2">

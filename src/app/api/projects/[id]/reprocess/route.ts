@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { getVideoQueue } from '@/lib/queue'
 import { deleteFile } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -19,10 +20,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // Check authentication - only admins can reprocess
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectStatuses')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limit to avoid enqueue abuse
   const rateLimitResult = await rateLimit(request, {
@@ -50,6 +55,10 @@ export async function POST(
     })
 
     if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 

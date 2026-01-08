@@ -18,6 +18,8 @@ import { sanitizeSlug } from '@/lib/password-utils'
 import { apiPatch, apiPost } from '@/lib/api-client'
 import Link from 'next/link'
 import { ArrowLeft, Save, RefreshCw, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { useAuth } from '@/components/AuthProvider'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -102,6 +104,10 @@ export default function ProjectSettingsPage() {
   const params = useParams()
   const router = useRouter()
   const projectId = params?.id as string
+
+  const { user } = useAuth()
+  const permissions = normalizeRolePermissions(user?.permissions)
+  const canChangeProjectSettings = canDoAction(permissions, 'changeProjectSettings')
 
   const [project, setProject] = useState<Project | null>(null)
   const [loading, setLoading] = useState(true)
@@ -263,6 +269,10 @@ export default function ProjectSettingsPage() {
   }, [authMode, initialLoadComplete])
 
   async function handleSave() {
+    if (!canChangeProjectSettings) {
+      setError('Forbidden')
+      return
+    }
     setSaving(true)
     setError('')
     setSuccess(false)
@@ -455,7 +465,7 @@ export default function ProjectSettingsPage() {
               </div>
             </div>
 
-            <Button onClick={handleSave} variant="default" disabled={saving} size="lg" className="w-full sm:w-auto">
+            <Button onClick={handleSave} variant="default" disabled={saving || !canChangeProjectSettings} size="lg" className="w-full sm:w-auto">
               <Save className="w-4 h-4 mr-2" />
               {saving ? 'Saving...' : 'Save Changes'}
             </Button>
@@ -1162,7 +1172,7 @@ export default function ProjectSettingsPage() {
 
         {/* Save button at bottom */}
         <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
-          <Button onClick={handleSave} variant="default" disabled={saving} size="lg" className="w-full sm:w-auto">
+          <Button onClick={handleSave} variant="default" disabled={saving || !canChangeProjectSettings} size="lg" className="w-full sm:w-auto">
             <Save className="w-4 h-4 mr-2" />
             {saving ? 'Saving...' : 'Save All Changes'}
           </Button>

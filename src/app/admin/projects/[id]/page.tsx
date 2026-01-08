@@ -13,6 +13,7 @@ import { ArrowLeft, Settings, ArrowUpDown, FolderKanban, Video } from 'lucide-re
 import { apiFetch } from '@/lib/api-client'
 import { apiPatch } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -30,6 +31,10 @@ export default function ProjectPage() {
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [adminUser, setAdminUser] = useState<any>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
+
+  const permissions = useMemo(() => normalizeRolePermissions(adminUser?.permissions), [adminUser?.permissions])
+  const canAccessProjectSettings = canDoAction(permissions, 'accessProjectSettings')
+  const canChangeProjectStatuses = canDoAction(permissions, 'changeProjectStatuses')
 
   // Derive active videos from selected video name (synchronous, no useEffect delay)
   const activeVideos = useMemo(() => {
@@ -224,6 +229,7 @@ export default function ProjectPage() {
 
   const setProjectStatus = async (nextStatus: string) => {
     if (!project || isUpdatingStatus) return
+    if (!canChangeProjectStatuses) return
     setIsUpdatingStatus(true)
     try {
       await apiPatch(`/api/projects/${id}`, { status: nextStatus })
@@ -246,12 +252,14 @@ export default function ProjectPage() {
               <span className="sm:hidden">Back</span>
             </Button>
           </Link>
-          <Link href={`/admin/projects/${id}/settings`}>
-            <Button variant="outline" size="default">
-              <Settings className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Project Settings</span>
-            </Button>
-          </Link>
+          {canAccessProjectSettings && (
+            <Link href={`/admin/projects/${id}/settings`}>
+              <Button variant="outline" size="default">
+                <Settings className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Project Settings</span>
+              </Button>
+            </Link>
+          )}
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
@@ -269,8 +277,9 @@ export default function ProjectPage() {
                   </div>
                   <ProjectStatusPicker
                     value={project.status}
-                    disabled={isUpdatingStatus}
+                    disabled={isUpdatingStatus || !canChangeProjectStatuses}
                     canApprove={canApproveProject}
+                    visibleStatuses={permissions.projectVisibility.statuses}
                     className={isUpdatingStatus ? 'opacity-70' : 'px-3 py-1'}
                     onChange={(next) => setProjectStatus(next)}
                   />

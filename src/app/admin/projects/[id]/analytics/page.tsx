@@ -1,7 +1,7 @@
 'use client'
 
 import { useParams } from 'next/navigation'
-import AnalyticsClient from './AnalyticsClient'
+import ProjectAnalyticsClient from '@/components/admin/ProjectAnalyticsClient'
 
 export default function ProjectAnalyticsPage() {
   const params = useParams()
@@ -12,5 +12,5 @@ export default function ProjectAnalyticsPage() {
 
   const id = params.id as string
 
-  return <AnalyticsClient id={id} />
+  return <ProjectAnalyticsClient id={id} />
 }

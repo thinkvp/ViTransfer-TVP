@@ -2,12 +2,13 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, BarChart3, Shield, Workflow } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Workflow, Building2 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
+import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 
 export default function AdminHeader() {
   const { user, logout } = useAuth()
@@ -33,16 +34,20 @@ export default function AdminHeader() {
 
   if (!user) return null
 
+  const permissions = user.permissions
+    ? normalizeRolePermissions(user.permissions)
+    : adminAllPermissions()
+
   const navLinks = [
-    { href: '/admin/projects', label: 'Projects', icon: FolderKanban },
-    { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
-    { href: '/admin/settings', label: 'Settings', icon: Settings },
-    { href: '/admin/users', label: 'Users', icon: Users },
-    { href: '/admin/integrations', label: 'Integrations', icon: Workflow },
-  ]
+    canSeeMenu(permissions, 'projects') ? { href: '/admin/projects', label: 'Projects', icon: FolderKanban } : null,
+    canSeeMenu(permissions, 'clients') ? { href: '/admin/clients', label: 'Clients', icon: Building2 } : null,
+    canSeeMenu(permissions, 'settings') ? { href: '/admin/settings', label: 'Settings', icon: Settings } : null,
+    canSeeMenu(permissions, 'users') ? { href: '/admin/users', label: 'Users', icon: Users } : null,
+    canSeeMenu(permissions, 'integrations') ? { href: '/admin/integrations', label: 'Integrations', icon: Workflow } : null,
+  ].filter(Boolean) as Array<{ href: string; label: string; icon: any }>
 
   // Add Security link if enabled
-  if (showSecurityDashboard) {
+  if (showSecurityDashboard && canSeeMenu(permissions, 'security')) {
     navLinks.push({ href: '/admin/security', label: 'Security', icon: Shield })
   }
 

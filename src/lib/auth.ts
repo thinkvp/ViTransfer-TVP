@@ -7,12 +7,17 @@ import { verifyPassword } from './encryption'
 import { revokeToken, isTokenRevoked, isUserTokensRevoked } from './token-revocation'
 import { getRedis } from './redis'
 import { isShareSessionRevoked } from './session-invalidation'
+import { adminAllPermissions, normalizeRolePermissions, type RolePermissions } from './rbac'
 
 export interface AuthUser {
   id: string
   email: string
   name: string | null
   role: string
+  appRoleId?: string
+  appRoleName?: string
+  appRoleIsSystemAdmin?: boolean
+  permissions?: RolePermissions
 }
 
 type TokenKind = 'admin_access' | 'admin_refresh' | 'share'
@@ -260,6 +265,15 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
         email: true,
         name: true,
         role: true,
+        appRoleId: true,
+        appRole: {
+          select: {
+            id: true,
+            name: true,
+            isSystemAdmin: true,
+            permissions: true,
+          },
+        },
         password: true,
       },
     })
@@ -279,6 +293,10 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
       email: user.email,
       name: user.name,
       role: user.role,
+      appRoleId: user.appRoleId,
+      appRoleName: user.appRole?.name ?? null,
+      appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
+      permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions))
     }
   } catch (error) {
     console.error('Error verifying credentials:', error)
@@ -294,14 +312,39 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      appRoleId: true,
+      appRole: {
+        select: {
+          id: true,
+          name: true,
+          isSystemAdmin: true,
+          permissions: true,
+        },
+      },
+    },
   })
 
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
   }
 
-  return user
+  if (!user) return null
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    appRoleId: user.appRoleId,
+    appRoleName: user.appRole?.name ?? null,
+    appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
+    permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions)),
+  }
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
@@ -315,14 +358,39 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      appRoleId: true,
+      appRole: {
+        select: {
+          id: true,
+          name: true,
+          isSystemAdmin: true,
+          permissions: true,
+        },
+      },
+    },
   })
 
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
   }
 
-  return user
+  if (!user) return null
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    appRoleId: user.appRoleId,
+    appRoleName: user.appRole?.name ?? null,
+    appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
+    permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions)),
+  }
 }
 
 export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
@@ -375,12 +443,37 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
   if (!payload) return null
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      appRoleId: true,
+      appRole: {
+        select: {
+          id: true,
+          name: true,
+          isSystemAdmin: true,
+          permissions: true,
+        },
+      },
+    },
   })
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
   }
-  return user
+
+  if (!user) return null
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    appRoleId: user.appRoleId,
+    appRoleName: user.appRole?.name ?? null,
+    appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
+    permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions)),
+  }
 }
 
 export async function requireShareToken(request: NextRequest) {

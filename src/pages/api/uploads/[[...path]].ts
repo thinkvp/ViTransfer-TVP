@@ -86,6 +86,7 @@ const tusServer: Server = new Server({
 
       const videoId = upload.metadata?.videoId as string
       const assetId = upload.metadata?.assetId as string
+      const clientFileId = upload.metadata?.clientFileId as string
 
       const declaredSize = Number(upload.size)
       if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
@@ -103,10 +104,10 @@ const tusServer: Server = new Server({
         }
       }
 
-      if (!videoId && !assetId) {
+      if (!videoId && !assetId && !clientFileId) {
         throw {
           status_code: 400,
-          body: 'Missing required metadata: videoId or assetId'
+          body: 'Missing required metadata: videoId, assetId, or clientFileId'
         }
       }
 
@@ -143,6 +144,19 @@ const tusServer: Server = new Server({
         }
       }
 
+      if (clientFileId) {
+        const file = await prisma.clientFile.findUnique({
+          where: { id: clientFileId }
+        })
+
+        if (!file) {
+          throw {
+            status_code: 404,
+            body: 'Client file record not found'
+          }
+        }
+      }
+
       return { metadata: upload.metadata }
     } catch (error) {
       console.error('[UPLOAD] Error in onUploadCreate:', error)
@@ -154,6 +168,7 @@ const tusServer: Server = new Server({
     const tusFilePath = path.join(TUS_UPLOAD_DIR, upload.id)
     const videoId = upload.metadata?.videoId as string
     const assetId = upload.metadata?.assetId as string
+    const clientFileId = upload.metadata?.clientFileId as string
 
     try {
       const maxUploadSizeBytes = await getMaxUploadSizeBytes()
@@ -161,6 +176,8 @@ const tusServer: Server = new Server({
         return await handleVideoUploadFinish(tusFilePath, upload, videoId, tusServer, maxUploadSizeBytes)
       } else if (assetId) {
         return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer, maxUploadSizeBytes)
+      } else if (clientFileId) {
+        return await handleClientFileUploadFinish(tusFilePath, upload, clientFileId, tusServer, maxUploadSizeBytes)
       } else {
         console.error('[UPLOAD] No videoId or assetId in upload metadata')
         return {}
@@ -289,6 +306,62 @@ async function handleAssetUploadFinish(
 
   await cleanupTUSFile(tusFilePath)
 
+  return {}
+}
+
+async function handleClientFileUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  clientFileId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
+  const clientFile = await prisma.clientFile.findUnique({
+    where: { id: clientFileId }
+  })
+
+  if (!clientFile) {
+    console.error(`[UPLOAD] Client file not found: ${clientFileId}`)
+    return {}
+  }
+
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
+
+  await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
+
+  const { uploadFile, initStorage } = await import('@/lib/storage')
+  await initStorage()
+
+  const fileStream = (tusServer.datastore as any).read(upload.id)
+
+  // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
+  const actualFileType = 'application/octet-stream'
+  await uploadFile(
+    clientFile.storagePath,
+    fileStream,
+    fileSize,
+    actualFileType
+  )
+
+  await prisma.clientFile.update({
+    where: { id: clientFileId },
+    data: {
+      fileType: actualFileType,
+    },
+  })
+
+  // Queue client file for magic byte validation
+  const { getClientFileQueue } = await import('@/lib/queue')
+  const q = getClientFileQueue()
+  await q.add('process-client-file', {
+    clientFileId: clientFile.id,
+    storagePath: clientFile.storagePath,
+    expectedCategory: clientFile.category ?? undefined,
+  })
+
+  console.log(`[UPLOAD] Client file uploaded and queued for processing: ${clientFileId}`)
+
+  await cleanupTUSFile(tusFilePath)
   return {}
 }
 

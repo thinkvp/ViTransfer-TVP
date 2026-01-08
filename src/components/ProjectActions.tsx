@@ -6,6 +6,8 @@ import { Project } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Trash2, ExternalLink, Archive, RotateCcw, Send, Loader2 } from 'lucide-react'
+import { useAuth } from '@/components/AuthProvider'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import {
   Dialog,
   DialogContent,
@@ -39,6 +41,7 @@ interface ProjectActionsProps {
 
 export default function ProjectActions({ project, videos, onRefresh }: ProjectActionsProps) {
   const router = useRouter()
+  const { user } = useAuth()
   const [isDeleting, setIsDeleting] = useState(false)
   const [isTogglingApproval, setIsTogglingApproval] = useState(false)
 
@@ -84,6 +87,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   const canApproveProject = readyVideos.length > 0 && allVideosHaveApprovedVersion
 
+  const permissions = normalizeRolePermissions(user?.permissions)
+  const canSendNotifications = canDoAction(permissions, 'sendNotificationsToRecipients')
+  const canViewAnalytics = canDoAction(permissions, 'viewAnalytics')
+  const canDeleteProjects = canDoAction(permissions, 'deleteProjects')
+  const canChangeStatuses = canDoAction(permissions, 'changeProjectStatuses')
+
   // Group videos by name
   const videosByName = readyVideos.reduce((acc, video) => {
     if (!acc[video.name]) {
@@ -111,6 +120,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   }
 
   const handleSendNotification = async () => {
+    if (!canSendNotifications) return
     // Prevent rapid-fire notification sends
     if (loading) return
 
@@ -155,10 +165,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   }
 
   const handleViewAnalytics = () => {
-    router.push(`/admin/analytics/${project.id}`)
+    if (!canViewAnalytics) return
+    router.push(`/admin/projects/${project.id}/analytics`)
   }
 
   const handleToggleApproval = async () => {
+    if (!canChangeStatuses) return
     // Prevent double-clicks during approval toggle
     if (isTogglingApproval) return
 
@@ -193,6 +205,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   }
 
   const handleUnapprove = async (unapproveVideos: boolean) => {
+    if (!canChangeStatuses) return
     // Prevent double-clicks during unapproval
     if (isTogglingApproval) return
 
@@ -235,6 +248,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   }
 
   const handleDelete = async () => {
+    if (!canDeleteProjects) return
     // Prevent double-clicks during deletion
     if (isDeleting) return
 
@@ -272,7 +286,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         </CardHeader>
         <CardContent className="space-y-3">
           {/* Send Notification Button - only show if there are ready videos */}
-          {readyVideos.length > 0 && (
+          {canSendNotifications && readyVideos.length > 0 && (
             <div>
               <Button
                 variant="outline"
@@ -314,63 +328,70 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             View Share Page
           </Button>
 
-          <Button
-            variant="outline"
-            size="default"
-            className="w-full"
-            onClick={handleViewAnalytics}
-          >
-            <ExternalLink className="w-4 h-4 mr-2" />
-            View Analytics
-          </Button>
-
-          {/* Approve/Unapprove Toggle Button */}
-          <div>
+          {canViewAnalytics && (
             <Button
               variant="outline"
               size="default"
               className="w-full"
-              onClick={handleToggleApproval}
-              disabled={isTogglingApproval || (project.status !== 'APPROVED' && !canApproveProject)}
-              title={
-                project.status !== 'APPROVED' && !canApproveProject
-                  ? 'Approve one version of each video first'
-                  : ''
-              }
+              onClick={handleViewAnalytics}
             >
-              {project.status === 'APPROVED' ? (
-                <>
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  {isTogglingApproval ? 'Unapproving...' : 'Unapprove Project'}
-                </>
-              ) : (
-                <>
-                  <Archive className="w-4 h-4 mr-2" />
-                  {isTogglingApproval ? 'Approving...' : 'Approve Project'}
-                </>
-              )}
+              <ExternalLink className="w-4 h-4 mr-2" />
+              View Analytics
             </Button>
-            {project.status !== 'APPROVED' && !canApproveProject && (
-              <p className="text-xs text-muted-foreground mt-1 px-1">
-                Approve one version of each video to enable project approval
-              </p>
-            )}
-          </div>
+          )}
 
-          <Button
-            variant="destructive"
-            size="default"
-            className="w-full"
-            onClick={handleDelete}
-            disabled={isDeleting}
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            {isDeleting ? 'Deleting...' : 'Delete Project'}
-          </Button>
+          {/* Approve/Unapprove Toggle Button */}
+          {canChangeStatuses && (
+            <div>
+              <Button
+                variant="outline"
+                size="default"
+                className="w-full"
+                onClick={handleToggleApproval}
+                disabled={isTogglingApproval || (project.status !== 'APPROVED' && !canApproveProject)}
+                title={
+                  project.status !== 'APPROVED' && !canApproveProject
+                    ? 'Approve one version of each video first'
+                    : ''
+                }
+              >
+                {project.status === 'APPROVED' ? (
+                  <>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    {isTogglingApproval ? 'Unapproving...' : 'Unapprove Project'}
+                  </>
+                ) : (
+                  <>
+                    <Archive className="w-4 h-4 mr-2" />
+                    {isTogglingApproval ? 'Approving...' : 'Approve Project'}
+                  </>
+                )}
+              </Button>
+              {project.status !== 'APPROVED' && !canApproveProject && (
+                <p className="text-xs text-muted-foreground mt-1 px-1">
+                  Approve one version of each video to enable project approval
+                </p>
+              )}
+            </div>
+          )}
+
+          {canDeleteProjects && (
+            <Button
+              variant="destructive"
+              size="default"
+              className="w-full"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {isDeleting ? 'Deleting...' : 'Delete Project'}
+            </Button>
+          )}
         </CardContent>
       </Card>
 
       {/* Notification Modal */}
+      {canSendNotifications && (
       <Dialog open={showNotificationModal} onOpenChange={setShowNotificationModal}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -524,6 +545,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           </div>
         </DialogContent>
       </Dialog>
+      )}
 
       {/* Unapprove Modal */}
       <UnapproveModal

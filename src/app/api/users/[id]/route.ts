@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin, getCurrentUserFromRequest } from '@/lib/auth'
+import { requireApiAuth, getCurrentUserFromRequest } from '@/lib/auth'
 import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption'
 import { revokeAllUserTokens, clearUserRevocation } from '@/lib/token-revocation'
 import { rateLimit } from '@/lib/rate-limit'
 import { normalizeHexDisplayColor } from '@/lib/display-color'
+import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 export const runtime = 'nodejs'
 
 
@@ -12,15 +13,24 @@ export const runtime = 'nodejs'
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
 
+function requireUsersMenuAccess(user: any): Response | null {
+  const permissions = normalizeRolePermissions(user?.permissions)
+  if (!canSeeMenu(permissions, 'users')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
+
 // GET /api/users/[id] - Get user by ID
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireUsersMenuAccess(authResult)
+  if (forbidden) return forbidden
 
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -44,6 +54,14 @@ export async function GET(
         name: true,
         displayColor: true,
         role: true,
+        appRoleId: true,
+        appRole: {
+          select: {
+            id: true,
+            name: true,
+            isSystemAdmin: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
         // Exclude password from response
@@ -73,15 +91,16 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireUsersMenuAccess(authResult)
+  if (forbidden) return forbidden
 
   try {
     const { id } = await params
     const body = await request.json()
-    const { email, username, name, displayColor, password, oldPassword, role } = body
+    const { email, username, name, displayColor, password, oldPassword, appRoleId } = body
 
     // Build update data
     const updateData: any = {}
@@ -147,23 +166,54 @@ export async function PATCH(
       }
     }
 
-    if (role !== undefined) {
-      // Validate role
-      if (role !== 'ADMIN' && role !== 'USER') {
+    if (appRoleId !== undefined) {
+      const nextRoleId = typeof appRoleId === 'string' ? appRoleId.trim() : ''
+      if (!nextRoleId) {
         return NextResponse.json(
-          { error: 'Invalid role. Must be ADMIN or USER' },
+          { error: 'Role is required' },
           { status: 400 }
         )
       }
 
-      // Check if role is actually changing
-      const currentUserData = await prisma.user.findUnique({
-        where: { id },
-        select: { role: true },
-      })
+      const [current, nextRole] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id },
+          select: { id: true, appRoleId: true, appRole: { select: { isSystemAdmin: true } } },
+        }),
+        prisma.role.findUnique({
+          where: { id: nextRoleId },
+          select: { id: true, isSystemAdmin: true },
+        }),
+      ])
 
-      if (currentUserData && currentUserData.role !== role) {
-        updateData.role = role
+      if (!current) {
+        return NextResponse.json(
+          { error: 'User not found' },
+          { status: 404 }
+        )
+      }
+      if (!nextRole) {
+        return NextResponse.json(
+          { error: 'Invalid role' },
+          { status: 400 }
+        )
+      }
+
+      if (current.appRoleId !== nextRole.id) {
+        // Safeguard: prevent demoting the last system-admin user.
+        if (current.appRole?.isSystemAdmin && !nextRole.isSystemAdmin) {
+          const systemAdminCount = await prisma.user.count({
+            where: { appRole: { isSystemAdmin: true } },
+          })
+          if (systemAdminCount <= 1) {
+            return NextResponse.json(
+              { error: 'Cannot remove the last Admin user' },
+              { status: 400 }
+            )
+          }
+        }
+
+        updateData.appRoleId = nextRole.id
         roleChanged = true
       }
     }
@@ -227,6 +277,14 @@ export async function PATCH(
         name: true,
         displayColor: true,
         role: true,
+        appRoleId: true,
+        appRole: {
+          select: {
+            id: true,
+            name: true,
+            isSystemAdmin: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },
@@ -283,10 +341,11 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireUsersMenuAccess(authResult)
+  if (forbidden) return forbidden
 
   try {
     const { id } = await params
@@ -304,6 +363,7 @@ export async function DELETE(
     // Check if user exists
     const user = await prisma.user.findUnique({
       where: { id },
+      include: { appRole: { select: { isSystemAdmin: true } } },
     })
 
     if (!user) {
@@ -311,6 +371,19 @@ export async function DELETE(
         { error: 'User not found' },
         { status: 404 }
       )
+    }
+
+    // Safeguard: prevent deleting the last system-admin user.
+    if (user.appRole?.isSystemAdmin) {
+      const systemAdminCount = await prisma.user.count({
+        where: { appRole: { isSystemAdmin: true } },
+      })
+      if (systemAdminCount <= 1) {
+        return NextResponse.json(
+          { error: 'Cannot delete the last Admin user' },
+          { status: 400 }
+        )
+      }
     }
 
     // Delete user

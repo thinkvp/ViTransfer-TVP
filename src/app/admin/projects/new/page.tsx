@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Eye, EyeOff, RefreshCw, Copy, Check, Plus, X, Mail, AlertCircle } from 'lucide-react'
 import { apiPost, apiFetch } from '@/lib/api-client'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
+import { useAuth } from '@/components/AuthProvider'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -44,6 +47,9 @@ function generateSecurePassword(): string {
 
 export default function NewProjectPage() {
   const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
+  const permissions = normalizeRolePermissions(user?.permissions)
+  const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
   const [loading, setLoading] = useState(false)
   const [passwordProtected, setPasswordProtected] = useState(true)
   const [sharePassword, setSharePassword] = useState('')
@@ -53,16 +59,15 @@ export default function NewProjectPage() {
   // Authentication mode
   const [authMode, setAuthMode] = useState<'PASSWORD' | 'OTP' | 'BOTH'>('PASSWORD')
   const [smtpConfigured, setSmtpConfigured] = useState(false)
-  const [recipientEmail, setRecipientEmail] = useState('')
+  const [companyNameValue, setCompanyNameValue] = useState('')
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
+  const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string; recipients?: any[] }>>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
+  const [recipients, setRecipients] = useState<EditableRecipient[]>([])
 
-  // Generate password on mount
-  useEffect(() => {
-    setSharePassword(generateSecurePassword())
-    checkSmtpConfiguration()
-  }, [])
+  const isForbidden = !authLoading && user && !canCreateProject
 
-  // Check if SMTP is configured (reuse centralized logic from settings API)
-  async function checkSmtpConfiguration() {
+  const checkSmtpConfiguration = useCallback(async () => {
     try {
       const res = await apiFetch('/api/settings')
       if (res.ok) {
@@ -73,14 +78,62 @@ export default function NewProjectPage() {
     } catch (err) {
       console.error('Failed to check SMTP configuration:', err)
     }
+  }, [])
+
+  // Generate password on mount
+  useEffect(() => {
+    setSharePassword(generateSecurePassword())
+    checkSmtpConfiguration()
+  }, [checkSmtpConfiguration])
+
+  const hasAnyRecipientEmail = useMemo(() => {
+    return recipients.some((r) => (r.email || '').trim().includes('@'))
+  }, [recipients])
+
+  const canUseOTP = smtpConfigured && hasAnyRecipientEmail
+  const showOTPRecommendation = hasAnyRecipientEmail && smtpConfigured && authMode === 'PASSWORD'
+
+  function normalizeEmail(email: string | null | undefined) {
+    return (email || '').trim().toLowerCase()
   }
 
-  // Smart recommendation: if email provided, recommend OTP
-  useEffect(() => {
-    if (recipientEmail && smtpConfigured && authMode === 'PASSWORD') {
-      // Don't auto-switch, just show recommendation
+  function ensurePrimary(next: EditableRecipient[]) {
+    if (next.length === 0) return next
+    const primaryCount = next.filter((r) => r.isPrimary).length
+    if (primaryCount === 1) return next
+    return next.map((r, idx) => ({ ...r, isPrimary: idx === 0 }))
+  }
+
+  const loadClientSuggestions = useCallback(async (query: string) => {
+    const q = query.trim()
+    if (!q) {
+      setClientSuggestions([])
+      setClientsLoading(false)
+      return
     }
-  }, [recipientEmail, smtpConfigured, authMode])
+
+    setClientsLoading(true)
+    try {
+      const res = await apiFetch(`/api/clients?query=${encodeURIComponent(q)}&includeRecipients=1`)
+      if (!res.ok) {
+        setClientSuggestions([])
+        return
+      }
+      const data = await res.json()
+      setClientSuggestions((data?.clients || []) as any[])
+    } catch {
+      setClientSuggestions([])
+    } finally {
+      setClientsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      void loadClientSuggestions(companyNameValue)
+    }, 200)
+    return () => clearTimeout(handle)
+  }, [companyNameValue, loadClientSuggestions])
 
   function handleGeneratePassword() {
     setSharePassword(generateSecurePassword())
@@ -101,9 +154,14 @@ export default function NewProjectPage() {
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
-      companyName: formData.get('companyName') as string,
-      recipientName: formData.get('recipientName') as string,
-      recipientEmail: formData.get('recipientEmail') as string,
+      companyName: companyNameValue,
+      clientId: selectedClientId,
+      recipients: recipients.map((r) => ({
+        name: r.name?.trim() ? r.name.trim() : null,
+        email: r.email?.trim() ? r.email.trim() : null,
+        isPrimary: Boolean(r.isPrimary),
+        receiveNotifications: Boolean(r.receiveNotifications),
+      })),
       sharePassword: (authMode === 'PASSWORD' || authMode === 'BOTH') && passwordProtected ? sharePassword : '',
       authMode: passwordProtected ? authMode : 'NONE',
     }
@@ -118,9 +176,28 @@ export default function NewProjectPage() {
     }
   }
 
-  const canUseOTP = smtpConfigured && recipientEmail
-  const showOTPRecommendation = recipientEmail && smtpConfigured && authMode === 'PASSWORD'
   const needsPassword = authMode === 'PASSWORD' || authMode === 'BOTH'
+
+  if (isForbidden) {
+    return (
+      <div className="flex-1 min-h-0 bg-background">
+        <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>New Project</CardTitle>
+              <CardDescription>Forbidden</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">You don&apos;t have permission to create projects.</p>
+              <div className="mt-4">
+                <Button variant="outline" onClick={() => router.push('/admin/projects')}>Back to Projects</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 min-h-0 bg-background">
@@ -155,36 +232,78 @@ export default function NewProjectPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="companyName">Company/Brand Name (Optional)</Label>
-                <Input
-                  id="companyName"
-                  name="companyName"
-                  placeholder="e.g., XYZ Corporation"
-                  maxLength={100}
-                />
-              </div>
+                <div className="relative">
+                  <Input
+                    id="companyName"
+                    name="companyName"
+                    placeholder="e.g., XYZ Corporation"
+                    maxLength={100}
+                    value={companyNameValue}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      setCompanyNameValue(next)
+                      setSelectedClientId(null)
+                    }}
+                    autoComplete="off"
+                  />
 
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="recipientName">Client Name (Optional)</Label>
-                    <Input id="recipientName" name="recipientName" placeholder="e.g., Client Name" />
-                  </div>
+                  {clientSuggestions.length > 0 && !selectedClientId && (
+                    <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-card shadow-sm overflow-hidden">
+                      {clientSuggestions.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40"
+                          onClick={() => {
+                            setSelectedClientId(c.id)
+                            setCompanyNameValue(c.name)
+                            setClientSuggestions([])
 
-                  <div className="space-y-2">
-                    <Label htmlFor="recipientEmail">Client Email (Optional)</Label>
-                    <Input
-                      id="recipientEmail"
-                      name="recipientEmail"
-                      type="email"
-                      placeholder="e.g., client@example.com"
-                      value={recipientEmail}
-                      onChange={(e) => setRecipientEmail(e.target.value)}
-                    />
-                  </div>
+                            const clientRecipients = Array.isArray((c as any).recipients) ? (c as any).recipients : []
+                            if (clientRecipients.length > 0) {
+                              setRecipients((prev) => {
+                                const existingEmails = new Set(prev.map((r) => normalizeEmail(r.email)))
+                                const merged: EditableRecipient[] = [...prev]
+
+                                for (const r of clientRecipients) {
+                                  const email = normalizeEmail(r?.email)
+                                  if (email && existingEmails.has(email)) continue
+
+                                  merged.push({
+                                    name: r?.name ?? null,
+                                    email: r?.email ?? null,
+                                    isPrimary: Boolean(r?.isPrimary),
+                                    receiveNotifications: r?.receiveNotifications !== false,
+                                  })
+
+                                  if (email) existingEmails.add(email)
+                                }
+
+                                return ensurePrimary(merged)
+                              })
+                            }
+                          }}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Add client name and email if you want to send notifications. You can add more recipients later in project settings.
+                  Start typing to match existing Clients.
+                  {clientsLoading ? ' Searching…' : ''}
                 </p>
+              </div>
+
+              <div className="border rounded-lg p-4 bg-card">
+                <RecipientsEditor
+                  label="Recipients"
+                  description="Manage who receives notifications and updates"
+                  value={recipients}
+                  onChange={setRecipients}
+                  addButtonLabel="Add Recipient"
+                />
               </div>
 
               {/* Authentication Section */}
@@ -274,11 +393,11 @@ export default function NewProjectPage() {
                         </div>
                       )}
 
-                      {smtpConfigured && !recipientEmail && authMode !== 'PASSWORD' && (
+                      {smtpConfigured && !hasAnyRecipientEmail && authMode !== 'PASSWORD' && (
                         <div className="flex items-start gap-2 p-3 bg-warning-visible border border-warning-visible rounded-md">
                           <AlertCircle className="w-4 h-4 text-warning mt-0.5" />
                           <p className="text-xs text-warning">
-                            Enter a client email address above to use OTP authentication
+                            Add a recipient email address above to use OTP authentication
                           </p>
                         </div>
                       )}

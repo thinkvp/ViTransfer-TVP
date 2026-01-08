@@ -18,6 +18,8 @@ model User {
   name      String?
   displayColor String? @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   role      UserRole @default(ADMIN)
+  appRoleId String
+  appRole   Role     @relation(fields: [appRoleId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -25,6 +27,72 @@ model User {
   comments Comment[]
   passkeys PasskeyCredential[]
   projectStatusChanges ProjectStatusChange[]
+}
+
+model Role {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  isSystemAdmin Boolean  @default(false)
+  permissions   Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users User[]
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  address   String?
+  phone     String?
+  website   String?
+  notes     String?
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipients ClientRecipient[]
+  files      ClientFile[]
+  projects   Project[]
+
+  @@index([deletedAt])
+  @@index([name])
+}
+
+model ClientRecipient {
+  id                   String   @id @default(cuid())
+  clientId             String
+  client               Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  email                String?
+  name                 String?
+  displayColor         String?  @db.VarChar(7)
+  isPrimary            Boolean  @default(false)
+  receiveNotifications Boolean  @default(true)
+  createdAt            DateTime @default(now())
+
+  @@index([clientId])
+  @@index([clientId, email])
+}
+
+model ClientFile {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  fileName    String
+  fileSize    BigInt
+  fileType    String
+  storagePath String
+  category    String?
+
+  uploadedBy     String?
+  uploadedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([clientId, category])
 }
 
 enum UserRole {
@@ -37,6 +105,8 @@ model Project {
   slug          String  @unique
   description   String?
   companyName   String? // Optional company/brand name (display priority: companyName → primary recipient → 'Client')
+  clientId      String?
+  client        Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   sharePassword String?
   authMode      String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
   guestMode     Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)

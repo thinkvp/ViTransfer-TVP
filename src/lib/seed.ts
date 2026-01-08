@@ -1,6 +1,7 @@
 import { prisma } from './db'
 import { hashPassword } from './encryption'
 import { redactEmailForLogs } from './log-sanitization'
+import { adminAllPermissions } from './rbac'
 
 /**
  * Ensure security settings are initialized
@@ -97,6 +98,26 @@ export async function ensureDefaultAdmin() {
     const adminUsername = process.env.ADMIN_USERNAME || adminEmail.split('@')[0]
     const hashedPassword = await hashPassword(adminPassword)
 
+      const roleDelegate = (prisma as any).role
+      const adminRole = await roleDelegate.findFirst({
+        where: { isSystemAdmin: true },
+        select: { id: true },
+      }).catch(() => null)
+
+      const adminRoleId = adminRole?.id
+        ?? (await roleDelegate.create({
+          data: {
+            name: 'Admin',
+            isSystemAdmin: true,
+            permissions: adminAllPermissions(),
+          },
+          select: { id: true },
+        }).catch(() => null))?.id
+
+      if (!adminRoleId) {
+        throw new Error('Unable to create Admin role')
+      }
+
     await prisma.user.create({
       data: {
         username: adminUsername,
@@ -104,6 +125,7 @@ export async function ensureDefaultAdmin() {
         password: hashedPassword,
         name: process.env.ADMIN_NAME || 'Admin',
         role: 'ADMIN',
+          appRoleId: adminRoleId,
       },
     })
 

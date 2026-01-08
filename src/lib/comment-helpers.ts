@@ -5,6 +5,7 @@ import { getRedis } from '@/lib/redis'
 import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { canDoAction, isProjectStatusVisible, normalizeRolePermissions } from '@/lib/rbac'
 
 const normalizeRecipientName = (value: string): string => {
   return value
@@ -190,6 +191,15 @@ export async function validateCommentPermissions(params: {
 }): Promise<{ valid: boolean; error?: string; errorStatus?: number }> {
   const { projectId, isInternal, currentUser } = params
 
+  const isAuthenticatedInternalUser = !!currentUser
+
+  if (isAuthenticatedInternalUser) {
+    const permissions = normalizeRolePermissions(currentUser?.permissions)
+    if (!canDoAction(permissions, 'makeCommentsOnProjects')) {
+      return { valid: false, error: 'Forbidden', errorStatus: 403 }
+    }
+  }
+
   // SECURITY: If isInternal flag is set, verify admin session
   if (isInternal) {
     if (!currentUser || currentUser.role !== 'ADMIN') {
@@ -212,6 +222,13 @@ export async function validateCommentPermissions(params: {
 
   if (!project) {
     return { valid: false, error: 'Access denied', errorStatus: 403 }
+  }
+
+  if (isAuthenticatedInternalUser) {
+    const permissions = normalizeRolePermissions(currentUser?.permissions)
+    if (!isProjectStatusVisible(permissions, project.status)) {
+      return { valid: false, error: 'Access denied', errorStatus: 403 }
+    }
   }
 
   // SECURITY: If feedback is hidden (or Share Only mode), reject comment creation

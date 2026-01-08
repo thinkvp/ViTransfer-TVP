@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
@@ -11,10 +12,14 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'analytics')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'viewAnalytics')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 100 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -114,6 +119,13 @@ export async function GET(
     })
 
     if (!project) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      )
+    }
+
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }

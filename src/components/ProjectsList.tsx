@@ -13,6 +13,8 @@ import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { PROJECT_STATUS_OPTIONS, projectStatusDotClass, projectStatusLabel, type ProjectStatus } from '@/lib/project-status'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/components/AuthProvider'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 interface Project {
   id: string
@@ -34,6 +36,7 @@ interface ProjectsListProps {
 
 export default function ProjectsList({ projects }: ProjectsListProps) {
   const router = useRouter()
+  const { user } = useAuth()
   const [isMobile, setIsMobile] = useState(false)
   const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
   const [sortMode, setSortMode] = useState<'activity' | 'alphabetical' | 'created'>('alphabetical')
@@ -58,6 +61,17 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
   })
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
+
+  const permissions = useMemo(() => normalizeRolePermissions(user?.permissions), [user?.permissions])
+  const canChangeProjectStatuses = canDoAction(permissions, 'changeProjectStatuses')
+  const visibleStatuses = useMemo(() => {
+    const allowed = permissions.projectVisibility.statuses
+    if (!Array.isArray(allowed) || allowed.length === 0) return undefined
+    const allowedSet = new Set(allowed.map((s) => String(s)))
+    return PROJECT_STATUS_OPTIONS
+      .map((s) => s.value)
+      .filter((v) => allowedSet.has(v)) as ProjectStatus[]
+  }, [permissions.projectVisibility.statuses])
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)')
@@ -635,10 +649,11 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
                             <td className="px-3 py-2">
                               <ProjectStatusPicker
                                 value={effectiveStatus}
-                                disabled={isUpdatingStatus}
+                                disabled={isUpdatingStatus || !canChangeProjectStatuses}
                                 canApprove={canApproveProject}
                                 stopPropagation
                                 className={isUpdatingStatus ? 'opacity-70' : undefined}
+                                visibleStatuses={visibleStatuses}
                                 onChange={(next) => setStatus(next)}
                               />
                             </td>
@@ -822,10 +837,11 @@ export default function ProjectsList({ projects }: ProjectsListProps) {
                                   <div className="flex flex-row sm:flex-col items-start sm:items-end gap-2 w-full sm:w-auto">
                                     <ProjectStatusPicker
                                       value={status}
-                                      disabled={isUpdatingStatus}
+                                      disabled={isUpdatingStatus || !canChangeProjectStatuses}
                                       canApprove={canApproveProject}
                                       stopPropagation
                                       className={isUpdatingStatus ? 'opacity-70' : undefined}
+                                      visibleStatuses={visibleStatuses}
                                       onChange={(next) => setStatus(next)}
                                     />
                                   </div>

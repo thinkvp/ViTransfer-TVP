@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { prisma } from '@/lib/db'
+import { requireApiAuth } from '@/lib/auth'
 import { updateRecipient, deleteRecipient } from '@/lib/recipients'
 import { z } from 'zod'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -27,13 +29,29 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; rid: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
+  if (forbiddenAction) return forbiddenAction
 
   try {
-    const { rid: recipientId } = await params
+    const { id: projectId, rid: recipientId } = await params
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    })
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
     const body = await request.json()
 
     // Validate input
@@ -69,13 +87,28 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; rid: string }> }
 ) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
+  if (forbiddenAction) return forbiddenAction
 
   try {
-    const { rid: recipientId } = await params
+    const { id: projectId, rid: recipientId } = await params
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    })
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
 
     await deleteRecipient(recipientId)
 

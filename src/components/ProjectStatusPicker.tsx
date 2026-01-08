@@ -16,6 +16,7 @@ interface ProjectStatusPickerProps {
   onChange: (nextStatus: ProjectStatus) => Promise<void> | void
   canApprove?: boolean
   disabled?: boolean
+  visibleStatuses?: Array<ProjectStatus | string>
   className?: string
   stopPropagation?: boolean
 }
@@ -25,6 +26,7 @@ export default function ProjectStatusPicker({
   onChange,
   canApprove,
   disabled,
+  visibleStatuses,
   className,
   stopPropagation,
 }: ProjectStatusPickerProps) {
@@ -33,6 +35,14 @@ export default function ProjectStatusPicker({
   const normalizedValue = useMemo(() => String(value || ''), [value])
 
   const approvedDisabled = normalizedValue !== 'APPROVED' && canApprove !== true
+
+  const visibleOptions = useMemo(() => {
+    if (!Array.isArray(visibleStatuses) || visibleStatuses.length === 0) {
+      return PROJECT_STATUS_OPTIONS
+    }
+    const visible = new Set(visibleStatuses.map((s) => String(s)))
+    return PROJECT_STATUS_OPTIONS.filter((opt) => visible.has(opt.value))
+  }, [visibleStatuses])
 
   const setStatus = async (status: ProjectStatus) => {
     await onChange(status)
@@ -93,7 +103,7 @@ export default function ProjectStatusPicker({
           </DialogHeader>
 
           <div className="space-y-2">
-            {PROJECT_STATUS_OPTIONS.map((opt) => {
+            {visibleOptions.map((opt) => {
               const isApproved = opt.value === 'APPROVED'
               const isShareOnly = opt.value === 'SHARE_ONLY'
               const isClosed = opt.value === 'CLOSED'

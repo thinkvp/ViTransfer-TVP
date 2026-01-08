@@ -236,28 +236,6 @@ export default function SharePage() {
         if (response.status === 401) {
           saveShareToken(storageKey, null)
           const data = await response.json()
-          if (data.authMode === 'NONE' && data.guestMode) {
-            try {
-              const guestResponse = await fetch(`/api/share/${token}/guest`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-              })
-              if (guestResponse.ok) {
-                const guestData = await guestResponse.json()
-                if (guestData.shareToken) {
-                  setShareToken(guestData.shareToken)
-                  saveShareToken(storageKey, guestData.shareToken)
-                  setIsGuest(true)
-                  setIsAuthenticated(true)
-                  await loadProject()
-                  return
-                }
-              }
-            } catch {
-              // fall through
-            }
-          }
-
           setIsPasswordProtected(true)
           setIsAuthenticated(false)
           setAuthMode(data.authMode || 'PASSWORD')
@@ -653,6 +631,7 @@ export default function SharePage() {
               {authMode === 'PASSWORD' && 'Please enter the password to continue.'}
               {authMode === 'OTP' && 'Enter your email to receive an access code.'}
               {authMode === 'BOTH' && 'Choose your preferred authentication method.'}
+              {authMode === 'NONE' && 'Guest access is required to continue.'}
             </p>
             <p className="text-xs text-muted-foreground mt-3 px-4">
               This authentication is for those assigned to this project.

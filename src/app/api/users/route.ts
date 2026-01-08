@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAuth } from '@/lib/auth'
 import { hashPassword, validatePassword } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
+import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 export const runtime = 'nodejs'
 
 
@@ -10,12 +11,21 @@ export const runtime = 'nodejs'
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
 
+function requireUsersMenuAccess(user: any): Response | null {
+  const permissions = normalizeRolePermissions(user?.permissions)
+  if (!canSeeMenu(permissions, 'users')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
+
 // GET /api/users - List all users
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireUsersMenuAccess(authResult)
+  if (forbidden) return forbidden
 
   // Rate limiting: 100 requests per minute for listing users
   const rateLimitResult = await rateLimit(request, {
@@ -35,7 +45,16 @@ export async function GET(request: NextRequest) {
         email: true,
         username: true,
         name: true,
+        displayColor: true,
         role: true,
+        appRoleId: true,
+        appRole: {
+          select: {
+            id: true,
+            name: true,
+            isSystemAdmin: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
         // Exclude password from response
@@ -59,10 +78,11 @@ export async function GET(request: NextRequest) {
 
 // POST /api/users - Create a new admin user
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireUsersMenuAccess(authResult)
+  if (forbidden) return forbidden
 
   // Rate limiting: 10 user creation requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -77,7 +97,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { email, username, password, name, role } = body
+    const { email, username, password, name, appRoleId } = body
 
     // Validation
     if (!email || !password) {
@@ -125,6 +145,19 @@ export async function POST(request: NextRequest) {
     // Hash password
     const hashedPassword = await hashPassword(password)
 
+    // Validate/resolve role
+    const resolvedRoleId = typeof appRoleId === 'string' && appRoleId.trim() ? appRoleId.trim() : 'role_admin'
+    const roleRecord = await prisma.role.findUnique({
+      where: { id: resolvedRoleId },
+      select: { id: true },
+    })
+    if (!roleRecord) {
+      return NextResponse.json(
+        { error: 'Invalid role' },
+        { status: 400 }
+      )
+    }
+
     // Create user (always ADMIN role)
     const user = await prisma.user.create({
       data: {
@@ -133,13 +166,23 @@ export async function POST(request: NextRequest) {
         password: hashedPassword,
         name: name || null,
         role: 'ADMIN',
+        appRoleId: roleRecord.id,
       },
       select: {
         id: true,
         email: true,
         username: true,
         name: true,
+        displayColor: true,
         role: true,
+        appRoleId: true,
+        appRole: {
+          select: {
+            id: true,
+            name: true,
+            isSystemAdmin: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },

@@ -9,8 +9,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiPatch, apiPost, apiDelete, apiFetch } from '@/lib/api-client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
+
+interface Role {
+  id: string
+  name: string
+  isSystemAdmin: boolean
+}
 
 export default function EditUserPage() {
   const router = useRouter()
@@ -28,10 +35,14 @@ export default function EditUserPage() {
     username: '',
     name: '',
     displayColor: '#22C55E',
+    appRoleId: 'role_admin',
     oldPassword: '',
     password: '',
     confirmPassword: '',
   })
+
+  const [roles, setRoles] = useState<Role[]>([])
+  const [rolesLoading, setRolesLoading] = useState(true)
 
   // PassKey state
   const [passkeyAvailable, setPasskeyAvailable] = useState(false)
@@ -51,6 +62,7 @@ export default function EditUserPage() {
         username: data.user.username || '',
         name: data.user.name || '',
         displayColor: data.user.displayColor || '#22C55E',
+        appRoleId: data.user.appRoleId || 'role_admin',
         oldPassword: '',
         password: '',
         confirmPassword: '',
@@ -65,6 +77,22 @@ export default function EditUserPage() {
     fetchPasskeyStatus()
     fetchPasskeys()
   }, [fetchUser])
+
+  useEffect(() => {
+    const loadRoles = async () => {
+      try {
+        const res = await apiFetch('/api/roles')
+        if (!res.ok) throw new Error('Failed to fetch roles')
+        const data = await res.json()
+        setRoles((data.roles || []) as Role[])
+      } catch {
+        // ignore
+      } finally {
+        setRolesLoading(false)
+      }
+    }
+    void loadRoles()
+  }, [])
 
   const fetchPasskeyStatus = async () => {
     try {
@@ -218,6 +246,7 @@ export default function EditUserPage() {
         username: formData.username || null,
         name: formData.name || null,
         displayColor: formData.displayColor || null,
+        appRoleId: formData.appRoleId,
       }
 
       // Only include password if it's being changed
@@ -241,8 +270,8 @@ export default function EditUserPage() {
     <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold">Edit Admin User</h1>
-          <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update administrator account details</p>
+          <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
+          <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
         </div>
 
         <Card>
@@ -288,6 +317,26 @@ export default function EditUserPage() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Optional"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select
+                value={formData.appRoleId}
+                onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
+                disabled={rolesLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {roles.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
