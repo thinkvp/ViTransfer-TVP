@@ -1,6 +1,7 @@
+
 'use client'
 
-import { useCallback, useMemo, useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,8 @@ import { SharePasswordRequirements } from '@/components/SharePasswordRequirement
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
+import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -50,6 +53,7 @@ export default function NewProjectPage() {
   const { user, loading: authLoading } = useAuth()
   const permissions = normalizeRolePermissions(user?.permissions)
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
+  const clientSearchRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(false)
   const [passwordProtected, setPasswordProtected] = useState(true)
   const [sharePassword, setSharePassword] = useState('')
@@ -63,7 +67,22 @@ export default function NewProjectPage() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string; recipients?: any[] }>>([])
   const [clientsLoading, setClientsLoading] = useState(false)
+  const [clientFieldError, setClientFieldError] = useState<string | null>(null)
   const [recipients, setRecipients] = useState<EditableRecipient[]>([])
+  const [selectedClientRecipients, setSelectedClientRecipients] = useState<any[]>([])
+  const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
+
+  const [createClientOpen, setCreateClientOpen] = useState(false)
+  const [creatingClient, setCreatingClient] = useState(false)
+  const [createClientError, setCreateClientError] = useState('')
+  const [newClientFormData, setNewClientFormData] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    website: '',
+    notes: '',
+  })
+  const [newClientRecipients, setNewClientRecipients] = useState<EditableRecipient[]>([])
 
   const isForbidden = !authLoading && user && !canCreateProject
 
@@ -86,6 +105,20 @@ export default function NewProjectPage() {
     checkSmtpConfiguration()
   }, [checkSmtpConfiguration])
 
+  useEffect(() => {
+    function handlePointerDown(e: PointerEvent) {
+      const container = clientSearchRef.current
+      if (!container) return
+
+      if (!container.contains(e.target as Node)) {
+        setClientSuggestions([])
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [])
+
   const hasAnyRecipientEmail = useMemo(() => {
     return recipients.some((r) => (r.email || '').trim().includes('@'))
   }, [recipients])
@@ -104,9 +137,9 @@ export default function NewProjectPage() {
     return next.map((r, idx) => ({ ...r, isPrimary: idx === 0 }))
   }
 
-  const loadClientSuggestions = useCallback(async (query: string) => {
+  const loadClientSuggestions = useCallback(async (query: string, opts?: { allowEmpty?: boolean }) => {
     const q = query.trim()
-    if (!q) {
+    if (!q && !opts?.allowEmpty) {
       setClientSuggestions([])
       setClientsLoading(false)
       return
@@ -114,7 +147,8 @@ export default function NewProjectPage() {
 
     setClientsLoading(true)
     try {
-      const res = await apiFetch(`/api/clients?query=${encodeURIComponent(q)}&includeRecipients=1`)
+      const queryParam = q ? `query=${encodeURIComponent(q)}&` : ''
+      const res = await apiFetch(`/api/clients?${queryParam}active=active&includeRecipients=1`)
       if (!res.ok) {
         setClientSuggestions([])
         return
@@ -150,17 +184,26 @@ export default function NewProjectPage() {
     e.preventDefault()
     setLoading(true)
 
+    if (!selectedClientId) {
+      setClientFieldError('Please choose an existing client')
+      setLoading(false)
+      return
+    }
+
     const formData = new FormData(e.currentTarget)
     const data = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
       companyName: companyNameValue,
       clientId: selectedClientId,
+      assignedUserIds: assignedUsers.map((u) => u.id),
       recipients: recipients.map((r) => ({
         name: r.name?.trim() ? r.name.trim() : null,
         email: r.email?.trim() ? r.email.trim() : null,
+        displayColor: r.displayColor ?? null,
         isPrimary: Boolean(r.isPrimary),
         receiveNotifications: Boolean(r.receiveNotifications),
+        alsoAddToClient: Boolean((r as any)?.alsoAddToClient),
       })),
       sharePassword: (authMode === 'PASSWORD' || authMode === 'BOTH') && passwordProtected ? sharePassword : '',
       authMode: passwordProtected ? authMode : 'NONE',
@@ -173,6 +216,56 @@ export default function NewProjectPage() {
       alert('Failed to create project')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleCreateClient() {
+    setCreateClientError('')
+
+    if (!newClientFormData.name.trim()) {
+      setCreateClientError('Client name is required')
+      return
+    }
+
+    setCreatingClient(true)
+    try {
+      const res = await apiPost('/api/clients', {
+        name: newClientFormData.name.trim(),
+        address: newClientFormData.address.trim() ? newClientFormData.address.trim() : null,
+        phone: newClientFormData.phone.trim() ? newClientFormData.phone.trim() : null,
+        website: newClientFormData.website.trim() ? newClientFormData.website.trim() : null,
+        notes: newClientFormData.notes.trim() ? newClientFormData.notes.trim() : null,
+        recipients: newClientRecipients.map((r) => ({
+          name: r.name?.trim() ? r.name.trim() : null,
+          email: r.email?.trim() ? r.email.trim() : null,
+          displayColor: r.displayColor ?? null,
+          isPrimary: Boolean(r.isPrimary),
+          receiveNotifications: Boolean(r.receiveNotifications),
+        })),
+      })
+
+      const createdId = res?.client?.id
+      const createdName = res?.client?.name
+      if (!createdId || !createdName) {
+        throw new Error('Client created but no id returned')
+      }
+
+      setSelectedClientId(createdId)
+      setCompanyNameValue(createdName)
+      setClientSuggestions([])
+      setClientFieldError(null)
+
+      setRecipients(ensurePrimary([...newClientRecipients]))
+      setSelectedClientRecipients(newClientRecipients)
+
+      setCreateClientOpen(false)
+      setNewClientFormData({ name: '', address: '', phone: '', website: '', notes: '' })
+      setNewClientRecipients([])
+      setCreateClientError('')
+    } catch (err: any) {
+      setCreateClientError(err?.message || 'Failed to create client')
+    } finally {
+      setCreatingClient(false)
     }
   }
 
@@ -231,67 +324,94 @@ export default function NewProjectPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="companyName">Company/Brand Name (Optional)</Label>
-                <div className="relative">
-                  <Input
-                    id="companyName"
-                    name="companyName"
-                    placeholder="e.g., XYZ Corporation"
-                    maxLength={100}
-                    value={companyNameValue}
-                    onChange={(e) => {
-                      const next = e.target.value
-                      setCompanyNameValue(next)
-                      setSelectedClientId(null)
+                <Label htmlFor="companyName">Company/Brand Name</Label>
+                <div className="flex items-center gap-2">
+                  <div ref={clientSearchRef} className="relative flex-1">
+                    <Input
+                      id="companyName"
+                      name="companyName"
+                      placeholder="Search clients..."
+                      maxLength={100}
+                      value={companyNameValue}
+                      onChange={(e) => {
+                        const next = e.target.value
+                        setCompanyNameValue(next)
+                        setSelectedClientId(null)
+                        setSelectedClientRecipients([])
+                        setClientFieldError(null)
+                      }}
+                      onFocus={() => {
+                        if (selectedClientId) return
+                        void loadClientSuggestions(companyNameValue, { allowEmpty: true })
+                      }}
+                      autoComplete="off"
+                    />
+
+                    {clientSuggestions.length > 0 && !selectedClientId && (
+                      <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-card shadow-sm overflow-hidden">
+                        {clientSuggestions.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40"
+                            onClick={() => {
+                              setSelectedClientId(c.id)
+                              setCompanyNameValue(c.name)
+                              setClientSuggestions([])
+                              setClientFieldError(null)
+
+                              const clientRecipients = Array.isArray((c as any).recipients) ? (c as any).recipients : []
+                              setSelectedClientRecipients(clientRecipients)
+                              if (clientRecipients.length > 0) {
+                                setRecipients((prev) => {
+                                  const existingEmails = new Set(prev.map((r) => normalizeEmail(r.email)))
+                                  const merged: EditableRecipient[] = [...prev]
+
+                                  for (const r of clientRecipients) {
+                                    const email = normalizeEmail(r?.email)
+                                    if (email && existingEmails.has(email)) continue
+
+                                    merged.push({
+                                      name: r?.name ?? null,
+                                      email: r?.email ?? null,
+                                      displayColor: typeof r?.displayColor === 'string' ? r.displayColor : null,
+                                      isPrimary: Boolean(r?.isPrimary),
+                                      receiveNotifications: r?.receiveNotifications !== false,
+                                    })
+
+                                    if (email) existingEmails.add(email)
+                                  }
+
+                                  return ensurePrimary(merged)
+                                })
+                              }
+                            }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setCreateClientError('')
+                      setCreateClientOpen(true)
                     }}
-                    autoComplete="off"
-                  />
-
-                  {clientSuggestions.length > 0 && !selectedClientId && (
-                    <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-card shadow-sm overflow-hidden">
-                      {clientSuggestions.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40"
-                          onClick={() => {
-                            setSelectedClientId(c.id)
-                            setCompanyNameValue(c.name)
-                            setClientSuggestions([])
-
-                            const clientRecipients = Array.isArray((c as any).recipients) ? (c as any).recipients : []
-                            if (clientRecipients.length > 0) {
-                              setRecipients((prev) => {
-                                const existingEmails = new Set(prev.map((r) => normalizeEmail(r.email)))
-                                const merged: EditableRecipient[] = [...prev]
-
-                                for (const r of clientRecipients) {
-                                  const email = normalizeEmail(r?.email)
-                                  if (email && existingEmails.has(email)) continue
-
-                                  merged.push({
-                                    name: r?.name ?? null,
-                                    email: r?.email ?? null,
-                                    isPrimary: Boolean(r?.isPrimary),
-                                    receiveNotifications: r?.receiveNotifications !== false,
-                                  })
-
-                                  if (email) existingEmails.add(email)
-                                }
-
-                                return ensurePrimary(merged)
-                              })
-                            }
-                          }}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                    className="flex-shrink-0"
+                  >
+                    <Plus className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Create Client</span>
+                  </Button>
                 </div>
+                {clientFieldError && (
+                  <p className="text-xs text-destructive font-medium">{clientFieldError}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  Start typing to match existing Clients.
+                  Choose an existing Client. Start typing to search.
                   {clientsLoading ? ' Searching…' : ''}
                 </p>
               </div>
@@ -303,8 +423,120 @@ export default function NewProjectPage() {
                   value={recipients}
                   onChange={setRecipients}
                   addButtonLabel="Add Recipient"
+                  showAlsoAddToClient
+                  addMode="dialog"
+                  clientRecipients={selectedClientRecipients}
                 />
               </div>
+
+              <div className="border rounded-lg p-4 bg-card">
+                <ProjectUsersEditor
+                  label="Users"
+                  description="Assign non-admin users who can access this project"
+                  value={assignedUsers}
+                  onChange={setAssignedUsers}
+                  addButtonLabel="Add User"
+                />
+              </div>
+
+              <Dialog open={createClientOpen} onOpenChange={setCreateClientOpen}>
+                <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Create Client</DialogTitle>
+                    <DialogDescription>Create a client record and default recipients</DialogDescription>
+                  </DialogHeader>
+
+                  {createClientError && (
+                    <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded">
+                      {createClientError}
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="newClientName">Client Name *</Label>
+                      <Input
+                        id="newClientName"
+                        value={newClientFormData.name}
+                        onChange={(e) => setNewClientFormData((p) => ({ ...p, name: e.target.value }))}
+                        required
+                        maxLength={200}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="newClientAddress">Address</Label>
+                      <Textarea
+                        id="newClientAddress"
+                        value={newClientFormData.address}
+                        onChange={(e) => setNewClientFormData((p) => ({ ...p, address: e.target.value }))}
+                        rows={3}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="newClientPhone">Phone</Label>
+                        <Input
+                          id="newClientPhone"
+                          value={newClientFormData.phone}
+                          onChange={(e) => setNewClientFormData((p) => ({ ...p, phone: e.target.value }))}
+                          maxLength={50}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="newClientWebsite">Website</Label>
+                        <Input
+                          id="newClientWebsite"
+                          value={newClientFormData.website}
+                          onChange={(e) => setNewClientFormData((p) => ({ ...p, website: e.target.value }))}
+                          maxLength={200}
+                          placeholder="https://"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="newClientNotes">Notes</Label>
+                      <Textarea
+                        id="newClientNotes"
+                        value={newClientFormData.notes}
+                        onChange={(e) => setNewClientFormData((p) => ({ ...p, notes: e.target.value }))}
+                        rows={4}
+                      />
+                    </div>
+
+                    <div className="border rounded-lg p-4 bg-card">
+                      <RecipientsEditor
+                        label="Client Recipients"
+                        description="These recipients can be added to projects when creating a new project"
+                        value={newClientRecipients}
+                        onChange={setNewClientRecipients}
+                        addButtonLabel="Add Recipient"
+                      />
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setCreateClientOpen(false)}
+                      disabled={creatingClient}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => void handleCreateClient()}
+                      disabled={creatingClient}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      {creatingClient ? 'Creating...' : 'Create Client'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               {/* Authentication Section */}
               <div className="space-y-4 border rounded-lg p-4 bg-primary-visible border-2 border-primary-visible">

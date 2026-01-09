@@ -24,6 +24,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   projects Project[]
+  assignedProjects ProjectUser[]
   comments Comment[]
   passkeys PasskeyCredential[]
   projectStatusChanges ProjectStatusChange[]
@@ -47,6 +48,7 @@ model Client {
   phone     String?
   website   String?
   notes     String?
+  active    Boolean  @default(true)
   deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -56,6 +58,7 @@ model Client {
   projects   Project[]
 
   @@index([deletedAt])
+  @@index([active])
   @@index([name])
 }
 
@@ -149,6 +152,8 @@ model Project {
   createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String
 
+  assignedUsers ProjectUser[]
+
   videos            Video[]
   comments          Comment[]
   securityEvents    SecurityEvent[]
@@ -159,8 +164,42 @@ model Project {
   emailEvents       ProjectEmailEvent[] // Logged client email notifications
   emailTracking     EmailTracking[] // Email open tracking pixels
   commentFiles      CommentFile[] // Files uploaded with comments
+  files             ProjectFile[] // Internal-only project documents (briefs, references)
 
   statusChanges      ProjectStatusChange[]
+}
+
+model ProjectFile {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  fileName    String
+  fileSize    BigInt
+  fileType    String
+  storagePath String
+  category    String?
+
+  uploadedBy     String?
+  uploadedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, category])
+}
+
+model ProjectUser {
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
 }
 
 model ProjectStatusChange {

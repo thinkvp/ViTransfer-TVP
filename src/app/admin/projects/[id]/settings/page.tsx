@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,6 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
 import { ReprocessModal } from '@/components/ReprocessModal'
-import { RecipientManager } from '@/components/RecipientManager'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
 import { apiFetch } from '@/lib/api-client'
@@ -78,6 +77,7 @@ interface Project {
   slug: string
   description: string | null
   companyName: string | null
+  clientId?: string | null
   enableRevisions: boolean
   maxRevisions: number
   restrictCommentsToLatestVersion: boolean
@@ -120,6 +120,9 @@ export default function ProjectSettingsPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [companyName, setCompanyName] = useState('')
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
+  const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string }>>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
   const [enableRevisions, setEnableRevisions] = useState(false)
   const [maxRevisions, setMaxRevisions] = useState<number | ''>('')
   const [restrictCommentsToLatestVersion, setRestrictCommentsToLatestVersion] = useState(false)
@@ -207,6 +210,7 @@ export default function ProjectSettingsPage() {
         setTitle(data.title)
         setDescription(data.description || '')
         setCompanyName(data.companyName || '')
+        setSelectedClientId(data.clientId || null)
         setEnableRevisions(data.enableRevisions)
         setMaxRevisions(data.maxRevisions)
         setRestrictCommentsToLatestVersion(data.restrictCommentsToLatestVersion)
@@ -258,6 +262,38 @@ export default function ProjectSettingsPage() {
     loadProject()
   }, [projectId])
 
+  const loadClientSuggestions = useCallback(async (query: string) => {
+    const q = query.trim()
+    if (!q) {
+      setClientSuggestions([])
+      setClientsLoading(false)
+      return
+    }
+
+    setClientsLoading(true)
+    try {
+      const res = await apiFetch(`/api/clients?query=${encodeURIComponent(q)}&active=active`)
+      if (!res.ok) {
+        setClientSuggestions([])
+        return
+      }
+      const data = await res.json()
+      setClientSuggestions(((data?.clients || []) as any[]).map((c) => ({ id: c.id, name: c.name })))
+    } catch {
+      setClientSuggestions([])
+    } finally {
+      setClientsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedClientId) return
+    const handle = setTimeout(() => {
+      void loadClientSuggestions(companyName)
+    }, 200)
+    return () => clearTimeout(handle)
+  }, [companyName, loadClientSuggestions, selectedClientId])
+
   // Track if initial load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
 
@@ -276,6 +312,12 @@ export default function ProjectSettingsPage() {
     setSaving(true)
     setError('')
     setSuccess(false)
+
+    if (!selectedClientId) {
+      setError('Please choose an existing client')
+      setSaving(false)
+      return
+    }
 
     try {
       const sanitizedSlug = sanitizeSlug(slug)
@@ -313,7 +355,7 @@ export default function ProjectSettingsPage() {
         title,
         slug: sanitizedSlug,
         description: description || null,
-        companyName: companyName || null,
+        clientId: selectedClientId,
         enableRevisions,
         maxRevisions: enableRevisions ? finalMaxRevisions : 0,
         restrictCommentsToLatestVersion,
@@ -539,14 +581,43 @@ export default function ProjectSettingsPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="companyName">Company/Brand Name</Label>
-                  <Input
-                    id="companyName"
-                    type="text"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="e.g., XYZ Corporation"
-                    maxLength={100}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="companyName"
+                      type="text"
+                      value={companyName}
+                      onChange={(e) => {
+                        setCompanyName(e.target.value)
+                        setSelectedClientId(null)
+                      }}
+                      placeholder="Search clients..."
+                      maxLength={100}
+                      autoComplete="off"
+                    />
+
+                    {clientSuggestions.length > 0 && !selectedClientId && (
+                      <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-card shadow-sm overflow-hidden">
+                        {clientSuggestions.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40"
+                            onClick={() => {
+                              setSelectedClientId(c.id)
+                              setCompanyName(c.name)
+                              setClientSuggestions([])
+                            }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Choose an existing Client. Start typing to search.
+                    {clientsLoading ? ' Searching…' : ''}
+                  </p>
                 </div>
               </div>
 
@@ -618,7 +689,7 @@ export default function ProjectSettingsPage() {
             )}
           </Card>
 
-          {/* Client Information & Notifications */}
+          {/* Notifications */}
           <Card className="border-border">
             <CardHeader
               className="cursor-pointer hover:bg-accent/50 transition-colors"
@@ -626,9 +697,9 @@ export default function ProjectSettingsPage() {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Client Information & Notifications</CardTitle>
+                  <CardTitle>Notifications</CardTitle>
                   <CardDescription>
-                    Manage client recipients and notification settings
+                    Set notification schedule for client recipients
                   </CardDescription>
                 </div>
                 {showClientInfo ? (
@@ -641,12 +712,6 @@ export default function ProjectSettingsPage() {
 
             {showClientInfo && (
               <CardContent className="space-y-6 border-t pt-4">
-              <RecipientManager
-                projectId={projectId}
-                onError={setError}
-                onRecipientsChange={setRecipients}
-              />
-
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <ScheduleSelector
                   schedule={clientNotificationSchedule}

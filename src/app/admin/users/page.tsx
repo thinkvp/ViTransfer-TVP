@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, UserPlus, Edit, Trash2, Plus, Pencil, Shield, ShieldOff, Check } from 'lucide-react'
+import { Users, UserPlus, Trash2, Plus, Shield, ShieldOff, Check } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -46,6 +46,8 @@ const MENU_ITEMS: Array<{ key: keyof RolePermissions['menuVisibility']; label: s
 const ACTION_ITEMS: Array<{ key: keyof RolePermissions['actions']; label: string }> = [
   { key: 'accessProjectSettings', label: 'Access project settings' },
   { key: 'changeProjectSettings', label: 'Change project settings' },
+  { key: 'uploadFilesToProjectInternal', label: 'Upload files to project (internal)' },
+  { key: 'uploadVideosOnProjects', label: 'Upload videos on projects' },
   { key: 'sendNotificationsToRecipients', label: 'Send notifications' },
   { key: 'makeCommentsOnProjects', label: 'Make comments' },
   { key: 'changeProjectStatuses', label: 'Change project statuses' },
@@ -231,7 +233,19 @@ export default function UsersPage() {
                     </thead>
                     <tbody>
                       {users.map((user) => (
-                        <tr key={user.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
+                        <tr
+                          key={user.id}
+                          className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
+                          onClick={() => router.push(`/admin/users/${user.id}`)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              router.push(`/admin/users/${user.id}`)
+                            }
+                          }}
+                        >
                           <td className="px-3 py-2">
                             <div className="font-medium">{user.name || user.username || user.email}</div>
                             <div className="text-xs text-muted-foreground md:hidden">{user.email}</div>
@@ -256,34 +270,28 @@ export default function UsersPage() {
                               <span
                                 className="h-4 w-4 rounded-full border border-border"
                                 style={{ backgroundColor: user.displayColor || 'transparent' }}
-                                aria-label="Display colour"
+                                aria-label={user.displayColor ? `Display colour ${user.displayColor}` : 'Display colour'}
                               />
-                              <span className="text-xs text-muted-foreground">{user.displayColor || '—'}</span>
                             </div>
                           </td>
                           <td className="px-3 py-2 text-right">
                             <div className="inline-flex items-center gap-2">
                               <Button
+                                type="button"
                                 variant="outline"
                                 size="sm"
-                                className="w-9 px-0 sm:w-auto sm:px-3"
-                                aria-label="Edit user"
-                                title="Edit"
-                                onClick={() => router.push(`/admin/users/${user.id}`)}
-                              >
-                                <Edit className="w-4 h-4 sm:mr-2" />
-                                <span className="hidden sm:inline">Edit</span>
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                className="w-9 px-0 sm:w-auto sm:px-3"
+                                className="h-9 w-9 p-0"
                                 aria-label="Delete user"
                                 title="Delete"
-                                onClick={() => handleDelete(user.id, user.email)}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void handleDelete(user.id, user.email)
+                                }}
                               >
-                                <Trash2 className="w-4 h-4 sm:mr-2" />
-                                <span className="hidden sm:inline">Delete</span>
+                                <Trash2 className="w-4 h-4 text-destructive" />
                               </Button>
                             </div>
                           </td>
@@ -325,7 +333,26 @@ export default function UsersPage() {
                           const canEdit = !role.isSystemAdmin && role.id !== 'role_admin'
                           const canDelete = canEdit && role.userCount === 0
                           return (
-                            <tr key={role.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
+                            <tr
+                              key={role.id}
+                              className={cn(
+                                'border-b border-border last:border-b-0 hover:bg-muted/40',
+                                canEdit && 'cursor-pointer'
+                              )}
+                              onClick={() => {
+                                if (!canEdit) return
+                                openEditRole(role)
+                              }}
+                              role={canEdit ? 'button' : undefined}
+                              tabIndex={canEdit ? 0 : -1}
+                              onKeyDown={(e) => {
+                                if (!canEdit) return
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  openEditRole(role)
+                                }
+                              }}
+                            >
                               <td className="px-3 py-2">
                                 <div className="flex items-center gap-2">
                                   <span className={cn(
@@ -346,28 +373,22 @@ export default function UsersPage() {
                               <td className="px-3 py-2 text-right">
                                 <div className="inline-flex items-center gap-2">
                                   <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
-                                    className="w-9 px-0 sm:w-auto sm:px-3"
-                                    aria-label="Edit role"
-                                    title="Edit"
-                                    onClick={() => openEditRole(role)}
-                                    disabled={!canEdit}
-                                  >
-                                    <Pencil className="w-4 h-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Edit</span>
-                                  </Button>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    className="w-9 px-0 sm:w-auto sm:px-3"
+                                    className="h-9 w-9 p-0"
                                     aria-label="Delete role"
-                                    onClick={() => void deleteRole(role)}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void deleteRole(role)
+                                    }}
                                     disabled={!canDelete}
                                     title={!canDelete ? (role.userCount > 0 ? 'Role has assigned users' : 'Protected') : 'Delete role'}
                                   >
-                                    <Trash2 className="w-4 h-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Delete</span>
+                                    <Trash2 className="w-4 h-4 text-destructive" />
                                   </Button>
                                 </div>
                               </td>
@@ -384,7 +405,7 @@ export default function UsersPage() {
         </div>
 
         <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-          <DialogContent>
+          <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{roleDialogMode === 'create' ? 'Add New Role' : 'Edit Role'}</DialogTitle>
               <DialogDescription>
@@ -426,27 +447,38 @@ export default function UsersPage() {
 
               <div className="space-y-2">
                 <div className="text-sm font-medium">Project Visibility</div>
-                <div className="flex flex-wrap gap-2">
-                  {PROJECT_STATUS_OPTIONS.map((s) => {
-                    const selected = rolePermissions.projectVisibility.statuses.includes(s.value)
-                    return (
-                      <button
-                        key={s.value}
-                        type="button"
-                        className={cn(
-                          'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border transition-colors',
-                          selected
-                            ? cn(projectStatusBadgeClass(s.value), 'border-2 font-semibold')
-                            : 'bg-muted text-muted-foreground border border-border opacity-70 hover:opacity-100'
-                        )}
-                        onClick={() => toggleStatus(s.value)}
-                        aria-pressed={selected}
-                      >
-                        {selected && <Check className="h-3.5 w-3.5" />}
-                        {s.label}
-                      </button>
-                    )
-                  })}
+                <div className="space-y-2">
+                  {(
+                    [
+                      ['NOT_STARTED', 'IN_REVIEW', 'ON_HOLD'],
+                      ['SHARE_ONLY', 'APPROVED', 'CLOSED'],
+                    ] as ProjectStatus[][]
+                  ).map((row) => (
+                    <div key={row.join('|')} className="flex items-center justify-center gap-2">
+                      {row.map((value) => {
+                        const option = PROJECT_STATUS_OPTIONS.find((s) => s.value === value)
+                        const label = option?.label || value
+                        const selected = rolePermissions.projectVisibility.statuses.includes(value)
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border transition-colors',
+                              selected
+                                ? cn(projectStatusBadgeClass(value), 'border-2 font-semibold')
+                                : 'bg-muted text-muted-foreground border border-border opacity-70 hover:opacity-100'
+                            )}
+                            onClick={() => toggleStatus(value)}
+                            aria-pressed={selected}
+                          >
+                            {selected && <Check className="h-3.5 w-3.5" />}
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ))}
                 </div>
               </div>
 

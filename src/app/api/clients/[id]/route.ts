@@ -23,6 +23,7 @@ const updateClientSchema = z.object({
   phone: z.string().trim().max(50).nullable().optional(),
   website: z.string().trim().max(200).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
+  active: z.boolean().optional(),
   recipients: z.array(recipientSchema).optional(),
 })
 
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     select: {
       id: true,
       name: true,
+      active: true,
       address: true,
       phone: true,
       website: true,
@@ -125,6 +127,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!existing) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
 
     const { name, address, phone, website, notes } = parsed.data
+    const active = parsed.data.active
 
     const recipientsInput = parsed.data.recipients
       ? parsed.data.recipients.map((r) => ({
@@ -145,6 +148,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           ...(phone !== undefined ? { phone: phone ?? null } : {}),
           ...(website !== undefined ? { website: website ?? null } : {}),
           ...(notes !== undefined ? { notes: notes ?? null } : {}),
+          ...(typeof active === 'boolean' ? { active } : {}),
         },
         select: { id: true, name: true },
       })
@@ -172,6 +176,26 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           await tx.clientRecipient.createMany({
             data: normalized.map((r) => ({ ...r, clientId: id })),
           })
+        }
+
+        // Keep project recipient colours in sync (best-effort) for this client.
+        // Only matches recipients by email.
+        const projectIds = await tx.project.findMany({
+          where: { clientId: id },
+          select: { id: true },
+        })
+        const projectIdList = projectIds.map((p) => p.id)
+        if (projectIdList.length > 0) {
+          for (const r of normalized) {
+            if (!r.email) continue
+            await tx.projectRecipient.updateMany({
+              where: {
+                projectId: { in: projectIdList },
+                email: r.email,
+              },
+              data: { displayColor: r.displayColor ?? null },
+            })
+          }
         }
       }
 

@@ -5,6 +5,8 @@ export type MenuKey = 'projects' | 'clients' | 'settings' | 'users' | 'integrati
 export type ActionKey =
   | 'accessProjectSettings'
   | 'changeProjectSettings'
+  | 'uploadFilesToProjectInternal'
+  | 'uploadVideosOnProjects'
   | 'sendNotificationsToRecipients'
   | 'makeCommentsOnProjects'
   | 'changeProjectStatuses'
@@ -23,6 +25,8 @@ const ALL_MENUS: MenuKey[] = ['projects', 'clients', 'settings', 'users', 'integ
 const ALL_ACTIONS: ActionKey[] = [
   'accessProjectSettings',
   'changeProjectSettings',
+  'uploadFilesToProjectInternal',
+  'uploadVideosOnProjects',
   'sendNotificationsToRecipients',
   'makeCommentsOnProjects',
   'changeProjectStatuses',

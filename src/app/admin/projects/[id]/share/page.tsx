@@ -474,7 +474,6 @@ export default function AdminSharePage() {
                       projectStatus={project.status}
                       defaultQuality={defaultQuality}
                       projectTitle={project.title}
-                      projectDescription={project.description}
                       clientName={project.clientName}
                       isPasswordProtected={!!project.sharePassword}
                       watermarkEnabled={project.watermarkEnabled}
@@ -793,7 +792,6 @@ function AdminShareFeedbackGrid({
               projectStatus={project.status}
               defaultQuality={defaultQuality}
               projectTitle={project.title}
-              projectDescription={project.description}
               clientName={project.clientName}
               isPasswordProtected={!!project.sharePassword}
               watermarkEnabled={project.watermarkEnabled}

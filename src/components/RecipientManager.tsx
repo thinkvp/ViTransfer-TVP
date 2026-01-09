@@ -299,7 +299,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                     )}
 
                     <span
-                      className="h-4 w-4 rounded-sm border border-border bg-muted/40"
+                      className="h-6 w-6 rounded-full border border-border bg-muted/40 flex-shrink-0"
                       style={recipient.displayColor ? { backgroundColor: recipient.displayColor } : undefined}
                       title={recipient.displayColor ? `Display colour: ${recipient.displayColor}` : 'Display colour: not set'}
                       aria-label={recipient.displayColor ? `Display colour ${recipient.displayColor}` : 'Display colour not set'}

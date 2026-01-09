@@ -87,6 +87,7 @@ const tusServer: Server = new Server({
       const videoId = upload.metadata?.videoId as string
       const assetId = upload.metadata?.assetId as string
       const clientFileId = upload.metadata?.clientFileId as string
+      const projectFileId = upload.metadata?.projectFileId as string
 
       const declaredSize = Number(upload.size)
       if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
@@ -104,10 +105,10 @@ const tusServer: Server = new Server({
         }
       }
 
-      if (!videoId && !assetId && !clientFileId) {
+      if (!videoId && !assetId && !clientFileId && !projectFileId) {
         throw {
           status_code: 400,
-          body: 'Missing required metadata: videoId, assetId, or clientFileId'
+          body: 'Missing required metadata: videoId, assetId, clientFileId, or projectFileId'
         }
       }
 
@@ -157,6 +158,19 @@ const tusServer: Server = new Server({
         }
       }
 
+      if (projectFileId) {
+        const file = await prisma.projectFile.findUnique({
+          where: { id: projectFileId }
+        })
+
+        if (!file) {
+          throw {
+            status_code: 404,
+            body: 'Project file record not found'
+          }
+        }
+      }
+
       return { metadata: upload.metadata }
     } catch (error) {
       console.error('[UPLOAD] Error in onUploadCreate:', error)
@@ -169,6 +183,7 @@ const tusServer: Server = new Server({
     const videoId = upload.metadata?.videoId as string
     const assetId = upload.metadata?.assetId as string
     const clientFileId = upload.metadata?.clientFileId as string
+    const projectFileId = upload.metadata?.projectFileId as string
 
     try {
       const maxUploadSizeBytes = await getMaxUploadSizeBytes()
@@ -178,6 +193,8 @@ const tusServer: Server = new Server({
         return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer, maxUploadSizeBytes)
       } else if (clientFileId) {
         return await handleClientFileUploadFinish(tusFilePath, upload, clientFileId, tusServer, maxUploadSizeBytes)
+      } else if (projectFileId) {
+        return await handleProjectFileUploadFinish(tusFilePath, upload, projectFileId, tusServer, maxUploadSizeBytes)
       } else {
         console.error('[UPLOAD] No videoId or assetId in upload metadata')
         return {}
@@ -360,6 +377,62 @@ async function handleClientFileUploadFinish(
   })
 
   console.log(`[UPLOAD] Client file uploaded and queued for processing: ${clientFileId}`)
+
+  await cleanupTUSFile(tusFilePath)
+  return {}
+}
+
+async function handleProjectFileUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  projectFileId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
+  const projectFile = await prisma.projectFile.findUnique({
+    where: { id: projectFileId }
+  })
+
+  if (!projectFile) {
+    console.error(`[UPLOAD] Project file not found: ${projectFileId}`)
+    return {}
+  }
+
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
+
+  await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
+
+  const { uploadFile, initStorage } = await import('@/lib/storage')
+  await initStorage()
+
+  const fileStream = (tusServer.datastore as any).read(upload.id)
+
+  // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
+  const actualFileType = 'application/octet-stream'
+  await uploadFile(
+    projectFile.storagePath,
+    fileStream,
+    fileSize,
+    actualFileType
+  )
+
+  await prisma.projectFile.update({
+    where: { id: projectFileId },
+    data: {
+      fileType: actualFileType,
+    },
+  })
+
+  // Queue project file for magic byte validation
+  const { getProjectFileQueue } = await import('@/lib/queue')
+  const q = getProjectFileQueue()
+  await q.add('process-project-file', {
+    projectFileId: projectFile.id,
+    storagePath: projectFile.storagePath,
+    expectedCategory: projectFile.category ?? undefined,
+  })
+
+  console.log(`[UPLOAD] Project file uploaded and queued for processing: ${projectFileId}`)
 
   await cleanupTUSFile(tusFilePath)
   return {}

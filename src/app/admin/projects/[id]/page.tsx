@@ -8,12 +8,14 @@ import Link from 'next/link'
 import AdminVideoManager from '@/components/AdminVideoManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
-import CommentSection from '@/components/CommentSection'
 import { ArrowLeft, Settings, ArrowUpDown, FolderKanban, Video } from 'lucide-react'
-import { apiFetch } from '@/lib/api-client'
-import { apiPatch } from '@/lib/api-client'
+import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
+import { ProjectFileUpload } from '@/components/ProjectFileUpload'
+import { ProjectFileList } from '@/components/ProjectFileList'
+import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -27,20 +29,20 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
   const [companyName, setCompanyName] = useState('Studio')
-  const [activeVideoName, setActiveVideoName] = useState<string>('')
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [adminUser, setAdminUser] = useState<any>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
+  const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
+  const [projectFilesRefresh, setProjectFilesRefresh] = useState(0)
+
+  const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
+  const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
 
   const permissions = useMemo(() => normalizeRolePermissions(adminUser?.permissions), [adminUser?.permissions])
   const canAccessProjectSettings = canDoAction(permissions, 'accessProjectSettings')
   const canChangeProjectStatuses = canDoAction(permissions, 'changeProjectStatuses')
-
-  // Derive active videos from selected video name (synchronous, no useEffect delay)
-  const activeVideos = useMemo(() => {
-    if (!project?.videos || !activeVideoName) return []
-    return project.videos.filter((v: any) => v.name === activeVideoName)
-  }, [project?.videos, activeVideoName])
+  const canChangeProjectSettings = canDoAction(permissions, 'changeProjectSettings')
+  const canUploadFilesToProjectInternal = canDoAction(permissions, 'uploadFilesToProjectInternal')
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -55,12 +57,88 @@ export default function ProjectPage() {
       }
       const data = await response.json()
       setProject(data)
+      setAssignedUsers(Array.isArray((data as any)?.assignedUsers) ? ((data as any).assignedUsers as AssignableUser[]) : [])
+
+      const recipients = Array.isArray((data as any)?.recipients) ? ((data as any).recipients as any[]) : []
+      setEditableRecipients(
+        recipients.map((r) => ({
+          id: String(r?.id || ''),
+          name: r?.name ?? null,
+          email: r?.email ?? null,
+          displayColor: r?.displayColor ?? null,
+          isPrimary: Boolean(r?.isPrimary),
+          receiveNotifications: r?.receiveNotifications !== false,
+        }))
+      )
     } catch (error) {
       console.error('Error fetching project:', error)
     } finally {
       setLoading(false)
     }
   }, [id, router])
+
+  const persistRecipients = useCallback(async (next: EditableRecipient[]) => {
+    if (!canChangeProjectSettings) return
+    setEditableRecipients(next)
+
+    try {
+      const prevIds = new Set(editableRecipients.map((r) => String(r.id || '')).filter(Boolean))
+      const nextIds = new Set(next.map((r) => String(r.id || '')).filter(Boolean))
+
+      // Deletions
+      const toDelete = Array.from(prevIds).filter((rid) => !nextIds.has(rid))
+      if (toDelete.length > 0) {
+        await Promise.all(toDelete.map((rid) => apiDelete(`/api/projects/${id}/recipients/${rid}`)))
+      }
+
+      // Updates
+      const toUpdate = next.filter((r) => r.id)
+      if (toUpdate.length > 0) {
+        await Promise.all(
+          toUpdate.map((r) => {
+            const rid = String(r.id || '')
+            return apiPatch(`/api/projects/${id}/recipients/${rid}`, {
+              name: r.name?.trim() ? r.name.trim() : null,
+              email: r.email?.trim() ? r.email.trim() : null,
+              displayColor: r.displayColor ?? null,
+              isPrimary: Boolean(r.isPrimary),
+              receiveNotifications: Boolean(r.receiveNotifications),
+            })
+          })
+        )
+      }
+
+      // Creations (no id)
+      const toCreate = next.filter((r) => !r.id)
+      if (toCreate.length > 0) {
+        for (const r of toCreate) {
+          await apiPost(`/api/projects/${id}/recipients`, {
+            name: r.name?.trim() ? r.name.trim() : null,
+            email: r.email?.trim() ? r.email.trim() : null,
+            displayColor: r.displayColor ?? null,
+            isPrimary: Boolean(r.isPrimary),
+            receiveNotifications: Boolean(r.receiveNotifications),
+            alsoAddToClient: Boolean((r as any)?.alsoAddToClient),
+          })
+        }
+      }
+
+      fetchProject()
+    } catch (e: any) {
+      alert(e?.message || 'Failed to update recipients')
+      fetchProject()
+    }
+  }, [canChangeProjectSettings, editableRecipients, fetchProject, id])
+
+  const persistAssignedUsers = useCallback(async (next: AssignableUser[]) => {
+    try {
+      await apiPatch(`/api/projects/${id}`, { assignedUserIds: next.map((u) => u.id) })
+    } catch {
+      alert('Failed to update assigned users')
+    } finally {
+      fetchProject()
+    }
+  }, [fetchProject, id])
 
   // Fetch project data on mount
   useEffect(() => {
@@ -71,23 +149,10 @@ export default function ProjectPage() {
   useEffect(() => {
     const handleUpdate = () => fetchProject()
 
-    const handleCommentPosted = (e: Event) => {
-      const customEvent = e as CustomEvent
-      if (customEvent.detail?.comments) {
-        setProject((prev: any) => prev ? { ...prev, comments: customEvent.detail.comments } : prev)
-      } else {
-        fetchProject()
-      }
-    }
-
     window.addEventListener('videoApprovalChanged', handleUpdate)
-    window.addEventListener('commentDeleted', handleUpdate)
-    window.addEventListener('commentPosted', handleCommentPosted as EventListener)
 
     return () => {
       window.removeEventListener('videoApprovalChanged', handleUpdate)
-      window.removeEventListener('commentDeleted', handleUpdate)
-      window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
     }
   }, [fetchProject])
 
@@ -129,6 +194,32 @@ export default function ProjectPage() {
     fetchShareUrl()
   }, [project?.slug])
 
+  // Fetch client recipients (for picker) when client changes
+  useEffect(() => {
+    if (!project?.clientId) {
+      setClientRecipients([])
+      return
+    }
+
+    let cancelled = false
+    async function fetchClientRecipients() {
+      try {
+        const response = await apiFetch(`/api/clients/${project.clientId}`)
+        if (!response.ok) return
+        const data = await response.json()
+        const recips = Array.isArray(data?.client?.recipients) ? data.client.recipients : []
+        if (!cancelled) setClientRecipients(recips)
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchClientRecipients()
+    return () => {
+      cancelled = true
+    }
+  }, [project?.clientId])
+
   // Fetch company name and admin user
   useEffect(() => {
     async function fetchCompanyName() {
@@ -159,12 +250,6 @@ export default function ProjectPage() {
     fetchAdminUser()
   }, [])
 
-  // Handle video selection
-  const handleVideoSelect = (videoName: string, videos: any[]) => {
-    setActiveVideoName(videoName)
-    // activeVideos is now derived from activeVideoName via useMemo
-  }
-
   if (loading) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
@@ -185,15 +270,6 @@ export default function ProjectPage() {
     )
   }
 
-  // Filter comments to only show comments for active videos
-  const activeVideoIds = new Set(activeVideos.map((v: any) => v.id))
-  const filteredComments = project?.comments?.filter((comment: any) => {
-    // Show general comments (no videoId) or comments for active videos
-    return !comment.videoId || activeVideoIds.has(comment.videoId)
-  }) || []
-
-  const hideFeedback = (project as any).hideFeedback === true
-  const hideFeedbackEffective = hideFeedback || project.status === 'SHARE_ONLY'
   const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
@@ -241,6 +317,8 @@ export default function ProjectPage() {
     }
   }
 
+  const handleVideoSelect = (_videoName: string, _videos: any[]) => {}
+
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
@@ -262,8 +340,9 @@ export default function ProjectPage() {
           )}
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          <Card className="overflow-hidden lg:col-span-2 order-1">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div className="space-y-6 min-w-0">
+            <Card className="overflow-hidden">
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
                   <div className="min-w-0 flex-1">
@@ -273,7 +352,6 @@ export default function ProjectPage() {
 	                      </span>
 	                      <span className="min-w-0 break-words">{project.title}</span>
 	                    </CardTitle>
-                    <p className="text-sm text-muted-foreground mt-2 break-words">{project.description}</p>
                   </div>
                   <ProjectStatusPicker
                     value={project.status}
@@ -287,13 +365,16 @@ export default function ProjectPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="text-sm">
-                    <div className="min-w-0">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="text-sm min-w-0">
                       <p className="text-muted-foreground">Client</p>
                       <p className="font-medium break-words">
                         {(() => {
                           const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
-                          return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+                          const label = project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+                          return project.clientId
+                            ? <Link href={`/admin/clients/${project.clientId}`} className="hover:underline">{label}</Link>
+                            : label
                         })()}
                       </p>
                       {!project.companyName && project.recipients?.[0]?.name && project.recipients?.[0]?.email && (
@@ -302,29 +383,45 @@ export default function ProjectPage() {
                         </p>
                       )}
                     </div>
-                  </div>
 
-                  <div className="text-sm">
-                    <div className="min-w-0">
+                    <div className="text-sm flex-shrink-0 text-right">
                       <p className="text-muted-foreground">Project Created</p>
                       <p className="font-medium tabular-nums">{formatProjectDate(project.createdAt)}</p>
                     </div>
                   </div>
+
+                  {String(project.description || '').trim().length > 0 && (
+                    <div className="text-sm">
+                      <p className="text-muted-foreground">Project Description</p>
+                      <div className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">{project.description}</div>
+                    </div>
+                  )}
 
                   <ShareLink
                     shareUrl={shareUrl}
                     disabled={project.status === 'CLOSED'}
                     label={project.status === 'CLOSED' ? 'Share Link - Inaccessible (Project is Closed)' : 'Share Link'}
                   />
+
+                  {/* Recipients: full row */}
+                  <div className="border rounded-lg p-4 bg-card">
+                    <RecipientsEditor
+                      label="Recipients"
+                      description=""
+                      value={editableRecipients}
+                      onChange={(next) => void persistRecipients(next)}
+                      addButtonLabel="Add Recipient"
+                      showNotificationsToggle={true}
+                      showDisplayColor={true}
+                      showAlsoAddToClient={Boolean(project?.clientId)}
+                      addMode="dialog"
+                      clientRecipients={clientRecipients}
+                    />
+                  </div>
                 </div>
               </CardContent>
-          </Card>
+            </Card>
 
-          <div className="space-y-6 min-w-0 order-2 lg:order-3 lg:col-span-1 lg:col-start-3 lg:row-start-1">
-            <ProjectActions project={project} videos={project.videos} onRefresh={fetchProject} />
-          </div>
-
-          <div className="lg:col-span-2 space-y-6 min-w-0 order-3 lg:order-2 lg:row-start-2">
             <div>
 	              <div className="flex items-center justify-between mb-4">
 	                <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -362,37 +459,51 @@ export default function ProjectPage() {
             </div>
           </div>
 
-          {!hideFeedbackEffective && activeVideos.length > 0 && (
-            <div className="min-w-0 order-4 lg:order-3 lg:col-span-1 lg:col-start-3 lg:row-start-2">
-              <div className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
-                <CommentSection
-                  key={activeVideoName} // Force fresh component per video
-                  projectId={project.id}
-                  projectSlug={project.slug}
-                  comments={filteredComments}
-                  clientName={(() => {
-                    const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
-                    return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
-                  })()}
-                  clientEmail={project.recipients?.[0]?.email}
-                  isApproved={project.status === 'APPROVED'}
-                  restrictToLatestVersion={project.restrictCommentsToLatestVersion}
-                  videos={activeVideos}
-                  isAdminView={true}
-                  companyName={companyName}
-                  clientCompanyName={project.companyName}
-                  smtpConfigured={true}
-                  isPasswordProtected={!!project.sharePassword}
-                  adminUser={adminUser}
-                  recipients={project.recipients || []}
-                  allowClientDeleteComments={project.allowClientDeleteComments}
-                  showVideoActions={false}
-                  showVideoNotes={false}
-                  hideInput={true}
+          <div className="space-y-6 min-w-0">
+            <ProjectActions project={project} videos={project.videos} onRefresh={fetchProject} />
+
+            <Card>
+              <CardContent className="pt-6">
+                <ProjectUsersEditor
+                  label={(
+                    <span className="inline-flex items-center gap-2">
+                      <span className="text-base">Users</span>
+                      <span className="text-xs text-muted-foreground">(Add non-admin users)</span>
+                    </span>
+                  )}
+                  description=""
+                  value={assignedUsers}
+                  onChange={(next) => {
+                    setAssignedUsers(next)
+                    void persistAssignedUsers(next)
+                  }}
+                  disabled={!canChangeProjectSettings}
+                  addButtonLabel="Add User"
+                  addButtonIconOnly
                 />
-              </div>
+              </CardContent>
+            </Card>
+
+            <div className="border rounded-lg p-4 bg-card space-y-4">
+              {canUploadFilesToProjectInternal ? (
+                <ProjectFileUpload
+                  title="Project Files (Internal)"
+                  layout="headerRow"
+                  projectId={project.id}
+                  maxConcurrent={3}
+                  onUploadComplete={() => setProjectFilesRefresh((v) => v + 1)}
+                />
+              ) : (
+                <h3 className="text-base font-medium">Project Files (Internal)</h3>
+              )}
+
+              <ProjectFileList
+                projectId={project.id}
+                refreshTrigger={projectFilesRefresh}
+                canDelete={canUploadFilesToProjectInternal}
+              />
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

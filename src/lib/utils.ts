@@ -125,30 +125,49 @@ export function generateSlug(title: string): string {
     .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
 }
 
+function randomSlugSuffix(length: number): string {
+  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz'
+  const cryptoObj = globalThis.crypto
+  if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
+    throw new Error('Secure random generator not available')
+  }
+
+  const max = 256 - (256 % alphabet.length)
+  let result = ''
+  const bytes = new Uint8Array(Math.max(16, length * 2))
+
+  while (result.length < length) {
+    cryptoObj.getRandomValues(bytes)
+    for (const b of bytes) {
+      if (b >= max) continue
+      result += alphabet[b % alphabet.length]
+      if (result.length >= length) break
+    }
+  }
+
+  return result
+}
+
 export async function generateUniqueSlug(
   title: string,
   prisma: any,
   excludeId?: string
 ): Promise<string> {
-  let slug = generateSlug(title)
-  let counter = 1
+  const base = generateSlug(title) || 'project'
 
-  // Check if slug exists
-  while (true) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const slug = `${base}-${randomSlugSuffix(8)}`
+
     const existing = await prisma.project.findUnique({
       where: { slug },
     })
 
     if (!existing || existing.id === excludeId) {
-      break
+      return slug
     }
-
-    // Append counter to make it unique
-    slug = `${generateSlug(title)}-${counter}`
-    counter++
   }
 
-  return slug
+  throw new Error('Unable to generate a unique share link. Please try again.')
 }
 
 export function getClientIpAddress(request: NextRequest): string {

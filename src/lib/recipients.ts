@@ -81,7 +81,8 @@ export async function addRecipient(
   email: string | null = null,
   name: string | null = null,
   isPrimary: boolean = false,
-  displayColor?: string | null
+  displayColor?: string | null,
+  alsoAddToClient?: boolean
 ): Promise<Recipient> {
   // If setting as primary, unset other primary recipients
   if (isPrimary) {
@@ -104,6 +105,54 @@ export async function addRecipient(
       displayColor: normalizedColor ?? generateRandomHexDisplayColor(),
     }
   })
+
+  // Keep client recipient colour in sync (best-effort) when a project belongs to a client.
+  // If alsoAddToClient is true, ensure the recipient exists on the client as well.
+  if (recipient.email) {
+    try {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { clientId: true },
+      })
+      const clientId = project?.clientId
+      if (clientId) {
+        if (alsoAddToClient) {
+          const existing = await prisma.clientRecipient.findFirst({
+            where: { clientId, email: recipient.email },
+            select: { id: true },
+          })
+
+          if (existing) {
+            await prisma.clientRecipient.update({
+              where: { id: existing.id },
+              data: {
+                displayColor: recipient.displayColor,
+                ...(recipient.name ? { name: recipient.name } : {}),
+              },
+            })
+          } else {
+            await prisma.clientRecipient.create({
+              data: {
+                clientId,
+                email: recipient.email,
+                name: recipient.name,
+                displayColor: recipient.displayColor,
+                isPrimary: false,
+                receiveNotifications: true,
+              },
+            })
+          }
+        } else {
+          await prisma.clientRecipient.updateMany({
+            where: { clientId, email: recipient.email },
+            data: { displayColor: recipient.displayColor },
+          })
+        }
+      }
+    } catch {
+      // Ignore sync failures; project recipient was created successfully.
+    }
+  }
 
   return {
     id: recipient.id,
@@ -158,6 +207,25 @@ export async function updateRecipient(
     where: { id: recipientId },
     data: updateData
   })
+
+  // Keep client recipient colour in sync (best-effort) when a project belongs to a client.
+  if (Object.prototype.hasOwnProperty.call(updateData, 'displayColor') && recipient.email) {
+    try {
+      const project = await prisma.project.findUnique({
+        where: { id: recipient.projectId },
+        select: { clientId: true },
+      })
+      const clientId = project?.clientId
+      if (clientId) {
+        await prisma.clientRecipient.updateMany({
+          where: { clientId, email: recipient.email },
+          data: { displayColor: recipient.displayColor },
+        })
+      }
+    } catch {
+      // Ignore sync failures; recipient update succeeded.
+    }
+  }
 
   return {
     id: recipient.id,

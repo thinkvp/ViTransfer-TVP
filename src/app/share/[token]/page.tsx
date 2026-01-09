@@ -870,7 +870,6 @@ export default function SharePage() {
                     projectStatus={project.status}
                     defaultQuality={defaultQuality}
                     projectTitle={project.title}
-                    projectDescription={isGuest ? null : project.description}
                     clientName={isGuest ? null : project.clientName}
                     isPasswordProtected={isPasswordProtected || false}
                     watermarkEnabled={project.watermarkEnabled}
@@ -1225,7 +1224,6 @@ function ShareFeedbackGrid({
               projectStatus={project.status}
               defaultQuality={defaultQuality}
               projectTitle={project.title}
-              projectDescription={project.description}
               clientName={project.clientName}
               isPasswordProtected={isPasswordProtected}
               watermarkEnabled={project.watermarkEnabled}

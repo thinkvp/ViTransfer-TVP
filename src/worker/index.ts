@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, ProjectFileProcessingJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
@@ -8,6 +8,7 @@ import os from 'os'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
+import { processProjectFile } from './project-file-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
@@ -172,6 +173,29 @@ async function main() {
   })
 
   console.log('[WORKER] Client file processing worker started')
+
+  // Create project file processing worker
+  const projectFileWorker = new Worker<ProjectFileProcessingJob>('project-file-processing', processProjectFile, {
+    connection: getRedisForQueue(),
+    concurrency: concurrency * 2,
+  })
+
+  projectFileWorker.on('completed', (job) => {
+    console.log(`[WORKER] Project file job ${job.id} completed successfully`)
+  })
+
+  projectFileWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Project file job ${job?.id} failed:`, err)
+    if (DEBUG) {
+      console.error('[WORKER DEBUG] Project file job failure details:', {
+        jobId: job?.id,
+        jobData: job?.data,
+        error: err instanceof Error ? err.stack : err,
+      })
+    }
+  })
+
+  console.log('[WORKER] Project file processing worker started')
 
   // Create notification processing queue with repeatable job
   console.log('Setting up notification processing...')

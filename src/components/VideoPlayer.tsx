@@ -27,7 +27,6 @@ interface VideoPlayerProps {
   defaultQuality?: '720p' | '1080p' // Default quality from settings
   onApprove?: () => void // Optional approval callback
   projectTitle?: string
-  projectDescription?: string
   clientName?: string
   isPasswordProtected?: boolean
   watermarkEnabled?: boolean
@@ -55,7 +54,6 @@ export default function VideoPlayer({
   defaultQuality = '720p',
   onApprove,
   projectTitle,
-  projectDescription,
   clientName,
   isPasswordProtected,
   watermarkEnabled = true,

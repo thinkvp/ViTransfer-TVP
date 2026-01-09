@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
 import { Trash2, ExternalLink, Archive, RotateCcw, Send, Loader2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
@@ -281,10 +281,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>Actions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="pt-6 space-y-3">
           {/* Send Notification Button - only show if there are ready videos */}
           {canSendNotifications && readyVideos.length > 0 && (
             <div>

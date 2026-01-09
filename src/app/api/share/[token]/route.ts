@@ -271,7 +271,6 @@ export async function GET(
       ...(isGuest ? {} : { id: project.id }),
 
       title: project.title,
-      description: project.description,
 
       ...(isGuest ? {} : { status: project.status }),
 

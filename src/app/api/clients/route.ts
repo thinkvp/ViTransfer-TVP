@@ -29,11 +29,23 @@ const createClientSchema = z.object({
 type ClientListItem = {
   id: string
   name: string
+  active: boolean
   contacts: number
+  projects: number
   primaryContact: string | null
   primaryEmail: string | null
   createdAt: Date
   updatedAt: Date
+}
+
+type ActiveFilter = 'all' | 'active' | 'inactive'
+
+function parseActiveFilter(raw: string | null): ActiveFilter {
+  const v = (raw || '').trim().toLowerCase()
+  if (!v || v === 'all') return 'all'
+  if (v === 'active' || v === '1' || v === 'true') return 'active'
+  if (v === 'inactive' || v === '0' || v === 'false') return 'inactive'
+  return 'all'
 }
 
 function pickPrimaryRecipient(recipients: Array<{ name: string | null; email: string | null; isPrimary: boolean }>) {
@@ -60,11 +72,13 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const query = url.searchParams.get('query')?.trim() || ''
   const includeRecipients = url.searchParams.get('includeRecipients') === '1'
+  const activeFilter = parseActiveFilter(url.searchParams.get('active'))
 
   try {
     const clients = await prisma.client.findMany({
       where: {
         deletedAt: null,
+        ...(activeFilter === 'all' ? {} : { active: activeFilter === 'active' }),
         ...(query
           ? {
               name: {
@@ -75,15 +89,17 @@ export async function GET(request: NextRequest) {
           : {}),
       },
       orderBy: { name: 'asc' },
-      take: query ? 10 : 500,
+      take: query ? 10 : (includeRecipients ? 25 : 500),
       select: {
         id: true,
         name: true,
+        active: true,
         createdAt: true,
         updatedAt: true,
         _count: {
           select: {
             recipients: true,
+            projects: true,
           },
         },
         recipients: includeRecipients
@@ -119,7 +135,9 @@ export async function GET(request: NextRequest) {
       return {
         id: c.id,
         name: c.name,
+        active: Boolean(c.active),
         contacts: Number(c?._count?.recipients ?? 0),
+        projects: Number(c?._count?.projects ?? 0),
         primaryContact,
         primaryEmail,
         createdAt: c.createdAt,

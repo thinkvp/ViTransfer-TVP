@@ -144,17 +144,20 @@ export const createProjectSchema = z.object({
       message: 'Company name cannot contain line breaks'
     })
     .optional(),
-  clientId: cuidSchema.optional(),
+  clientId: cuidSchema,
   recipients: z
     .array(
       z.object({
         name: safeStringSchema(0, 255).optional().nullable(),
         email: emailSchema.optional().nullable().or(z.literal('')),
+        displayColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid display colour').nullable().optional(),
+        alsoAddToClient: z.boolean().optional(),
         isPrimary: z.boolean().optional(),
         receiveNotifications: z.boolean().optional(),
       })
     )
     .optional(),
+  assignedUserIds: z.array(cuidSchema).max(200).optional(),
   // Legacy single-recipient inputs (kept for backwards compatibility)
   recipientEmail: emailSchema.optional().or(z.literal('')),
   recipientName: safeStringSchema(0, 255).optional(),

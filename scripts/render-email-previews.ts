@@ -112,7 +112,6 @@ async function main() {
 		(await renderProjectGeneralNotificationEmail({
 			clientName: 'Alex',
 			projectTitle: 'Winter Campaign',
-			projectDescription: 'A quick overview of what to look for in this review.',
 			shareUrl: 'http://localhost:3000/share/demo',
 			readyVideos: [
 				{ name: 'Cut A', versionLabel: 'v3' },

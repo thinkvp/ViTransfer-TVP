@@ -1140,7 +1140,6 @@ export async function sendAdminProjectApprovedEmail({
 export async function renderProjectGeneralNotificationEmail({
   clientName,
   projectTitle,
-  projectDescription,
   shareUrl,
   readyVideos = [],
   notes,
@@ -1150,7 +1149,6 @@ export async function renderProjectGeneralNotificationEmail({
 }: {
   clientName: string
   projectTitle: string
-  projectDescription: string
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
   notes?: string | null
@@ -1196,12 +1194,6 @@ export async function renderProjectGeneralNotificationEmail({
       <p style="margin:0 0 24px; font-size:15px;">
         Your project is ready for review. Click below to view and leave feedback.
       </p>
-      ${projectDescription ? `
-        <div style="${emailCalloutStyle({ borderLeftPx: 4, marginBottomPx: 20 })}">
-          <div style="${emailCardTitleStyle()}">Project Description</div>
-          <div style="font-size:15px; color:#374151; line-height:1.6;">${escapeHtml(projectDescription)}</div>
-        </div>
-      ` : ''}
       ${renderNotesCard(notes, { cardStyle: notesCardStyle, cardTitleStyle: notesCardTitleStyle })}
       ${readyVideos.length > 0 ? `
         <div style="${emailCardStyle({ paddingPx: 20, borderRadiusPx: 8, marginBottomPx: 24 })}">
@@ -1233,7 +1225,6 @@ export async function sendProjectGeneralNotificationEmail({
   clientEmail,
   clientName,
   projectTitle,
-  projectDescription,
   shareUrl,
   readyVideos = [],
   notes,
@@ -1243,7 +1234,6 @@ export async function sendProjectGeneralNotificationEmail({
   clientEmail: string
   clientName: string
   projectTitle: string
-  projectDescription: string
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
   notes?: string | null
@@ -1253,7 +1243,6 @@ export async function sendProjectGeneralNotificationEmail({
   const { subject, html } = await renderProjectGeneralNotificationEmail({
     clientName,
     projectTitle,
-    projectDescription,
     shareUrl,
     readyVideos,
     notes,

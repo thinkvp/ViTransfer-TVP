@@ -20,7 +20,7 @@ const updateProjectSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   slug: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
-  companyName: z.string().max(200).nullable().optional(),
+  clientId: z.string().regex(/^c[a-z0-9]{24}$/).optional(),
   status: z.enum(['NOT_STARTED', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']).optional(),
   enableRevisions: z.boolean().optional(),
   maxRevisions: z.number().int().min(0).max(50).optional(),
@@ -41,6 +41,7 @@ const updateProjectSchema = z.object({
   clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'WEEKLY']).optional(),
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
+  assignedUserIds: z.array(z.string().regex(/^c[a-z0-9]{24}$/)).max(200).optional(),
 })
 
 export async function GET(
@@ -74,6 +75,25 @@ export async function GET(
     const project = await prisma.project.findUnique({
       where: { id },
       include: {
+        assignedUsers: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                appRole: {
+                  select: {
+                    id: true,
+                    name: true,
+                    isSystemAdmin: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         videos: {
           orderBy: { version: 'desc' },
         },
@@ -121,6 +141,22 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    // Non-system-admin users can only access projects explicitly assigned to them.
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assignment = await prisma.projectUser.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: project.id,
+            userId: authResult.id,
+          },
+        },
+        select: { projectId: true },
+      })
+      if (!assignment) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+      }
+    }
+
     // Check SMTP configuration status
     const smtpConfigured = await isSmtpConfigured()
 
@@ -160,6 +196,7 @@ export async function GET(
       comments: sanitizedComments,
       sharePassword: decryptedPassword,
       smtpConfigured,
+      assignedUsers: (project as any).assignedUsers?.map((pu: any) => pu.user).filter(Boolean) || [],
     }
 
     return NextResponse.json(projectData)
@@ -206,12 +243,63 @@ export async function PATCH(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    // Non-system-admin users can only mutate projects explicitly assigned to them.
+    if (admin.appRoleIsSystemAdmin !== true) {
+      const assignment = await prisma.projectUser.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: id,
+            userId: admin.id,
+          },
+        },
+        select: { projectId: true },
+      })
+      if (!assignment) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+      }
+    }
+
     const body = await request.json()
     const parsed = updateProjectSchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
     }
     const validatedBody = parsed.data
+
+    // Assignment updates (optional)
+    let assignedUserIdsToSet: string[] | null = null
+    if (validatedBody.assignedUserIds !== undefined) {
+      const requested = Array.isArray(validatedBody.assignedUserIds)
+        ? Array.from(new Set(validatedBody.assignedUserIds.map((v) => String(v || '')).filter(Boolean)))
+        : []
+
+      const creatorMustBeAssigned = admin.appRoleIsSystemAdmin !== true
+      const effective = creatorMustBeAssigned
+        ? Array.from(new Set([...requested, admin.id]))
+        : requested
+
+      if (effective.length === 0) {
+        assignedUserIdsToSet = []
+      } else {
+        const rows = await prisma.user.findMany({
+          where: { id: { in: effective } },
+          select: { id: true, appRole: { select: { isSystemAdmin: true } } },
+        })
+
+        const foundById = new Map(rows.map((r) => [r.id, r]))
+        const missing = effective.filter((uid) => !foundById.has(uid))
+        if (missing.length > 0) {
+          return NextResponse.json({ error: 'One or more assigned users were not found' }, { status: 400 })
+        }
+
+        const hasSystemAdmin = rows.some((r) => r.appRole?.isSystemAdmin === true)
+        if (hasSystemAdmin) {
+          return NextResponse.json({ error: 'System admin users cannot be assigned to projects' }, { status: 400 })
+        }
+
+        assignedUserIdsToSet = rows.map((r) => r.id)
+      }
+    }
 
     const isStatusMutation = validatedBody.status !== undefined
     const isSettingsMutation = Object.keys(validatedBody).some((k) => k !== 'status')
@@ -259,15 +347,21 @@ export async function PATCH(
     if (validatedBody.description !== undefined) {
       updateData.description = validatedBody.description || null
     }
-    if (validatedBody.companyName !== undefined) {
-      // Validate companyName (CRLF protection)
-      if (validatedBody.companyName && /[\r\n]/.test(validatedBody.companyName)) {
+    if (validatedBody.clientId !== undefined) {
+      const client = await prisma.client.findFirst({
+        where: { id: validatedBody.clientId, deletedAt: null },
+        select: { id: true, name: true },
+      })
+
+      if (!client) {
         return NextResponse.json(
-          { error: 'Company name cannot contain line breaks' },
+          { error: 'Client not found' },
           { status: 400 }
         )
       }
-      updateData.companyName = validatedBody.companyName || null
+
+      updateData.clientId = client.id
+      updateData.companyName = client.name
     }
 
     // Handle status update (for approval)
@@ -475,9 +569,23 @@ export async function PATCH(
     }
 
     // Update the project in database FIRST (before invalidating sessions)
-    const project = await prisma.project.update({
-      where: { id },
-      data: updateData,
+    const project = await prisma.$transaction(async (tx) => {
+      const updated = await tx.project.update({
+        where: { id },
+        data: updateData,
+      })
+
+      if (assignedUserIdsToSet !== null) {
+        await tx.projectUser.deleteMany({ where: { projectId: id } })
+        if (assignedUserIdsToSet.length > 0) {
+          await tx.projectUser.createMany({
+            data: assignedUserIdsToSet.map((userId) => ({ projectId: id, userId })),
+            skipDuplicates: true,
+          })
+        }
+      }
+
+      return updated
     })
 
     // Record status change in analytics activity feed

@@ -53,7 +53,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: { id: projectId },
       select: {
         title: true,
-        description: true,
         slug: true,
         sharePassword: true,
         status: true,
@@ -139,7 +138,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             clientEmail: recipient.email!,
             clientName: recipient.name || 'Client',
             projectTitle: project.title,
-            projectDescription: project.description || '',
             shareUrl,
             readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel })),
             notes: trimmedNotes ? trimmedNotes : null,

@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
   try {
     const permissions = getUserPermissions(authResult)
     const allowedStatuses = permissions.projectVisibility.statuses
+    const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
 
     if (!Array.isArray(allowedStatuses) || allowedStatuses.length === 0) {
       const response = NextResponse.json({ projects: [] })
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
     const projects = await prisma.project.findMany({
       where: {
         status: { in: allowedStatuses as any },
+        ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
       },
       select: {
         id: true,
@@ -141,8 +143,8 @@ export async function POST(request: NextRequest) {
     const {
       title,
       description,
-      companyName,
       clientId,
+      assignedUserIds,
       recipients,
       recipientEmail,
       recipientName,
@@ -155,6 +157,72 @@ export async function POST(request: NextRequest) {
       isShareOnly
     } = validation.data
 
+    const requestedUserIdsRaw = Array.isArray(assignedUserIds) ? assignedUserIds : []
+    const requestedUserIds = Array.from(new Set(requestedUserIdsRaw.map((v) => String(v || '')).filter(Boolean)))
+
+    // Only system admins have access to all projects; non-system-admins must be explicitly assigned.
+    // To prevent accidentally locking a non-system-admin creator out of their own project,
+    // ensure the creator is always assigned when they're not a system admin.
+    const creatorId = admin.id
+    const creatorMustBeAssigned = admin.appRoleIsSystemAdmin !== true
+    const effectiveAssignedUserIds = creatorMustBeAssigned
+      ? Array.from(new Set([...requestedUserIds, creatorId]))
+      : requestedUserIds
+
+    // Validate that all assigned users exist and are NOT system admins.
+    // (System admins already see every project and shouldn't be assigned.)
+    let validatedAssignableUserIds: string[] = []
+    if (effectiveAssignedUserIds.length > 0) {
+      const rows = await prisma.user.findMany({
+        where: {
+          id: { in: effectiveAssignedUserIds },
+        },
+        select: {
+          id: true,
+          appRole: { select: { isSystemAdmin: true } },
+        },
+      })
+
+      const foundById = new Map(rows.map((r) => [r.id, r]))
+      const missing = effectiveAssignedUserIds.filter((id) => !foundById.has(id))
+      if (missing.length > 0) {
+        return NextResponse.json(
+          { error: 'One or more assigned users were not found' },
+          { status: 400 }
+        )
+      }
+
+      const hasSystemAdmin = rows.some((r) => r.appRole?.isSystemAdmin === true)
+      if (hasSystemAdmin) {
+        return NextResponse.json(
+          { error: 'System admin users cannot be assigned to projects' },
+          { status: 400 }
+        )
+      }
+
+      validatedAssignableUserIds = rows.map((r) => r.id)
+    }
+
+    // Enforce that projects must be linked to an existing client.
+    if (!clientId) {
+      return NextResponse.json(
+        { error: 'Client is required' },
+        { status: 400 }
+      )
+    }
+
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, deletedAt: null },
+      select: { id: true, name: true },
+    })
+
+    if (!client) {
+      return NextResponse.json(
+        { error: 'Client not found' },
+        { status: 400 }
+      )
+    }
+
     const normalizeEmail = (email: any): string | null => {
       const v = typeof email === 'string' ? email.trim().toLowerCase() : ''
       return v && v.includes('@') ? v : null
@@ -165,12 +233,20 @@ export async function POST(request: NextRequest) {
       return v ? v : null
     }
 
+    const normalizeDisplayColor = (color: any): string | null => {
+      const v = typeof color === 'string' ? color.trim() : ''
+      if (!v) return null
+      return /^#[0-9a-fA-F]{6}$/.test(v) ? v : null
+    }
+
     const normalizeRecipients = (input: any[] | undefined) => {
       const list = Array.isArray(input) ? input : []
       const mapped = list
         .map((r: any) => ({
           email: normalizeEmail(r?.email),
           name: normalizeName(r?.name),
+          displayColor: normalizeDisplayColor(r?.displayColor),
+          alsoAddToClient: Boolean(r?.alsoAddToClient),
           isPrimary: Boolean(r?.isPrimary),
           receiveNotifications: r?.receiveNotifications !== false,
         }))
@@ -199,7 +275,7 @@ export async function POST(request: NextRequest) {
     const effectiveRecipients = recipientsFromArray.length
       ? recipientsFromArray
       : legacyEmail
-        ? [{ email: legacyEmail, name: legacyName, isPrimary: true, receiveNotifications: true }]
+        ? [{ email: legacyEmail, name: legacyName, displayColor: null, alsoAddToClient: false, isPrimary: true, receiveNotifications: true }]
         : []
 
     // Normalize auth/password inputs
@@ -249,8 +325,8 @@ export async function POST(request: NextRequest) {
           title,
           slug,
           description,
-          companyName: companyName || null,
-          clientId: clientId || null,
+          companyName: client.name,
+          clientId: client.id,
           sharePassword: encryptedSharePassword,
           authMode: resolvedAuthMode,
           enableRevisions: isShareOnly ? false : (enableRevisions || false),
@@ -270,16 +346,66 @@ export async function POST(request: NextRequest) {
         },
       })
 
+      if (validatedAssignableUserIds.length > 0) {
+        await tx.projectUser.createMany({
+          data: validatedAssignableUserIds.map((userId) => ({
+            projectId: newProject.id,
+            userId,
+          })),
+          skipDuplicates: true,
+        })
+      }
+
       if (effectiveRecipients.length > 0) {
         await tx.projectRecipient.createMany({
           data: effectiveRecipients.map((r) => ({
             projectId: newProject.id,
             email: r.email,
             name: r.name,
+            displayColor: r.displayColor ?? null,
             isPrimary: r.isPrimary,
             receiveNotifications: r.receiveNotifications,
           })),
         })
+      }
+
+      // Optionally add recipients to the Client profile (matched by email)
+      if (newProject.clientId) {
+        const toAdd = effectiveRecipients.filter((r) => r.alsoAddToClient && r.email)
+        if (toAdd.length > 0) {
+          const emails = Array.from(new Set(toAdd.map((r) => String(r.email || '').trim()).filter(Boolean)))
+          const existing = await tx.clientRecipient.findMany({
+            where: { clientId: newProject.clientId, email: { in: emails } },
+            select: { email: true },
+          })
+          const existingSet = new Set(existing.map((r) => String(r.email || '').trim()))
+
+          const missing = toAdd.filter((r) => r.email && !existingSet.has(String(r.email).trim()))
+          if (missing.length > 0) {
+            await tx.clientRecipient.createMany({
+              data: missing.map((r) => ({
+                clientId: newProject.clientId as string,
+                email: r.email,
+                name: r.name,
+                displayColor: r.displayColor ?? null,
+                isPrimary: false,
+                receiveNotifications: true,
+              })),
+            })
+          }
+
+          // If already present, sync displayColor/name best-effort
+          for (const r of toAdd) {
+            if (!r.email) continue
+            await tx.clientRecipient.updateMany({
+              where: { clientId: newProject.clientId, email: r.email },
+              data: {
+                displayColor: r.displayColor ?? null,
+                ...(r.name ? { name: r.name } : {}),
+              },
+            })
+          }
+        }
       }
 
       return newProject
