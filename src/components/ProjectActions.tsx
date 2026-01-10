@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent } from './ui/card'
@@ -23,7 +23,7 @@ import {
 } from './ui/select'
 import { Textarea } from './ui/textarea'
 import { UnapproveModal } from './UnapproveModal'
-import { apiPost, apiPatch, apiDelete } from '@/lib/api-client'
+import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 
 interface Video {
   id: string
@@ -39,6 +39,12 @@ interface ProjectActionsProps {
   onRefresh?: () => void
 }
 
+type AlbumSummary = {
+  id: string
+  name: string
+  _count?: { photos?: number }
+}
+
 export default function ProjectActions({ project, videos, onRefresh }: ProjectActionsProps) {
   const router = useRouter()
   const { user } = useAuth()
@@ -50,9 +56,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
-  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video'>('entire-project')
+  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'specific-album'>('entire-project')
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
+  const [albums, setAlbums] = useState<AlbumSummary[]>([])
+  const [albumsLoading, setAlbumsLoading] = useState(false)
   const [entireProjectNotes, setEntireProjectNotes] = useState<string>('')
   const [sendPasswordSeparately, setSendPasswordSeparately] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -68,6 +77,9 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const isPasswordProtected = (project as any).sharePassword !== null &&
                                (project as any).sharePassword !== undefined &&
                                (project as any).sharePassword !== ''
+
+  const projectId = project.id
+  const photosEnabled = (project as any)?.enablePhotos !== false
 
   // Filter only ready videos
   const readyVideos = videos.filter(v => v.status === 'READY')
@@ -106,10 +118,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const versionsForSelectedVideo = selectedVideoName ? videosByName[selectedVideoName] : []
 
   // Reset selections when notification type changes
-  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video') => {
+  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'specific-album') => {
     setNotificationType(type)
     setSelectedVideoName('')
     setSelectedVideoId('')
+    setSelectedAlbumId('')
     setEntireProjectNotes('')
   }
 
@@ -118,6 +131,38 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setSelectedVideoName(name)
     setSelectedVideoId('')
   }
+
+  useEffect(() => {
+    const shouldFetchAlbums =
+      showNotificationModal &&
+      notificationType === 'specific-album' &&
+      photosEnabled
+
+    if (!shouldFetchAlbums) return
+
+    let cancelled = false
+
+    const load = async () => {
+      setAlbumsLoading(true)
+      try {
+        const res = await apiFetch(`/api/projects/${projectId}/albums`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Failed to load albums')
+        const data = await res.json().catch(() => null)
+        const list = Array.isArray((data as any)?.albums) ? ((data as any).albums as AlbumSummary[]) : []
+        if (!cancelled) setAlbums(list)
+      } catch {
+        if (!cancelled) setAlbums([])
+      } finally {
+        if (!cancelled) setAlbumsLoading(false)
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [notificationType, photosEnabled, projectId, showNotificationModal])
 
   const handleSendNotification = async () => {
     if (!canSendNotifications) return
@@ -130,12 +175,18 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       return
     }
 
+    if (notificationType === 'specific-album' && !selectedAlbumId) {
+      setMessage({ type: 'error', text: 'Please select an album' })
+      return
+    }
+
     setLoading(true)
     setMessage({ type: 'success', text: 'Sending notification...' })
 
     // Send notification in background without blocking UI
     apiPost(`/api/projects/${project.id}/notify`, {
       videoId: notificationType === 'specific-video' ? selectedVideoId : null,
+      albumId: notificationType === 'specific-album' ? selectedAlbumId : null,
       notifyEntireProject: notificationType === 'entire-project',
       notes: notificationType === 'entire-project' ? entireProjectNotes : null,
       sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately
@@ -144,6 +195,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         setMessage({ type: 'success', text: data.message || 'Notification sent successfully!' })
         setSelectedVideoName('')
         setSelectedVideoId('')
+        setSelectedAlbumId('')
         setEntireProjectNotes('')
         setSendPasswordSeparately(false)
 
@@ -415,6 +467,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                   <SelectItem value="specific-video">
                     Specific Video & Version
                   </SelectItem>
+                  {(project as any)?.enablePhotos !== false && (
+                    <SelectItem value="specific-album">
+                      Specific Album Ready
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -479,6 +536,28 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </>
             )}
 
+            {notificationType === 'specific-album' && (
+              <>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Select Album
+                  </label>
+                  <Select value={selectedAlbumId} onValueChange={setSelectedAlbumId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={albumsLoading ? 'Loading albums…' : 'Select an album...'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {albums.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+
             {/* Password checkbox - only show if project is password protected */}
             {isPasswordProtected && (
               <div className="flex items-center space-x-2 p-3 bg-muted rounded-md">
@@ -506,7 +585,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
             <Button
               onClick={handleSendNotification}
-              disabled={loading || (notificationType === 'specific-video' && !selectedVideoId)}
+              disabled={
+                loading ||
+                (notificationType === 'specific-video' && !selectedVideoId) ||
+                (notificationType === 'specific-album' && !selectedAlbumId)
+              }
               className="w-full"
             >
               {loading ? (

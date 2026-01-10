@@ -7,6 +7,7 @@ import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
 import { GripVertical } from 'lucide-react'
 import VideoSidebar from '@/components/VideoSidebar'
+import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { OTPInput } from '@/components/OTPInput'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,6 +15,7 @@ import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
 import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
+import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { cn } from '@/lib/utils'
 
@@ -48,9 +50,13 @@ export default function SharePage() {
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
+  const [albums, setAlbums] = useState<any[]>([])
+  const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
   const [shareToken, setShareToken] = useState<string | null>(null)
+  const [isAdminSession, setIsAdminSession] = useState(false)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
 
@@ -67,28 +73,49 @@ export default function SharePage() {
     }
   })()
 
-  // Load stored token once (persist across refresh)
+  // Detect admin session (JWT) so we don't accidentally use a cached guest share token.
+  useEffect(() => {
+    let isMounted = true
+
+    async function checkAdminSession() {
+      try {
+        const res = await apiFetch('/api/auth/session', { cache: 'no-store' })
+        if (!isMounted) return
+        setIsAdminSession(res.ok)
+      } catch {
+        if (!isMounted) return
+        setIsAdminSession(false)
+      }
+    }
+
+    void checkAdminSession()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  // Load stored token once (persist across refresh) - only for non-admin viewers.
   useEffect(() => {
     if (!storageKey) return
+    if (isAdminSession) return
     const stored = loadShareToken(storageKey)
     if (stored) {
       setShareToken(stored)
     }
-  }, [storageKey])
+  }, [storageKey, isAdminSession])
 
 
   // Fetch comments separately for security
   const fetchComments = useCallback(async (tokenOverride?: string | null) => {
     const authToken = tokenOverride || shareToken
-    if (!token || !authToken) return
+    if (!token) return
+    if (!isAdminSession && !authToken) return
 
     setCommentsLoading(true)
     try {
-      const response = await fetch(`/api/share/${token}/comments`, {
+      const response = await apiFetch(`/api/share/${token}/comments`, {
         cache: 'no-store',
-        headers: {
-          Authorization: `Bearer ${authToken}`
-        }
+        headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
       if (response.ok) {
         const commentsData = await response.json()
@@ -99,7 +126,7 @@ export default function SharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }, [token, shareToken])
+  }, [token, shareToken, isAdminSession])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -173,9 +200,9 @@ export default function SharePage() {
   const fetchProjectData = useCallback(async (tokenOverride?: string | null) => {
     try {
       const authToken = tokenOverride || shareToken
-      const projectResponse = await fetch(`/api/share/${token}`, {
+      const projectResponse = await apiFetch(`/api/share/${token}`, {
         cache: 'no-store',
-        headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined
+        headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
       if (projectResponse.ok) {
         const projectData = await projectResponse.json()
@@ -200,7 +227,33 @@ export default function SharePage() {
     } catch (error) {
       // Failed to load project data
     }
-  }, [fetchComments, shareToken, storageKey, token])
+  }, [fetchComments, shareToken, storageKey, token, isAdminSession])
+
+  const fetchAlbums = useCallback(async (tokenOverride?: string | null) => {
+    const authToken = tokenOverride || shareToken
+    if (!token) return
+
+    if (project?.enablePhotos === false) {
+      setAlbums([])
+      return
+    }
+
+    setAlbumsLoading(true)
+    try {
+      const response = await apiFetch(`/api/share/${token}/albums`, {
+        cache: 'no-store',
+        headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setAlbums(Array.isArray(data?.albums) ? data.albums : [])
+      }
+    } catch {
+      // ignore
+    } finally {
+      setAlbumsLoading(false)
+    }
+  }, [token, shareToken, isAdminSession, project])
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
@@ -226,9 +279,9 @@ export default function SharePage() {
 
     async function loadProject() {
       try {
-        const response = await fetch(`/api/share/${token}`, {
+        const response = await apiFetch(`/api/share/${token}`, {
           cache: 'no-store',
-          headers: shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined
+          headers: !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined,
         })
 
         if (!isMounted) return
@@ -273,7 +326,7 @@ export default function SharePage() {
             setProject(projectData)
             setIsPasswordProtected(!!projectData.recipients && projectData.recipients.length > 0)
             setIsAuthenticated(true)
-            setIsGuest(projectData.isGuest || false)
+            setIsGuest(isAdminSession ? false : (projectData.isGuest || false))
 
             if (projectData.settings) {
               setCompanyName(projectData.settings.companyName || 'Studio')
@@ -298,10 +351,12 @@ export default function SharePage() {
     return () => {
       isMounted = false
     }
-  }, [token, shareToken, storageKey, fetchComments])
+  }, [token, shareToken, storageKey, fetchComments, isAdminSession])
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
+    if (activeAlbumId) return
+    if (project?.enableVideos === false) return
     if (project?.videosByName) {
       const videoNames = Object.keys(project.videosByName)
       if (videoNames.length === 0) return
@@ -355,7 +410,7 @@ export default function SharePage() {
         }
       }
     }
-  }, [project?.videosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp])
+  }, [project?.videosByName, project?.enableVideos, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
 
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
@@ -370,6 +425,7 @@ export default function SharePage() {
   }, [token, shareToken])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
+    if (project?.enableVideos === false) return videos
     if (!shareToken) return videos
 
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
@@ -467,9 +523,21 @@ export default function SharePage() {
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {
+    setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
   }
+
+  const handleAlbumSelect = (albumId: string) => {
+    setActiveVideoName('')
+    setActiveVideosRaw([])
+    setActiveAlbumId(albumId)
+  }
+
+  useEffect(() => {
+    if (!project) return
+    void fetchAlbums()
+  }, [project, shareToken, fetchAlbums])
 
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault()
@@ -772,7 +840,7 @@ export default function SharePage() {
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground text-center">
-                  Guest users do not have permissions to provide feedback, approve videos, or download files.
+                  Guest users do not have permissions to provide feedback or approve videos.
                 </p>
                 <Button
                   type="button"
@@ -806,7 +874,9 @@ export default function SharePage() {
   }
 
   // Filter to READY videos first
-  let readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
+  let readyVideos = (project?.enableVideos === false)
+    ? []
+    : activeVideos.filter((v: any) => v.status === 'READY')
 
   const shareOnlyMode = project.status === 'SHARE_ONLY'
 
@@ -832,23 +902,44 @@ export default function SharePage() {
   })
 
   return (
-    <div className="flex-1 min-h-0 bg-background flex flex-col lg:flex-row overflow-hidden">
+    <div className="h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row overflow-hidden">
       {/* Video Sidebar - contains both desktop and mobile versions internally */}
-      {project.videosByName && (
-        <VideoSidebar
-          videosByName={project.videosByName}
-          activeVideoName={activeVideoName}
-          onVideoSelect={handleVideoSelect}
-          className="w-64 flex-shrink-0"
-        />
-      )}
+      <VideoSidebar
+        videosByName={project.videosByName || {}}
+        activeVideoName={activeVideoName}
+        onVideoSelect={handleVideoSelect}
+        heading={project.title}
+        albums={albums.map((a: any) => ({
+          id: String(a.id),
+          name: String(a.name || ''),
+          photoCount: Number(a?._count?.photos || 0),
+        }))}
+        activeAlbumId={activeAlbumId}
+        onAlbumSelect={handleAlbumSelect}
+        showVideos={project.enableVideos !== false}
+        showAlbums={project.enablePhotos !== false}
+        className="w-64 flex-shrink-0"
+      />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      <div className={`flex-1 flex flex-col min-w-0 ${activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         {/* Content Area */}
         <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
           {/* Content Area */}
-          {readyVideos.length === 0 ? (
+          {activeAlbumId ? (
+            <ShareAlbumViewer
+              shareSlug={token}
+              shareToken={shareToken}
+              albumId={activeAlbumId}
+              showThemeToggle={true}
+            />
+          ) : project.enableVideos === false ? (
+            <Card className="bg-card border-border">
+              <CardContent className="py-12 text-center">
+                <p className="text-muted-foreground">Select an album to view photos.</p>
+              </CardContent>
+            </Card>
+          ) : readyVideos.length === 0 ? (
             <Card className="bg-card border-border">
               <CardContent className="py-12 text-center">
                 <p className="text-muted-foreground">

@@ -95,7 +95,30 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const response = NextResponse.json({ projects })
+    const projectIds = projects.map((p) => p.id)
+    const photoCountByProjectId = new Map<string, number>()
+
+    if (projectIds.length > 0) {
+      const albumRows = await prisma.album.findMany({
+        where: { projectId: { in: projectIds } },
+        select: {
+          projectId: true,
+          _count: { select: { photos: true } },
+        },
+      })
+
+      for (const row of albumRows) {
+        const prev = photoCountByProjectId.get(row.projectId) ?? 0
+        photoCountByProjectId.set(row.projectId, prev + (row._count?.photos ?? 0))
+      }
+    }
+
+    const projectsWithPhotoCounts = projects.map((p) => ({
+      ...p,
+      photoCount: photoCountByProjectId.get(p.id) ?? 0,
+    }))
+
+    const response = NextResponse.json({ projects: projectsWithPhotoCounts })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response
@@ -150,12 +173,23 @@ export async function POST(request: NextRequest) {
       recipientName,
       sharePassword,
       authMode,
+      enableVideos,
+      enablePhotos,
       enableRevisions,
       maxRevisions,
       restrictCommentsToLatestVersion,
       allowClientDeleteComments,
       isShareOnly
     } = validation.data
+
+    const finalEnableVideos = enableVideos !== undefined ? Boolean(enableVideos) : true
+    const finalEnablePhotos = enablePhotos !== undefined ? Boolean(enablePhotos) : false
+    if (!finalEnableVideos && !finalEnablePhotos) {
+      return NextResponse.json(
+        { error: 'Project must have at least one type enabled (Video and/or Photo)' },
+        { status: 400 }
+      )
+    }
 
     const requestedUserIdsRaw = Array.isArray(assignedUserIds) ? assignedUserIds : []
     const requestedUserIds = Array.from(new Set(requestedUserIdsRaw.map((v) => String(v || '')).filter(Boolean)))
@@ -327,6 +361,8 @@ export async function POST(request: NextRequest) {
           description,
           companyName: client.name,
           clientId: client.id,
+          enableVideos: finalEnableVideos,
+          enablePhotos: finalEnablePhotos,
           sharePassword: encryptedSharePassword,
           authMode: resolvedAuthMode,
           enableRevisions: isShareOnly ? false : (enableRevisions || false),

@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import AdminVideoManager from '@/components/AdminVideoManager'
+import AdminAlbumManager from '@/components/AdminAlbumManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
-import { ArrowLeft, Settings, ArrowUpDown, FolderKanban, Video } from 'lucide-react'
+import { ArrowLeft, Settings, ArrowUpDown, FolderKanban, Video, Images } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -422,41 +423,57 @@ export default function ProjectPage() {
               </CardContent>
             </Card>
 
-            <div>
-	              <div className="flex items-center justify-between mb-4">
-	                <h2 className="text-xl font-semibold flex items-center gap-2">
-	                  <span className={iconBadgeClassName}>
+            {project.enableVideos !== false && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <span className={iconBadgeClassName}>
 	                    <Video className={iconBadgeIconClassName} />
 	                  </span>
 	                  Videos
 	                </h2>
-                {project.videos.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-                    className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-                    title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
-                  >
-                    <span>{sortMode === 'status' ? 'Status' : 'Alphabetical'}</span>
-                    <ArrowUpDown className="w-4 h-4" />
-                  </Button>
-                )}
+                  {project.videos.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                      title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
+                    >
+                      <span>{sortMode === 'status' ? 'Status' : 'Alphabetical'}</span>
+                      <ArrowUpDown className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+                <AdminVideoManager
+                  projectId={project.id}
+                  videos={project.videos}
+                  projectStatus={project.status}
+                  comments={project.comments}
+                  restrictToLatestVersion={project.restrictCommentsToLatestVersion}
+                  companyName={companyName}
+                  onVideoSelect={handleVideoSelect}
+                  onRefresh={fetchProject}
+                  sortMode={sortMode}
+                  maxRevisions={project.maxRevisions}
+                  enableRevisions={project.enableRevisions}
+                />
               </div>
-              <AdminVideoManager
-                projectId={project.id}
-                videos={project.videos}
-                projectStatus={project.status}
-                comments={project.comments}
-                restrictToLatestVersion={project.restrictCommentsToLatestVersion}
-                companyName={companyName}
-                onVideoSelect={handleVideoSelect}
-                onRefresh={fetchProject}
-                sortMode={sortMode}
-                maxRevisions={project.maxRevisions}
-                enableRevisions={project.enableRevisions}
-              />
-            </div>
+            )}
+
+            {project.enablePhotos !== false && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <span className={iconBadgeClassName}>
+                      <Images className={iconBadgeIconClassName} />
+                    </span>
+                    Photos
+                  </h2>
+                </div>
+                <AdminAlbumManager projectId={project.id} projectStatus={project.status} />
+              </div>
+            )}
           </div>
 
           <div className="space-y-6 min-w-0">

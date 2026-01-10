@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, ProjectFileProcessingJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, ProjectFileProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
@@ -9,6 +9,8 @@ import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
 import { processProjectFile } from './project-file-processor'
+import { processAlbumPhotoSocial } from './album-photo-social-processor'
+import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
@@ -197,6 +199,54 @@ async function main() {
 
   console.log('[WORKER] Project file processing worker started')
 
+  // Create album photo social derivative worker
+  const albumPhotoSocialWorker = new Worker<AlbumPhotoSocialJob>('album-photo-social', processAlbumPhotoSocial, {
+    connection: getRedisForQueue(),
+    // Image resizes can be CPU-intensive; keep this modest.
+    concurrency: Math.max(1, concurrency),
+  })
+
+  albumPhotoSocialWorker.on('completed', (job) => {
+    console.log(`[WORKER] Album photo social job ${job.id} completed successfully`)
+  })
+
+  albumPhotoSocialWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Album photo social job ${job?.id} failed:`, err)
+    if (DEBUG) {
+      console.error('[WORKER DEBUG] Album photo social job failure details:', {
+        jobId: job?.id,
+        jobData: job?.data,
+        error: err instanceof Error ? err.stack : err,
+      })
+    }
+  })
+
+  console.log('[WORKER] Album photo social derivative worker started')
+
+  // Create album photo ZIP generation worker
+  const albumPhotoZipWorker = new Worker<AlbumPhotoZipJob>('album-photo-zip', processAlbumPhotoZip, {
+    connection: getRedisForQueue(),
+    // ZIP creation is mostly I/O; keep modest.
+    concurrency: Math.max(1, concurrency),
+  })
+
+  albumPhotoZipWorker.on('completed', (job) => {
+    console.log(`[WORKER] Album photo ZIP job ${job.id} completed successfully`)
+  })
+
+  albumPhotoZipWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Album photo ZIP job ${job?.id} failed:`, err)
+    if (DEBUG) {
+      console.error('[WORKER DEBUG] Album photo ZIP job failure details:', {
+        jobId: job?.id,
+        jobData: job?.data,
+        error: err instanceof Error ? err.stack : err,
+      })
+    }
+  })
+
+  console.log('[WORKER] Album photo ZIP generation worker started')
+
   // Create notification processing queue with repeatable job
   console.log('Setting up notification processing...')
   const notificationQueue = new Queue('notification-processing', {
@@ -344,6 +394,8 @@ async function main() {
     await Promise.all([
       worker.close(),
       assetWorker.close(),
+      albumPhotoSocialWorker.close(),
+      albumPhotoZipWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
     ])
@@ -359,6 +411,8 @@ async function main() {
     await Promise.all([
       worker.close(),
       assetWorker.close(),
+      albumPhotoSocialWorker.close(),
+      albumPhotoZipWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
     ])

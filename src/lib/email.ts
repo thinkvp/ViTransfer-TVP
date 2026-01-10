@@ -604,6 +604,126 @@ export async function sendNewVersionEmail({
 }
 
 /**
+ * Email template: New album available
+ */
+export async function renderNewAlbumReadyEmail({
+  clientName,
+  projectTitle,
+  albumName,
+  albumNotes,
+  shareUrl,
+  isPasswordProtected = false,
+  trackingToken,
+  branding,
+}: {
+  clientName: string
+  projectTitle: string
+  albumName: string
+  albumNotes?: string | null
+  shareUrl: string
+  isPasswordProtected?: boolean
+  trackingToken?: string
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const subject = `New Album Available: ${projectTitle}`
+
+  const headerGradient = EMAIL_THEME.headerBackground
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+  const cardTitleStyle = emailCardTitleStyle()
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient,
+    title: 'New Album Available',
+    subtitle: 'Ready for your review',
+    trackingToken,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain: resolved.appDomain,
+    bodyContent: `
+      <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
+        Hi <strong>${escapeHtml(clientName)}</strong>,
+      </p>
+
+      <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+        A new album for your project is ready.
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Project Details</div>
+        <div style="font-size: 15px; color: #111827; padding: 4px 0;">
+          <strong>${escapeHtml(projectTitle)}</strong>
+        </div>
+        <div style="font-size: 14px; color: #374151; padding: 4px 0;">
+          ${escapeHtml(albumName)}
+        </div>
+      </div>
+
+      ${renderNotesCard(albumNotes || null, { cardStyle, cardTitleStyle })}
+
+      ${isPasswordProtected ? `
+        <div style="${cardStyle}">
+          <div style="font-size: 14px; color: #374151; line-height: 1.5;">
+            <strong>Password Protected:</strong> Use the password previously sent to you to access this project.
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${escapeHtml(shareUrl)}" style="${primaryButtonStyle}">
+          View Project
+        </a>
+      </div>
+
+      <p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
+        ${EMAIL_SELF_HOST_NOTICE_HTML}
+      </p>
+    `,
+  })
+
+  return { subject, html }
+}
+
+export async function sendNewAlbumReadyEmail({
+  clientEmail,
+  clientName,
+  projectTitle,
+  albumName,
+  albumNotes,
+  shareUrl,
+  isPasswordProtected = false,
+  trackingToken,
+}: {
+  clientEmail: string
+  clientName: string
+  projectTitle: string
+  albumName: string
+  albumNotes?: string | null
+  shareUrl: string
+  isPasswordProtected?: boolean
+  trackingToken?: string
+}) {
+  const { subject, html } = await renderNewAlbumReadyEmail({
+    clientName,
+    projectTitle,
+    albumName,
+    albumNotes,
+    shareUrl,
+    isPasswordProtected,
+    trackingToken,
+  })
+
+  return sendEmail({
+    to: clientEmail,
+    subject,
+    html,
+  })
+}
+
+/**
  * Email template: Project approved
  */
 export async function renderProjectApprovedEmail({
@@ -1142,6 +1262,7 @@ export async function renderProjectGeneralNotificationEmail({
   projectTitle,
   shareUrl,
   readyVideos = [],
+  readyAlbums = [],
   notes,
   isPasswordProtected = false,
   trackingToken,
@@ -1151,6 +1272,7 @@ export async function renderProjectGeneralNotificationEmail({
   projectTitle: string
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
+  readyAlbums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
   trackingToken?: string
@@ -1195,14 +1317,26 @@ export async function renderProjectGeneralNotificationEmail({
         Your project is ready for review. Click below to view and leave feedback.
       </p>
       ${renderNotesCard(notes, { cardStyle: notesCardStyle, cardTitleStyle: notesCardTitleStyle })}
-      ${readyVideos.length > 0 ? `
+      ${readyVideos.length > 0 || readyAlbums.length > 0 ? `
         <div style="${emailCardStyle({ paddingPx: 20, borderRadiusPx: 8, marginBottomPx: 24 })}">
           <div style="${emailCardTitleStyle()}">Ready to View</div>
-          ${readyVideos.map(v => `
-            <div style="font-size:15px; color:#374151; padding:6px 0;">
-              • ${escapeHtml(v.name)} <span style="color:${EMAIL_THEME.accent};">${escapeHtml(v.versionLabel)}</span>
-            </div>
-          `).join('')}
+          ${readyVideos.length > 0 ? `
+            <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
+            ${readyVideos.map(v => `
+              <div style="font-size:15px; color:#374151; padding:6px 0;">
+                • ${escapeHtml(v.name)} <span style="color:${EMAIL_THEME.accent};">${escapeHtml(v.versionLabel)}</span>
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${readyAlbums.length > 0 ? `
+            <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:${readyVideos.length > 0 ? 14 : 2}px; margin-bottom:8px;">Albums</div>
+            ${readyAlbums.map(a => `
+              <div style="font-size:15px; color:#374151; padding:6px 0;">
+                • ${escapeHtml(a.name)} <span style="color:${EMAIL_THEME.textMuted};">(${Number(a.photoCount) || 0} photos)</span>
+              </div>
+            `).join('')}
+          ` : ''}
         </div>
       ` : ''}
       ${passwordNotice}
@@ -1227,6 +1361,7 @@ export async function sendProjectGeneralNotificationEmail({
   projectTitle,
   shareUrl,
   readyVideos = [],
+  readyAlbums = [],
   notes,
   isPasswordProtected = false,
   trackingToken,
@@ -1236,6 +1371,7 @@ export async function sendProjectGeneralNotificationEmail({
   projectTitle: string
   shareUrl: string
   readyVideos?: Array<{ name: string; versionLabel: string }>
+  readyAlbums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
   trackingToken?: string
@@ -1245,6 +1381,7 @@ export async function sendProjectGeneralNotificationEmail({
     projectTitle,
     shareUrl,
     readyVideos,
+    readyAlbums,
     notes,
     isPasswordProtected,
     trackingToken,

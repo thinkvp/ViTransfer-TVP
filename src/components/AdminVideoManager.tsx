@@ -303,7 +303,6 @@ export default function AdminVideoManager({
                     value={newVideoName}
                     onChange={(e) => setNewVideoName(e.target.value)}
                     placeholder="e.g., Introduction, Tutorial, Demo"
-                    autoFocus
                     required
                   />
                   <p className="text-xs text-muted-foreground mt-1">

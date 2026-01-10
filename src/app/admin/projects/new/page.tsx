@@ -72,6 +72,10 @@ export default function NewProjectPage() {
   const [selectedClientRecipients, setSelectedClientRecipients] = useState<any[]>([])
   const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
 
+  const [enableVideos, setEnableVideos] = useState(true)
+  const [enablePhotos, setEnablePhotos] = useState(false)
+  const [projectTypeError, setProjectTypeError] = useState('')
+
   const [createClientOpen, setCreateClientOpen] = useState(false)
   const [creatingClient, setCreatingClient] = useState(false)
   const [createClientError, setCreateClientError] = useState('')
@@ -183,9 +187,16 @@ export default function NewProjectPage() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
+    setProjectTypeError('')
 
     if (!selectedClientId) {
       setClientFieldError('Please choose an existing client')
+      setLoading(false)
+      return
+    }
+
+    if (!enableVideos && !enablePhotos) {
+      setProjectTypeError('Select at least one project type (Video and/or Photo)')
       setLoading(false)
       return
     }
@@ -196,6 +207,8 @@ export default function NewProjectPage() {
       description: formData.get('description') as string,
       companyName: companyNameValue,
       clientId: selectedClientId,
+      enableVideos,
+      enablePhotos,
       assignedUserIds: assignedUsers.map((u) => u.id),
       recipients: recipients.map((r) => ({
         name: r.name?.trim() ? r.name.trim() : null,
@@ -299,7 +312,7 @@ export default function NewProjectPage() {
         <Card>
           <CardHeader>
             <CardTitle>Create New Project</CardTitle>
-            <CardDescription>Set up a new video project for your client</CardDescription>
+            <CardDescription>Set up a project for your client</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -311,6 +324,31 @@ export default function NewProjectPage() {
                   placeholder="e.g., Video Project - Client Name"
                   required
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Project Type</Label>
+                <div className="grid grid-cols-2 gap-x-12 gap-y-2">
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={enableVideos}
+                      onChange={(e) => setEnableVideos(e.target.checked)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    Video
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={enablePhotos}
+                      onChange={(e) => setEnablePhotos(e.target.checked)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    Photo
+                  </label>
+                </div>
+                {projectTypeError && <p className="text-sm text-destructive">{projectTypeError}</p>}
               </div>
 
               <div className="space-y-2">

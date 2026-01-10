@@ -8,6 +8,7 @@ import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
 import { GripVertical } from 'lucide-react'
 import VideoSidebar from '@/components/VideoSidebar'
+import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
@@ -40,6 +41,9 @@ export default function AdminSharePage() {
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
   const [adminUser, setAdminUser] = useState<any>(null)
+  const [albums, setAlbums] = useState<any[]>([])
+  const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
 
@@ -230,6 +234,40 @@ export default function AdminSharePage() {
     }
   }, [id, fetchComments])
 
+  const fetchAlbums = useCallback(async (shareSlug: string) => {
+    if (!shareSlug) return
+    if (project?.enablePhotos === false) {
+      setAlbums([])
+      return
+    }
+
+    setAlbumsLoading(true)
+    try {
+      const res = await apiFetch(`/api/share/${shareSlug}/albums`, { cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json().catch(() => null)
+        setAlbums(Array.isArray((data as any)?.albums) ? (data as any).albums : [])
+      }
+    } catch {
+      // ignore
+    } finally {
+      setAlbumsLoading(false)
+    }
+  }, [project?.enablePhotos])
+
+  // Fetch albums once the project is loaded (admin sessions can use the share endpoints without a bearer token).
+  useEffect(() => {
+    if (!project?.slug) return
+    void fetchAlbums(String(project.slug))
+  }, [fetchAlbums, project?.slug])
+
+  // If photos are disabled, ensure we can't be stuck in an album view.
+  useEffect(() => {
+    if (project?.enablePhotos === false && activeAlbumId) {
+      setActiveAlbumId(null)
+    }
+  }, [activeAlbumId, project?.enablePhotos])
+
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
     const handleCommentPosted = (e: CustomEvent) => {
@@ -338,9 +376,24 @@ export default function AdminSharePage() {
 
   // Handle video selection (identical to public share)
   const handleVideoSelect = (videoName: string) => {
+    setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
   }
+
+  const handleAlbumSelect = (albumId: string) => {
+    setActiveAlbumId(albumId)
+  }
+
+  // Photos-only projects: default to first album once albums load.
+  useEffect(() => {
+    if (!project) return
+    if (project.enablePhotos === false) return
+    if (project.enableVideos !== false) return
+    if (activeAlbumId) return
+    if (!Array.isArray(albums) || albums.length === 0) return
+    setActiveAlbumId(String(albums[0]?.id))
+  }, [activeAlbumId, albums, project])
 
   // Show loading state while project loads
   if (loading) {
@@ -371,7 +424,9 @@ export default function AdminSharePage() {
   }
 
   // Filter to READY videos first (identical to public share)
-  let readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
+  let readyVideos = (project?.enableVideos === false)
+    ? []
+    : activeVideos.filter((v: any) => v.status === 'READY')
 
   // If any video is approved, show ONLY approved videos (for both admin and client)
   const hasApprovedVideo = readyVideos.some((v: any) => v.approved)
@@ -439,20 +494,37 @@ export default function AdminSharePage() {
       {/* Content */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {/* Video Sidebar */}
-        {project.videosByName && hasMultipleVideos && (
-          <VideoSidebar
-            videosByName={project.videosByName}
-            activeVideoName={activeVideoName}
-            onVideoSelect={handleVideoSelect}
-            className="w-64 flex-shrink-0 max-h-full"
-          />
-        )}
+        <VideoSidebar
+          videosByName={project.videosByName || {}}
+          activeVideoName={activeVideoName}
+          onVideoSelect={handleVideoSelect}
+          albums={albums.map((a: any) => ({
+            id: String(a.id),
+            name: String(a.name || ''),
+            photoCount: Number(a?._count?.photos || 0),
+          }))}
+          activeAlbumId={activeAlbumId}
+          onAlbumSelect={handleAlbumSelect}
+          showVideos={project.enableVideos !== false}
+          showAlbums={project.enablePhotos !== false}
+          className="w-64 flex-shrink-0 max-h-full"
+        />
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
+        <div className={cn('flex-1 flex flex-col min-w-0 overflow-x-hidden', activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto')}>
           <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
             {/* Main Content */}
-            {readyVideos.length === 0 ? (
+            {activeAlbumId ? (
+              <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} />
+            ) : project.enableVideos === false ? (
+              <Card className="bg-card border-border rounded-lg">
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground">
+                    {albumsLoading ? 'Loading albums…' : 'Select an album to view photos.'}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : readyVideos.length === 0 ? (
               <Card className="bg-card border-border rounded-lg">
                 <CardContent className="py-12 text-center">
                   <p className="text-muted-foreground">

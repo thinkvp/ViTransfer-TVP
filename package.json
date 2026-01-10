@@ -1,10 +1,10 @@
 {
   "name": "vitransfer",
-  "version": "0.8.3-alpha-12",
+  "version": "1.10.0-tvp-v1.10",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "prisma generate && rimraf .next",
+    "prebuild": "prisma generate && node scripts/clean-next.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
@@ -43,6 +43,7 @@
     "prisma": "^6.19.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
+    "sharp": "^0.33.5",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "tsx": "^4.20.6",

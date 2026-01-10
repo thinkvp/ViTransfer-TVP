@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Download, Eye, FolderKanban, Plus, Video } from 'lucide-react'
+import { Download, Eye, FolderKanban, Image as ImageIcon, Layers, Plus, Video } from 'lucide-react'
 import ProjectsList from '@/components/ProjectsList'
 import { apiFetch } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
@@ -22,6 +22,7 @@ type Project = {
   videos: any[]
   recipients: any[]
   _count: { comments: number }
+  photoCount?: number
 }
 
 type AnalyticsProject = {
@@ -34,6 +35,8 @@ type AnalyticsProject = {
 type OverviewStats = {
   totalProjects: number
   totalVideos: number
+  totalVersions: number
+  totalPhotos: number
   totalVisits: number
   totalDownloads: number
 }
@@ -70,11 +73,13 @@ export default function AdminPage() {
 
         acc.totalProjects += 1
         acc.totalVideos += getUniqueVideosCount(project)
+        acc.totalVersions += (project.videos || []).length
+        acc.totalPhotos += Number(project.photoCount) || 0
         acc.totalVisits += Number(analytics?.totalVisits) || 0
         acc.totalDownloads += Number(analytics?.totalDownloads) || 0
         return acc
       },
-      { totalProjects: 0, totalVideos: 0, totalVisits: 0, totalDownloads: 0 }
+      { totalProjects: 0, totalVideos: 0, totalVersions: 0, totalPhotos: 0, totalVisits: 0, totalDownloads: 0 }
     )
 
     return totals
@@ -140,7 +145,7 @@ export default function AdminPage() {
                 <FolderKanban className="w-7 h-7 sm:w-8 sm:h-8" />
                 Projects Dashboard
               </h1>
-              <p className="text-muted-foreground mt-1 text-sm sm:text-base">Manage your video projects</p>
+              <p className="text-muted-foreground mt-1 text-sm sm:text-base">Manage your video and photo projects</p>
             </div>
             {canCreateProject && (
               <Link href="/admin/projects/new">
@@ -154,7 +159,7 @@ export default function AdminPage() {
 
           <Card className="mb-4">
             <CardContent className="p-3 sm:p-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
                 <div className="flex items-center gap-2">
                   <div className={metricIconWrapperClassName}>
                     <FolderKanban className={metricIconClassName} />
@@ -172,6 +177,26 @@ export default function AdminPage() {
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Videos</p>
                     <p className="text-base font-semibold tabular-nums truncate">{overview.totalVideos.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <Layers className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Versions</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalVersions.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <ImageIcon className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Photos</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalPhotos.toLocaleString()}</p>
                   </div>
                 </div>
 
@@ -213,7 +238,7 @@ export default function AdminPage() {
               <FolderKanban className="w-7 h-7 sm:w-8 sm:h-8" />
               Projects Dashboard
             </h1>
-            <p className="text-muted-foreground mt-1 text-sm sm:text-base">Manage your video projects</p>
+            <p className="text-muted-foreground mt-1 text-sm sm:text-base">Manage your video and photo projects</p>
           </div>
           {canCreateProject && (
             <Link href="/admin/projects/new">
@@ -227,7 +252,7 @@ export default function AdminPage() {
 
         <Card className="mb-4">
           <CardContent className="p-3 sm:p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
               <div className="flex items-center gap-2">
                 <div className={metricIconWrapperClassName}>
                   <FolderKanban className={metricIconClassName} />
@@ -245,6 +270,26 @@ export default function AdminPage() {
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Videos</p>
                   <p className="text-base font-semibold tabular-nums truncate">{overview.totalVideos.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className={metricIconWrapperClassName}>
+                  <Layers className={metricIconClassName} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Versions</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalVersions.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className={metricIconWrapperClassName}>
+                  <ImageIcon className={metricIconClassName} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Photos</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalPhotos.toLocaleString()}</p>
                 </div>
               </div>
 

@@ -88,6 +88,7 @@ const tusServer: Server = new Server({
       const assetId = upload.metadata?.assetId as string
       const clientFileId = upload.metadata?.clientFileId as string
       const projectFileId = upload.metadata?.projectFileId as string
+      const photoId = upload.metadata?.photoId as string
 
       const declaredSize = Number(upload.size)
       if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
@@ -105,10 +106,10 @@ const tusServer: Server = new Server({
         }
       }
 
-      if (!videoId && !assetId && !clientFileId && !projectFileId) {
+      if (!videoId && !assetId && !clientFileId && !projectFileId && !photoId) {
         throw {
           status_code: 400,
-          body: 'Missing required metadata: videoId, assetId, clientFileId, or projectFileId'
+          body: 'Missing required metadata: videoId, assetId, clientFileId, projectFileId, or photoId'
         }
       }
 
@@ -171,6 +172,26 @@ const tusServer: Server = new Server({
         }
       }
 
+      if (photoId) {
+        const photo = await prisma.albumPhoto.findUnique({
+          where: { id: photoId }
+        })
+
+        if (!photo) {
+          throw {
+            status_code: 404,
+            body: 'Photo record not found'
+          }
+        }
+
+        if (photo.status !== 'UPLOADING') {
+          throw {
+            status_code: 400,
+            body: 'Photo is not in UPLOADING state'
+          }
+        }
+      }
+
       return { metadata: upload.metadata }
     } catch (error) {
       console.error('[UPLOAD] Error in onUploadCreate:', error)
@@ -184,6 +205,7 @@ const tusServer: Server = new Server({
     const assetId = upload.metadata?.assetId as string
     const clientFileId = upload.metadata?.clientFileId as string
     const projectFileId = upload.metadata?.projectFileId as string
+    const photoId = upload.metadata?.photoId as string
 
     try {
       const maxUploadSizeBytes = await getMaxUploadSizeBytes()
@@ -195,6 +217,8 @@ const tusServer: Server = new Server({
         return await handleClientFileUploadFinish(tusFilePath, upload, clientFileId, tusServer, maxUploadSizeBytes)
       } else if (projectFileId) {
         return await handleProjectFileUploadFinish(tusFilePath, upload, projectFileId, tusServer, maxUploadSizeBytes)
+      } else if (photoId) {
+        return await handleAlbumPhotoUploadFinish(tusFilePath, upload, photoId, tusServer, maxUploadSizeBytes)
       } else {
         console.error('[UPLOAD] No videoId or assetId in upload metadata')
         return {}
@@ -205,6 +229,10 @@ const tusServer: Server = new Server({
 
       if (videoId) {
         await markVideoAsError(videoId, error)
+      }
+
+      if (photoId) {
+        await markPhotoAsError(photoId, error)
       }
 
       throw error
@@ -438,6 +466,99 @@ async function handleProjectFileUploadFinish(
   return {}
 }
 
+async function handleAlbumPhotoUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  photoId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
+  const photo = await prisma.albumPhoto.findUnique({
+    where: { id: photoId },
+    include: { album: true },
+  })
+
+  if (!photo) {
+    console.error(`[UPLOAD] Album photo not found: ${photoId}`)
+    return {}
+  }
+
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
+
+  await validateAlbumPhotoFile(tusFilePath, upload.metadata?.filename as string)
+
+  const { uploadFile, initStorage } = await import('@/lib/storage')
+  await initStorage()
+
+  const fileStream = (tusServer.datastore as any).read(upload.id)
+  const actualFileType = 'image/jpeg'
+
+  await uploadFile(photo.storagePath, fileStream, fileSize, actualFileType)
+
+  const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
+
+  await prisma.albumPhoto.update({
+    where: { id: photoId },
+    data: {
+      fileType: actualFileType,
+      status: 'READY',
+      error: null,
+      socialStoragePath,
+      socialStatus: 'PENDING',
+      socialError: null,
+    },
+  })
+
+  console.log(`[UPLOAD] Album photo uploaded and marked READY: ${photoId}`)
+
+  // Queue social-size derivative generation
+  try {
+    const { getAlbumPhotoSocialQueue } = await import('@/lib/queue')
+    const q = getAlbumPhotoSocialQueue()
+    await q.add(
+      'process-album-photo-social',
+      { photoId },
+      {
+        jobId: `album-photo-social-${photoId}`,
+      }
+    )
+  } catch (e) {
+    // Best-effort: social generation can be triggered later (e.g. on download).
+    console.warn('[UPLOAD] Failed to enqueue album photo social derivative job:', e)
+  }
+
+  // Invalidate and (debounced) regenerate album ZIPs
+  try {
+    const { deleteFile } = await import('@/lib/storage')
+    const { getAlbumZipJobId, getAlbumZipStoragePath } = await import('@/lib/album-photo-zip')
+    const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
+
+    const fullZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId: photo.albumId, variant: 'full' })
+    const socialZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId: photo.albumId, variant: 'social' })
+
+    await deleteFile(fullZipPath).catch(() => {})
+    await deleteFile(socialZipPath).catch(() => {})
+
+    const zipQueue = getAlbumPhotoZipQueue()
+
+    const fullJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'full' })
+    const socialJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'social' })
+
+    await zipQueue.remove(fullJobId).catch(() => {})
+    await zipQueue.remove(socialJobId).catch(() => {})
+
+    // Delay to allow large batches to finish; the worker also skips if uploads are still in progress.
+    const delayMs = 30_000
+    await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'full' }, { jobId: fullJobId, delay: delayMs })
+    await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'social' }, { jobId: socialJobId, delay: delayMs })
+  } catch (e) {
+    console.warn('[UPLOAD] Failed to schedule album ZIP regeneration:', e)
+  }
+
+  await cleanupTUSFile(tusFilePath)
+  return {}
+}
+
 async function verifyUploadedFile(
   tusFilePath: string,
   expectedSize: unknown,
@@ -507,6 +628,21 @@ async function validateAssetFile(tusFilePath: string, filename?: string) {
   console.log(`[UPLOAD] Asset extension validation passed, magic byte check will run in worker`)
 }
 
+async function validateAlbumPhotoFile(tusFilePath: string, filename?: string) {
+  if (filename) {
+    const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
+    const allowedExtensions = ['.jpg', '.jpeg']
+    if (!allowedExtensions.includes(ext)) {
+      await cleanupTUSFile(tusFilePath)
+      throw new Error(
+        `Invalid file extension: ${ext}. Allowed: ${allowedExtensions.join(', ')}`
+      )
+    }
+  }
+
+  console.log(`[UPLOAD] Album photo extension validation passed`)
+}
+
 async function cleanupTUSFile(tusFilePath: string) {
   try {
     if (fs.existsSync(tusFilePath)) {
@@ -532,6 +668,20 @@ async function markVideoAsError(videoId: string, error: any) {
     })
   } catch (dbError) {
     console.error('[UPLOAD] Failed to mark video as ERROR:', dbError)
+  }
+}
+
+async function markPhotoAsError(photoId: string, error: any) {
+  try {
+    await prisma.albumPhoto.update({
+      where: { id: photoId },
+      data: {
+        status: 'ERROR',
+        error: error instanceof Error ? error.message : 'Unknown upload error',
+      },
+    })
+  } catch (dbError) {
+    console.error('[UPLOAD] Failed to mark album photo as ERROR:', dbError)
   }
 }
 

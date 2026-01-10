@@ -26,11 +26,15 @@ export async function GET(
 
   const project = await prisma.project.findUnique({
     where: { id: shareContext.projectId },
-    select: { id: true, slug: true },
+    select: { id: true, slug: true, enableVideos: true },
   })
 
   if (!project || project.slug !== token) {
     return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+  }
+
+  if (project.enableVideos === false) {
+    return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }
 
   const video = await prisma.video.findUnique({

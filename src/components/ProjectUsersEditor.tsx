@@ -118,7 +118,7 @@ export function ProjectUsersEditor({
 
       {selected.length === 0 && !showAddForm ? (
         <div className="text-sm text-muted-foreground py-4 text-center border border-dashed rounded-lg">
-          {addButtonIconOnly ? 'No users assigned yet. Click the + button to add one.' : `No users assigned yet. Click "${addButtonLabel}" to add one.`}
+          No users assigned yet.
         </div>
       ) : (
         <div className="space-y-2">

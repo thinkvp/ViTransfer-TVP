@@ -6,6 +6,8 @@ let videoQueueInstance: Queue<VideoProcessingJob> | null = null
 let assetQueueInstance: Queue<AssetProcessingJob> | null = null
 let clientFileQueueInstance: Queue<ClientFileProcessingJob> | null = null
 let projectFileQueueInstance: Queue<ProjectFileProcessingJob> | null = null
+let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
+let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -29,6 +31,15 @@ export interface ProjectFileProcessingJob {
   projectFileId: string
   storagePath: string
   expectedCategory?: string
+}
+
+export interface AlbumPhotoSocialJob {
+  photoId: string
+}
+
+export interface AlbumPhotoZipJob {
+  albumId: string
+  variant: 'full' | 'social'
 }
 
 export function getVideoQueue(): Queue<VideoProcessingJob> {
@@ -137,6 +148,62 @@ export function getProjectFileQueue(): Queue<ProjectFileProcessingJob> {
     })
   }
   return projectFileQueueInstance
+}
+
+export function getAlbumPhotoSocialQueue(): Queue<AlbumPhotoSocialJob> {
+  // Don't create queue during build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!albumPhotoSocialQueueInstance) {
+    albumPhotoSocialQueueInstance = new Queue<AlbumPhotoSocialJob>('album-photo-social', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return albumPhotoSocialQueueInstance
+}
+
+export function getAlbumPhotoZipQueue(): Queue<AlbumPhotoZipJob> {
+  // Don't create queue during build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!albumPhotoZipQueueInstance) {
+    albumPhotoZipQueueInstance = new Queue<AlbumPhotoZipJob>('album-photo-zip', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return albumPhotoZipQueueInstance
 }
 
 // Export for backward compatibility, but use getter in new code

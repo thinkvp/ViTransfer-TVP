@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendPasswordEmail, isSmtpConfigured } from '@/lib/email'
+import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendPasswordEmail, isSmtpConfigured } from '@/lib/email'
 import { generateShareUrl } from '@/lib/url'
 import { requireApiAuth } from '@/lib/auth'
 import { decrypt } from '@/lib/encryption'
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { id: projectId } = await params
     const body = await request.json()
-    const { videoId, notifyEntireProject, sendPasswordSeparately, notes } = body
+    const { videoId, albumId, notifyEntireProject, sendPasswordSeparately, notes } = body
 
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : ''
 
@@ -56,6 +56,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         slug: true,
         sharePassword: true,
         status: true,
+        enablePhotos: true,
         videos: {
           where: { status: 'READY' },
           select: {
@@ -65,6 +66,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             status: true,
           },
           orderBy: { createdAt: 'desc' }
+        },
+        albums: {
+          select: {
+            id: true,
+            name: true,
+            _count: { select: { photos: true } },
+          },
+          orderBy: { name: 'asc' },
         }
       }
     })
@@ -90,7 +99,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     // Prepare video data if specific video notification
     let video = null
-    if (!notifyEntireProject) {
+    let album: { id: string; name: string; notes: string | null; projectId: string } | null = null
+
+    const isSpecificAlbum = !notifyEntireProject && !!albumId
+    const isSpecificVideo = !notifyEntireProject && !albumId
+
+    if (isSpecificVideo) {
       if (!videoId) {
         return NextResponse.json({ error: 'videoId is required for specific video notification' }, { status: 400 })
       }
@@ -117,6 +131,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
 
+    if (isSpecificAlbum) {
+      album = await prisma.album.findUnique({
+        where: { id: String(albumId) },
+        select: { id: true, name: true, notes: true, projectId: true },
+      })
+
+      if (!album || album.projectId !== projectId) {
+        return NextResponse.json({ error: 'Album not found' }, { status: 404 })
+      }
+
+      // Ensure photos are enabled for this project.
+      if (project.enablePhotos === false) {
+        return NextResponse.json({ error: 'Photos are disabled for this project' }, { status: 400 })
+      }
+    }
+
+    const trackingType = notifyEntireProject
+      ? 'ALL_READY_VIDEOS'
+      : isSpecificAlbum
+      ? 'SPECIFIC_ALBUM_READY'
+      : 'SPECIFIC_VIDEO_VERSION'
+
     // Send emails to all recipients with email addresses
     const emailPromises = recipients
       .filter(recipient => recipient.email)
@@ -127,8 +163,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             // Do not embed PII (like emails) in tokens that end up in URLs and logs.
             token: crypto.randomBytes(32).toString('base64url'),
             projectId,
-            type: notifyEntireProject ? 'ALL_READY_VIDEOS' : 'SPECIFIC_VIDEO_VERSION',
-            videoId: notifyEntireProject ? null : videoId,
+            type: trackingType,
+            videoId: notifyEntireProject || isSpecificAlbum ? null : videoId,
             recipientEmail: recipient.email!,
           },
         })
@@ -140,7 +176,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             projectTitle: project.title,
             shareUrl,
             readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel })),
+            readyAlbums: project.enablePhotos === false
+              ? []
+              : (project.albums || [])
+                  .map((a) => ({ name: a.name, photoCount: a._count?.photos ?? 0 }))
+                  .filter((a) => a.photoCount > 0),
             notes: trimmedNotes ? trimmedNotes : null,
+            isPasswordProtected,
+            trackingToken: trackingToken.token,
+          })
+        } else if (isSpecificAlbum) {
+          return sendNewAlbumReadyEmail({
+            clientEmail: recipient.email!,
+            clientName: recipient.name || 'Client',
+            projectTitle: project.title,
+            albumName: album!.name,
+            albumNotes: album!.notes,
+            shareUrl,
             isPasswordProtected,
             trackingToken: trackingToken.token,
           })
@@ -245,8 +297,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         await prisma.projectEmailEvent.create({
           data: {
             projectId,
-            type: notifyEntireProject ? 'ALL_READY_VIDEOS' : 'SPECIFIC_VIDEO_VERSION',
-            videoId: notifyEntireProject ? null : videoId,
+            type: trackingType,
+            videoId: notifyEntireProject || isSpecificAlbum ? null : videoId,
             recipientEmails: recipientEmailsJson,
           },
         })

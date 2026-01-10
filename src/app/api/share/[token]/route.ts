@@ -267,6 +267,9 @@ export async function GET(
       return acc
     }, {}) : sortedVideosByName
 
+    const effectiveVideos = project.enableVideos === false ? [] : sanitizedVideos
+    const effectiveVideosByName = project.enableVideos === false ? {} : sanitizedVideosByName
+
     const projectData = {
       ...(isGuest ? {} : { id: project.id }),
 
@@ -276,6 +279,9 @@ export async function GET(
 
       guestMode: project.guestMode || false,
       isGuest: isGuest,
+
+      enableVideos: project.enableVideos ?? true,
+      enablePhotos: project.enablePhotos ?? false,
 
       ...(!isGuest ? {
         clientName: project.companyName || primaryRecipient?.name || 'Client',
@@ -298,8 +304,8 @@ export async function GET(
 
       timelinePreviewsEnabled: project.timelinePreviewsEnabled,
 
-      videos: sanitizedVideos,
-      videosByName: sanitizedVideosByName,
+      videos: effectiveVideos,
+      videosByName: effectiveVideosByName,
 
       ...(isGuest ? {} : { smtpConfigured }),
 
@@ -311,8 +317,9 @@ export async function GET(
 
     const responseBody: any = projectData
 
-    // If no share token present, issue a short-lived viewer token (view-only) for this project
-    if (!shareContext && !isAdmin) {
+    // If no share token present, issue a short-lived viewer token (view-only) for this project.
+    // Admin sessions also need this for share-token-gated endpoints (e.g. video token minting).
+    if (!shareContext) {
       // CRITICAL: For NONE authMode, use deterministic sessionId based on IP
       // This must match the sessionId used in SharePageAccess tracking
       let sessionId = accessCheck.shareTokenSessionId || `share:${project.id}:${token}`

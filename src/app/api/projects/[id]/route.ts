@@ -38,6 +38,8 @@ const updateProjectSchema = z.object({
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
   guestMode: z.boolean().optional(),
   guestLatestOnly: z.boolean().optional(),
+  enableVideos: z.boolean().optional(),
+  enablePhotos: z.boolean().optional(),
   clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'WEEKLY']).optional(),
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
@@ -75,6 +77,12 @@ export async function GET(
     const project = await prisma.project.findUnique({
       where: { id },
       include: {
+        _count: {
+          select: {
+            videos: true,
+            albums: true,
+          },
+        },
         assignedUsers: {
           orderBy: { createdAt: 'asc' },
           include: {
@@ -325,6 +333,51 @@ export async function PATCH(
     // Handle basic project details
     if (validatedBody.title !== undefined) {
       updateData.title = validatedBody.title
+    }
+
+    // Project Type flags
+    if (validatedBody.enableVideos !== undefined) {
+      const next = Boolean(validatedBody.enableVideos)
+      if (!next) {
+        const existingVideos = await prisma.video.count({ where: { projectId: id } })
+        if (existingVideos > 0) {
+          return NextResponse.json(
+            { error: 'Remove existing videos to disable Videos in this project' },
+            { status: 400 }
+          )
+        }
+      }
+      updateData.enableVideos = next
+    }
+
+    if (validatedBody.enablePhotos !== undefined) {
+      const next = Boolean(validatedBody.enablePhotos)
+      if (!next) {
+        const existingAlbums = await prisma.album.count({ where: { projectId: id } })
+        if (existingAlbums > 0) {
+          return NextResponse.json(
+            { error: 'Remove existing albums to disable Photos in this project' },
+            { status: 400 }
+          )
+        }
+      }
+      updateData.enablePhotos = next
+    }
+
+    // Prevent invalid state where neither is enabled (accounting for current values)
+    const finalEnableVideos = validatedBody.enableVideos !== undefined
+      ? Boolean(validatedBody.enableVideos)
+      : Boolean((currentProject as any).enableVideos ?? true)
+
+    const finalEnablePhotos = validatedBody.enablePhotos !== undefined
+      ? Boolean(validatedBody.enablePhotos)
+      : Boolean((currentProject as any).enablePhotos ?? false)
+
+    if (!finalEnableVideos && !finalEnablePhotos) {
+      return NextResponse.json(
+        { error: 'Project must have at least one type enabled (Video and/or Photo)' },
+        { status: 400 }
+      )
     }
     if (validatedBody.slug !== undefined) {
       // Check if slug is unique (excluding current project)

@@ -78,6 +78,9 @@ interface Project {
   description: string | null
   companyName: string | null
   clientId?: string | null
+  enableVideos?: boolean
+  enablePhotos?: boolean
+  _count?: { videos: number; albums: number }
   enableRevisions: boolean
   maxRevisions: number
   restrictCommentsToLatestVersion: boolean
@@ -120,6 +123,8 @@ export default function ProjectSettingsPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [companyName, setCompanyName] = useState('')
+  const [enableVideos, setEnableVideos] = useState(true)
+  const [enablePhotos, setEnablePhotos] = useState(false)
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string }>>([])
   const [clientsLoading, setClientsLoading] = useState(false)
@@ -210,6 +215,8 @@ export default function ProjectSettingsPage() {
         setTitle(data.title)
         setDescription(data.description || '')
         setCompanyName(data.companyName || '')
+        setEnableVideos(data.enableVideos !== false)
+        setEnablePhotos(data.enablePhotos === true)
         setSelectedClientId(data.clientId || null)
         setEnableRevisions(data.enableRevisions)
         setMaxRevisions(data.maxRevisions)
@@ -356,6 +363,8 @@ export default function ProjectSettingsPage() {
         slug: sanitizedSlug,
         description: description || null,
         clientId: selectedClientId,
+        enableVideos,
+        enablePhotos,
         enableRevisions,
         maxRevisions: enableRevisions ? finalMaxRevisions : 0,
         restrictCommentsToLatestVersion,
@@ -563,6 +572,47 @@ export default function ProjectSettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     The name of this project as shown to clients and in the admin panel
                   </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Project Type</Label>
+                  <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                    <div className="min-w-0">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={enableVideos}
+                          onChange={(e) => setEnableVideos(e.target.checked)}
+                          disabled={(project?._count?.videos ?? 0) > 0 && enableVideos}
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60"
+                        />
+                        Video
+                      </label>
+                      {(project?._count?.videos ?? 0) > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Remove existing videos to disable them in this project.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={enablePhotos}
+                          onChange={(e) => setEnablePhotos(e.target.checked)}
+                          disabled={(project?._count?.albums ?? 0) > 0 && enablePhotos}
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60"
+                        />
+                        Photo
+                      </label>
+                      {(project?._count?.albums ?? 0) > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Remove existing albums to disable them in this project.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

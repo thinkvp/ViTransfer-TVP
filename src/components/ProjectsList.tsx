@@ -29,6 +29,7 @@ interface Project {
   videos: any[]
   recipients: any[]
   _count: { comments: number }
+  photoCount?: number
 }
 
 interface ProjectsListProps {
@@ -49,7 +50,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   const [statusToggleLoading, setStatusToggleLoading] = useState<Record<string, boolean>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<ProjectStatus>>(new Set())
   const [tableSortKey, setTableSortKey] = useState<
-    'title' | 'client' | 'status' | 'videos' | 'versions' | 'comments' | 'createdAt' | 'updatedAt'
+    'title' | 'client' | 'status' | 'videos' | 'versions' | 'comments' | 'photos' | 'createdAt' | 'updatedAt'
   >('updatedAt')
   const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
@@ -241,6 +242,8 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
 
     const getVersionsCount = (project: Project) => (project.videos || []).length
 
+    const getPhotosCount = (project: Project) => Number(project.photoCount) || 0
+
     const sorted = [...filteredProjects].sort((a, b) => {
       const dir = tableSortDirection === 'asc' ? 1 : -1
 
@@ -257,6 +260,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       if (tableSortKey === 'videos') return dir * (getUniqueVideosCount(a) - getUniqueVideosCount(b))
       if (tableSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (tableSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
+      if (tableSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
       if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       if (tableSortKey === 'updatedAt') return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
       return 0
@@ -454,6 +458,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                         { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
                         { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
                         { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
+                        { key: 'photos', label: 'Photos', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
                         { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false },
                         { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px] hidden md:table-cell', mobile: false },
                       ] as const
@@ -485,7 +490,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                         </td>
                       </tr>
                       <tr className="hidden md:table-row">
-                        <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
+                        <td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">
                           No projects found.
                         </td>
                       </tr>
@@ -520,6 +525,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
 
                       const versionsCount = (project.videos || []).length
                       const commentsCount = project._count?.comments || 0
+                      const photosCount = Number(project.photoCount) || 0
                       const clientName = (() => {
                         const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
                         return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
@@ -612,6 +618,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                             <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
                             <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
                             <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
+                            <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
                             <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
                             <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.updatedAt)}</td>
                           </tr>
@@ -632,10 +639,10 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                                       <span className="text-muted-foreground">Videos:</span> {uniqueVideos}
                                     </div>
                                     <div className="text-center">
-                                      <span className="text-muted-foreground">Versions:</span> {versionsCount}
+                                      <span className="text-muted-foreground">Comments:</span> {commentsCount}
                                     </div>
                                     <div className="text-right">
-                                      <span className="text-muted-foreground">Comments:</span> {commentsCount}
+                                      <span className="text-muted-foreground">Photos:</span> {photosCount}
                                     </div>
                                   </div>
                                   <div className="flex items-center justify-between gap-4 tabular-nums">

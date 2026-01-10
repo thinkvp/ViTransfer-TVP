@@ -45,7 +45,7 @@ interface DownloadActivity {
 interface EmailActivity {
   id: string
   type: 'EMAIL'
-  description: 'All Ready Videos' | 'Specific Video & Version' | 'Comment Summary'
+  description: 'All Ready Videos' | 'Specific Video & Version' | 'Specific Album Ready' | 'Comment Summary'
   recipients: string[]
   videoName?: string
   versionLabel?: string
@@ -55,7 +55,7 @@ interface EmailActivity {
 interface EmailOpenActivity {
   id: string
   type: 'EMAIL_OPEN'
-  description: 'All Ready Videos' | 'Specific Video & Version' | 'Comment Summary'
+  description: 'All Ready Videos' | 'Specific Video & Version' | 'Specific Album Ready' | 'Comment Summary'
   recipientEmail: string
   videoName?: string
   versionLabel?: string

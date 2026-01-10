@@ -115,6 +115,10 @@ model Project {
   guestMode     Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
   guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
 
+  // Project Type
+  enableVideos Boolean @default(true)
+  enablePhotos Boolean @default(false)
+
   // Revision tracking (optional)
   enableRevisions Boolean @default(false)
   maxRevisions    Int     @default(3)
@@ -155,6 +159,7 @@ model Project {
   assignedUsers ProjectUser[]
 
   videos            Video[]
+  albums            Album[]
   comments          Comment[]
   securityEvents    SecurityEvent[]
   analytics         VideoAnalytics[]
@@ -167,6 +172,64 @@ model Project {
   files             ProjectFile[] // Internal-only project documents (briefs, references)
 
   statusChanges      ProjectStatusChange[]
+}
+
+model Album {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name  String
+  notes String? @db.VarChar(500)
+
+  photos AlbumPhoto[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+}
+
+model AlbumPhoto {
+  id      String @id @default(cuid())
+  albumId String
+  album   Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  fileName    String
+  fileSize    BigInt
+  fileType    String
+  storagePath String
+  status      AlbumPhotoStatus @default(UPLOADING)
+  error       String?
+
+  socialStoragePath String?
+  socialStatus      AlbumPhotoSocialStatus @default(PENDING)
+  socialError       String?
+  socialGeneratedAt DateTime?
+
+  uploadedBy     String?
+  uploadedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([albumId])
+  @@index([albumId, status])
+  @@index([albumId, socialStatus])
+}
+
+enum AlbumPhotoStatus {
+  UPLOADING
+  READY
+  ERROR
+}
+
+enum AlbumPhotoSocialStatus {
+  PENDING
+  PROCESSING
+  READY
+  ERROR
 }
 
 model ProjectFile {
