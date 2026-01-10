@@ -1,6 +1,6 @@
 import type { ProjectStatus } from '@/lib/project-status'
 
-export type MenuKey = 'projects' | 'clients' | 'settings' | 'users' | 'integrations' | 'security' | 'analytics'
+export type MenuKey = 'projects' | 'clients' | 'settings' | 'users' | 'security' | 'analytics'
 
 export type ActionKey =
   | 'accessProjectSettings'
@@ -21,7 +21,7 @@ export interface RolePermissions {
   actions: Record<ActionKey, boolean>
 }
 
-const ALL_MENUS: MenuKey[] = ['projects', 'clients', 'settings', 'users', 'integrations', 'security', 'analytics']
+const ALL_MENUS: MenuKey[] = ['projects', 'clients', 'settings', 'users', 'security', 'analytics']
 const ALL_ACTIONS: ActionKey[] = [
   'accessProjectSettings',
   'changeProjectSettings',

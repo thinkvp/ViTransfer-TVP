@@ -39,7 +39,6 @@ export default function AdminIndexPage() {
           canSeeMenu(permissions, 'clients') ? '/admin/clients' : null,
           canSeeMenu(permissions, 'settings') ? '/admin/settings' : null,
           canSeeMenu(permissions, 'users') ? '/admin/users' : null,
-          canSeeMenu(permissions, 'integrations') ? '/admin/integrations' : null,
           securityEnabled && canSeeMenu(permissions, 'security') ? '/admin/security' : null,
         ].filter(Boolean) as string[]
 

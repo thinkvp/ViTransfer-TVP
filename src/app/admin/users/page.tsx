@@ -39,7 +39,6 @@ const MENU_ITEMS: Array<{ key: keyof RolePermissions['menuVisibility']; label: s
   { key: 'clients', label: 'Clients' },
   { key: 'settings', label: 'Settings' },
   { key: 'users', label: 'Users' },
-  { key: 'integrations', label: 'Integrations' },
   { key: 'security', label: 'Security' },
 ]
 

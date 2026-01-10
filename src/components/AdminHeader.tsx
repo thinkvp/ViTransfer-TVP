@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Workflow, Building2 } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -43,7 +43,6 @@ export default function AdminHeader() {
     canSeeMenu(permissions, 'clients') ? { href: '/admin/clients', label: 'Clients', icon: Building2 } : null,
     canSeeMenu(permissions, 'settings') ? { href: '/admin/settings', label: 'Settings', icon: Settings } : null,
     canSeeMenu(permissions, 'users') ? { href: '/admin/users', label: 'Users', icon: Users } : null,
-    canSeeMenu(permissions, 'integrations') ? { href: '/admin/integrations', label: 'Integrations', icon: Workflow } : null,
   ].filter(Boolean) as Array<{ href: string; label: string; icon: any }>
 
   // Add Security link if enabled

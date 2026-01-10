@@ -778,270 +778,272 @@ export default function ProjectSettingsPage() {
             )}
           </Card>
 
-          {/* Video Processing Settings */}
-          <Card className="border-border">
-            <CardHeader
-              className="cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => setShowVideoProcessing(!showVideoProcessing)}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Video Processing</CardTitle>
-                  <CardDescription>
-                    Configure how videos are processed and displayed
-                  </CardDescription>
-                </div>
-                {showVideoProcessing ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                )}
-              </div>
-            </CardHeader>
-
-            {showVideoProcessing && (
-              <CardContent className="space-y-6 border-t pt-4">
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="space-y-2">
-                  <Label htmlFor="resolution">Preview Resolution</Label>
-                  <select
-                    id="resolution"
-                    value={previewResolution}
-                    onChange={(e) => setPreviewResolution(e.target.value)}
-                    className="w-full px-3 py-2 bg-card border border-border rounded-md"
-                  >
-                    <option value="720p">720p (1280x720 or 720x1280 for vertical)</option>
-                    <option value="1080p">1080p (1920x1080 or 1080x1920 for vertical)</option>
-                  </select>
-                  <p className="text-xs text-muted-foreground">
-                    Higher resolutions take longer to process and use more storage.
-                    Vertical videos automatically adjust dimensions while maintaining aspect ratio.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="watermarkEnabled">Enable Watermarks</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Add watermarks to processed videos
-                    </p>
-                  </div>
-                  <Switch
-                    id="watermarkEnabled"
-                    checked={watermarkEnabled}
-                    onCheckedChange={setWatermarkEnabled}
-                  />
-                </div>
-
-                {watermarkEnabled && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="customWatermark">Custom Watermark Text</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Override default watermark format
-                        </p>
-                      </div>
-                      <Switch
-                        id="customWatermark"
-                        checked={useCustomWatermark}
-                        onCheckedChange={setUseCustomWatermark}
-                      />
+          {enableVideos && (
+            <>
+              {/* Video Processing Settings */}
+              <Card className="border-border">
+                <CardHeader
+                  className="cursor-pointer hover:bg-accent/50 transition-colors"
+                  onClick={() => setShowVideoProcessing(!showVideoProcessing)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Video Processing</CardTitle>
+                      <CardDescription>
+                        Configure how videos are processed and displayed
+                      </CardDescription>
                     </div>
-
-                    {useCustomWatermark && (
-                      <div className="space-y-2">
-                        <Input
-                          value={watermarkText}
-                          onChange={(e) => setWatermarkText(e.target.value)}
-                          placeholder="e.g., CONFIDENTIAL, DRAFT, REVIEW COPY"
-                          className="font-mono"
-                          maxLength={100}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Leave empty to use default format: PREVIEW-{project?.title}-[version]
-                          <br />
-                          <span className="text-warning">Only letters, numbers, spaces, and these characters: - _ . ( )</span>
-                        </p>
-                      </div>
+                    {showVideoProcessing ? (
+                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                     )}
-                  </>
-                )}
-              </div>
-
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="timelinePreviewsEnabled">Enable Timeline Previews</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Show preview thumbnails when hovering or scrubbing the timeline
-                    </p>
                   </div>
-                  <Switch
-                    id="timelinePreviewsEnabled"
-                    checked={timelinePreviewsEnabled}
-                    onCheckedChange={setTimelinePreviewsEnabled}
-                  />
-                </div>
-              </div>
-            </CardContent>
-            )}
-          </Card>
+                </CardHeader>
 
-          {/* Revision Settings */}
-          <Card className="border-border">
-            <CardHeader
-              className="cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => setShowRevisionTracking(!showRevisionTracking)}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Revision Tracking</CardTitle>
-                  <CardDescription>
-                    Manage how video revisions are tracked and limited
-                  </CardDescription>
-                </div>
-                {showRevisionTracking ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                )}
-              </div>
-            </CardHeader>
-
-            {showRevisionTracking && (
-              <CardContent className="space-y-6 border-t pt-4">
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="enableRevisions">Enable Revision Tracking</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Track and limit the number of video revisions
-                    </p>
-                  </div>
-                  <Switch
-                    id="enableRevisions"
-                    checked={enableRevisions}
-                    onCheckedChange={setEnableRevisions}
-                  />
-                </div>
-
-                {enableRevisions && (
-                  <div className="space-y-4">
+                {showVideoProcessing && (
+                  <CardContent className="space-y-6 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                     <div className="space-y-2">
-                      <Label htmlFor="maxRevisions">Maximum Revisions</Label>
-                      <Input
-                        id="maxRevisions"
-                        type="number"
-                        min="1"
-                        max="20"
-                        value={maxRevisions}
-                        onChange={(e) => {
-                          const val = e.target.value
-                          if (val === '') {
-                            setMaxRevisions('')
-                          } else {
-                            const num = parseInt(val, 10)
-                            if (!isNaN(num)) setMaxRevisions(num)
-                          }
-                        }}
-                        onBlur={(e) => {
-                          // Only validate on blur - ensure at least 1
-                          const val = e.target.value
-                          if (val === '') {
-                            setMaxRevisions(1)
-                          } else {
-                            const num = parseInt(val, 10)
-                            if (isNaN(num) || num < 1) setMaxRevisions(1)
-                            else if (num > 20) setMaxRevisions(20)
-                          }
-                        }}
-                      />
+                      <Label htmlFor="resolution">Preview Resolution</Label>
+                      <select
+                        id="resolution"
+                        value={previewResolution}
+                        onChange={(e) => setPreviewResolution(e.target.value)}
+                        className="w-full px-3 py-2 bg-card border border-border rounded-md"
+                      >
+                        <option value="720p">720p (1280x720 or 720x1280 for vertical)</option>
+                        <option value="1080p">1080p (1920x1080 or 1080x1920 for vertical)</option>
+                      </select>
                       <p className="text-xs text-muted-foreground">
-                        Must be at least 1. Applies to each video group independently.
+                        Higher resolutions take longer to process and use more storage.
+                        Vertical videos automatically adjust dimensions while maintaining aspect ratio.
                       </p>
                     </div>
                   </div>
+
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="watermarkEnabled">Enable Watermarks</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Add watermarks to processed videos
+                        </p>
+                      </div>
+                      <Switch
+                        id="watermarkEnabled"
+                        checked={watermarkEnabled}
+                        onCheckedChange={setWatermarkEnabled}
+                      />
+                    </div>
+
+                    {watermarkEnabled && (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="customWatermark">Custom Watermark Text</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Override default watermark format
+                            </p>
+                          </div>
+                          <Switch
+                            id="customWatermark"
+                            checked={useCustomWatermark}
+                            onCheckedChange={setUseCustomWatermark}
+                          />
+                        </div>
+
+                        {useCustomWatermark && (
+                          <div className="space-y-2">
+                            <Input
+                              value={watermarkText}
+                              onChange={(e) => setWatermarkText(e.target.value)}
+                              placeholder="e.g., CONFIDENTIAL, DRAFT, REVIEW COPY"
+                              className="font-mono"
+                              maxLength={100}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Leave empty to use default format: PREVIEW-{project?.title}-[version]
+                              <br />
+                              <span className="text-warning">Only letters, numbers, spaces, and these characters: - _ . ( )</span>
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="timelinePreviewsEnabled">Enable Timeline Previews</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Show preview thumbnails when hovering or scrubbing the timeline
+                        </p>
+                      </div>
+                      <Switch
+                        id="timelinePreviewsEnabled"
+                        checked={timelinePreviewsEnabled}
+                        onCheckedChange={setTimelinePreviewsEnabled}
+                      />
+                    </div>
+                  </div>
+                </CardContent>
                 )}
-              </div>
-            </CardContent>
-            )}
-          </Card>
+              </Card>
 
-          {/* Comment Settings */}
-          <Card className="border-border">
-            <CardHeader
-              className="cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => setShowFeedback(!showFeedback)}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Feedback & Client Uploads</CardTitle>
-                  <CardDescription>
-                    Control clients ability to see or leave feedback and upload files
-                  </CardDescription>
-                </div>
-                {showFeedback ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+              {/* Revision Settings */}
+              <Card className="border-border">
+                <CardHeader
+                  className="cursor-pointer hover:bg-accent/50 transition-colors"
+                  onClick={() => setShowRevisionTracking(!showRevisionTracking)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Revision Tracking</CardTitle>
+                      <CardDescription>
+                        Manage how video revisions are tracked and limited
+                      </CardDescription>
+                    </div>
+                    {showRevisionTracking ? (
+                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    )}
+                  </div>
+                </CardHeader>
+
+                {showRevisionTracking && (
+                  <CardContent className="space-y-6 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="enableRevisions">Enable Revision Tracking</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Track and limit the number of video revisions
+                        </p>
+                      </div>
+                      <Switch
+                        id="enableRevisions"
+                        checked={enableRevisions}
+                        onCheckedChange={setEnableRevisions}
+                      />
+                    </div>
+
+                    {enableRevisions && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="maxRevisions">Maximum Revisions</Label>
+                          <Input
+                            id="maxRevisions"
+                            type="number"
+                            min="1"
+                            max="20"
+                            value={maxRevisions}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              if (val === '') {
+                                setMaxRevisions('')
+                              } else {
+                                const num = parseInt(val, 10)
+                                if (!isNaN(num)) setMaxRevisions(num)
+                              }
+                            }}
+                            onBlur={(e) => {
+                              // Only validate on blur - ensure at least 1
+                              const val = e.target.value
+                              if (val === '') {
+                                setMaxRevisions(1)
+                              } else {
+                                const num = parseInt(val, 10)
+                                if (isNaN(num) || num < 1) setMaxRevisions(1)
+                                else if (num > 20) setMaxRevisions(20)
+                              }
+                            }}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Must be at least 1. Applies to each video group independently.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
                 )}
-              </div>
-            </CardHeader>
+              </Card>
 
-            {showFeedback && (
-              <CardContent className="space-y-6 border-t pt-4">
-              {(project as any)?.status === 'SHARE_ONLY' && (
-                <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
-                  <p className="text-sm text-warning font-medium">
-                    This project is currently set to <b>Share Only</b> mode, which overrides some settings. The Feedback Section is always hidden in this mode and videos are restricted to their latest version. If a video is manually approved by Admin, authenticated clients (i.e. OTP and Password users) will be able to download the video.
-                  </p>
-                </div>
-              )}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="hideFeedback">Hide Feedback Section</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Completely hide the Feedback & Discussion window from clients
-                    </p>
+              {/* Comment Settings */}
+              <Card className="border-border">
+                <CardHeader
+                  className="cursor-pointer hover:bg-accent/50 transition-colors"
+                  onClick={() => setShowFeedback(!showFeedback)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Feedback & Client Uploads</CardTitle>
+                      <CardDescription>
+                        Control clients ability to see or leave feedback and upload files
+                      </CardDescription>
+                    </div>
+                    {showFeedback ? (
+                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    )}
                   </div>
-                  <Switch
-                    id="hideFeedback"
-                    checked={hideFeedback}
-                    onCheckedChange={setHideFeedback}
-                  />
-                </div>
+                </CardHeader>
 
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="restrictComments">Restrict Comments to Latest Version</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Only allow feedback on the most recent video version
-                    </p>
-                  </div>
-                  <Switch
-                    id="restrictComments"
-                    checked={restrictCommentsToLatestVersion}
-                    onCheckedChange={setRestrictCommentsToLatestVersion}
-                  />
-                </div>
+                {showFeedback && (
+                  <CardContent className="space-y-6 border-t pt-4">
+                  {(project as any)?.status === 'SHARE_ONLY' && (
+                    <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
+                      <p className="text-sm text-warning font-medium">
+                        This project is currently set to <b>Share Only</b> mode, which overrides some settings. The Feedback Section is always hidden in this mode and videos are restricted to their latest version. If a video is manually approved by Admin, authenticated clients (i.e. OTP and Password users) will be able to download the video.
+                      </p>
+                    </div>
+                  )}
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="hideFeedback">Hide Feedback Section</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Completely hide the Feedback & Discussion window from clients
+                        </p>
+                      </div>
+                      <Switch
+                        id="hideFeedback"
+                        checked={hideFeedback}
+                        onCheckedChange={setHideFeedback}
+                      />
+                    </div>
 
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="useFullTimecode">Display Full Timecode</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.
-                    </p>
-                  </div>
-                  <Switch
-                    id="useFullTimecode"
-                    checked={useFullTimecode}
-                    onCheckedChange={setUseFullTimecode}
-                  />
-                </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="restrictComments">Restrict Comments to Latest Version</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Only allow feedback on the most recent video version
+                        </p>
+                      </div>
+                      <Switch
+                        id="restrictComments"
+                        checked={restrictCommentsToLatestVersion}
+                        onCheckedChange={setRestrictCommentsToLatestVersion}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="useFullTimecode">Display Full Timecode</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.
+                        </p>
+                      </div>
+                      <Switch
+                        id="useFullTimecode"
+                        checked={useFullTimecode}
+                        onCheckedChange={setUseFullTimecode}
+                      />
+                    </div>
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
@@ -1097,6 +1099,9 @@ export default function ProjectSettingsPage() {
             </CardContent>
             )}
           </Card>
+
+            </>
+          )}
 
           {/* Security Settings */}
           <Card className="border-border">
