@@ -4,6 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,6 +16,12 @@ export async function DELETE(
 ) {
   const auth = await requireApiAdmin(request)
   if (auth instanceof Response) return auth
+
+  const forbiddenMenu = requireMenuAccess(auth, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(auth, 'manageProjectAlbums')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,
@@ -32,6 +39,22 @@ export async function DELETE(
     })
 
     if (!photo) return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
+
+    if (auth.appRoleIsSystemAdmin !== true) {
+      const project = await prisma.project.findUnique({
+        where: { id: photo.album.projectId },
+        select: { status: true, assignedUsers: { select: { userId: true } } },
+      })
+
+      if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+      const assigned = project.assignedUsers?.some((u) => u.userId === auth.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(auth, project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
 
     await prisma.albumPhoto.delete({ where: { id: photoId } })
 

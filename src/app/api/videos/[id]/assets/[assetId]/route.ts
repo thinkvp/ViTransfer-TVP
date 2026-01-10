@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { getCurrentUserFromRequest, requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { verifyProjectAccess } from '@/lib/project-access'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { createReadStream } from 'fs'
 import fs from 'fs'
 export const runtime = 'nodejs'
@@ -45,7 +46,9 @@ export async function GET(
       include: {
         video: {
           include: {
-            project: true,
+            project: {
+              include: { assignedUsers: { select: { userId: true } } },
+            },
           },
         },
       },
@@ -61,6 +64,27 @@ export async function GET(
     const accessCheck = await verifyProjectAccess(request, project.id, project.sharePassword, project.authMode)
     if (!accessCheck.authorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
+    // If this is an admin request, also enforce app-role RBAC.
+    if (accessCheck.isAdmin) {
+      const adminUser = await getCurrentUserFromRequest(request)
+      if (!adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+      const forbiddenMenu = requireMenuAccess(adminUser, 'projects')
+      if (forbiddenMenu) return forbiddenMenu
+
+      const forbiddenAction = requireActionAccess(adminUser, 'accessProjectSettings')
+      if (forbiddenAction) return forbiddenAction
+
+      if (adminUser.appRoleIsSystemAdmin !== true) {
+        const assigned = project.assignedUsers?.some((u: any) => u.userId === adminUser.id)
+        if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+        if (!isVisibleProjectStatusForUser(adminUser, project.status)) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      }
     }
 
     // For non-admins, verify video approval
@@ -133,6 +157,12 @@ export async function DELETE(
     return authResult
   }
 
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  if (forbiddenAction) return forbiddenAction
+
   // Rate limiting
   const rateLimitResult = await rateLimit(
     request,
@@ -150,12 +180,25 @@ export async function DELETE(
     const asset = await prisma.videoAsset.findUnique({
       where: { id: assetId },
       include: {
-        video: true,
+        video: {
+          include: {
+            project: { select: { status: true, assignedUsers: { select: { userId: true } } } },
+          },
+        },
       },
     })
 
     if (!asset || asset.videoId !== videoId) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = asset.video.project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, asset.video.project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     // Check if this asset is being used as the video's thumbnail

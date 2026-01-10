@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getCurrentUserFromRequest, requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
 import { z } from 'zod'
 
@@ -29,6 +29,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const forbidden = requireMenuAccess(authResult, 'clients')
   if (forbidden) return forbidden
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageClientFiles')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,
@@ -71,6 +74,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const forbidden = requireMenuAccess(authResult, 'clients')
   if (forbidden) return forbidden
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageClientFiles')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,

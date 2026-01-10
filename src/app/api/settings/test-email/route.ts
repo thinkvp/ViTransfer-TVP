@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { testEmailConnection } from '@/lib/email'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -15,6 +16,12 @@ export async function POST(request: NextRequest) {
     if (authResult instanceof Response) {
       return authResult
     }
+
+    const forbiddenMenu = requireMenuAccess(authResult, 'settings')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(authResult, 'sendTestEmail')
+    if (forbiddenAction) return forbiddenAction
 
     const { testEmail, smtpConfig } = await request.json()
 

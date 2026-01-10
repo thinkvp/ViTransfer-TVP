@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -108,6 +108,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const forbidden = requireMenuAccess(authResult, 'clients')
   if (forbidden) return forbidden
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageClients')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,
@@ -221,6 +224,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   const forbidden = requireMenuAccess(authResult, 'clients')
   if (forbidden) return forbidden
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageClients')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,

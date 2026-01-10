@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.10.0-tvp-v1.10",
+  "version": "1.11.0-tvp-v1.11",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,6 +8,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
+    "check:rbac": "node scripts/check-rbac-gates.mjs",
     "lint": "eslint .",
     "postinstall": "prisma generate",
     "worker": "tsx src/worker/index.ts",

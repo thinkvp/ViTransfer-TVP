@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { invalidateBlocklistCache } from '@/lib/video-access'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +18,12 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'security')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'viewSecurityBlocklists')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const blockedIPs = await prisma.blockedIP.findMany({
@@ -50,6 +57,12 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'security')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageSecurityBlocklists')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const body = await request.json()
@@ -121,6 +134,12 @@ export async function DELETE(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'security')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageSecurityBlocklists')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const body = await request.json()

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { hashPassword, validatePassword } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
-import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -11,21 +11,13 @@ export const runtime = 'nodejs'
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
 
-function requireUsersMenuAccess(user: any): Response | null {
-  const permissions = normalizeRolePermissions(user?.permissions)
-  if (!canSeeMenu(permissions, 'users')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  return null
-}
-
 // GET /api/users - List all users
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const forbidden = requireUsersMenuAccess(authResult)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(authResult, 'users')
+  if (forbiddenMenu) return forbiddenMenu
 
   // Rate limiting: 100 requests per minute for listing users
   const rateLimitResult = await rateLimit(request, {
@@ -81,8 +73,11 @@ export async function POST(request: NextRequest) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const forbidden = requireUsersMenuAccess(authResult)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(authResult, 'users')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageUsers')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 10 user creation requests per minute
   const rateLimitResult = await rateLimit(request, {

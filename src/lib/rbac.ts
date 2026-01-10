@@ -3,6 +3,19 @@ import type { ProjectStatus } from '@/lib/project-status'
 export type MenuKey = 'projects' | 'clients' | 'settings' | 'users' | 'security' | 'analytics'
 
 export type ActionKey =
+  | 'manageClients'
+  | 'manageClientFiles'
+  | 'changeSettings'
+  | 'sendTestEmail'
+  | 'manageUsers'
+  | 'manageRoles'
+  | 'viewSecurityEvents'
+  | 'manageSecurityEvents'
+  | 'viewSecurityBlocklists'
+  | 'manageSecurityBlocklists'
+  | 'viewSecurityRateLimits'
+  | 'manageSecurityRateLimits'
+  | 'manageProjectAlbums'
   | 'accessProjectSettings'
   | 'changeProjectSettings'
   | 'uploadFilesToProjectInternal'
@@ -23,6 +36,19 @@ export interface RolePermissions {
 
 const ALL_MENUS: MenuKey[] = ['projects', 'clients', 'settings', 'users', 'security', 'analytics']
 const ALL_ACTIONS: ActionKey[] = [
+  'manageClients',
+  'manageClientFiles',
+  'changeSettings',
+  'sendTestEmail',
+  'manageUsers',
+  'manageRoles',
+  'viewSecurityEvents',
+  'manageSecurityEvents',
+  'viewSecurityBlocklists',
+  'manageSecurityBlocklists',
+  'viewSecurityRateLimits',
+  'manageSecurityRateLimits',
+  'manageProjectAlbums',
   'accessProjectSettings',
   'changeProjectSettings',
   'uploadFilesToProjectInternal',
@@ -33,6 +59,18 @@ const ALL_ACTIONS: ActionKey[] = [
   'deleteProjects',
   'viewAnalytics',
 ]
+
+// Backwards-compatibility: historically, some areas were effectively gated by menu access only.
+// When migrating to more granular per-area actions, default a subset of actions to true
+// when the corresponding menu is enabled *unless* the action is explicitly present in stored JSON.
+const FALLBACK_ACTIONS_BY_MENU: Record<MenuKey, ActionKey[]> = {
+  projects: ['manageProjectAlbums'],
+  clients: ['manageClients', 'manageClientFiles'],
+  settings: ['changeSettings', 'sendTestEmail'],
+  users: ['manageUsers', 'manageRoles'],
+  security: ['viewSecurityEvents', 'manageSecurityEvents', 'viewSecurityBlocklists', 'manageSecurityBlocklists', 'viewSecurityRateLimits', 'manageSecurityRateLimits'],
+  analytics: [],
+}
 
 export function defaultRolePermissions(): RolePermissions {
   const menuVisibility = Object.fromEntries(ALL_MENUS.map((k) => [k, false])) as Record<MenuKey, boolean>
@@ -60,8 +98,24 @@ export function normalizeRolePermissions(raw: unknown): RolePermissions {
 
   const actionsRaw = isRecord(raw.actions) ? raw.actions : {}
   for (const key of ALL_ACTIONS) {
-    const v = actionsRaw[key]
-    base.actions[key] = v === true
+    const hasKey = Object.prototype.hasOwnProperty.call(actionsRaw, key)
+    if (hasKey) {
+      base.actions[key] = actionsRaw[key] === true
+    } else {
+      base.actions[key] = false
+    }
+  }
+
+  // Apply fallback defaults for legacy roles
+  for (const menuKey of ALL_MENUS) {
+    if (base.menuVisibility[menuKey] !== true) continue
+    const fallbackActions = FALLBACK_ACTIONS_BY_MENU[menuKey] || []
+    for (const actionKey of fallbackActions) {
+      const hasActionKey = Object.prototype.hasOwnProperty.call(actionsRaw, actionKey)
+      if (!hasActionKey) {
+        base.actions[actionKey] = true
+      }
+    }
   }
 
   return base

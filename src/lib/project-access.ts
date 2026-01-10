@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserFromRequest, getShareContext } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import {
+  isVisibleProjectStatusForUser,
+  requireAnyActionAccess,
+  requireMenuAccess,
+} from '@/lib/rbac-api'
 import type { Project, Video } from '@prisma/client'
 
 /**
@@ -29,7 +34,7 @@ export async function verifyProjectAccess(
   isAuthenticated: boolean
   isGuest?: boolean
   shareTokenSessionId?: string
-  errorResponse?: NextResponse
+  errorResponse?: Response
 }> {
   // Check if user is admin (admins bypass password protection)
   const currentUser = await getCurrentUserFromRequest(request)
@@ -37,6 +42,72 @@ export async function verifyProjectAccess(
   const shareContext = await getShareContext(request)
 
   if (isAdmin) {
+    const forbiddenMenu = requireMenuAccess(currentUser, 'projects')
+    if (forbiddenMenu) {
+      return {
+        authorized: false,
+        isAdmin: true,
+        isAuthenticated: true,
+        errorResponse: forbiddenMenu,
+      }
+    }
+
+    const forbiddenAction = requireAnyActionAccess(currentUser, [
+      'accessProjectSettings',
+      'uploadVideosOnProjects',
+      'changeProjectSettings',
+      'changeProjectStatuses',
+      'manageProjectAlbums',
+    ])
+    if (forbiddenAction) {
+      return {
+        authorized: false,
+        isAdmin: true,
+        isAuthenticated: true,
+        errorResponse: forbiddenAction,
+      }
+    }
+
+    // Enforce project assignment + status visibility for non-system-admin users.
+    if (!currentUser.appRoleIsSystemAdmin) {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          status: true,
+          assignedUsers: { select: { userId: true } },
+        },
+      })
+
+      if (!project) {
+        return {
+          authorized: false,
+          isAdmin: true,
+          isAuthenticated: true,
+          errorResponse: NextResponse.json({ error: 'Project not found' }, { status: 404 }),
+        }
+      }
+
+      const isAssigned = project.assignedUsers.some((u) => u.userId === currentUser.id)
+      if (!isAssigned) {
+        return {
+          authorized: false,
+          isAdmin: true,
+          isAuthenticated: true,
+          errorResponse: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+        }
+      }
+
+      const isStatusVisible = isVisibleProjectStatusForUser(currentUser, project.status)
+      if (!isStatusVisible) {
+        return {
+          authorized: false,
+          isAdmin: true,
+          isAuthenticated: true,
+          errorResponse: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+        }
+      }
+    }
+
     return {
       authorized: true,
       isAdmin: true,

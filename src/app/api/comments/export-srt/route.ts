@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { timecodeToSeconds } from '@/lib/timecode'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -67,12 +68,34 @@ export async function GET(request: NextRequest) {
   const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) return authResult
 
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  if (forbiddenAction) return forbiddenAction
+
   const { searchParams } = new URL(request.url)
   const projectId = searchParams.get('projectId')
   const videoId = searchParams.get('videoId')
 
   if (!projectId || !videoId) {
     return NextResponse.json({ error: 'projectId and videoId are required' }, { status: 400 })
+  }
+
+  if (authResult.appRoleIsSystemAdmin !== true) {
+    const projectAccess = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true, assignedUsers: { select: { userId: true } } },
+    })
+
+    if (!projectAccess) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    const assigned = projectAccess.assignedUsers?.some((u) => u.userId === authResult.id)
+    if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    if (!isVisibleProjectStatusForUser(authResult, projectAccess.status)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
   }
 
   const [project, video] = await Promise.all([

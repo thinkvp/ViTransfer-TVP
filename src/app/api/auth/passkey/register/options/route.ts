@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { generatePasskeyRegistrationOptions } from '@/lib/passkey'
 import { isPasskeyConfigured } from '@/lib/settings'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -26,6 +27,12 @@ export async function POST(request: NextRequest) {
     // Require admin authentication
     const user = await requireApiAdmin(request)
     if (user instanceof Response) return user
+
+    const forbiddenMenu = requireMenuAccess(user, 'settings')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(user, 'changeSettings')
+    if (forbiddenAction) return forbiddenAction
 
     // Check if PassKey is configured
     const configured = await isPasskeyConfigured()

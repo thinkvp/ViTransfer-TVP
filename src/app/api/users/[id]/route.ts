@@ -5,21 +5,13 @@ import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption
 import { revokeAllUserTokens, clearUserRevocation } from '@/lib/token-revocation'
 import { rateLimit } from '@/lib/rate-limit'
 import { normalizeHexDisplayColor } from '@/lib/display-color'
-import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
-
-function requireUsersMenuAccess(user: any): Response | null {
-  const permissions = normalizeRolePermissions(user?.permissions)
-  if (!canSeeMenu(permissions, 'users')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  return null
-}
 
 // GET /api/users/[id] - Get user by ID
 export async function GET(
@@ -29,8 +21,8 @@ export async function GET(
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const forbidden = requireUsersMenuAccess(authResult)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(authResult, 'users')
+  if (forbiddenMenu) return forbiddenMenu
 
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -94,8 +86,11 @@ export async function PATCH(
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const forbidden = requireUsersMenuAccess(authResult)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(authResult, 'users')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageUsers')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const { id } = await params
@@ -357,8 +352,11 @@ export async function DELETE(
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const forbidden = requireUsersMenuAccess(authResult)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(authResult, 'users')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageUsers')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const { id } = await params

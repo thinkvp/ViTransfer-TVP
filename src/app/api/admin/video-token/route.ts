@@ -3,6 +3,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,12 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: Allow generous limit for token generation
   const rateLimitResult = await rateLimit(request, {
@@ -56,6 +63,26 @@ export async function GET(request: NextRequest) {
         { error: 'Video not found or does not belong to project' },
         { status: 404 }
       )
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { status: true, assignedUsers: { select: { userId: true } } },
+      })
+      if (!project) {
+        return NextResponse.json(
+          { error: 'Project not found' },
+          { status: 404 }
+        )
+      }
+
+      const assigned = project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     // Generate video access token

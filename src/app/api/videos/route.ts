@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateUploadedFile } from '@/lib/file-validation'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -18,6 +19,12 @@ export async function POST(request: NextRequest) {
     return authResult
   }
   const admin = authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: Max 50 video uploads per hour
   const rateLimitResult = await rateLimit(request, {
@@ -64,6 +71,7 @@ export async function POST(request: NextRequest) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
+        assignedUsers: { select: { userId: true } },
         videos: {
           where: { name: videoName },
           orderBy: { version: 'desc' },
@@ -74,6 +82,19 @@ export async function POST(request: NextRequest) {
 
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    // Non-system-admins can only upload to projects explicitly assigned to them.
+    if (admin.appRoleIsSystemAdmin !== true) {
+      const assigned = project.assignedUsers?.some((u: any) => u.userId === admin.id)
+      if (!assigned) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
+    // Enforce project status visibility
+    if (!isVisibleProjectStatusForUser(admin, project.status)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
     // Calculate next version number for this specific video name

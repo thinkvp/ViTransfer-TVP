@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { deletePasskey, updatePasskeyName } from '@/lib/passkey'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -24,6 +25,12 @@ export async function DELETE(
     // Require admin authentication
     const user = await requireApiAdmin(request)
     if (user instanceof Response) return user
+
+    const forbiddenMenu = requireMenuAccess(user, 'settings')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(user, 'changeSettings')
+    if (forbiddenAction) return forbiddenAction
 
     const { id: credentialId } = await params
 
@@ -73,6 +80,12 @@ export async function PATCH(
     // Require admin authentication
     const user = await requireApiAdmin(request)
     if (user instanceof Response) return user
+
+    const forbiddenMenu = requireMenuAccess(user, 'settings')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(user, 'changeSettings')
+    if (forbiddenAction) return forbiddenAction
 
     const { id: credentialId } = await params
 

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { invalidateAllSessions, clearAllRateLimits } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -44,6 +45,9 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'settings')
+  if (forbiddenMenu) return forbiddenMenu
 
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -87,6 +91,12 @@ export async function PATCH(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'settings')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeSettings')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const body = await request.json()

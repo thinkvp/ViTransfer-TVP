@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { getPasskeyConfigStatus } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -26,6 +27,12 @@ export async function GET(request: NextRequest) {
     // Require admin authentication
     const user = await requireApiAdmin(request)
     if (user instanceof Response) return user
+
+    const forbiddenMenu = requireMenuAccess(user, 'settings')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(user, 'changeSettings')
+    if (forbiddenAction) return forbiddenAction
 
     // Rate limiting: 60 requests per minute
     const rateLimitResult = await rateLimit(request, {

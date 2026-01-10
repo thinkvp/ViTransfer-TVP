@@ -4,6 +4,7 @@ import { deleteFile } from '@/lib/storage'
 import { requireApiAdmin } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -19,6 +20,13 @@ export async function GET(
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  // Status polling is needed both for uploaders and for users who can access project settings.
+  const forbiddenAction = requireAnyActionAccess(authResult, ['accessProjectSettings', 'uploadVideosOnProjects'])
+  if (forbiddenAction) return forbiddenAction
 
   // Rate limit status checks (allow frequent polling)
   const rateLimitResult = await rateLimit(request, {
@@ -42,11 +50,27 @@ export async function GET(
         duration: true,
         width: true,
         height: true,
+        projectId: true,
       }
     })
 
     if (!video) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const project = await prisma.project.findUnique({
+        where: { id: video.projectId },
+        select: { status: true, assignedUsers: { select: { userId: true } } },
+      })
+      if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+      const assigned = project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     return NextResponse.json(video)
@@ -160,6 +184,9 @@ export async function PATCH(
   }
   const admin = authResult
 
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
   // Rate limit admin toggles
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
@@ -220,11 +247,35 @@ export async function PATCH(
     // Get video details
     const video = await prisma.video.findUnique({
       where: { id },
-      include: { project: true }
+      include: {
+        project: {
+          include: { assignedUsers: { select: { userId: true } } },
+        },
+      },
     })
 
     if (!video) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = video.project.assignedUsers?.some((u: any) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, video.project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
+    // RBAC: split permissions by intent.
+    if (approved !== undefined) {
+      const forbidden = requireActionAccess(authResult, 'changeProjectStatuses')
+      if (forbidden) return forbidden
+    }
+
+    if (name !== undefined || versionLabel !== undefined || videoNotes !== undefined) {
+      const forbidden = requireActionAccess(authResult, 'changeProjectSettings')
+      if (forbidden) return forbidden
     }
 
     // If approving this video, unapprove all other versions of the SAME video
@@ -299,6 +350,13 @@ export async function DELETE(
     return authResult
   }
 
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  // Conservative: video deletion is a destructive project content operation.
+  const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
+  if (forbiddenAction) return forbiddenAction
+
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
     maxRequests: 30,
@@ -313,11 +371,21 @@ export async function DELETE(
       where: { id },
       include: {
         assets: true,
+        project: { select: { status: true, assignedUsers: { select: { userId: true } } } },
       }
     })
 
     if (!video) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = video.project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, video.project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     const projectId = video.projectId

@@ -34,24 +34,71 @@ interface Role {
   userCount: number
 }
 
-const MENU_ITEMS: Array<{ key: keyof RolePermissions['menuVisibility']; label: string }> = [
-  { key: 'projects', label: 'Projects' },
-  { key: 'clients', label: 'Clients' },
-  { key: 'settings', label: 'Settings' },
-  { key: 'users', label: 'Users' },
-  { key: 'security', label: 'Security' },
-]
+type PermissionGroup = {
+  key: keyof RolePermissions['menuVisibility']
+  label: string
+  actions: Array<{ key: keyof RolePermissions['actions']; label: string }>
+}
 
-const ACTION_ITEMS: Array<{ key: keyof RolePermissions['actions']; label: string }> = [
-  { key: 'accessProjectSettings', label: 'Access project settings' },
-  { key: 'changeProjectSettings', label: 'Change project settings' },
-  { key: 'uploadFilesToProjectInternal', label: 'Upload files to project (internal)' },
-  { key: 'uploadVideosOnProjects', label: 'Upload videos on projects' },
-  { key: 'sendNotificationsToRecipients', label: 'Send notifications' },
-  { key: 'makeCommentsOnProjects', label: 'Make comments' },
-  { key: 'changeProjectStatuses', label: 'Change project statuses' },
-  { key: 'deleteProjects', label: 'Delete projects' },
-  { key: 'viewAnalytics', label: 'View analytics' },
+const PERMISSION_GROUPS: PermissionGroup[] = [
+  {
+    key: 'projects',
+    label: 'Projects',
+    actions: [
+      { key: 'accessProjectSettings', label: 'Access project settings' },
+      { key: 'changeProjectSettings', label: 'Change project settings' },
+      { key: 'uploadFilesToProjectInternal', label: 'Upload internal project files' },
+      { key: 'uploadVideosOnProjects', label: 'Upload videos' },
+      { key: 'manageProjectAlbums', label: 'Manage albums' },
+      { key: 'sendNotificationsToRecipients', label: 'Send notifications to recipients' },
+      { key: 'makeCommentsOnProjects', label: 'Make internal comments' },
+      { key: 'changeProjectStatuses', label: 'Change project statuses' },
+      { key: 'deleteProjects', label: 'Delete projects' },
+    ],
+  },
+  {
+    key: 'clients',
+    label: 'Clients',
+    actions: [
+      { key: 'manageClients', label: 'Create/edit/delete clients' },
+      { key: 'manageClientFiles', label: 'Manage client files' },
+    ],
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    actions: [
+      { key: 'changeSettings', label: 'Change global settings' },
+      { key: 'sendTestEmail', label: 'Send test email' },
+    ],
+  },
+  {
+    key: 'users',
+    label: 'Users',
+    actions: [
+      { key: 'manageUsers', label: 'Create/edit/delete users' },
+      { key: 'manageRoles', label: 'Create/edit/delete roles' },
+    ],
+  },
+  {
+    key: 'security',
+    label: 'Security',
+    actions: [
+      { key: 'viewSecurityEvents', label: 'View security events' },
+      { key: 'manageSecurityEvents', label: 'Delete/purge security events' },
+      { key: 'viewSecurityBlocklists', label: 'View blocklists' },
+      { key: 'manageSecurityBlocklists', label: 'Manage blocklists' },
+      { key: 'viewSecurityRateLimits', label: 'View rate limits' },
+      { key: 'manageSecurityRateLimits', label: 'Clear rate limits' },
+    ],
+  },
+  {
+    key: 'analytics',
+    label: 'Analytics',
+    actions: [
+      { key: 'viewAnalytics', label: 'View analytics' },
+    ],
+  },
 ]
 
 export default function UsersPage() {
@@ -136,6 +183,26 @@ export default function UsersPage() {
       else existing.add(status)
       next.projectVisibility.statuses = [...existing]
       return next
+    })
+  }
+
+  const toggleArea = (area: keyof RolePermissions['menuVisibility'], enabled: boolean) => {
+    setRolePermissions((prev) => {
+      const group = PERMISSION_GROUPS.find((g) => g.key === area)
+      const nextActions = { ...prev.actions }
+
+      // If disabling the area, clear all child actions (prevents "hidden enabled" permissions)
+      if (!enabled && group) {
+        for (const a of group.actions) {
+          nextActions[a.key] = false
+        }
+      }
+
+      return {
+        ...prev,
+        menuVisibility: { ...prev.menuVisibility, [area]: enabled },
+        actions: nextActions,
+      }
     })
   }
 
@@ -408,7 +475,7 @@ export default function UsersPage() {
             <DialogHeader>
               <DialogTitle>{roleDialogMode === 'create' ? 'Add New Role' : 'Edit Role'}</DialogTitle>
               <DialogDescription>
-                Configure access, project visibility, and actions.
+                Configure access by area, project visibility, and allowed actions.
               </DialogDescription>
             </DialogHeader>
 
@@ -424,23 +491,56 @@ export default function UsersPage() {
                 <Input id="roleName" value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="e.g. Project Manager" />
               </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Access</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {MENU_ITEMS.map((item) => (
-                    <label key={item.key} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={rolePermissions.menuVisibility[item.key]}
-                        onCheckedChange={(checked) =>
-                          setRolePermissions((prev) => ({
-                            ...prev,
-                            menuVisibility: { ...prev.menuVisibility, [item.key]: checked === true },
-                          }))
-                        }
-                      />
-                      <span>{item.label}</span>
-                    </label>
-                  ))}
+              <div className="space-y-4">
+                <div className="text-sm font-medium">Areas & Actions</div>
+
+                <div className="space-y-4">
+                  {PERMISSION_GROUPS.map((group) => {
+                    const areaEnabled = rolePermissions.menuVisibility[group.key] === true
+                    return (
+                      <div key={group.key} className="rounded-md border border-border bg-card p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <label className="flex items-center gap-2 text-sm font-medium">
+                            <Checkbox
+                              checked={areaEnabled}
+                              onCheckedChange={(checked) => toggleArea(group.key, checked === true)}
+                            />
+                            <span>{group.label}</span>
+                          </label>
+
+                          <span className={cn('text-xs', areaEnabled ? 'text-muted-foreground' : 'text-muted-foreground/70')}>
+                            {areaEnabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </div>
+
+                        {group.actions.length > 0 && (
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {group.actions.map((item) => (
+                              <label
+                                key={item.key}
+                                className={cn(
+                                  'flex items-center gap-2 text-sm',
+                                  !areaEnabled && 'opacity-60'
+                                )}
+                              >
+                                <Checkbox
+                                  checked={rolePermissions.actions[item.key]}
+                                  disabled={!areaEnabled}
+                                  onCheckedChange={(checked) =>
+                                    setRolePermissions((prev) => ({
+                                      ...prev,
+                                      actions: { ...prev.actions, [item.key]: checked === true },
+                                    }))
+                                  }
+                                />
+                                <span>{item.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -462,13 +562,17 @@ export default function UsersPage() {
                           <button
                             key={value}
                             type="button"
+                            disabled={rolePermissions.menuVisibility.projects !== true}
                             className={cn(
                               'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border transition-colors',
                               selected
                                 ? cn(projectStatusBadgeClass(value), 'border-2 font-semibold')
                                 : 'bg-muted text-muted-foreground border border-border opacity-70 hover:opacity-100'
                             )}
-                            onClick={() => toggleStatus(value)}
+                            onClick={() => {
+                              if (rolePermissions.menuVisibility.projects !== true) return
+                              toggleStatus(value)
+                            }}
                             aria-pressed={selected}
                           >
                             {selected && <Check className="h-3.5 w-3.5" />}
@@ -477,26 +581,6 @@ export default function UsersPage() {
                         )
                       })}
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Actions</div>
-                <div className="grid grid-cols-1 gap-2">
-                  {ACTION_ITEMS.map((item) => (
-                    <label key={item.key} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={rolePermissions.actions[item.key]}
-                        onCheckedChange={(checked) =>
-                          setRolePermissions((prev) => ({
-                            ...prev,
-                            actions: { ...prev.actions, [item.key]: checked === true },
-                          }))
-                        }
-                      />
-                      <span>{item.label}</span>
-                    </label>
                   ))}
                 </div>
               </div>

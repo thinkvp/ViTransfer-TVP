@@ -3,6 +3,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { verifyPasskeyRegistration } from '@/lib/passkey'
 import { getClientIpAddress } from '@/lib/utils'
 import type { RegistrationResponseJSON } from '@simplewebauthn/browser'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -32,6 +33,12 @@ export async function POST(request: NextRequest) {
     // Require admin authentication
     const user = await requireApiAdmin(request)
     if (user instanceof Response) return user
+
+    const forbiddenMenu = requireMenuAccess(user, 'settings')
+    if (forbiddenMenu) return forbiddenMenu
+
+    const forbiddenAction = requireActionAccess(user, 'changeSettings')
+    if (forbiddenAction) return forbiddenAction
 
     // Parse request body
     const body = await request.json()

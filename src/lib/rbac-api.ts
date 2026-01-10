@@ -29,6 +29,15 @@ export function requireActionAccess(user: any, action: ActionKey): Response | nu
   return null
 }
 
+export function requireAnyActionAccess(user: any, actions: ActionKey[]): Response | null {
+  const permissions = getUserPermissions(user)
+  const allowed = actions.some((a) => canDoAction(permissions, a))
+  if (!allowed) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
+
 export function isVisibleProjectStatusForUser(user: any, status: string): boolean {
   const permissions = getUserPermissions(user)
   return isProjectStatusVisible(permissions, status)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,6 +10,9 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'settings')
+  if (forbiddenMenu) return forbiddenMenu
 
   try {
     const settings = await prisma.pushNotificationSettings.upsert({
@@ -48,6 +52,12 @@ export async function PATCH(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'settings')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeSettings')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const body = await request.json()

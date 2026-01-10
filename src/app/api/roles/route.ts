@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -13,20 +13,12 @@ const roleSchema = z.object({
   permissions: z.unknown().optional(),
 })
 
-function requireUsersMenuAccess(user: any): Response | null {
-  const permissions = normalizeRolePermissions(user?.permissions)
-  if (!canSeeMenu(permissions, 'users')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  return null
-}
-
 export async function GET(request: NextRequest) {
   const auth = await requireApiAuth(request)
   if (auth instanceof Response) return auth
 
-  const forbidden = requireUsersMenuAccess(auth)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(auth, 'users')
+  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
@@ -57,8 +49,11 @@ export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request)
   if (auth instanceof Response) return auth
 
-  const forbidden = requireUsersMenuAccess(auth)
-  if (forbidden) return forbidden
+  const forbiddenMenu = requireMenuAccess(auth, 'users')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(auth, 'manageRoles')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,

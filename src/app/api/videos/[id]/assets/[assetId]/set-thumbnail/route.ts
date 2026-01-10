@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 
@@ -17,6 +18,12 @@ export async function POST(
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  if (forbiddenAction) return forbiddenAction
 
   // 3. RATE LIMITING
   const rateLimitResult = await rateLimit(
@@ -40,10 +47,20 @@ export async function POST(
     // Verify video exists
     const video = await prisma.video.findUnique({
       where: { id: videoId },
+      include: { project: { select: { status: true, assignedUsers: { select: { userId: true } } } } },
     })
 
     if (!video) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = video.project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, video.project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     // If action is 'remove', revert to system-generated thumbnail

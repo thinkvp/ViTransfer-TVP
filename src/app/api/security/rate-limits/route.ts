@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { getRateLimitedEntries, clearRateLimitByKey } from '@/lib/rate-limit'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
@@ -16,6 +17,12 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'security')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'viewSecurityRateLimits')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const entries = await getRateLimitedEntries()
@@ -47,6 +54,12 @@ export async function DELETE(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'security')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageSecurityRateLimits')
+  if (forbiddenAction) return forbiddenAction
 
   try {
     const body = await request.json()

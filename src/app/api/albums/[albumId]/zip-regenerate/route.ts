@@ -4,6 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,12 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {
   const auth = await requireApiAdmin(request)
   if (auth instanceof Response) return auth
+
+  const forbiddenMenu = requireMenuAccess(auth, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(auth, 'manageProjectAlbums')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,
@@ -28,6 +35,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
 
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
+
+  if (auth.appRoleIsSystemAdmin !== true) {
+    const project = await prisma.project.findUnique({
+      where: { id: album.projectId },
+      select: { status: true, assignedUsers: { select: { userId: true } } },
+    })
+
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+    const assigned = project.assignedUsers?.some((u) => u.userId === auth.id)
+    if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    if (!isVisibleProjectStatusForUser(auth, project.status)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
 
   const fullZipPath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'full' })
   const socialZipPath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'social' })

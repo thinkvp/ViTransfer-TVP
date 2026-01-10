@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -23,6 +24,12 @@ export async function POST(
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  if (forbiddenAction) return forbiddenAction
 
   // 3. RATE LIMITING
   const rateLimitResult = await rateLimit(
@@ -52,15 +59,32 @@ export async function POST(
     // Verify source video exists
     const sourceVideo = await prisma.video.findUnique({
       where: { id: sourceVideoId },
+      select: { id: true, projectId: true },
     })
 
     if (!sourceVideo) {
       return NextResponse.json({ error: 'Source video not found' }, { status: 404 })
     }
 
+    const project = await prisma.project.findUnique({
+      where: { id: sourceVideo.projectId },
+      select: { status: true, assignedUsers: { select: { userId: true } } },
+    })
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
     // Verify target video exists and is in same project
     const targetVideo = await prisma.video.findUnique({
       where: { id: targetVideoId },
+      select: { id: true, projectId: true },
     })
 
     if (!targetVideo) {

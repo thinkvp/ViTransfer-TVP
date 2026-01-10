@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
@@ -28,6 +28,9 @@ export async function GET(
 
   const forbidden = requireMenuAccess(authResult, 'clients')
   if (forbidden) return forbidden
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageClientFiles')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,
@@ -98,6 +101,9 @@ export async function DELETE(
 
   const forbidden = requireMenuAccess(authResult, 'clients')
   if (forbidden) return forbidden
+
+  const forbiddenAction = requireActionAccess(authResult, 'manageClientFiles')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,

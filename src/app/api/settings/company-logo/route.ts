@@ -6,6 +6,7 @@ import { deleteFile, uploadFile } from '@/lib/storage'
 import { invalidateEmailSettingsCache } from '@/lib/email'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import type { Prisma } from '@prisma/client'
+import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,12 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'settings')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'changeSettings')
+  if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,

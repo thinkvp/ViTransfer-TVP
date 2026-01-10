@@ -4,6 +4,7 @@ import { getCurrentUserFromRequest, requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -45,7 +46,9 @@ export async function GET(
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: {
-        project: true,
+        project: {
+          include: { assignedUsers: { select: { userId: true } } },
+        },
       },
     })
 
@@ -59,6 +62,27 @@ export async function GET(
     const accessCheck = await verifyProjectAccess(request, project.id, project.sharePassword, project.authMode)
     if (!accessCheck.authorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
+    // If this is an admin request, also enforce app-role RBAC.
+    if (accessCheck.isAdmin) {
+      const adminUser = await getCurrentUserFromRequest(request)
+      if (!adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+      const forbiddenMenu = requireMenuAccess(adminUser, 'projects')
+      if (forbiddenMenu) return forbiddenMenu
+
+      const forbiddenAction = requireActionAccess(adminUser, 'accessProjectSettings')
+      if (forbiddenAction) return forbiddenAction
+
+      if (adminUser.appRoleIsSystemAdmin !== true) {
+        const assigned = project.assignedUsers?.some((u: any) => u.userId === adminUser.id)
+        if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+        if (!isVisibleProjectStatusForUser(adminUser, project.status)) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      }
     }
 
     if (!accessCheck.isAdmin && !video.approved) {
@@ -106,6 +130,12 @@ export async function POST(
     return authResult
   }
 
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  if (forbiddenAction) return forbiddenAction
+
   // Rate limiting
   const rateLimitResult = await rateLimit(
     request,
@@ -123,12 +153,23 @@ export async function POST(
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: {
-        project: true,
+        project: {
+          include: { assignedUsers: { select: { userId: true } } },
+        },
       },
     })
 
     if (!video) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = video.project.assignedUsers?.some((u: any) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, video.project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     // Get current user for tracking
