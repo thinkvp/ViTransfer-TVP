@@ -102,9 +102,7 @@ export async function POST(request: NextRequest) {
 
     // Check if revisions are enabled and validate (per-video tracking)
     if (project.enableRevisions && project.maxRevisions > 0) {
-      // Count existing versions for this specific video name (project.videos is already filtered by name)
-      const existingVersionCount = project.videos.length
-
+      const existingVersionCount = await prisma.video.count({ where: { projectId, name: videoName } })
       if (existingVersionCount >= project.maxRevisions) {
         return NextResponse.json(
           { error: `Maximum revisions (${project.maxRevisions}) exceeded for this video` },

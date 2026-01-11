@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent } from './ui/card'
@@ -18,12 +18,14 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from './ui/select'
 import { Textarea } from './ui/textarea'
 import { UnapproveModal } from './UnapproveModal'
 import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
+import { formatFileSize } from '@/lib/utils'
 
 interface Video {
   id: string
@@ -56,16 +58,24 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
-  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'specific-album'>('entire-project')
+  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'specific-album' | 'internal-invite'>('entire-project')
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [entireProjectNotes, setEntireProjectNotes] = useState<string>('')
+  const [internalInviteNotes, setInternalInviteNotes] = useState<string>('')
+  const [selectedInternalUserIds, setSelectedInternalUserIds] = useState<string[]>([])
+  const [projectFiles, setProjectFiles] = useState<Array<{ id: string; fileName: string; fileSize: string }>>([])
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false)
+  const [selectedProjectFileIds, setSelectedProjectFileIds] = useState<string[]>([])
   const [sendPasswordSeparately, setSendPasswordSeparately] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  const MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES = 20 * 1024 * 1024
+  const MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES = 10 * 1024 * 1024
 
   // Read SMTP configuration status from project data
   const smtpConfigured = (project as any).smtpConfigured !== false
@@ -117,13 +127,28 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const videoNames = Object.keys(videosByName)
   const versionsForSelectedVideo = selectedVideoName ? videosByName[selectedVideoName] : []
 
+  const assignedUsers = useMemo(
+    () => (Array.isArray((project as any)?.assignedUsers) ? ((project as any).assignedUsers as any[]) : []),
+    [project]
+  )
+  const assignedUsersWithEmail = useMemo(
+    () => assignedUsers.filter((u) => typeof u?.email === 'string' && u.email.trim().length > 0),
+    [assignedUsers]
+  )
+
+  const albumCount = Number((project as any)?._count?.albums ?? 0)
+  const hasAnyReadyForEntireProject = readyVideos.length > 0 || (photosEnabled && albumCount > 0)
+
   // Reset selections when notification type changes
-  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'specific-album') => {
+  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'specific-album' | 'internal-invite') => {
     setNotificationType(type)
     setSelectedVideoName('')
     setSelectedVideoId('')
     setSelectedAlbumId('')
     setEntireProjectNotes('')
+    setInternalInviteNotes('')
+    setSelectedInternalUserIds([])
+    setSelectedProjectFileIds([])
   }
 
   // Reset version selection when video name changes
@@ -164,12 +189,80 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     }
   }, [notificationType, photosEnabled, projectId, showNotificationModal])
 
+  useEffect(() => {
+    const shouldFetchFiles = showNotificationModal && notificationType === 'internal-invite'
+    if (!shouldFetchFiles) return
+
+    let cancelled = false
+
+    const load = async () => {
+      setProjectFilesLoading(true)
+      try {
+        const res = await apiFetch(`/api/projects/${projectId}/files`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Failed to load project files')
+        const data = await res.json().catch(() => null)
+        const list = Array.isArray((data as any)?.files) ? ((data as any).files as any[]) : []
+        const normalized = list
+          .map((f) => ({
+            id: String(f.id),
+            fileName: String(f.fileName || ''),
+            fileSize: String(f.fileSize || '0'),
+          }))
+          .filter((f) => f.id && f.fileName)
+
+        if (!cancelled) setProjectFiles(normalized)
+      } catch {
+        if (!cancelled) setProjectFiles([])
+      } finally {
+        if (!cancelled) setProjectFilesLoading(false)
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [notificationType, projectId, showNotificationModal])
+
+  useEffect(() => {
+    if (!showNotificationModal) return
+    if (notificationType !== 'internal-invite') return
+    // Default: select all assigned internal users with email
+    setSelectedInternalUserIds(assignedUsersWithEmail.map((u) => String(u.id)))
+  }, [assignedUsersWithEmail, notificationType, showNotificationModal])
+
+  const selectedAttachmentsMeta = projectFiles
+    .filter((f) => selectedProjectFileIds.includes(f.id))
+    .map((f) => {
+      const bytes = Number(f.fileSize)
+      return { id: f.id, fileName: f.fileName, bytes: Number.isFinite(bytes) ? bytes : 0 }
+    })
+
+  const attachmentsTotalBytes = selectedAttachmentsMeta.reduce((sum, f) => sum + (f.bytes || 0), 0)
+  const oversizedAttachmentNames = selectedAttachmentsMeta
+    .filter((f) => (f.bytes || 0) > MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES)
+    .map((f) => f.fileName)
+
+  const attachmentsTooLarge =
+    attachmentsTotalBytes > MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES || oversizedAttachmentNames.length > 0
+
   const handleSendNotification = async () => {
     if (!canSendNotifications) return
     // Prevent rapid-fire notification sends
     if (loading) return
 
     // Validation
+    if (notificationType !== 'internal-invite' && !hasRecipientWithEmail) {
+      setMessage({ type: 'error', text: 'Add at least one recipient with an email address in Settings before sending client notifications.' })
+      return
+    }
+
+    if (notificationType === 'entire-project' && !hasAnyReadyForEntireProject) {
+      setMessage({ type: 'error', text: 'There is nothing ready to notify yet. Add a ready video (or an album) first.' })
+      return
+    }
+
     if (notificationType === 'specific-video' && !selectedVideoId) {
       setMessage({ type: 'error', text: 'Please select a video and version' })
       return
@@ -180,16 +273,35 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       return
     }
 
+    if (notificationType === 'internal-invite') {
+      if (selectedInternalUserIds.length === 0) {
+        setMessage({ type: 'error', text: 'Please select at least one user' })
+        return
+      }
+      if (attachmentsTooLarge) {
+        setMessage({ type: 'error', text: 'Selected attachments are too large to send via email' })
+        return
+      }
+    }
+
     setLoading(true)
     setMessage({ type: 'success', text: 'Sending notification...' })
 
     // Send notification in background without blocking UI
     apiPost(`/api/projects/${project.id}/notify`, {
+      notificationType,
       videoId: notificationType === 'specific-video' ? selectedVideoId : null,
       albumId: notificationType === 'specific-album' ? selectedAlbumId : null,
       notifyEntireProject: notificationType === 'entire-project',
-      notes: notificationType === 'entire-project' ? entireProjectNotes : null,
-      sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately
+      notes:
+        notificationType === 'entire-project'
+          ? entireProjectNotes
+          : notificationType === 'internal-invite'
+          ? internalInviteNotes
+          : null,
+      internalUserIds: notificationType === 'internal-invite' ? selectedInternalUserIds : undefined,
+      projectFileIds: notificationType === 'internal-invite' ? selectedProjectFileIds : undefined,
+      sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately,
     })
       .then((data) => {
         setMessage({ type: 'success', text: data.message || 'Notification sent successfully!' })
@@ -197,6 +309,9 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         setSelectedVideoId('')
         setSelectedAlbumId('')
         setEntireProjectNotes('')
+        setInternalInviteNotes('')
+        setSelectedInternalUserIds([])
+        setSelectedProjectFileIds([])
         setSendPasswordSeparately(false)
 
         // Sending a notification can auto-transition NOT_STARTED → IN_REVIEW.
@@ -334,20 +449,17 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     <>
       <Card>
         <CardContent className="pt-6 space-y-3">
-          {/* Send Notification Button - only show if there are ready videos */}
-          {canSendNotifications && readyVideos.length > 0 && (
+          {canSendNotifications && (
             <div>
               <Button
                 variant="outline"
                 size="default"
                 className="w-full"
                 onClick={() => setShowNotificationModal(true)}
-                disabled={smtpConfigured === false || !hasRecipientWithEmail}
+                disabled={smtpConfigured === false}
                 title={
                   smtpConfigured === false
                     ? 'SMTP not configured. Please configure email settings in Settings.'
-                    : !hasRecipientWithEmail
-                    ? 'No recipients with email addresses configured. Please add at least one recipient with an email in Settings.'
                     : ''
                 }
               >
@@ -361,7 +473,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               )}
               {smtpConfigured && !hasRecipientWithEmail && (
                 <p className="text-xs text-muted-foreground mt-1 px-1">
-                  Add at least one recipient with an email address in Settings
+                  No client recipients with email addresses are configured. You can still send internal invites.
                 </p>
               )}
             </div>
@@ -472,6 +584,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                       Specific Album Ready
                     </SelectItem>
                   )}
+
+                  <SelectSeparator />
+
+                  <SelectItem value="internal-invite">
+                    Project Invite (Internal Users)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -479,6 +597,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             {/* Notes (only for entire project notification) */}
             {notificationType === 'entire-project' && (
               <div>
+                {!hasAnyReadyForEntireProject && (
+                  <p className="text-xs text-muted-foreground mb-2">
+                    There is nothing ready yet. Add a ready video (or an album) to enable this email.
+                  </p>
+                )}
                 <label className="text-sm font-medium mb-2 block">
                   Notes
                 </label>
@@ -558,6 +681,112 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </>
             )}
 
+            {notificationType === 'internal-invite' && (
+              <>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Select Users</label>
+                  <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                    {assignedUsersWithEmail.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No assigned users with email addresses.</div>
+                    ) : (
+                      assignedUsersWithEmail.map((u) => {
+                        const checked = selectedInternalUserIds.includes(String(u.id))
+                        const label = (u.name || u.email) as string
+                        return (
+                          <label key={String(u.id)} className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 mt-0.5"
+                              checked={checked}
+                              onChange={(e) => {
+                                const id = String(u.id)
+                                setSelectedInternalUserIds((prev) =>
+                                  e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id)
+                                )
+                              }}
+                              disabled={loading}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-medium truncate">{label}</span>
+                              <span className="block text-xs text-muted-foreground truncate">{u.email}</span>
+                            </span>
+                          </label>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Notes</label>
+                  <Textarea
+                    value={internalInviteNotes}
+                    onChange={(e) => setInternalInviteNotes(e.target.value)}
+                    placeholder="Optional notes to include in the email"
+                    className="resize-none"
+                    rows={4}
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Attachments</label>
+                  <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                    {projectFilesLoading ? (
+                      <div className="text-xs text-muted-foreground">Loading project files…</div>
+                    ) : projectFiles.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No project files found.</div>
+                    ) : (
+                      projectFiles.map((f) => {
+                        const checked = selectedProjectFileIds.includes(f.id)
+                        const bytes = Number(f.fileSize)
+                        const safeBytes = Number.isFinite(bytes) ? bytes : 0
+                        const tooBig = safeBytes > MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES
+                        return (
+                          <label key={f.id} className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 mt-0.5"
+                              checked={checked}
+                              onChange={(e) => {
+                                setSelectedProjectFileIds((prev) =>
+                                  e.target.checked ? Array.from(new Set([...prev, f.id])) : prev.filter((x) => x !== f.id)
+                                )
+                              }}
+                              disabled={loading}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-medium truncate">{f.fileName}</span>
+                              <span className="block text-xs text-muted-foreground truncate">
+                                {formatFileSize(safeBytes)}
+                                {tooBig ? ' • too large to email' : ''}
+                              </span>
+                            </span>
+                          </label>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  {(selectedProjectFileIds.length > 0 || attachmentsTooLarge) && (
+                    <div className="text-xs text-muted-foreground mt-2">
+                      Selected: {formatFileSize(attachmentsTotalBytes)} (max {formatFileSize(MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES)})
+                      {oversizedAttachmentNames.length > 0 && (
+                        <div className="text-destructive mt-1">
+                          Too large: {oversizedAttachmentNames.join(', ')} (max per file {formatFileSize(MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES)})
+                        </div>
+                      )}
+                      {attachmentsTotalBytes > MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES && (
+                        <div className="text-destructive mt-1">
+                          Total attachments exceed {formatFileSize(MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES)}.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             {/* Password checkbox - only show if project is password protected */}
             {isPasswordProtected && (
               <div className="flex items-center space-x-2 p-3 bg-muted rounded-md">
@@ -587,8 +816,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               onClick={handleSendNotification}
               disabled={
                 loading ||
+                (notificationType !== 'internal-invite' && !hasRecipientWithEmail) ||
+                (notificationType === 'entire-project' && !hasAnyReadyForEntireProject) ||
                 (notificationType === 'specific-video' && !selectedVideoId) ||
-                (notificationType === 'specific-album' && !selectedAlbumId)
+                (notificationType === 'specific-album' && !selectedAlbumId) ||
+                (notificationType === 'internal-invite' && (selectedInternalUserIds.length === 0 || attachmentsTooLarge))
               }
               className="w-full"
             >
@@ -620,6 +852,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             <p className="text-xs text-muted-foreground">
               {notificationType === 'entire-project'
                 ? 'This will send an email to the client with access to all ready videos in this project.'
+                : notificationType === 'specific-album'
+                ? 'This will send an email to the client with a link to view the selected album.'
+                : notificationType === 'internal-invite'
+                ? 'This will send an email to the selected internal users with a link to access this project.'
                 : 'This will send an email to the client with a link to view the selected video version.'}
             </p>
           </div>

@@ -25,6 +25,7 @@ export async function processClientNotifications() {
       where: {
         notificationQueue: {
           some: {
+            type: 'ADMIN_REPLY',
             sentToClients: false,
             clientFailed: false,
             clientAttempts: { lt: 3 }
@@ -42,6 +43,7 @@ export async function processClientNotifications() {
         lastClientNotificationSent: true,
         notificationQueue: {
           where: {
+            type: 'ADMIN_REPLY',
             sentToClients: false,
             clientFailed: false,
             clientAttempts: { lt: 3 }

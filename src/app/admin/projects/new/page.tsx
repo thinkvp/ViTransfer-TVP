@@ -109,6 +109,26 @@ export default function NewProjectPage() {
     checkSmtpConfiguration()
   }, [checkSmtpConfiguration])
 
+  // Default: add all system admins to every new project
+  useEffect(() => {
+    if (authLoading) return
+    if (assignedUsers.length > 0) return
+
+    const loadAdminUsers = async () => {
+      try {
+        const res = await apiFetch('/api/users/assignable?onlySystemAdmins=true&take=50')
+        if (!res.ok) return
+        const data = await res.json()
+        const admins = (data?.users || []) as AssignableUser[]
+        setAssignedUsers(admins.map((u) => ({ ...u, receiveNotifications: true })))
+      } catch {
+        // ignore
+      }
+    }
+
+    void loadAdminUsers()
+  }, [assignedUsers.length, authLoading])
+
   useEffect(() => {
     function handlePointerDown(e: PointerEvent) {
       const container = clientSearchRef.current
@@ -209,7 +229,10 @@ export default function NewProjectPage() {
       clientId: selectedClientId,
       enableVideos,
       enablePhotos,
-      assignedUserIds: assignedUsers.map((u) => u.id),
+      assignedUsers: assignedUsers.map((u) => ({
+        userId: u.id,
+        receiveNotifications: u.receiveNotifications !== false,
+      })),
       recipients: recipients.map((r) => ({
         name: r.name?.trim() ? r.name.trim() : null,
         email: r.email?.trim() ? r.email.trim() : null,
@@ -471,10 +494,11 @@ export default function NewProjectPage() {
               <div className="border rounded-lg p-4 bg-card">
                 <ProjectUsersEditor
                   label="Users"
-                  description="Assign non-admin users who can access this project"
+                  description="Assign internal users who can access this project"
                   value={assignedUsers}
                   onChange={setAssignedUsers}
-                  addButtonLabel="Add User"
+                  addButtonLabel="Add Users"
+                  addButtonSize="default"
                 />
               </div>
 

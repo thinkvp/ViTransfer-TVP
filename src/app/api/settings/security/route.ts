@@ -114,7 +114,16 @@ export async function PATCH(request: NextRequest) {
       trackAnalytics,
       trackSecurityLogs,
       viewSecurityEvents,
+      maxInternalCommentsPerProject,
+      maxCommentsPerVideoVersion,
+      maxProjectRecipients,
+      maxProjectFilesPerProject,
     } = body
+
+    // Backward compatibility for older clients that may still send this name.
+    const legacyMaxVideoVersionsPerVideo = (body as any)?.maxVideoVersionsPerVideo
+    const resolvedMaxCommentsPerVideoVersion =
+      maxCommentsPerVideoVersion ?? legacyMaxVideoVersionsPerVideo
 
     // Validate required security fields
     if (sessionTimeoutValue !== undefined && sessionTimeoutValue !== null) {
@@ -157,6 +166,26 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    const validatePositiveInt = (value: any, label: string, max = 100_000) => {
+      if (value === undefined || value === null || value === '') return
+      const parsed = typeof value === 'number' ? value : parseInt(value, 10)
+      if (!Number.isFinite(parsed) || parsed <= 0 || parsed > max) {
+        throw new Error(`${label} must be between 1 and ${max}`)
+      }
+    }
+
+    try {
+      validatePositiveInt(maxInternalCommentsPerProject, 'Max internal comments per project')
+      validatePositiveInt(resolvedMaxCommentsPerVideoVersion, 'Max comments per video version')
+      validatePositiveInt(maxProjectRecipients, 'Max recipients per project')
+      validatePositiveInt(maxProjectFilesPerProject, 'Max project files per project')
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : 'Invalid safeguard limits' },
+        { status: 400 }
+      )
+    }
+
     // Get current settings to detect changes
     const currentSettings = await prisma.securitySettings.findUnique({
       where: { id: 'default' },
@@ -182,6 +211,23 @@ export async function PATCH(request: NextRequest) {
         trackAnalytics: trackAnalytics ?? true,
         trackSecurityLogs: trackSecurityLogs ?? true,
         viewSecurityEvents: viewSecurityEvents ?? false,
+
+        maxInternalCommentsPerProject:
+          maxInternalCommentsPerProject !== undefined && maxInternalCommentsPerProject !== null && maxInternalCommentsPerProject !== ''
+            ? parseInt(maxInternalCommentsPerProject, 10)
+            : undefined,
+        maxCommentsPerVideoVersion:
+          resolvedMaxCommentsPerVideoVersion !== undefined && resolvedMaxCommentsPerVideoVersion !== null && resolvedMaxCommentsPerVideoVersion !== ''
+            ? parseInt(resolvedMaxCommentsPerVideoVersion, 10)
+            : undefined,
+        maxProjectRecipients:
+          maxProjectRecipients !== undefined && maxProjectRecipients !== null && maxProjectRecipients !== ''
+            ? parseInt(maxProjectRecipients, 10)
+            : undefined,
+        maxProjectFilesPerProject:
+          maxProjectFilesPerProject !== undefined && maxProjectFilesPerProject !== null && maxProjectFilesPerProject !== ''
+            ? parseInt(maxProjectFilesPerProject, 10)
+            : undefined,
       },
       create: {
         id: 'default',
@@ -197,6 +243,23 @@ export async function PATCH(request: NextRequest) {
         trackAnalytics: trackAnalytics ?? true,
         trackSecurityLogs: trackSecurityLogs ?? true,
         viewSecurityEvents: viewSecurityEvents ?? false,
+
+        maxInternalCommentsPerProject:
+          maxInternalCommentsPerProject !== undefined && maxInternalCommentsPerProject !== null && maxInternalCommentsPerProject !== ''
+            ? parseInt(maxInternalCommentsPerProject, 10)
+            : 250,
+        maxCommentsPerVideoVersion:
+          resolvedMaxCommentsPerVideoVersion !== undefined && resolvedMaxCommentsPerVideoVersion !== null && resolvedMaxCommentsPerVideoVersion !== ''
+            ? parseInt(resolvedMaxCommentsPerVideoVersion, 10)
+            : 100,
+        maxProjectRecipients:
+          maxProjectRecipients !== undefined && maxProjectRecipients !== null && maxProjectRecipients !== ''
+            ? parseInt(maxProjectRecipients, 10)
+            : 30,
+        maxProjectFilesPerProject:
+          maxProjectFilesPerProject !== undefined && maxProjectFilesPerProject !== null && maxProjectFilesPerProject !== ''
+            ? parseInt(maxProjectFilesPerProject, 10)
+            : 50,
       },
     })
 

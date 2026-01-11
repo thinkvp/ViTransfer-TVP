@@ -6,6 +6,7 @@ import { validateRequest, createCommentSchema } from '@/lib/validation'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
+import { getSafeguardLimits } from '@/lib/settings'
 import {
 
   validateCommentPermissions,
@@ -299,6 +300,25 @@ export async function POST(request: NextRequest) {
       })
       if (video) {
         finalVideoVersion = video.version
+      }
+    }
+
+    // Safeguard: cap total comments per video version (internal + client, including replies)
+    if (videoId && typeof finalVideoVersion === 'number' && Number.isFinite(finalVideoVersion)) {
+      const { maxCommentsPerVideoVersion } = await getSafeguardLimits()
+      const existingCount = await prisma.comment.count({
+        where: {
+          projectId,
+          videoId,
+          videoVersion: finalVideoVersion,
+        },
+      })
+
+      if (existingCount >= maxCommentsPerVideoVersion) {
+        return NextResponse.json(
+          { error: `Maximum comments (${maxCommentsPerVideoVersion}) reached for this video version` },
+          { status: 400, headers: noStoreHeaders }
+        )
       }
     }
 

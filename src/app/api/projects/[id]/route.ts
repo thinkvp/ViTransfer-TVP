@@ -44,6 +44,15 @@ const updateProjectSchema = z.object({
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
   assignedUserIds: z.array(z.string().regex(/^c[a-z0-9]{24}$/)).max(200).optional(),
+  assignedUsers: z
+    .array(
+      z.object({
+        userId: z.string().regex(/^c[a-z0-9]{24}$/),
+        receiveNotifications: z.boolean().optional(),
+      })
+    )
+    .max(200)
+    .optional(),
 })
 
 export async function GET(
@@ -204,7 +213,13 @@ export async function GET(
       comments: sanitizedComments,
       sharePassword: decryptedPassword,
       smtpConfigured,
-      assignedUsers: (project as any).assignedUsers?.map((pu: any) => pu.user).filter(Boolean) || [],
+      assignedUsers:
+        (project as any).assignedUsers
+          ?.map((pu: any) => ({
+            ...(pu.user || {}),
+            receiveNotifications: pu.receiveNotifications !== false,
+          }))
+          .filter((u: any) => u?.id) || [],
     }
 
     return NextResponse.json(projectData)
@@ -275,37 +290,63 @@ export async function PATCH(
     const validatedBody = parsed.data
 
     // Assignment updates (optional)
-    let assignedUserIdsToSet: string[] | null = null
-    if (validatedBody.assignedUserIds !== undefined) {
-      const requested = Array.isArray(validatedBody.assignedUserIds)
-        ? Array.from(new Set(validatedBody.assignedUserIds.map((v) => String(v || '')).filter(Boolean)))
-        : []
+    let assignedUsersToSet: Array<{ userId: string; receiveNotifications: boolean }> | null = null
+    if (validatedBody.assignedUsers !== undefined || validatedBody.assignedUserIds !== undefined) {
+      const requested: Array<{ userId: string; receiveNotifications: boolean }> =
+        validatedBody.assignedUsers !== undefined
+          ? Array.from(
+              new Map(
+                (validatedBody.assignedUsers || [])
+                  .map((u) => ({
+                    userId: String(u?.userId || ''),
+                    receiveNotifications: u?.receiveNotifications !== false,
+                  }))
+                  .filter((u) => u.userId)
+                  .map((u) => [u.userId, u])
+              ).values()
+            )
+          : Array.isArray(validatedBody.assignedUserIds)
+            ? Array.from(
+                new Map(
+                  validatedBody.assignedUserIds
+                    .map((id) => String(id || ''))
+                    .filter(Boolean)
+                    .map((userId) => [userId, { userId, receiveNotifications: true }])
+                ).values()
+              )
+            : []
 
       const creatorMustBeAssigned = admin.appRoleIsSystemAdmin !== true
       const effective = creatorMustBeAssigned
-        ? Array.from(new Set([...requested, admin.id]))
+        ? Array.from(new Map([...requested, { userId: admin.id, receiveNotifications: true }].map((u) => [u.userId, u])).values())
         : requested
 
       if (effective.length === 0) {
-        assignedUserIdsToSet = []
+        return NextResponse.json(
+          { error: 'Each project must have at least one Admin assigned.' },
+          { status: 400 }
+        )
       } else {
         const rows = await prisma.user.findMany({
-          where: { id: { in: effective } },
+          where: { id: { in: effective.map((u) => u.userId) } },
           select: { id: true, appRole: { select: { isSystemAdmin: true } } },
         })
 
         const foundById = new Map(rows.map((r) => [r.id, r]))
-        const missing = effective.filter((uid) => !foundById.has(uid))
+        const missing = effective.filter((u) => !foundById.has(u.userId))
         if (missing.length > 0) {
           return NextResponse.json({ error: 'One or more assigned users were not found' }, { status: 400 })
         }
 
         const hasSystemAdmin = rows.some((r) => r.appRole?.isSystemAdmin === true)
-        if (hasSystemAdmin) {
-          return NextResponse.json({ error: 'System admin users cannot be assigned to projects' }, { status: 400 })
+        if (!hasSystemAdmin) {
+          return NextResponse.json(
+            { error: 'Each project must have at least one Admin assigned.' },
+            { status: 400 }
+          )
         }
 
-        assignedUserIdsToSet = rows.map((r) => r.id)
+        assignedUsersToSet = effective
       }
     }
 
@@ -628,11 +669,15 @@ export async function PATCH(
         data: updateData,
       })
 
-      if (assignedUserIdsToSet !== null) {
+      if (assignedUsersToSet !== null) {
         await tx.projectUser.deleteMany({ where: { projectId: id } })
-        if (assignedUserIdsToSet.length > 0) {
+        if (assignedUsersToSet.length > 0) {
           await tx.projectUser.createMany({
-            data: assignedUserIdsToSet.map((userId) => ({ projectId: id, userId })),
+            data: assignedUsersToSet.map((a) => ({
+              projectId: id,
+              userId: a.userId,
+              receiveNotifications: a.receiveNotifications !== false,
+            })),
             skipDuplicates: true,
           })
         }

@@ -4,6 +4,7 @@ import { getCurrentUserFromRequest, requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
+import { getSafeguardLimits } from '@/lib/settings'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -126,6 +127,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const fileValidation = validateAssetFile(fileName, mimeType || 'application/octet-stream')
   if (!fileValidation.valid) {
     return NextResponse.json({ error: fileValidation.error || 'Invalid file' }, { status: 400 })
+  }
+
+  const { maxProjectFilesPerProject } = await getSafeguardLimits()
+  const existingCount = await prisma.projectFile.count({ where: { projectId } })
+  if (existingCount >= maxProjectFilesPerProject) {
+    return NextResponse.json(
+      { error: `Maximum project files (${maxProjectFilesPerProject}) reached for this project` },
+      { status: 400 }
+    )
   }
 
   const timestamp = Date.now()

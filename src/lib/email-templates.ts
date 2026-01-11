@@ -3,7 +3,7 @@
  * Clean, minimal, and easy to scan
  */
 
-import { EMAIL_THEME, emailCardStyle, emailPrimaryButtonStyle, escapeHtml, renderEmailShell } from './email'
+import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, escapeHtml, renderEmailShell } from './email'
 import { formatTimecodeDisplay } from './timecode'
 
 interface NotificationData {
@@ -211,6 +211,143 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
           Open Admin Dashboard
         </a>
       </div>
+    `,
+  }).trim()
+}
+
+export interface InternalCommentSummaryProject {
+  projectTitle: string
+  adminUrl: string
+  comments: Array<{ authorName: string; authorEmail?: string | null; content: string }>
+}
+
+export interface InternalCommentSummaryEmailData {
+  companyName: string
+  recipientName?: string
+  period: string
+  companyLogoUrl?: string
+  projects: InternalCommentSummaryProject[]
+}
+
+export function generateInternalCommentSummaryEmail(data: InternalCommentSummaryEmailData): string {
+  const greeting = data.recipientName ? data.recipientName : 'there'
+  const total = data.projects.reduce((sum, p) => sum + p.comments.length, 0)
+  const projectCount = data.projects.length
+
+  const projectsHtml = data.projects.map((project) => {
+    const items = project.comments.map((c, index) => `
+      <div style="padding:10px 0;${index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''}">
+        <div style="margin-bottom:4px;">
+          <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(c.authorName)}</span>
+          ${c.authorEmail ? `<span style="font-size:12px; color:#6b7280; margin-left:6px;">${escapeHtml(c.authorEmail)}</span>` : ''}
+        </div>
+        <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(c.content || '')}</div>
+      </div>
+    `).join('')
+
+    return `
+      <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">
+        <div style="font-size:15px; font-weight:800; color:#111827; margin-bottom:8px;">${escapeHtml(project.projectTitle)}</div>
+        ${items}
+        <div style="margin-top:12px; text-align:center;">
+          <a href="${escapeHtml(project.adminUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999 })}">
+            Open project<span style="font-size:16px;">→</span>
+          </a>
+        </div>
+      </div>
+    `
+  }).join('')
+
+  const dashboardUrl = data.projects[0]?.adminUrl ? escapeHtml(data.projects[0].adminUrl.replace(/\/admin\/projects\/[^/]+/, '/admin/projects')) : '#'
+
+  return renderEmailShell({
+    companyName: data.companyName,
+    companyLogoUrl: data.companyLogoUrl,
+    headerGradient: EMAIL_THEME.headerBackground,
+    title: 'Internal Comments Summary',
+    subtitle: `${total} ${total === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
+    footerNote: data.companyName,
+    bodyContent: `
+      <p style="margin:0 0 20px; font-size:16px;">
+        Hi <strong>${escapeHtml(greeting)}</strong>,
+      </p>
+      <p style="margin:0 0 24px; font-size:15px;">
+        Here are the latest internal comments:
+      </p>
+      ${projectsHtml}
+      <div style="text-align:center; margin:32px 0;">
+        <a href="${dashboardUrl}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
+          Open Admin Dashboard
+        </a>
+      </div>
+    `,
+  }).trim()
+}
+
+export interface ProjectInviteInternalUsersEmailData {
+  companyName: string
+  companyLogoUrl?: string
+  recipientName?: string
+  projectTitle: string
+  projectAdminUrl: string
+  notes?: string | null
+  attachments?: Array<{ fileName: string; fileSizeBytes: number }>
+}
+
+export function generateProjectInviteInternalUsersEmail(data: ProjectInviteInternalUsersEmailData): string {
+  const greeting = data.recipientName ? data.recipientName : 'there'
+  const notes = (data.notes || '').trim()
+  const attachments = Array.isArray(data.attachments) ? data.attachments : []
+
+  const notesHtml = notes
+    ? `
+      <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">
+        <div style="${emailCardTitleStyle()}">Notes</div>
+        <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(notes)}</div>
+      </div>
+    `
+    : ''
+
+  const attachmentsHtml = attachments.length
+    ? `
+      <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">
+        <div style="${emailCardTitleStyle()}">Attachments</div>
+        <div style="font-size:14px; color:#374151; line-height:1.6;">
+          ${attachments
+            .map((a) => {
+              const sizeMb = a.fileSizeBytes > 0 ? (a.fileSizeBytes / 1024 / 1024).toFixed(a.fileSizeBytes < 1024 * 1024 ? 2 : 1) : '0'
+              return `<div style="padding:6px 0; border-top:1px solid #e5e7eb;">${escapeHtml(a.fileName)} <span style="color:#6b7280; font-size:12px;">(${sizeMb} MB)</span></div>`
+            })
+            .join('')}
+        </div>
+      </div>
+    `
+    : ''
+
+  return renderEmailShell({
+    companyName: data.companyName,
+    companyLogoUrl: data.companyLogoUrl,
+    headerGradient: EMAIL_THEME.headerBackground,
+    title: 'Project Invite',
+    subtitle: data.projectTitle,
+    footerNote: data.companyName,
+    bodyContent: `
+      <p style="margin:0 0 16px; font-size:16px;">
+        Hi <strong>${escapeHtml(greeting)}</strong>,
+      </p>
+      <p style="margin:0 0 24px; font-size:15px; color:#374151; line-height:1.6;">
+        You’ve been invited to access the project <strong>${escapeHtml(data.projectTitle)}</strong>.
+      </p>
+      ${notesHtml}
+      ${attachmentsHtml}
+      <div style="text-align:center; margin:28px 0 8px;">
+        <a href="${escapeHtml(data.projectAdminUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
+          Open Project
+        </a>
+      </div>
+      <p style="margin:0; font-size:12px; color:#6b7280; text-align:center;">
+        If you can’t access the project, ask an admin to confirm you’re assigned.
+      </p>
     `,
   }).trim()
 }

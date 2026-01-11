@@ -125,6 +125,13 @@ export async function POST(
       )
     }
 
+    if (error instanceof Error && error.message.includes('Maximum recipients')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
     return NextResponse.json(
       { error: 'Failed to add recipient' },
       { status: 500 }

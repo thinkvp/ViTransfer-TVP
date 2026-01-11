@@ -141,6 +141,7 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
 
   useEffect(() => {
     const photosTimers = refreshPhotosTimersRef.current
+    const zipTimers = zipPollTimersRef.current
     return () => {
       if (refreshAlbumsTimerRef.current) clearTimeout(refreshAlbumsTimerRef.current)
       for (const timer of photosTimers.values()) {
@@ -148,10 +149,10 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
       }
       photosTimers.clear()
 
-      for (const timer of zipPollTimersRef.current.values()) {
+      for (const timer of zipTimers.values()) {
         clearTimeout(timer)
       }
-      zipPollTimersRef.current.clear()
+      zipTimers.clear()
     }
   }, [])
 

@@ -48,11 +48,12 @@ export async function sendImmediateNotification(context: NotificationContext) {
   const allRecipients = await getProjectRecipients(comment.projectId)
   const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
 
-  // Get all admins
-  const admins = await prisma.user.findMany({
-    where: { role: 'ADMIN' },
-    select: { email: true, name: true }
+  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled
+  const internalUsers = await prisma.projectUser.findMany({
+    where: { projectId: comment.projectId, receiveNotifications: true },
+    select: { user: { select: { email: true, name: true } } },
   })
+  const internalEmails = internalUsers.map((r) => r.user.email).filter(Boolean)
 
   const shareUrl = await generateShareUrl(project.slug)
   const videoName = video?.name || 'Unknown Video'
@@ -167,17 +168,17 @@ export async function sendImmediateNotification(context: NotificationContext) {
     }
   } else {
     // Client commented → notify admins IMMEDIATELY
-    if (admins.length === 0) {
-      console.log(`[IMMEDIATE→ADMIN] Skipped - no admins configured`)
+    if (internalEmails.length === 0) {
+      console.log(`[IMMEDIATE→ADMIN] Skipped - no internal users opted in`)
       return
     }
 
-    console.log(`[IMMEDIATE→ADMIN] Sending to ${admins.length} admin(s) for "${project.title}"`)
+    console.log(`[IMMEDIATE→ADMIN] Sending to ${internalEmails.length} internal user(s) for "${project.title}"`)
     console.log(`[IMMEDIATE→ADMIN]   Video: ${videoName} (${versionLabel})`)
     console.log(`[IMMEDIATE→ADMIN]   Client: ${comment.authorName || 'Client'}`)
 
     const result = await sendAdminCommentNotificationEmail({
-      adminEmails: admins.map(a => a.email),
+      adminEmails: internalEmails,
       clientName: comment.authorName || 'Client',
       clientEmail: comment.authorEmail,
       projectTitle: project.title,
@@ -281,11 +282,12 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   const allRecipients = await getProjectRecipients(project.id)
   const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
 
-  // Get all admins
-  const admins = await prisma.user.findMany({
-    where: { role: 'ADMIN' },
-    select: { email: true, name: true }
+  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled
+  const internalUsers = await prisma.projectUser.findMany({
+    where: { projectId: project.id, receiveNotifications: true },
+    select: { user: { select: { email: true, name: true } } },
   })
+  const internalEmails = internalUsers.map((r) => r.user.email).filter(Boolean)
 
   // Send to clients ONLY if complete project approval (all videos approved)
   // Don't send for partial approvals - client knows they just clicked approve
@@ -343,12 +345,12 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   }
 
   // Send to admins - notify them when client approves OR unapproves ANY video
-  if (admins.length > 0) {
+  if (internalEmails.length > 0) {
     const action = approved ? 'approval' : 'unapproval'
-    console.log(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${admins.length} admin(s)`)
+    console.log(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${internalEmails.length} internal user(s)`)
 
     const result = await sendAdminProjectApprovedEmail({
-      adminEmails: admins.map(a => a.email),
+      adminEmails: internalEmails,
       clientName: authorName || 'Client',
       projectTitle: project.title,
       approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),

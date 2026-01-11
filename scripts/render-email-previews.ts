@@ -11,7 +11,11 @@ import {
 	renderProjectGeneralNotificationEmail,
 } from '../src/lib/email'
 
-import { generateAdminSummaryEmail, generateNotificationSummaryEmail } from '../src/lib/email-templates'
+import {
+	generateAdminSummaryEmail,
+	generateNotificationSummaryEmail,
+	generateProjectInviteInternalUsersEmail,
+} from '../src/lib/email-templates'
 import { renderOTPEmail } from '../src/lib/otp'
 
 async function writeHtml(outDir: string, fileName: string, html: string) {
@@ -207,6 +211,23 @@ async function main() {
 						},
 					],
 				},
+			],
+		})
+	)
+
+	await writeHtml(
+		outDir,
+		'11-project-invite-internal.html',
+		generateProjectInviteInternalUsersEmail({
+			companyName: branding.companyName,
+			companyLogoUrl: branding.companyLogoUrl ?? undefined,
+			recipientName: 'Morgan',
+			projectTitle: 'Winter Campaign',
+			projectAdminUrl: 'http://localhost:3000/admin/projects/demo',
+			notes: 'Hey team — this project is ready for internal review.\n\nPlease check timeline previews + watermark behavior before we send to the client.',
+			attachments: [
+				{ fileName: 'Brief.pdf', fileSizeBytes: 2_345_678 },
+				{ fileName: 'Shotlist.xlsx', fileSizeBytes: 345_678 },
 			],
 		})
 	)

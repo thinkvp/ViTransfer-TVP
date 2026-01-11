@@ -12,6 +12,21 @@ const cachedRateLimits: CachedValue<{
 const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0 }
 const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
 const cachedAutoApproveProject: CachedValue<boolean> = { value: true, expiresAt: 0 }
+type SafeguardLimits = {
+  maxInternalCommentsPerProject: number
+  maxCommentsPerVideoVersion: number
+  maxProjectRecipients: number
+  maxProjectFilesPerProject: number
+}
+const cachedSafeguardLimits: CachedValue<SafeguardLimits> = {
+  value: {
+    maxInternalCommentsPerProject: 250,
+    maxCommentsPerVideoVersion: 100,
+    maxProjectRecipients: 30,
+    maxProjectFilesPerProject: 50,
+  },
+  expiresAt: 0,
+}
 
 /**
  * Get the company name from settings
@@ -111,6 +126,37 @@ export async function getAutoApproveProject(): Promise<boolean> {
   } catch (error) {
     console.error('Error fetching auto-approve setting:', error)
     return cachedAutoApproveProject.value
+  }
+}
+
+export async function getSafeguardLimits(): Promise<SafeguardLimits> {
+  const now = Date.now()
+  if (cachedSafeguardLimits.expiresAt > now) {
+    return cachedSafeguardLimits.value
+  }
+
+  try {
+    const settings = await prisma.securitySettings.findUnique({
+      where: { id: 'default' },
+      select: {
+        maxInternalCommentsPerProject: true,
+        maxCommentsPerVideoVersion: true,
+        maxProjectRecipients: true,
+        maxProjectFilesPerProject: true,
+      },
+    })
+
+    cachedSafeguardLimits.value = {
+      maxInternalCommentsPerProject: settings?.maxInternalCommentsPerProject ?? 250,
+      maxCommentsPerVideoVersion: settings?.maxCommentsPerVideoVersion ?? 100,
+      maxProjectRecipients: settings?.maxProjectRecipients ?? 30,
+      maxProjectFilesPerProject: settings?.maxProjectFilesPerProject ?? 50,
+    }
+    cachedSafeguardLimits.expiresAt = now + SETTINGS_CACHE_TTL_MS
+    return cachedSafeguardLimits.value
+  } catch (error) {
+    console.error('Error fetching safeguard limits:', error)
+    return cachedSafeguardLimits.value
   }
 }
 

@@ -6,6 +6,7 @@ import { encrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { createProjectSchema, validateRequest } from '@/lib/validation'
 import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getSafeguardLimits } from '@/lib/settings'
 export const runtime = 'nodejs'
 
 
@@ -191,34 +192,69 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const requestedUserIdsRaw = Array.isArray(assignedUserIds) ? assignedUserIds : []
-    const requestedUserIds = Array.from(new Set(requestedUserIdsRaw.map((v) => String(v || '')).filter(Boolean)))
+    const requestedAssignmentsRaw: Array<{ userId: string; receiveNotifications: boolean }> =
+      Array.isArray((validation.data as any).assignedUsers)
+        ? ((validation.data as any).assignedUsers as any[])
+            .map((u) => ({
+              userId: String(u?.userId || ''),
+              receiveNotifications: u?.receiveNotifications !== false,
+            }))
+            .filter((u) => u.userId)
+        : Array.isArray(assignedUserIds)
+          ? (assignedUserIds as any[]).map((id) => ({ userId: String(id || ''), receiveNotifications: true })).filter((u) => u.userId)
+          : []
+
+    const requestedAssignments = Array.from(
+      new Map(requestedAssignmentsRaw.map((u) => [u.userId, u])).values()
+    )
 
     // Only system admins have access to all projects; non-system-admins must be explicitly assigned.
     // To prevent accidentally locking a non-system-admin creator out of their own project,
     // ensure the creator is always assigned when they're not a system admin.
     const creatorId = admin.id
     const creatorMustBeAssigned = admin.appRoleIsSystemAdmin !== true
-    const effectiveAssignedUserIds = creatorMustBeAssigned
-      ? Array.from(new Set([...requestedUserIds, creatorId]))
-      : requestedUserIds
+    const effectiveAssigned = creatorMustBeAssigned
+      ? Array.from(
+          new Map(
+            [...requestedAssignments, { userId: creatorId, receiveNotifications: true }].map((u) => [u.userId, u])
+          ).values()
+        )
+      : requestedAssignments
 
-    // Validate that all assigned users exist and are NOT system admins.
-    // (System admins already see every project and shouldn't be assigned.)
-    let validatedAssignableUserIds: string[] = []
-    if (effectiveAssignedUserIds.length > 0) {
+    // Ensure at least one system admin is associated with every project.
+    // Default behavior: include all system admins unless explicitly present.
+    const systemAdmins = await prisma.user.findMany({
+      where: { appRole: { isSystemAdmin: true } },
+      select: { id: true },
+    })
+    if (systemAdmins.length === 0) {
+      return NextResponse.json(
+        { error: 'No system admin users exist. Create an admin before creating projects.' },
+        { status: 400 }
+      )
+    }
+
+    const hasAdminAlready = effectiveAssigned.some((u) => systemAdmins.some((a) => a.id === u.userId))
+    const effectiveWithAdmins = hasAdminAlready
+      ? effectiveAssigned
+      : Array.from(
+          new Map(
+            [...effectiveAssigned, ...systemAdmins.map((a) => ({ userId: a.id, receiveNotifications: true }))]
+              .map((u) => [u.userId, u])
+          ).values()
+        )
+
+    // Validate that all assigned users exist
+    let validatedAssignments: Array<{ userId: string; receiveNotifications: boolean }> = []
+    if (effectiveWithAdmins.length > 0) {
+      const effectiveIds = effectiveWithAdmins.map((u) => u.userId)
       const rows = await prisma.user.findMany({
-        where: {
-          id: { in: effectiveAssignedUserIds },
-        },
-        select: {
-          id: true,
-          appRole: { select: { isSystemAdmin: true } },
-        },
+        where: { id: { in: effectiveIds } },
+        select: { id: true },
       })
 
-      const foundById = new Map(rows.map((r) => [r.id, r]))
-      const missing = effectiveAssignedUserIds.filter((id) => !foundById.has(id))
+      const foundById = new Set(rows.map((r) => r.id))
+      const missing = effectiveIds.filter((id) => !foundById.has(id))
       if (missing.length > 0) {
         return NextResponse.json(
           { error: 'One or more assigned users were not found' },
@@ -226,15 +262,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const hasSystemAdmin = rows.some((r) => r.appRole?.isSystemAdmin === true)
-      if (hasSystemAdmin) {
-        return NextResponse.json(
-          { error: 'System admin users cannot be assigned to projects' },
-          { status: 400 }
-        )
-      }
-
-      validatedAssignableUserIds = rows.map((r) => r.id)
+      validatedAssignments = effectiveWithAdmins
     }
 
     // Enforce that projects must be linked to an existing client.
@@ -312,6 +340,14 @@ export async function POST(request: NextRequest) {
         ? [{ email: legacyEmail, name: legacyName, displayColor: null, alsoAddToClient: false, isPrimary: true, receiveNotifications: true }]
         : []
 
+    const { maxProjectRecipients } = await getSafeguardLimits()
+    if (effectiveRecipients.length > maxProjectRecipients) {
+      return NextResponse.json(
+        { error: `Maximum recipients (${maxProjectRecipients}) exceeded for this project` },
+        { status: 400 }
+      )
+    }
+
     // Normalize auth/password inputs
     const trimmedPassword = sharePassword?.trim()
     const resolvedAuthMode = authMode || 'PASSWORD'
@@ -382,11 +418,12 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      if (validatedAssignableUserIds.length > 0) {
+      if (validatedAssignments.length > 0) {
         await tx.projectUser.createMany({
-          data: validatedAssignableUserIds.map((userId) => ({
+          data: validatedAssignments.map((a) => ({
             projectId: newProject.id,
-            userId,
+            userId: a.userId,
+            receiveNotifications: a.receiveNotifications !== false,
           })),
           skipDuplicates: true,
         })

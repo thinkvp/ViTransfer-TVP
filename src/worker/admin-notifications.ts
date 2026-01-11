@@ -54,6 +54,7 @@ export async function processAdminNotifications() {
     // Get pending admin notifications
     const pendingNotifications = await prisma.notificationQueue.findMany({
       where: {
+        type: 'CLIENT_COMMENT',
         sentToAdmins: false,
         adminFailed: false,
         adminAttempts: { lt: 3 }
@@ -121,14 +122,34 @@ export async function processAdminNotifications() {
       )
     }
 
-    // Get all admins
-    const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN' },
-      select: { email: true, name: true }
+    const projectIds = Object.keys(projectGroups)
+    const assignedUsers = await prisma.projectUser.findMany({
+      where: {
+        projectId: { in: projectIds },
+        receiveNotifications: true,
+      },
+      select: {
+        projectId: true,
+        user: { select: { id: true, email: true, name: true } },
+      },
     })
 
-    if (admins.length === 0) {
-      console.log('No admin users found, skipping notification summary')
+    const usersById = new Map<string, { email: string; name: string | null; projects: any[] }>()
+    for (const row of assignedUsers) {
+      const user = row.user
+      if (!user?.email) continue
+      if (!usersById.has(user.id)) {
+        usersById.set(user.id, { email: user.email, name: user.name || null, projects: [] })
+      }
+      const group = projectGroups[row.projectId]
+      if (group) {
+        usersById.get(user.id)!.projects.push(group)
+      }
+    }
+
+    const recipients = Array.from(usersById.values()).filter((u) => u.projects.length > 0)
+    if (recipients.length === 0) {
+      console.log('[ADMIN] No assigned users opted in; skipping notification summary')
       return
     }
 
@@ -151,8 +172,6 @@ export async function processAdminNotifications() {
       isClientNotification: false,
       logPrefix: '[ADMIN]',
       onSuccess: async () => {
-        const projects = Object.values(projectGroups)
-
         const emailSettings = await getEmailSettings()
         const companyLogoUrl = buildCompanyLogoUrl({
           appDomain: emailSettings.appDomain,
@@ -162,25 +181,25 @@ export async function processAdminNotifications() {
           updatedAt: emailSettings.updatedAt,
         })
 
-        for (const admin of admins) {
+        for (const recipient of recipients) {
           const html = generateAdminSummaryEmail({
             companyName: emailSettings.companyName || 'ViTransfer',
-            adminName: admin.name || '',
+            adminName: recipient.name || '',
             period,
             companyLogoUrl: companyLogoUrl || undefined,
-            projects
+            projects: recipient.projects
           })
 
           const result = await sendEmail({
-            to: admin.email,
+            to: recipient.email,
             subject: `Project activity summary (${pendingNotifications.length} updates)`,
             html,
           })
 
           if (result.success) {
-            console.log(`[ADMIN]   Sent to ${redactEmailForLogs(admin.email)}`)
+            console.log(`[ADMIN]   Sent to ${redactEmailForLogs(recipient.email)}`)
           } else {
-            throw new Error(`Failed to send to ${redactEmailForLogs(admin.email)}: ${result.error}`)
+            throw new Error(`Failed to send to ${redactEmailForLogs(recipient.email)}: ${result.error}`)
           }
         }
       }
@@ -192,7 +211,7 @@ export async function processAdminNotifications() {
         where: { id: 'default' },
         data: { lastAdminNotificationSent: now }
       })
-      console.log(`[ADMIN] Summary sent (${pendingNotifications.length} notifications to ${admins.length} admins)`)
+      console.log(`[ADMIN] Summary sent (${pendingNotifications.length} notifications to ${recipients.length} user(s))`)
     }
   } catch (error) {
     console.error('Failed to process admin notifications:', error)

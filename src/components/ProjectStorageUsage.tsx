@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { cn, formatFileSize } from '@/lib/utils'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 
 type StorageSummary = {
   totalBytes: number
@@ -28,6 +30,7 @@ export function ProjectStorageUsage({ projectId }: { projectId: string }) {
   const [data, setData] = useState<StorageSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -89,55 +92,77 @@ export function ProjectStorageUsage({ projectId }: { projectId: string }) {
   }, [data])
 
   return (
-    <div className="border rounded-lg p-4 bg-card space-y-4">
-      <div>
-        <div className="text-base font-medium">Storage Usage</div>
-        <p className="text-xs text-muted-foreground mt-1">Total used by this project</p>
-      </div>
+    <Card className="border-border">
+      <CardHeader
+        className="cursor-pointer hover:bg-accent/50 transition-colors"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="text-base">Storage Usage</CardTitle>
+            <CardDescription>Total used by this project</CardDescription>
+          </div>
 
-      {loading ? (
-        <div className="text-sm text-muted-foreground py-2">Loading storage usage...</div>
-      ) : error ? (
-        <div className="text-sm text-destructive">{error}</div>
-      ) : !data ? (
-        <div className="text-sm text-muted-foreground py-2">No storage data available.</div>
-      ) : (
-        <div className="space-y-4">
-          <div className="rounded-lg border border-border bg-background px-4 py-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <div className="text-sm text-muted-foreground">Total</div>
-              <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="text-sm font-semibold tabular-nums text-foreground">
+              {loading ? 'Loading…' : error ? '—' : !data ? '—' : totalLabel}
             </div>
-            {availableLabel && (
-              <div className="mt-1 flex items-baseline justify-between gap-3">
-                <div className="text-xs text-muted-foreground">Available space</div>
-                <div className="text-xs text-muted-foreground tabular-nums">{availableLabel}</div>
-              </div>
+            {expanded ? (
+              <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
             )}
           </div>
-
-          <div className="space-y-2">
-            {rows.map((r) => (
-              <div key={r.key} className="space-y-1">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-medium">{r.label}</div>
-                  <div className="text-xs text-muted-foreground tabular-nums">
-                    {formatFileSize(r.bytes)}{data.totalBytes > 0 ? ` • ${r.pct}%` : ''}
-                  </div>
-                </div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className={cn('h-full rounded-full bg-primary/70', r.bytes === 0 && 'bg-muted')}
-                    style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }}
-                    aria-label={`${r.label} ${r.pct}%`}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-
         </div>
+      </CardHeader>
+
+      {expanded && (
+        <CardContent className="space-y-4 border-t pt-4">
+          {loading ? (
+            <div className="text-sm text-muted-foreground py-2">Loading storage usage...</div>
+          ) : error ? (
+            <div className="text-sm text-destructive">{error}</div>
+          ) : !data ? (
+            <div className="text-sm text-muted-foreground py-2">No storage data available.</div>
+          ) : (
+            <>
+              <div className="rounded-lg border border-border bg-background px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="text-sm text-muted-foreground">Total</div>
+                  <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
+                </div>
+                {availableLabel && (
+                  <div className="mt-1 flex items-baseline justify-between gap-3">
+                    <div className="text-xs text-muted-foreground">Available space</div>
+                    <div className="text-xs text-muted-foreground tabular-nums">{availableLabel}</div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {rows.map((r) => (
+                  <div key={r.key} className="space-y-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-medium">{r.label}</div>
+                      <div className="text-xs text-muted-foreground tabular-nums">
+                        {formatFileSize(r.bytes)}{data.totalBytes > 0 ? ` • ${r.pct}%` : ''}
+                      </div>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={cn('h-full rounded-full bg-primary/70', r.bytes === 0 && 'bg-muted')}
+                        style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }}
+                        aria-label={`${r.label} ${r.pct}%`}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </CardContent>
       )}
-    </div>
+    </Card>
   )
 }

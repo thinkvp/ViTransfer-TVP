@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendPasswordEmail, isSmtpConfigured } from '@/lib/email'
+import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendPasswordEmail, isSmtpConfigured, getEmailSettings, buildCompanyLogoUrl, sendEmail } from '@/lib/email'
+import { generateProjectInviteInternalUsersEmail } from '@/lib/email-templates'
 import { generateShareUrl } from '@/lib/url'
 import { requireApiAuth } from '@/lib/auth'
 import { decrypt } from '@/lib/encryption'
@@ -8,6 +9,8 @@ import { getProjectRecipients } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import crypto from 'crypto'
+import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import fs from 'fs'
 export const runtime = 'nodejs'
 
 
@@ -44,9 +47,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { id: projectId } = await params
     const body = await request.json()
-    const { videoId, albumId, notifyEntireProject, sendPasswordSeparately, notes } = body
+    const { videoId, albumId, notifyEntireProject, sendPasswordSeparately, notes, notificationType, internalUserIds, projectFileIds } = body
 
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : ''
+
+    const isInternalInvite = notificationType === 'internal-invite'
 
     // Get project details including password
     const project = await prisma.project.findUnique({
@@ -57,6 +62,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         sharePassword: true,
         status: true,
         enablePhotos: true,
+        assignedUsers: {
+          select: {
+            userId: true,
+            user: { select: { id: true, email: true, name: true } },
+          },
+        },
         videos: {
           where: { status: 'READY' },
           select: {
@@ -86,7 +97,141 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    // Get recipients
+    // INTERNAL INVITE: send to selected assigned internal users (not to project recipients)
+    if (isInternalInvite) {
+      const requestedUserIds: string[] = Array.isArray(internalUserIds) ? internalUserIds.map((x: any) => String(x)) : []
+      const requestedFileIds: string[] = Array.isArray(projectFileIds) ? projectFileIds.map((x: any) => String(x)) : []
+
+      const uniqueUserIds = Array.from(new Set(requestedUserIds)).filter(Boolean)
+      if (uniqueUserIds.length === 0) {
+        return NextResponse.json({ error: 'Please select at least one internal user' }, { status: 400 })
+      }
+
+      const assignedUserIds = new Set((project.assignedUsers || []).map((a) => String(a.userId)))
+      const invalidUserIds = uniqueUserIds.filter((id) => !assignedUserIds.has(id))
+      if (invalidUserIds.length > 0) {
+        return NextResponse.json({ error: 'One or more selected users are not assigned to this project' }, { status: 400 })
+      }
+
+      const assignedUsersById = new Map<string, { id: string; email: string; name: string | null }>()
+      for (const row of project.assignedUsers || []) {
+        const u = row.user
+        if (u?.id && u.email) {
+          assignedUsersById.set(String(u.id), { id: String(u.id), email: String(u.email), name: u.name || null })
+        }
+      }
+
+      const recipients = uniqueUserIds
+        .map((id) => assignedUsersById.get(id))
+        .filter((u): u is { id: string; email: string; name: string | null } => !!u && !!u.email)
+
+      if (recipients.length === 0) {
+        return NextResponse.json({ error: 'No selected users have an email address' }, { status: 400 })
+      }
+
+      // Resolve attachments (optional)
+      const MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES = 20 * 1024 * 1024
+      const MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES = 10 * 1024 * 1024
+
+      const uniqueFileIds = Array.from(new Set(requestedFileIds)).filter(Boolean)
+      let attachments: NonNullable<Parameters<typeof sendEmail>[0]['attachments']> | undefined = undefined
+      let attachmentsMeta: Array<{ fileName: string; fileSizeBytes: number }> = []
+
+      if (uniqueFileIds.length > 0) {
+        const files = await prisma.projectFile.findMany({
+          where: { id: { in: uniqueFileIds }, projectId },
+          select: { id: true, fileName: true, fileType: true, fileSize: true, storagePath: true },
+        })
+
+        if (files.length !== uniqueFileIds.length) {
+          return NextResponse.json({ error: 'One or more selected files were not found' }, { status: 400 })
+        }
+
+        const sizes = files.map((f) => Number(f.fileSize))
+        const totalBytes = sizes.reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0)
+        const oversized = files.filter((f) => Number(f.fileSize) > MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES).map((f) => f.fileName)
+
+        if (oversized.length > 0) {
+          return NextResponse.json(
+            { error: `One or more attachments are too large to email (max ${Math.round(MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES / 1024 / 1024)}MB each): ${oversized.join(', ')}` },
+            { status: 400 }
+          )
+        }
+
+        if (totalBytes > MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES) {
+          return NextResponse.json(
+            { error: `Total attachments are too large to email (max ${Math.round(MAX_EMAIL_ATTACHMENTS_TOTAL_BYTES / 1024 / 1024)}MB total)` },
+            { status: 400 }
+          )
+        }
+
+        // Ensure files exist on disk
+        for (const f of files) {
+          const fullPath = getFilePath(f.storagePath)
+          const stat = await fs.promises.stat(fullPath)
+          if (!stat.isFile()) {
+            return NextResponse.json({ error: `File not found on disk: ${f.fileName}` }, { status: 404 })
+          }
+        }
+
+        attachments = files.map((f) => ({
+          filename: sanitizeFilenameForHeader(f.fileName),
+          path: getFilePath(f.storagePath),
+          contentType: f.fileType || 'application/octet-stream',
+        }))
+
+        attachmentsMeta = files.map((f) => ({ fileName: f.fileName, fileSizeBytes: Number(f.fileSize) }))
+      }
+
+      const emailSettings = await getEmailSettings()
+      const companyLogoUrl = buildCompanyLogoUrl({
+        appDomain: emailSettings.appDomain,
+        companyLogoMode: emailSettings.companyLogoMode,
+        companyLogoPath: emailSettings.companyLogoPath,
+        companyLogoUrl: emailSettings.companyLogoUrl,
+        updatedAt: emailSettings.updatedAt,
+      })
+
+      let origin = ''
+      if (emailSettings.appDomain) {
+        try {
+          const parsed = new URL(emailSettings.appDomain)
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') origin = parsed.origin
+        } catch {
+          origin = ''
+        }
+      }
+
+      const projectAdminUrl = origin ? `${origin}/admin/projects/${projectId}` : '#'
+      const subject = `Project Invite: ${project.title}`
+
+      for (const recipient of recipients) {
+        const html = generateProjectInviteInternalUsersEmail({
+          companyName: emailSettings.companyName || 'ViTransfer',
+          companyLogoUrl: companyLogoUrl || undefined,
+          recipientName: recipient.name || undefined,
+          projectTitle: project.title,
+          projectAdminUrl,
+          notes: trimmedNotes ? trimmedNotes : null,
+          attachments: attachmentsMeta,
+        })
+
+        const result = await sendEmail({
+          to: recipient.email,
+          subject,
+          html,
+          attachments,
+        })
+
+        if (!result.success) {
+          return NextResponse.json({ error: result.error || 'Failed to send invite email' }, { status: 500 })
+        }
+      }
+
+      return NextResponse.json({ success: true, message: `Sent invite email to ${recipients.length} user(s).` })
+    }
+
+    // Get recipients (client notifications)
     const recipients = await getProjectRecipients(projectId)
 
     if (recipients.length === 0) {
@@ -96,6 +241,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Generate share URL
     const shareUrl = await generateShareUrl(project.slug)
     const isPasswordProtected = !!project.sharePassword
+
+    const readyAlbums =
+      project.enablePhotos === false
+        ? []
+        : (project.albums || [])
+            .map((a) => ({ name: a.name, photoCount: a._count?.photos ?? 0 }))
+            .filter((a) => a.photoCount > 0)
+
+    if (notifyEntireProject && project.videos.length === 0 && readyAlbums.length === 0) {
+      return NextResponse.json(
+        { error: 'There is nothing ready to notify yet.' },
+        { status: 400 }
+      )
+    }
 
     // Prepare video data if specific video notification
     let video = null
@@ -176,11 +335,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             projectTitle: project.title,
             shareUrl,
             readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel })),
-            readyAlbums: project.enablePhotos === false
-              ? []
-              : (project.albums || [])
-                  .map((a) => ({ name: a.name, photoCount: a._count?.photos ?? 0 }))
-                  .filter((a) => a.photoCount > 0),
+            readyAlbums,
             notes: trimmedNotes ? trimmedNotes : null,
             isPasswordProtected,
             trackingToken: trackingToken.token,

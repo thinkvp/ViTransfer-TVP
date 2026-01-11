@@ -32,6 +32,14 @@ interface SecuritySettingsSectionProps {
   setTrackSecurityLogs: (value: boolean) => void
   viewSecurityEvents: boolean
   setViewSecurityEvents: (value: boolean) => void
+  maxInternalCommentsPerProject: string
+  setMaxInternalCommentsPerProject: (value: string) => void
+  maxCommentsPerVideoVersion: string
+  setMaxCommentsPerVideoVersion: (value: string) => void
+  maxProjectRecipients: string
+  setMaxProjectRecipients: (value: string) => void
+  maxProjectFilesPerProject: string
+  setMaxProjectFilesPerProject: (value: string) => void
   blockedIPs: Array<{ id: string; ipAddress: string; reason: string | null; createdAt: string }>
   blockedDomains: Array<{ id: string; domain: string; reason: string | null; createdAt: string }>
   newIP: string
@@ -76,6 +84,14 @@ export function SecuritySettingsSection({
   setTrackSecurityLogs,
   viewSecurityEvents,
   setViewSecurityEvents,
+  maxInternalCommentsPerProject,
+  setMaxInternalCommentsPerProject,
+  maxCommentsPerVideoVersion,
+  setMaxCommentsPerVideoVersion,
+  maxProjectRecipients,
+  setMaxProjectRecipients,
+  maxProjectFilesPerProject,
+  setMaxProjectFilesPerProject,
   blockedIPs,
   blockedDomains,
   newIP,
@@ -122,6 +138,64 @@ export function SecuritySettingsSection({
             <p className="text-xs text-warning font-medium mt-1">
               These settings control critical security features including rate limiting, hotlink protection, and access controls. Modifying these values without proper understanding may impact system functionality and security. Only adjust if you are familiar with these security mechanisms.
             </p>
+          </div>
+
+          {/* Safeguard Limits */}
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-primary flex-shrink-0" />
+              <div className="text-base font-semibold">Safeguard Limits</div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="maxInternalCommentsPerProject">Internal Comments</Label>
+                <Input
+                  id="maxInternalCommentsPerProject"
+                  type="number"
+                  min={1}
+                  value={maxInternalCommentsPerProject}
+                  onChange={(e) => setMaxInternalCommentsPerProject(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Per project</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxCommentsPerVideoVersion">Video Comments</Label>
+                <Input
+                  id="maxCommentsPerVideoVersion"
+                  type="number"
+                  min={1}
+                  value={maxCommentsPerVideoVersion}
+                  onChange={(e) => setMaxCommentsPerVideoVersion(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Per video version</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxProjectRecipients">Recipients</Label>
+                <Input
+                  id="maxProjectRecipients"
+                  type="number"
+                  min={1}
+                  value={maxProjectRecipients}
+                  onChange={(e) => setMaxProjectRecipients(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Per project</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxProjectFilesPerProject">Project Files</Label>
+                <Input
+                  id="maxProjectFilesPerProject"
+                  type="number"
+                  min={1}
+                  value={maxProjectFilesPerProject}
+                  onChange={(e) => setMaxProjectFilesPerProject(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Per project</p>
+              </div>
+            </div>
           </div>
 
           {/* HTTPS Enforcement */}

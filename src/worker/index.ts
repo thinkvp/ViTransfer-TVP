@@ -13,6 +13,7 @@ import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
+import { processInternalCommentNotifications } from './internal-comment-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
 
@@ -26,12 +27,14 @@ async function hasRetriableNotificationFailures(): Promise<boolean> {
     where: {
       OR: [
         {
+          type: { in: ['CLIENT_COMMENT', 'INTERNAL_COMMENT'] },
           sentToAdmins: false,
           adminFailed: false,
           adminAttempts: { lt: 3 },
           lastError: { not: null },
         },
         {
+          type: 'ADMIN_REPLY',
           sentToClients: false,
           clientFailed: false,
           clientAttempts: { lt: 3 },
@@ -314,11 +317,42 @@ async function main() {
         return
       }
 
-      console.log('Running scheduled notification check...')
+      const [pendingAdminCommentSummaries, pendingClientSummaries, pendingInternalCommentSummaries] =
+        await Promise.all([
+          prisma.notificationQueue.count({
+            where: {
+              type: 'CLIENT_COMMENT',
+              sentToAdmins: false,
+              adminFailed: false,
+              adminAttempts: { lt: 3 },
+            },
+          }),
+          prisma.notificationQueue.count({
+            where: {
+              type: 'ADMIN_REPLY',
+              sentToClients: false,
+              clientFailed: false,
+              clientAttempts: { lt: 3 },
+            },
+          }),
+          prisma.notificationQueue.count({
+            where: {
+              type: 'INTERNAL_COMMENT',
+              sentToAdmins: false,
+              adminFailed: false,
+              adminAttempts: { lt: 3 },
+            },
+          }),
+        ])
+
+      console.log(
+        `Running scheduled notification check... (adminComment=${pendingAdminCommentSummaries}, client=${pendingClientSummaries}, internalComment=${pendingInternalCommentSummaries})`
+      )
 
       await Promise.all([
         processAdminNotifications(),
         processClientNotifications(),
+        processInternalCommentNotifications(),
       ])
 
       console.log('Notification check completed')

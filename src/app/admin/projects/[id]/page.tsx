@@ -18,6 +18,7 @@ import { ProjectFileUpload } from '@/components/ProjectFileUpload'
 import { ProjectFileList } from '@/components/ProjectFileList'
 import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
+import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -46,6 +47,7 @@ export default function ProjectPage() {
   const canChangeProjectStatuses = canDoAction(permissions, 'changeProjectStatuses')
   const canChangeProjectSettings = canDoAction(permissions, 'changeProjectSettings')
   const canUploadFilesToProjectInternal = canDoAction(permissions, 'uploadFilesToProjectInternal')
+  const canMakeProjectComments = canDoAction(permissions, 'makeCommentsOnProjects')
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -135,7 +137,12 @@ export default function ProjectPage() {
 
   const persistAssignedUsers = useCallback(async (next: AssignableUser[]) => {
     try {
-      await apiPatch(`/api/projects/${id}`, { assignedUserIds: next.map((u) => u.id) })
+      await apiPatch(`/api/projects/${id}`, {
+        assignedUsers: next.map((u) => ({
+          userId: u.id,
+          receiveNotifications: u.receiveNotifications !== false,
+        })),
+      })
     } catch {
       alert('Failed to update assigned users')
     } finally {
@@ -487,11 +494,18 @@ export default function ProjectPage() {
           <div className="space-y-6 min-w-0">
             <ProjectActions project={project} videos={project.videos} onRefresh={fetchProject} />
 
+            <ProjectInternalComments
+              projectId={project.id}
+              currentUserId={adminUser?.id || null}
+              canMakeComments={canMakeProjectComments}
+              canDeleteAll={adminUser?.appRoleIsSystemAdmin === true}
+            />
+
             <Card>
               <CardContent className="pt-6">
                 <ProjectUsersEditor
                   label="Users"
-                  description="Add non-admin users"
+                  description="Add internal users"
                   value={assignedUsers}
                   onChange={(next) => {
                     setAssignedUsers(next)
@@ -499,6 +513,7 @@ export default function ProjectPage() {
                   }}
                   disabled={!canChangeProjectSettings}
                   addButtonLabel="Add Users"
+                  addButtonSize="default"
                   addButtonVariant="outline"
                 />
               </CardContent>

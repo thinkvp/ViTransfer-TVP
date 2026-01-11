@@ -32,12 +32,13 @@ export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url)
     const query = (url.searchParams.get('query') || '').trim()
+    const onlySystemAdmins = url.searchParams.get('onlySystemAdmins') === 'true'
     const takeRaw = Number(url.searchParams.get('take') || '25')
     const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 50) : 25
 
     const users = await prisma.user.findMany({
       where: {
-        appRole: { isSystemAdmin: false },
+        ...(onlySystemAdmins ? { appRole: { isSystemAdmin: true } } : {}),
         ...(query
           ? {
               OR: [
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
           },
         },
       },
-      orderBy: [{ name: 'asc' }],
+      orderBy: [{ appRole: { isSystemAdmin: 'desc' } }, { name: 'asc' }],
       take,
     })
 

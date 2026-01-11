@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiFetch } from '@/lib/api-client'
-import { Plus, Trash2, User as UserIcon } from 'lucide-react'
+import { Bell, BellOff, Plus, Shield, Trash2, User as UserIcon } from 'lucide-react'
 import type { ButtonProps } from '@/components/ui/button'
 
 export type AssignableUser = {
@@ -14,6 +14,7 @@ export type AssignableUser = {
   email: string
   username?: string | null
   appRole?: { id: string; name: string; isSystemAdmin: boolean } | null
+  receiveNotifications?: boolean
 }
 
 interface ProjectUsersEditorProps {
@@ -24,6 +25,7 @@ interface ProjectUsersEditorProps {
   disabled?: boolean
   addButtonLabel?: string
   addButtonIconOnly?: boolean
+  addButtonSize?: ButtonProps['size']
   addButtonVariant?: ButtonProps['variant']
   addButtonClassName?: string
 }
@@ -36,16 +38,34 @@ export function ProjectUsersEditor({
   disabled = false,
   addButtonLabel = 'Add User',
   addButtonIconOnly = false,
+  addButtonSize = 'sm',
   addButtonVariant = 'default',
   addButtonClassName,
 }: ProjectUsersEditorProps) {
-  const selected = useMemo(() => value || [], [value])
+  const selectedRaw = useMemo(() => value || [], [value])
+  const selected = useMemo(() => {
+    const next = [...selectedRaw]
+    next.sort((a, b) => {
+      const aIsAdmin = a.appRole?.isSystemAdmin === true
+      const bIsAdmin = b.appRole?.isSystemAdmin === true
+      if (aIsAdmin !== bIsAdmin) return aIsAdmin ? -1 : 1
+      const aName = (a.name || a.email || '').toLowerCase()
+      const bName = (b.name || b.email || '').toLowerCase()
+      return aName.localeCompare(bName)
+    })
+    return next
+  }, [selectedRaw])
   const [showAddForm, setShowAddForm] = useState(false)
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<AssignableUser[]>([])
   const [loading, setLoading] = useState(false)
 
   const normalizeKey = (u: AssignableUser) => String(u?.id || '')
+
+  const adminCount = useMemo(
+    () => selected.filter((u) => u.appRole?.isSystemAdmin === true).length,
+    [selected]
+  )
 
   const loadSuggestions = async (q: string, opts?: { allowEmpty?: boolean }) => {
     const trimmed = q.trim()
@@ -85,7 +105,13 @@ export function ProjectUsersEditor({
     const id = normalizeKey(u)
     if (!id) return
     if (selected.some((s) => normalizeKey(s) === id)) return
-    onChange([...selected, u])
+    onChange([
+      ...selected,
+      {
+        ...u,
+        receiveNotifications: u.receiveNotifications !== false,
+      },
+    ])
     setQuery('')
     setSuggestions([])
     setShowAddForm(false)
@@ -93,7 +119,23 @@ export function ProjectUsersEditor({
 
   const removeUser = (id: string) => {
     if (disabled) return
+    const toRemove = selected.find((u) => normalizeKey(u) === String(id))
+    const isRemovingAdmin = toRemove?.appRole?.isSystemAdmin === true
+    if (isRemovingAdmin) {
+      const adminCount = selected.filter((u) => u.appRole?.isSystemAdmin === true).length
+      if (adminCount <= 1) return
+    }
     onChange(selected.filter((u) => normalizeKey(u) !== id))
+  }
+
+  const toggleNotifications = (id: string) => {
+    if (disabled) return
+    const next = selected.map((u) =>
+      normalizeKey(u) === String(id)
+        ? { ...u, receiveNotifications: !(u.receiveNotifications !== false) }
+        : u
+    )
+    onChange(next)
   }
 
   return (
@@ -109,7 +151,7 @@ export function ProjectUsersEditor({
           <Button
             type="button"
             variant={addButtonVariant}
-            size="sm"
+            size={addButtonSize}
             onClick={() => {
               if (disabled) return
               setShowAddForm(true)
@@ -137,6 +179,17 @@ export function ProjectUsersEditor({
                   <div className="flex items-center gap-2">
                     <UserIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <span className="text-sm font-medium truncate">{u.name || u.email}</span>
+                    {u.appRole?.isSystemAdmin === true && (
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                        <Shield className="w-3 h-3" />
+                        Admin
+                      </span>
+                    )}
+                    {u.appRole?.isSystemAdmin !== true && u.appRole?.name && (
+                      <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                        {u.appRole.name}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground truncate">{u.email}</div>
                 </div>
@@ -146,8 +199,24 @@ export function ProjectUsersEditor({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => removeUser(u.id)}
+                    onClick={() => toggleNotifications(u.id)}
                     disabled={disabled}
+                    title="Toggle notifications"
+                    aria-label="Toggle notifications"
+                    className={
+                      u.receiveNotifications !== false
+                        ? 'text-success hover:text-success hover:bg-success-visible'
+                        : 'text-muted-foreground hover:text-muted-foreground'
+                    }
+                  >
+                    {u.receiveNotifications !== false ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => removeUser(u.id)}
+                    disabled={disabled || (u.appRole?.isSystemAdmin === true && adminCount <= 1)}
                     title="Remove"
                   >
                     <Trash2 className="w-4 h-4 text-destructive" />
@@ -195,7 +264,20 @@ export function ProjectUsersEditor({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-medium truncate">{u.name || u.email}</div>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="font-medium truncate">{u.name || u.email}</div>
+                            {u.appRole?.isSystemAdmin === true && (
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                                <Shield className="w-3 h-3" />
+                                Admin
+                              </span>
+                            )}
+                            {u.appRole?.isSystemAdmin !== true && u.appRole?.name && (
+                              <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                                {u.appRole.name}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-muted-foreground truncate">{u.email}</div>
                         </div>
                       </div>

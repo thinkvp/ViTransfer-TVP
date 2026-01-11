@@ -1,5 +1,6 @@
 import { prisma } from './db'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from './display-color'
+import { getSafeguardLimits } from './settings'
 
 export interface Recipient {
   id?: string
@@ -84,6 +85,12 @@ export async function addRecipient(
   displayColor?: string | null,
   alsoAddToClient?: boolean
 ): Promise<Recipient> {
+  const { maxProjectRecipients } = await getSafeguardLimits()
+  const currentCount = await prisma.projectRecipient.count({ where: { projectId } })
+  if (currentCount >= maxProjectRecipients) {
+    throw new Error(`Maximum recipients (${maxProjectRecipients}) reached for this project`)
+  }
+
   // If setting as primary, unset other primary recipients
   if (isPrimary) {
     await prisma.projectRecipient.updateMany({

@@ -440,11 +440,13 @@ export async function sendEmail({
   subject,
   html,
   text,
+  attachments,
 }: {
   to: string
   subject: string
   html: string
   text?: string
+  attachments?: nodemailer.SendMailOptions['attachments']
 }) {
   try {
     const settings = await getEmailSettings()
@@ -459,6 +461,7 @@ export async function sendEmail({
       subject,
       text: text || html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
       html,
+      attachments,
     })
 
     return { success: true, messageId: info.messageId }

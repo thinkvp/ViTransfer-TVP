@@ -56,6 +56,11 @@ interface SecuritySettings {
   trackAnalytics: boolean
   trackSecurityLogs: boolean
   viewSecurityEvents: boolean
+
+  maxInternalCommentsPerProject?: number
+  maxCommentsPerVideoVersion?: number
+  maxProjectRecipients?: number
+  maxProjectFilesPerProject?: number
 }
 
 interface BlockedIP {
@@ -165,6 +170,10 @@ export default function GlobalSettingsPage() {
   const [trackAnalytics, setTrackAnalytics] = useState(true)
   const [trackSecurityLogs, setTrackSecurityLogs] = useState(true)
   const [viewSecurityEvents, setViewSecurityEvents] = useState(false)
+  const [maxInternalCommentsPerProject, setMaxInternalCommentsPerProject] = useState('250')
+  const [maxCommentsPerVideoVersion, setMaxCommentsPerVideoVersion] = useState('100')
+  const [maxProjectRecipients, setMaxProjectRecipients] = useState('30')
+  const [maxProjectFilesPerProject, setMaxProjectFilesPerProject] = useState('50')
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([])
   const [blockedDomains, setBlockedDomains] = useState<BlockedDomain[]>([])
   const [newIP, setNewIP] = useState('')
@@ -257,6 +266,10 @@ export default function GlobalSettingsPage() {
           setTrackAnalytics(securityData.trackAnalytics ?? true)
           setTrackSecurityLogs(securityData.trackSecurityLogs ?? true)
           setViewSecurityEvents(securityData.viewSecurityEvents ?? false)
+          setMaxInternalCommentsPerProject(securityData.maxInternalCommentsPerProject?.toString() || '250')
+          setMaxCommentsPerVideoVersion(securityData.maxCommentsPerVideoVersion?.toString() || '100')
+          setMaxProjectRecipients(securityData.maxProjectRecipients?.toString() || '30')
+          setMaxProjectFilesPerProject(securityData.maxProjectFilesPerProject?.toString() || '50')
         }
 
         // Load push notification settings
@@ -454,6 +467,10 @@ export default function GlobalSettingsPage() {
         trackAnalytics,
         trackSecurityLogs,
         viewSecurityEvents,
+        maxInternalCommentsPerProject: parseInt(maxInternalCommentsPerProject, 10) || 250,
+        maxCommentsPerVideoVersion: parseInt(maxCommentsPerVideoVersion, 10) || 100,
+        maxProjectRecipients: parseInt(maxProjectRecipients, 10) || 30,
+        maxProjectFilesPerProject: parseInt(maxProjectFilesPerProject, 10) || 50,
       }
 
       await apiPatch('/api/settings/security', securityUpdates)
@@ -526,6 +543,10 @@ export default function GlobalSettingsPage() {
         setTrackAnalytics(refreshedSecurityData.trackAnalytics)
         setTrackSecurityLogs(refreshedSecurityData.trackSecurityLogs)
         setViewSecurityEvents(refreshedSecurityData.viewSecurityEvents)
+        setMaxInternalCommentsPerProject(refreshedSecurityData.maxInternalCommentsPerProject?.toString() || '250')
+        setMaxCommentsPerVideoVersion(refreshedSecurityData.maxCommentsPerVideoVersion?.toString() || '100')
+        setMaxProjectRecipients(refreshedSecurityData.maxProjectRecipients?.toString() || '30')
+        setMaxProjectFilesPerProject(refreshedSecurityData.maxProjectFilesPerProject?.toString() || '50')
       }
 
       // Refresh the page to update server components (like AdminHeader menu)
@@ -789,6 +810,14 @@ export default function GlobalSettingsPage() {
             setTrackSecurityLogs={setTrackSecurityLogs}
             viewSecurityEvents={viewSecurityEvents}
             setViewSecurityEvents={setViewSecurityEvents}
+            maxInternalCommentsPerProject={maxInternalCommentsPerProject}
+            setMaxInternalCommentsPerProject={setMaxInternalCommentsPerProject}
+            maxCommentsPerVideoVersion={maxCommentsPerVideoVersion}
+            setMaxCommentsPerVideoVersion={setMaxCommentsPerVideoVersion}
+            maxProjectRecipients={maxProjectRecipients}
+            setMaxProjectRecipients={setMaxProjectRecipients}
+            maxProjectFilesPerProject={maxProjectFilesPerProject}
+            setMaxProjectFilesPerProject={setMaxProjectFilesPerProject}
             blockedIPs={blockedIPs}
             blockedDomains={blockedDomains}
             newIP={newIP}

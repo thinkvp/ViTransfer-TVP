@@ -158,6 +158,15 @@ export const createProjectSchema = z.object({
     )
     .optional(),
   assignedUserIds: z.array(cuidSchema).max(200).optional(),
+  assignedUsers: z
+    .array(
+      z.object({
+        userId: cuidSchema,
+        receiveNotifications: z.boolean().optional(),
+      })
+    )
+    .max(200)
+    .optional(),
   // Legacy single-recipient inputs (kept for backwards compatibility)
   recipientEmail: emailSchema.optional().or(z.literal('')),
   recipientName: safeStringSchema(0, 255).optional(),

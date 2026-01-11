@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiFetch, apiPost } from '@/lib/api-client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { generateRandomHexDisplayColor } from '@/lib/display-color'
 
 interface Role {
   id: string
@@ -27,14 +28,15 @@ export default function NewUserPage() {
   const [copiedPassword, setCopiedPassword] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(() => ({
     email: '',
     username: '',
     password: '',
     confirmPassword: '',
     name: '',
+    displayColor: generateRandomHexDisplayColor(),
     appRoleId: 'role_admin',
-  })
+  }))
 
   useEffect(() => {
     const loadRoles = async () => {
@@ -139,6 +141,7 @@ export default function NewUserPage() {
         username: formData.username || null,
         password: formData.password,
         name: formData.name || null,
+        displayColor: formData.displayColor || null,
         appRoleId: formData.appRoleId,
       })
 
@@ -206,6 +209,7 @@ export default function NewUserPage() {
             <div className="space-y-2">
               <Label>Role</Label>
               <Select
+                key={rolesLoading ? 'roles-loading' : 'roles-loaded'}
                 value={formData.appRoleId}
                 onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
                 disabled={rolesLoading}
@@ -222,6 +226,30 @@ export default function NewUserPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="displayColor">Display Colour</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="displayColor"
+                  type="color"
+                  value={formData.displayColor}
+                  onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
+                  className="h-10 w-14 rounded-md border border-input bg-background p-1"
+                  aria-label="Display colour"
+                />
+                <Input
+                  type="text"
+                  value={formData.displayColor}
+                  onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
+                  placeholder="#RRGGBB"
+                  className="max-w-[140px]"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Used for this admin&apos;s comment highlight and timeline markers.
+              </p>
             </div>
 
             <div className="space-y-2">

@@ -26,6 +26,7 @@ model User {
   projects Project[]
   assignedProjects ProjectUser[]
   comments Comment[]
+  internalProjectComments ProjectInternalComment[]
   passkeys PasskeyCredential[]
   projectStatusChanges ProjectStatusChange[]
 }
@@ -161,6 +162,7 @@ model Project {
   videos            Video[]
   albums            Album[]
   comments          Comment[]
+  internalComments  ProjectInternalComment[]
   securityEvents    SecurityEvent[]
   analytics         VideoAnalytics[]
   recipients        ProjectRecipient[] // Multiple email recipients
@@ -256,6 +258,7 @@ model ProjectFile {
 model ProjectUser {
   projectId String
   userId    String
+  receiveNotifications Boolean @default(true)
   createdAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -438,6 +441,34 @@ model Comment {
   @@index([recipientId])
 }
 
+model ProjectInternalComment {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // User who authored this internal comment (nullable to preserve history if user is deleted)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Snapshot display properties at creation time (fallback if user is later deleted/changed)
+  authorNameSnapshot     String?
+  displayColorSnapshot   String? @db.VarChar(7)
+
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Reply threading
+  parentId String?
+  parent   ProjectInternalComment?  @relation("ProjectInternalCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  ProjectInternalComment[] @relation("ProjectInternalCommentReplies")
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([parentId])
+  @@index([userId])
+}
+
 model NotificationQueue {
   id        String   @id @default(cuid())
   projectId String
@@ -508,6 +539,9 @@ model Settings {
   autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved
 
   // Auto-close approved projects
+
+  // Internal comment notification tracking (uses admin notification schedule)
+  lastInternalCommentNotificationSent DateTime?
   autoCloseApprovedProjectsEnabled   Boolean @default(false)
   autoCloseApprovedProjectsAfterDays Int     @default(7) // 1-99 days
 
@@ -592,6 +626,12 @@ model SecuritySettings {
 
   // Security Dashboard Access
   viewSecurityEvents Boolean @default(false) // Show /admin/security page in navigation
+
+  // Application safeguard limits
+  maxInternalCommentsPerProject Int @default(250)
+  maxCommentsPerVideoVersion    Int @default(100)
+  maxProjectRecipients          Int @default(30)
+  maxProjectFilesPerProject     Int @default(50)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

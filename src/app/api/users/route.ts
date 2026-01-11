@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { hashPassword, validatePassword } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { normalizeHexDisplayColor } from '@/lib/display-color'
 export const runtime = 'nodejs'
 
 
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { email, username, password, name, appRoleId } = body
+    const { email, username, password, name, appRoleId, displayColor } = body
 
     // Validation
     if (!email || !password) {
@@ -154,12 +155,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user (always ADMIN role)
+    let normalizedDisplayColor: string | null | undefined = undefined
+    if (displayColor !== undefined) {
+      if (displayColor === null || displayColor === '') {
+        normalizedDisplayColor = null
+      } else {
+        const normalized = normalizeHexDisplayColor(displayColor)
+        if (!normalized) {
+          return NextResponse.json(
+            { error: 'Invalid display colour. Use a hex value like #RRGGBB.' },
+            { status: 400 }
+          )
+        }
+        normalizedDisplayColor = normalized
+      }
+    }
+
     const user = await prisma.user.create({
       data: {
         email,
         username: username || null,
         password: hashedPassword,
         name: name || null,
+        displayColor: normalizedDisplayColor,
         role: 'ADMIN',
         appRoleId: roleRecord.id,
       },
