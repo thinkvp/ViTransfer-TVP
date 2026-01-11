@@ -197,7 +197,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
               {editingId === recipient.id ? (
                 <div className="p-4 space-y-3">
                   <div className="space-y-2">
-                    <Label htmlFor={`edit-name-${recipient.id}`}>Client Name</Label>
+                    <Label htmlFor={`edit-name-${recipient.id}`}>Contact Name</Label>
                     <Input
                       id={`edit-name-${recipient.id}`}
                       type="text"
@@ -208,7 +208,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`edit-email-${recipient.id}`}>Client Email</Label>
+                    <Label htmlFor={`edit-email-${recipient.id}`}>Contact Email</Label>
                     <Input
                       id={`edit-email-${recipient.id}`}
                       type="email"
@@ -333,7 +333,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
           {showAddForm && (
             <div className="p-4 border-2 border-dashed rounded-lg space-y-3">
               <div className="space-y-2">
-                <Label htmlFor="newRecipientName">Client Name</Label>
+                <Label htmlFor="newRecipientName">Contact Name</Label>
                 <Input
                   id="newRecipientName"
                   type="text"
@@ -344,7 +344,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="newRecipientEmail">Client Email</Label>
+                <Label htmlFor="newRecipientEmail">Contact Email</Label>
                 <Input
                   id="newRecipientEmail"
                   type="email"

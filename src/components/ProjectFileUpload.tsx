@@ -16,6 +16,7 @@ interface ProjectFileUploadProps {
   onUploadComplete?: () => void
   maxConcurrent?: number
   title?: string
+  description?: string
   layout?: 'stacked' | 'headerRow'
 }
 
@@ -38,6 +39,7 @@ export function ProjectFileUpload({
   onUploadComplete,
   maxConcurrent = 3,
   title = 'Files (Multiple)',
+  description,
   layout = 'stacked',
 }: ProjectFileUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -477,8 +479,13 @@ export function ProjectFileUpload({
     <div className="space-y-4">
       {layout === 'headerRow' ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-base font-medium">{title}</div>
-          <div className="w-full sm:w-80">{picker}</div>
+          <div>
+            <div className="text-base font-medium">{title}</div>
+            {String(description || '').trim().length > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">{description}</p>
+            )}
+          </div>
+          <div className="w-full sm:w-64">{picker}</div>
         </div>
       ) : (
         picker

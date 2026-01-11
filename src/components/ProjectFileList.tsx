@@ -98,7 +98,11 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true }:
   }
 
   if (files.length === 0) {
-    return <div className="text-sm text-muted-foreground py-2">No files uploaded yet.</div>
+    return (
+      <div className="text-sm text-muted-foreground py-4 text-center border border-dashed rounded-lg">
+        No files uploaded yet.
+      </div>
+    )
   }
 
   return (

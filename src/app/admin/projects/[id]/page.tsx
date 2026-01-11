@@ -16,6 +16,7 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { ProjectFileUpload } from '@/components/ProjectFileUpload'
 import { ProjectFileList } from '@/components/ProjectFileList'
+import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 
 // Force dynamic rendering (no static pre-rendering)
@@ -38,6 +39,7 @@ export default function ProjectPage() {
 
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
   const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
+  const [projectClientName, setProjectClientName] = useState<string | null>(null)
 
   const permissions = useMemo(() => normalizeRolePermissions(adminUser?.permissions), [adminUser?.permissions])
   const canAccessProjectSettings = canDoAction(permissions, 'accessProjectSettings')
@@ -199,6 +201,7 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!project?.clientId) {
       setClientRecipients([])
+      setProjectClientName(null)
       return
     }
 
@@ -208,8 +211,12 @@ export default function ProjectPage() {
         const response = await apiFetch(`/api/clients/${project.clientId}`)
         if (!response.ok) return
         const data = await response.json()
+        const clientName = typeof data?.client?.name === 'string' ? data.client.name : null
         const recips = Array.isArray(data?.client?.recipients) ? data.client.recipients : []
-        if (!cancelled) setClientRecipients(recips)
+        if (!cancelled) {
+          setClientRecipients(recips)
+          setProjectClientName(clientName)
+        }
       } catch {
         // ignore
       }
@@ -417,6 +424,7 @@ export default function ProjectPage() {
                       showAlsoAddToClient={Boolean(project?.clientId)}
                       addMode="dialog"
                       clientRecipients={clientRecipients}
+                      clientName={projectClientName || undefined}
                     />
                   </div>
                 </div>
@@ -482,21 +490,16 @@ export default function ProjectPage() {
             <Card>
               <CardContent className="pt-6">
                 <ProjectUsersEditor
-                  label={(
-                    <span className="inline-flex items-center gap-2">
-                      <span className="text-base">Users</span>
-                      <span className="text-xs text-muted-foreground">(Add non-admin users)</span>
-                    </span>
-                  )}
-                  description=""
+                  label="Users"
+                  description="Add non-admin users"
                   value={assignedUsers}
                   onChange={(next) => {
                     setAssignedUsers(next)
                     void persistAssignedUsers(next)
                   }}
                   disabled={!canChangeProjectSettings}
-                  addButtonLabel="Add User"
-                  addButtonIconOnly
+                  addButtonLabel="Add Users"
+                  addButtonVariant="outline"
                 />
               </CardContent>
             </Card>
@@ -504,14 +507,18 @@ export default function ProjectPage() {
             <div className="border rounded-lg p-4 bg-card space-y-4">
               {canUploadFilesToProjectInternal ? (
                 <ProjectFileUpload
-                  title="Project Files (Internal)"
+                  title="Project Files"
+                  description="Internal use only"
                   layout="headerRow"
                   projectId={project.id}
                   maxConcurrent={3}
                   onUploadComplete={() => setProjectFilesRefresh((v) => v + 1)}
                 />
               ) : (
-                <h3 className="text-base font-medium">Project Files (Internal)</h3>
+                <div>
+                  <div className="text-base font-medium">Project Files</div>
+                  <p className="text-xs text-muted-foreground mt-1">Internal use only</p>
+                </div>
               )}
 
               <ProjectFileList
@@ -520,6 +527,8 @@ export default function ProjectPage() {
                 canDelete={canUploadFilesToProjectInternal}
               />
             </div>
+
+            <ProjectStorageUsage projectId={project.id} />
           </div>
         </div>
       </div>

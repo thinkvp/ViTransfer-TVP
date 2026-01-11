@@ -417,7 +417,6 @@ export function ClientFileUpload({ clientId, onUploadComplete, maxConcurrent = 3
               {selectedFiles.length > 0 ? 'Change Files' : 'Drag & Drop or Click to Choose'}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">Allowed types match project video asset uploads.</p>
           {selectedFiles.length > 0 && (
             <p className="text-sm text-muted-foreground">
               Selected: {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} ({formatFileSize(selectedFiles.reduce((sum, f) => sum + f.size, 0))} total)
@@ -569,11 +568,7 @@ export function ClientFileUpload({ clientId, onUploadComplete, maxConcurrent = 3
         </div>
       )}
 
-      {queue.length === 0 && (
-        <div className="text-center py-2 text-sm text-muted-foreground">
-          Select files above to add them to the upload queue. Up to {maxConcurrent} uploads run at once.
-        </div>
-      )}
+      {queue.length === 0 && null}
     </div>
   )
 }

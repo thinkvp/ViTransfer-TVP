@@ -433,7 +433,7 @@ export default function ClientDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Files</CardTitle>
-              <CardDescription>Upload and manage files for this client</CardDescription>
+              <CardDescription>Store contracts, brand assets and more</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <ClientFileUpload

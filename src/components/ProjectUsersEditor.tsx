@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Trash2, User as UserIcon } from 'lucide-react'
+import type { ButtonProps } from '@/components/ui/button'
 
 export type AssignableUser = {
   id: string
@@ -23,6 +24,8 @@ interface ProjectUsersEditorProps {
   disabled?: boolean
   addButtonLabel?: string
   addButtonIconOnly?: boolean
+  addButtonVariant?: ButtonProps['variant']
+  addButtonClassName?: string
 }
 
 export function ProjectUsersEditor({
@@ -33,6 +36,8 @@ export function ProjectUsersEditor({
   disabled = false,
   addButtonLabel = 'Add User',
   addButtonIconOnly = false,
+  addButtonVariant = 'default',
+  addButtonClassName,
 }: ProjectUsersEditorProps) {
   const selected = useMemo(() => value || [], [value])
   const [showAddForm, setShowAddForm] = useState(false)
@@ -93,27 +98,30 @@ export function ProjectUsersEditor({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <Label>{label}</Label>
+          <div className="text-base font-medium">{label}</div>
           {String(description || '').trim().length > 0 && (
             <p className="text-xs text-muted-foreground mt-1">{description}</p>
           )}
         </div>
-        <Button
-          type="button"
-          variant="default"
-          size="sm"
-          onClick={() => {
-            if (disabled) return
-            setShowAddForm(true)
-            void loadSuggestions('', { allowEmpty: true })
-          }}
-          disabled={disabled || showAddForm}
-        >
-          <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 sm:mr-2'} />
-          {!addButtonIconOnly && <span className="hidden sm:inline">{addButtonLabel}</span>}
-        </Button>
+        <div className="w-full sm:w-64">
+          <Button
+            type="button"
+            variant={addButtonVariant}
+            size="sm"
+            onClick={() => {
+              if (disabled) return
+              setShowAddForm(true)
+              void loadSuggestions('', { allowEmpty: true })
+            }}
+            disabled={disabled || showAddForm}
+            className={addButtonClassName || 'w-full'}
+          >
+            <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 mr-2'} />
+            {!addButtonIconOnly && <span>{addButtonLabel}</span>}
+          </Button>
+        </div>
       </div>
 
       {selected.length === 0 && !showAddForm ? (

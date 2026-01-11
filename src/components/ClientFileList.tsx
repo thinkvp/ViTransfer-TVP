@@ -97,7 +97,7 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
   }
 
   if (files.length === 0) {
-    return <div className="text-sm text-muted-foreground py-2">No files uploaded yet.</div>
+    return <div className="text-sm text-muted-foreground py-10 text-center">No files uploaded yet.</div>
   }
 
   return (

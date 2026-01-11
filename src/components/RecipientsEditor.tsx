@@ -38,6 +38,7 @@ interface RecipientsEditorProps {
   showAlsoAddToClient?: boolean
   addMode?: 'inline' | 'dialog'
   clientRecipients?: ClientRecipientPickItem[]
+  clientName?: string
 }
 
 function normalizeEmail(email: string | null | undefined): string {
@@ -55,6 +56,7 @@ export function RecipientsEditor({
   showAlsoAddToClient = false,
   addMode = 'inline',
   clientRecipients,
+  clientName,
 }: RecipientsEditorProps) {
   const recipients = useMemo(() => value || [], [value])
   const [showAddForm, setShowAddForm] = useState(false)
@@ -122,6 +124,12 @@ export function RecipientsEditor({
       })
       .filter((x) => Boolean(x.key))
   }, [clientRecipients])
+
+  const clientRecipientKeySet = useMemo(() => {
+    return new Set(clientRecipientItems.map((x) => x.key))
+  }, [clientRecipientItems])
+
+  const showClientInfo = Boolean(showAlsoAddToClient && (clientName || clientRecipientItems.length > 0))
 
   useEffect(() => {
     if (addMode !== 'dialog') return
@@ -415,7 +423,7 @@ export function RecipientsEditor({
                 <div className="border-t border-border p-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <Label htmlFor={`edit-recipient-name-${idx}`}>Client Name</Label>
+                      <Label htmlFor={`edit-recipient-name-${idx}`}>Contact Name</Label>
                       <Input
                         id={`edit-recipient-name-${idx}`}
                         value={editName}
@@ -424,13 +432,13 @@ export function RecipientsEditor({
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor={`edit-recipient-email-${idx}`}>Client Email</Label>
+                      <Label htmlFor={`edit-recipient-email-${idx}`}>Contact Email</Label>
                       <Input
                         id={`edit-recipient-email-${idx}`}
                         type="email"
                         value={editEmail}
                         onChange={(e) => setEditEmail(e.target.value)}
-                        placeholder="e.g., client@example.com"
+                        placeholder="e.g., contact@example.com"
                       />
                     </div>
                     {showDisplayColor && (
@@ -459,6 +467,20 @@ export function RecipientsEditor({
                           >
                             <Plus className="w-4 h-4" />
                           </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {showDisplayColor && showClientInfo && (
+                      <div className="space-y-1">
+                        <Label>Client</Label>
+                        <div className="rounded-md border border-border bg-background px-3 py-2 text-sm">
+                          {(() => {
+                            const recipientKey = keyForRecipient({ email: recipient.email, name: recipient.name })
+                            const assigned = Boolean(recipientKey && clientRecipientKeySet.has(recipientKey))
+                            if (!assigned) return 'None'
+                            return (clientName || 'Client').trim() || 'Client'
+                          })()}
                         </div>
                       </div>
                     )}
@@ -526,7 +548,7 @@ export function RecipientsEditor({
             <div className="border-t border-border pt-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="new-recipient-name">Client Name</Label>
+                  <Label htmlFor="new-recipient-name">Contact Name</Label>
                   <Input
                     id="new-recipient-name"
                     value={newName}
@@ -535,13 +557,13 @@ export function RecipientsEditor({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="new-recipient-email">Client Email</Label>
+                  <Label htmlFor="new-recipient-email">Contact Email</Label>
                   <Input
                     id="new-recipient-email"
                     type="email"
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="e.g., client@example.com"
+                    placeholder="e.g., contact@example.com"
                   />
                 </div>
                 {showDisplayColor && (
@@ -605,7 +627,7 @@ export function RecipientsEditor({
         <div className="border rounded-lg bg-card p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="new-recipient-name">Client Name</Label>
+              <Label htmlFor="new-recipient-name">Contact Name</Label>
               <Input
                 id="new-recipient-name"
                 value={newName}
@@ -614,13 +636,13 @@ export function RecipientsEditor({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="new-recipient-email">Client Email</Label>
+              <Label htmlFor="new-recipient-email">Contact Email</Label>
               <Input
                 id="new-recipient-email"
                 type="email"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
-                placeholder="e.g., client@example.com"
+                placeholder="e.g., contact@example.com"
               />
             </div>
             {showDisplayColor && (

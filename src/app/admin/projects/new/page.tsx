@@ -464,6 +464,7 @@ export default function NewProjectPage() {
                   showAlsoAddToClient
                   addMode="dialog"
                   clientRecipients={selectedClientRecipients}
+                  clientName={selectedClientId ? companyNameValue : undefined}
                 />
               </div>
 
