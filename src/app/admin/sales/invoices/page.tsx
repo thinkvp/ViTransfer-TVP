@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
+import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 type InvoiceRow = {
   invoice: SalesInvoice
@@ -112,6 +113,23 @@ export default function SalesInvoicesPage() {
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const result = await pullAndHydrateSalesNativeStore()
+        if (!cancelled && result.hydrated) setTick((v) => v + 1)
+      } catch {
+        // best-effort
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -557,13 +575,14 @@ export default function SalesInvoicesPage() {
 
                               <Button
                                 type="button"
-                                size="icon"
-                                variant="destructive"
+                                variant="outline"
+                                size="sm"
+                                className="h-9 w-9 p-0"
                                 onClick={() => onDelete(row.invoice)}
                                 title="Delete"
                                 aria-label="Delete"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="w-4 h-4 text-destructive" />
                               </Button>
                             </div>
                           </td>

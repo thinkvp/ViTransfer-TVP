@@ -767,6 +767,17 @@ model SalesStripeGatewaySettings {
   updatedAt DateTime @updatedAt
 }
 
+model SalesNativeStore {
+  id String @id @default("default")
+
+  // Canonical storage for the previously browser-local "native" Sales records.
+  // Shape (by convention): { quotes: [], invoices: [], payments: [], settings: {}, seq: { quote: 0, invoice: 0 } }
+  data Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model SalesInvoiceStripePayment {
   id String @id @default(cuid())
 

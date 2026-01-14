@@ -13,6 +13,8 @@ type SeqState = {
   invoice: number
 }
 
+export type SalesSeqState = SeqState
+
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback
   try {
@@ -46,6 +48,19 @@ function readSeq(): SeqState {
 function writeSeq(next: SeqState): void {
   assertBrowser()
   localStorage.setItem(KEYS.seq, JSON.stringify(next))
+}
+
+export function getSalesSeqState(): SeqState {
+  return readSeq()
+}
+
+export function setSalesSeqState(next: SeqState): SeqState {
+  assertBrowser()
+  const quote = Number.isFinite(next.quote) && next.quote >= 0 ? Math.trunc(next.quote) : 0
+  const invoice = Number.isFinite(next.invoice) && next.invoice >= 0 ? Math.trunc(next.invoice) : 0
+  const normalized: SeqState = { quote, invoice }
+  writeSeq(normalized)
+  return normalized
 }
 
 function nextNumber(kind: keyof SeqState): string {

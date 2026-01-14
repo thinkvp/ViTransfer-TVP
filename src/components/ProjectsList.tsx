@@ -40,6 +40,8 @@ interface ProjectsListProps {
 export default function ProjectsList({ projects, onFilteredProjectsChange }: ProjectsListProps) {
   const router = useRouter()
   const { user } = useAuth()
+
+  const TABLE_SORT_STORAGE_KEY = 'admin_projects_table_sort'
   const [isMobile, setIsMobile] = useState(false)
   const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
   const [searchQuery, setSearchQuery] = useState('')
@@ -57,6 +59,40 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   const [tablePage, setTablePage] = useState(1)
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
+
+  useEffect(() => {
+    const stored = localStorage.getItem(TABLE_SORT_STORAGE_KEY)
+    if (!stored) return
+    try {
+      const parsed = JSON.parse(stored)
+      const key = typeof parsed?.key === 'string' ? parsed.key : null
+      const direction = parsed?.direction === 'asc' || parsed?.direction === 'desc' ? parsed.direction : null
+
+      const validKeys = new Set([
+        'title',
+        'client',
+        'status',
+        'videos',
+        'versions',
+        'comments',
+        'photos',
+        'createdAt',
+        'updatedAt',
+      ])
+
+      if (key && validKeys.has(key)) setTableSortKey(key as any)
+      if (direction) setTableSortDirection(direction)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(
+      TABLE_SORT_STORAGE_KEY,
+      JSON.stringify({ key: tableSortKey, direction: tableSortDirection })
+    )
+  }, [tableSortKey, tableSortDirection])
 
   const permissions = useMemo(() => normalizeRolePermissions(user?.permissions), [user?.permissions])
   const canChangeProjectStatuses = canDoAction(permissions, 'changeProjectStatuses')

@@ -13,8 +13,21 @@
  */
 
 import { getRedis } from './redis'
+import { createHash } from 'crypto'
 
 const REFRESH_TOKEN_TTL_SECONDS = Number(process.env.ADMIN_REFRESH_TTL_SECONDS || 7 * 24 * 60 * 60)
+
+function tokenBlacklistKey(token: string): string {
+  // Prefer JWT signature (compact, fixed-ish length) to save space.
+  const tokenParts = token.split('.')
+  const signature = tokenParts.length >= 3 ? tokenParts[tokenParts.length - 1] : ''
+  if (signature) return `blacklist:token:${signature}`
+
+  // Fall back to hashing the whole token if it's malformed.
+  // This avoids storing large raw tokens in Redis keys.
+  const hash = createHash('sha256').update(token).digest('hex')
+  return `blacklist:tokenhash:${hash}`
+}
 
 /**
  * Revoke a JWT token by adding it to the blacklist
@@ -36,20 +49,22 @@ export async function revokeToken(token: string, expiresIn: number): Promise<voi
     await redis.connect()
   }
 
-  // Use the token signature (last part) as the key to save space
-  // Format: blacklist:token:{signature}
-  const tokenParts = token.split('.')
-  const signature = tokenParts[tokenParts.length - 1]
-  const key = `blacklist:token:${signature}`
+  const key = tokenBlacklistKey(token)
 
   // Store with TTL equal to token expiration time
   // Value is timestamp of revocation for audit purposes
-  if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
-    console.warn('[AUTH] Skipping token revocation due to invalid TTL', { expiresIn, key })
+  if (!Number.isFinite(expiresIn)) {
+    console.warn('[AUTH] Skipping token revocation due to invalid TTL', { expiresIn })
     return
   }
 
-  await redis.setex(key, expiresIn, Date.now().toString())
+  // TTL=0 is common when revoking a token that's already expired (or expiring now).
+  // That's not an error and doesn't need log noise.
+  if (expiresIn <= 0) return
+
+  const ttlSeconds = Math.max(1, Math.ceil(expiresIn))
+
+  await redis.setex(key, ttlSeconds, Date.now().toString())
 }
 
 /**

@@ -21,6 +21,7 @@ import { centsToDollars, dollarsToCents, sumLineItemsSubtotal, sumLineItemsTax }
 import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
+import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 type PaymentFilter = 'LINKED' | 'UNLINKED'
 
@@ -63,6 +64,23 @@ export default function SalesPaymentsPage() {
     const onFocus = () => setTick((v) => v + 1)
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const result = await pullAndHydrateSalesNativeStore()
+        if (!cancelled && result.hydrated) setTick((v) => v + 1)
+      } catch {
+        // best-effort
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -519,14 +537,15 @@ export default function SalesPaymentsPage() {
                             <div className="flex justify-end">
                               <Button
                                 type="button"
-                                size="icon"
-                                variant="destructive"
+                                variant="outline"
+                                size="sm"
+                                className="h-9 w-9 p-0"
                                 onClick={() => onDelete(p.id)}
                                 disabled={isReadOnlyPayment(p)}
                                 title={isReadOnlyPayment(p) ? 'Stripe payments are read-only' : 'Delete'}
                                 aria-label={isReadOnlyPayment(p) ? 'Read-only payment' : 'Delete'}
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="w-4 h-4 text-destructive" />
                               </Button>
                             </div>
                           </td>

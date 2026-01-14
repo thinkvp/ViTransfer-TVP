@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { getInvoice, getSalesSettings, saveSalesSettings, upsertInvoice, upsertPayment, upsertQuote } from '@/lib/sales/local-store'
 import { apiFetch } from '@/lib/api-client'
+import { pushSalesNativeStoreToServer } from '@/lib/sales/native-store-sync'
 
 function addDaysYmd(ymd: string, days: number): string {
   const d = new Date(`${ymd}T00:00:00`)
@@ -138,6 +139,7 @@ export default function SalesSettingsPage() {
 
       // Auto-ingest QuickBooks quotes/invoices into native (local) Sales records.
       if (res.ok && method === 'POST' && (url.endsWith('/pull/quotes') || url.endsWith('/pull/invoices') || url.endsWith('/pull/payments'))) {
+        let didIngestNative = false
         const settings = getSalesSettings()
 
         if (url.endsWith('/pull/quotes')) {
@@ -190,6 +192,8 @@ export default function SalesSettingsPage() {
             })
             upserted += 1
           }
+
+          didIngestNative = true
 
           payload.result = {
             ...payload.result,
@@ -252,6 +256,8 @@ export default function SalesSettingsPage() {
             upserted += 1
           }
 
+          didIngestNative = true
+
           payload.result = {
             ...payload.result,
             vitransfer: {
@@ -304,6 +310,8 @@ export default function SalesSettingsPage() {
             upserted += 1
           }
 
+          didIngestNative = true
+
           payload.result = {
             ...payload.result,
             vitransfer: {
@@ -312,6 +320,27 @@ export default function SalesSettingsPage() {
               skippedPaymentsMissingAmount: skippedMissingAmount,
               note: 'Imported payments were saved as native Sales payments (browser storage).',
             },
+          }
+        }
+
+        if (didIngestNative) {
+          try {
+            const sync = await pushSalesNativeStoreToServer()
+            payload.result = {
+              ...payload.result,
+              vitransfer: {
+                ...(payload.result as any)?.vitransfer,
+                serverSync: { ok: true, updatedAt: sync.updatedAt ?? null },
+              },
+            }
+          } catch (e) {
+            payload.result = {
+              ...payload.result,
+              vitransfer: {
+                ...(payload.result as any)?.vitransfer,
+                serverSync: { ok: false, error: e instanceof Error ? e.message : String(e) },
+              },
+            }
           }
         }
       }
