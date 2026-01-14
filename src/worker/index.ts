@@ -15,6 +15,7 @@ import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processInternalCommentNotifications } from './internal-comment-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
+import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
@@ -306,6 +307,21 @@ async function main() {
     }
   )
 
+  // Add repeatable daily job to refresh QuickBooks token (if configured)
+  // Runs at 03:15 server/container time (see TZ env var)
+  await notificationQueue.add(
+    'quickbooks-refresh-token',
+    {},
+    {
+      repeat: {
+        pattern: '15 3 * * *',
+      },
+      jobId: 'quickbooks-refresh-token',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Create worker to process notification jobs
   const notificationWorker = new Worker(
     'notification-processing',
@@ -314,6 +330,22 @@ async function main() {
         console.log('Running scheduled auto-close check...')
         const result = await processAutoCloseApprovedProjects()
         console.log(`Auto-close check completed (closed=${result.closedCount})`)
+        return
+      }
+
+      if (job.name === 'quickbooks-refresh-token') {
+        try {
+          console.log('[QBO] Running scheduled token refresh...')
+          const result = await refreshQuickBooksAccessToken()
+          console.log('[QBO] Token refresh ok', {
+            refreshTokenSource: result.refreshTokenSource,
+            refreshTokenPersisted: result.refreshTokenPersisted,
+            rotated: !!result.rotatedRefreshToken,
+          })
+        } catch (e) {
+          // Non-fatal: integration is optional
+          console.warn('[QBO] Token refresh skipped/failed:', e instanceof Error ? e.message : e)
+        }
         return
       }
 

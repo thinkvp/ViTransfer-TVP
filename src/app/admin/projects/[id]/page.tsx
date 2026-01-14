@@ -19,6 +19,8 @@ import { ProjectFileList } from '@/components/ProjectFileList'
 import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
+import { getSalesSettings, listInvoices, listQuotes } from '@/lib/sales/local-store'
+import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -48,6 +50,17 @@ export default function ProjectPage() {
   const canChangeProjectSettings = canDoAction(permissions, 'changeProjectSettings')
   const canUploadFilesToProjectInternal = canDoAction(permissions, 'uploadFilesToProjectInternal')
   const canMakeProjectComments = canDoAction(permissions, 'makeCommentsOnProjects')
+
+  const salesSettings = useMemo(() => getSalesSettings(), [])
+  const projectQuotes = useMemo(() => {
+    if (!project?.id) return []
+    return listQuotes().filter((q) => q.projectId === project.id)
+  }, [project?.id])
+
+  const projectInvoices = useMemo(() => {
+    if (!project?.id) return []
+    return listInvoices().filter((inv) => inv.projectId === project.id)
+  }, [project?.id])
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -437,6 +450,86 @@ export default function ProjectPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {(projectQuotes.length > 0 || projectInvoices.length > 0) && (
+              <Card>
+                <CardContent className="pt-6 space-y-6">
+                  {projectQuotes.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Quotes</div>
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/30 text-xs text-muted-foreground">
+                            <tr className="text-left">
+                              <th className="px-3 py-2">Quote</th>
+                              <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2 text-right">Amount (inc tax)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {projectQuotes.slice(0, 5).map((q: any) => {
+                              const totalCents = sumLineItemsTotal(Array.isArray(q.items) ? q.items : [], salesSettings.taxRatePercent)
+                              return (
+                                <tr key={q.id} className="border-t">
+                                  <td className="px-3 py-2">
+                                    <Link href={`/admin/sales/quotes/${q.id}`} className="font-medium hover:underline">
+                                      {q.quoteNumber}
+                                    </Link>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+                                      {q.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {projectInvoices.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Invoices</div>
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/30 text-xs text-muted-foreground">
+                            <tr className="text-left">
+                              <th className="px-3 py-2">Invoice</th>
+                              <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2 text-right">Amount (inc tax)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {projectInvoices.slice(0, 5).map((inv: any) => {
+                              const totalCents = sumLineItemsTotal(Array.isArray(inv.items) ? inv.items : [], salesSettings.taxRatePercent)
+                              return (
+                                <tr key={inv.id} className="border-t">
+                                  <td className="px-3 py-2">
+                                    <Link href={`/admin/sales/invoices/${inv.id}`} className="font-medium hover:underline">
+                                      {inv.invoiceNumber}
+                                    </Link>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+                                      {inv.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {project.enableVideos !== false && (
               <div>

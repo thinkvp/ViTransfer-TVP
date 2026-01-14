@@ -16,6 +16,8 @@ import { ClientFileList } from '@/components/ClientFileList'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
+import { listInvoices, listPayments, listQuotes } from '@/lib/sales/local-store'
+import { centsToDollars } from '@/lib/sales/money'
 
 type ClientResponse = {
   id: string
@@ -79,6 +81,10 @@ export default function ClientDetailPage() {
   const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
   const [projectsPage, setProjectsPage] = useState(1)
 
+  const [salesTick, setSalesTick] = useState(0)
+
+  const [extraProjectTitles, setExtraProjectTitles] = useState<Record<string, string>>({})
+
   const projectsPageSize = 10
 
   useEffect(() => {
@@ -87,6 +93,12 @@ export default function ClientDetailPage() {
     update()
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    const onFocus = () => setSalesTick((v) => v + 1)
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [])
 
   const loadClient = useCallback(async () => {
@@ -248,6 +260,81 @@ export default function ClientDetailPage() {
     const start = (projectsPage - 1) * projectsPageSize
     return sortedClientProjects.slice(start, start + projectsPageSize)
   }, [projectsPage, sortedClientProjects])
+
+  const projectTitleById = useMemo(() => {
+    return Object.fromEntries(clientProjects.map((p) => [p.id, p.title]))
+  }, [clientProjects])
+
+  const resolvedProjectTitleById = useMemo(() => {
+    return { ...projectTitleById, ...extraProjectTitles }
+  }, [extraProjectTitles, projectTitleById])
+
+  const sales = useMemo(() => {
+    void salesTick
+    const quotes = listQuotes().filter((q) => q.clientId === clientId)
+    const invoices = listInvoices().filter((i) => i.clientId === clientId)
+    const payments = listPayments().filter((p) => p.clientId === clientId)
+
+    const invoiceNumberById = Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber]))
+
+    quotes.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+    invoices.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+    payments.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+
+    return {
+      quotes,
+      invoices,
+      payments,
+      invoiceNumberById,
+    }
+  }, [clientId, salesTick])
+
+  useEffect(() => {
+    const idsToFetch = new Set<string>()
+
+    for (const q of sales.quotes) {
+      if (!q.projectId) continue
+      if (resolvedProjectTitleById[q.projectId]) continue
+      idsToFetch.add(q.projectId)
+    }
+
+    for (const inv of sales.invoices) {
+      if (!inv.projectId) continue
+      if (resolvedProjectTitleById[inv.projectId]) continue
+      idsToFetch.add(inv.projectId)
+    }
+
+    const ids = Array.from(idsToFetch).slice(0, 25)
+    if (ids.length === 0) return
+
+    let cancelled = false
+
+    void (async () => {
+      const next: Record<string, string> = {}
+
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}`)
+            if (!res.ok) return
+            const data: any = await res.json().catch(() => null)
+            const title = String(data?.title || data?.project?.title || '').trim()
+            if (title) next[id] = title
+          } catch {
+            // ignore
+          }
+        })
+      )
+
+      if (cancelled) return
+      if (Object.keys(next).length === 0) return
+      setExtraProjectTitles((prev) => ({ ...prev, ...next }))
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [resolvedProjectTitleById, sales.invoices, sales.quotes])
 
   const toggleProjectsSort = (key: ProjectSortKey) => {
     setProjectsSortKey((prev) => {
@@ -622,6 +709,147 @@ export default function ClientDetailPage() {
                   )}
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Sales</CardTitle>
+              <CardDescription>Quotes, invoices, and payments for this client</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium">Quotes</div>
+                  <Link href="/admin/sales/quotes" className="text-sm text-muted-foreground hover:underline">View all</Link>
+                </div>
+                {sales.quotes.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No quotes for this client yet.</div>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b border-border">
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Quote</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Project</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.quotes.slice(0, 10).map((q) => (
+                          <tr key={q.id} className="border-b border-border/60 last:border-b-0">
+                            <td className="px-3 py-2 font-medium">
+                              <Link href={`/admin/sales/quotes/${q.id}`} className="hover:underline">
+                                {q.quoteNumber}
+                              </Link>
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{q.issueDate}</td>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {q.projectId ? (
+                                <Link href={`/admin/projects/${q.projectId}`} className="hover:underline">
+                                  {resolvedProjectTitleById[q.projectId] ?? q.projectId}
+                                </Link>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground">{q.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium">Invoices</div>
+                  <Link href="/admin/sales/invoices" className="text-sm text-muted-foreground hover:underline">View all</Link>
+                </div>
+                {sales.invoices.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No invoices for this client yet.</div>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b border-border">
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Due date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Project</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.invoices.slice(0, 10).map((inv) => (
+                          <tr key={inv.id} className="border-b border-border/60 last:border-b-0">
+                            <td className="px-3 py-2 font-medium">
+                              <Link href={`/admin/sales/invoices/${inv.id}`} className="hover:underline">
+                                {inv.invoiceNumber}
+                              </Link>
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{inv.issueDate}</td>
+                            <td className="px-3 py-2 tabular-nums">{inv.dueDate ?? '—'}</td>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {inv.projectId ? (
+                                <Link href={`/admin/projects/${inv.projectId}`} className="hover:underline">
+                                  {resolvedProjectTitleById[inv.projectId] ?? inv.projectId}
+                                </Link>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground">{inv.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium">Payments</div>
+                  <Link href="/admin/sales/payments" className="text-sm text-muted-foreground hover:underline">View all</Link>
+                </div>
+                {sales.payments.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No payments for this client yet.</div>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b border-border">
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Method</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.payments.slice(0, 10).map((p) => (
+                          <tr key={p.id} className="border-b border-border/60 last:border-b-0">
+                            <td className="px-3 py-2 tabular-nums">{p.paymentDate}</td>
+                            <td className="px-3 py-2 font-medium">${centsToDollars(p.amountCents)}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{p.method || '—'}</td>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {p.invoiceId ? (
+                                <Link href={`/admin/sales/invoices/${p.invoiceId}`} className="hover:underline">
+                                  {sales.invoiceNumberById[p.invoiceId] ?? p.invoiceId}
+                                </Link>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

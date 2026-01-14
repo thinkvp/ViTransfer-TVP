@@ -82,6 +82,14 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET:?SHARE_TOKEN_SECRET is required}
       HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
+      # QuickBooks Online (optional - pull only)
+      QBO_CLIENT_ID: ${QBO_CLIENT_ID:-}
+      QBO_CLIENT_SECRET: ${QBO_CLIENT_SECRET:-}
+      QBO_REALM_ID: ${QBO_REALM_ID:-}
+      QBO_REFRESH_TOKEN: ${QBO_REFRESH_TOKEN:-}
+      QBO_SANDBOX: ${QBO_SANDBOX:-false}
+      QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
+      QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
     ports:
       - "${APP_PORT:-4321}:4321"
     volumes:
@@ -127,6 +135,14 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      # QuickBooks Online (optional - pull only)
+      QBO_CLIENT_ID: ${QBO_CLIENT_ID:-}
+      QBO_CLIENT_SECRET: ${QBO_CLIENT_SECRET:-}
+      QBO_REALM_ID: ${QBO_REALM_ID:-}
+      QBO_REFRESH_TOKEN: ${QBO_REFRESH_TOKEN:-}
+      QBO_SANDBOX: ${QBO_SANDBOX:-false}
+      QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
+      QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
     volumes:
       - uploads:/app/uploads
     networks:

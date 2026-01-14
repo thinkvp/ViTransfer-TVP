@@ -45,6 +45,7 @@ model Role {
 model Client {
   id        String   @id @default(cuid())
   name      String   @unique
+  quickbooksCustomerId String? @unique
   address   String?
   phone     String?
   website   String?
@@ -61,6 +62,7 @@ model Client {
   @@index([deletedAt])
   @@index([active])
   @@index([name])
+  @@index([quickbooksCustomerId])
 }
 
 model ClientRecipient {
@@ -384,7 +386,7 @@ model VideoAsset {
   category     String? // Optional category: "image", "audio", "project", "other"
 
   // Upload metadata
-  uploadedBy   String? // User ID or "client" for client uploads
+  expiresAt     DateTime?
   uploadedByName String? // Display name of uploader
 
   createdAt DateTime @default(now())
@@ -556,10 +558,195 @@ model Settings {
   updatedAt DateTime @updatedAt
 }
 
+model QuickBooksIntegration {
+  id String @id @default("default")
+
+  // Encrypted storage for the Intuit OAuth2 refresh token.
+  // This avoids needing to edit .env when Intuit rotates tokens.
+  refreshTokenEncrypted String?
+  lastRefreshedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuickBooksEstimateImport {
+  id String @id @default(cuid())
+
+  qboId     String @unique
+  docNumber String?
+
+  txnDate DateTime?
+
+  totalAmt Decimal? @db.Decimal(18, 2)
+
+  customerQboId String?
+  customerName  String?
+
+  privateNote      String?
+  lastUpdatedTime  DateTime?
+  raw              Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastUpdatedTime])
+  @@index([customerQboId])
+  @@index([docNumber])
+}
+
+model QuickBooksInvoiceImport {
+  id String @id @default(cuid())
+
+  qboId     String @unique
+  docNumber String?
+
+  txnDate DateTime?
+  dueDate DateTime?
+
+  totalAmt Decimal? @db.Decimal(18, 2)
+  balance  Decimal? @db.Decimal(18, 2)
+
+  customerQboId String?
+  customerName  String?
+
+  privateNote      String?
+  lastUpdatedTime  DateTime?
+  raw              Json?
+
+  appliedPayments QuickBooksPaymentAppliedInvoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastUpdatedTime])
+  @@index([customerQboId])
+  @@index([docNumber])
+}
+
+model QuickBooksPaymentImport {
+  id String @id @default(cuid())
+
+  qboId String @unique
+
+  txnDate DateTime?
+
+  totalAmt Decimal? @db.Decimal(18, 2)
+
+  customerQboId String?
+  customerName  String?
+
+  paymentRefNum String?
+  privateNote   String?
+
+  lastUpdatedTime DateTime?
+  raw             Json?
+
+  appliedInvoices QuickBooksPaymentAppliedInvoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastUpdatedTime])
+  @@index([customerQboId])
+  @@index([paymentRefNum])
+}
+
+model QuickBooksPaymentAppliedInvoice {
+  id String @id @default(cuid())
+
+  paymentImportId String
+  paymentImport   QuickBooksPaymentImport @relation(fields: [paymentImportId], references: [id], onDelete: Cascade)
+
+  invoiceQboId    String
+  invoiceImportId String?
+  invoiceImport   QuickBooksInvoiceImport? @relation(fields: [invoiceImportId], references: [id], onDelete: SetNull)
+
+  amount Decimal? @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([paymentImportId, invoiceQboId])
+  @@index([invoiceQboId])
+  @@index([invoiceImportId])
+}
+
 enum CompanyLogoMode {
   NONE
   UPLOAD
   LINK
+}
+
+enum SalesDocShareType {
+  QUOTE
+  INVOICE
+}
+
+model SalesDocumentShare {
+  id String @id @default(cuid())
+
+  token String @unique
+  type  SalesDocShareType
+
+  // Local-storage doc id (quote.id / invoice.id)
+  docId     String
+  docNumber String
+
+  // Snapshotted payloads for public rendering
+  docJson      Json
+  settingsJson Json
+  clientName   String?
+  projectTitle String?
+  viewEvents     SalesDocumentViewEvent[]
+  emailTrackings SalesEmailTracking[]
+
+  lastAccessedAt DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, docId])
+  @@index([type, docNumber])
+}
+
+model SalesDocumentViewEvent {
+  id String @id @default(cuid())
+
+  shareToken String
+  share      SalesDocumentShare @relation(fields: [shareToken], references: [token], onDelete: Cascade)
+
+  type  SalesDocShareType
+  docId String
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([shareToken, createdAt])
+  @@index([type, docId, createdAt])
+}
+
+model SalesEmailTracking {
+  id String @id @default(cuid())
+  token String @unique
+
+  shareToken String
+  share      SalesDocumentShare @relation(fields: [shareToken], references: [token], onDelete: Cascade)
+
+  type  SalesDocShareType
+  docId String
+
+  recipientEmail String
+
+  sentAt   DateTime @default(now())
+  openedAt DateTime?
+
+  @@index([type, docId, sentAt])
+  @@index([token])
+  @@index([recipientEmail])
 }
 
 model PushNotificationSettings {
@@ -578,6 +765,10 @@ model PushNotificationSettings {
   notifySuccessfulShareAccess Boolean @default(true)
   notifyClientComments Boolean @default(true)
   notifyVideoApproval Boolean @default(true)
+
+  notifySalesQuoteViewed Boolean @default(true)
+  notifySalesQuoteAccepted Boolean @default(true)
+  notifySalesInvoiceViewed Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

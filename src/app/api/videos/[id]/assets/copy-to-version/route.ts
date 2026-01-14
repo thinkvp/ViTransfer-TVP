@@ -122,7 +122,6 @@ export async function POST(
             fileType: asset.fileType,
             storagePath: asset.storagePath, // Same storage path (symlink approach)
             category: asset.category,
-            uploadedBy: asset.uploadedBy,
             uploadedByName: asset.uploadedByName,
           },
         })

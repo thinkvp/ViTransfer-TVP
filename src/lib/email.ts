@@ -125,6 +125,7 @@ export interface EmailShellOptions {
   companyLogoUrl?: string | null
   trackingToken?: string
   trackingPixelsEnabled?: boolean
+  trackingPixelPath?: string
   appDomain?: string
 }
 
@@ -185,6 +186,7 @@ export function renderEmailShell({
   companyLogoUrl,
   trackingToken,
   trackingPixelsEnabled,
+  trackingPixelPath,
   appDomain,
 }: EmailShellOptions) {
   const rawDomain = (appDomain || process.env.APP_DOMAIN || '').trim()
@@ -200,8 +202,9 @@ export function renderEmailShell({
     }
   }
 
+  const trackingPath = (trackingPixelPath || '/api/track/email').trim() || '/api/track/email'
   const trackingPixel = trackingPixelsEnabled && trackingToken && trackingDomain
-    ? `<img src="${trackingDomain}/api/track/email/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />`
+    ? `<img src="${trackingDomain}${trackingPath}/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />`
     : ''
   
   return `
@@ -1150,6 +1153,7 @@ export async function renderAdminProjectApprovedEmail({
   approvedVideos = [],
   isComplete = true,
   isApproval = true,
+  greetingName,
   branding,
 }: {
   clientName: string
@@ -1157,6 +1161,7 @@ export async function renderAdminProjectApprovedEmail({
   approvedVideos?: Array<{ name: string; id: string }>
   isComplete?: boolean
   isApproval?: boolean
+  greetingName?: string
   branding?: EmailBrandingOverrides
 }): Promise<RenderedEmail> {
   const resolved = await resolveEmailBranding(branding)
@@ -1191,7 +1196,11 @@ export async function renderAdminProjectApprovedEmail({
     appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(greetingName || 'there')}</strong>,
+      </p>
+
+      <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.5;">
+        Client: <strong>${escapeHtml(clientName)}</strong>
       </p>
 
       ${approvedVideos.length > 0 ? `
@@ -1231,29 +1240,40 @@ export async function sendAdminProjectApprovedEmail({
   isComplete?: boolean
   isApproval?: boolean
 }) {
-  const { subject, html } = await renderAdminProjectApprovedEmail({
-    clientName,
-    projectTitle,
-    approvedVideos,
-    isComplete,
-    isApproval,
+  const uniqueEmails = [...new Set(adminEmails.map((e) => String(e || '').trim()).filter(Boolean))]
+  const users = await prisma.user.findMany({
+    where: { email: { in: uniqueEmails } },
+    select: { email: true, name: true },
   })
+  const nameByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.name]))
 
-  // Send to all admin emails
-  const promises = adminEmails.map(email =>
-    sendEmail({
+  const promises = uniqueEmails.map(async (email) => {
+    const nameFromDb = nameByEmail.get(email.toLowerCase())
+    const fallback = email.split('@')[0] || 'there'
+    const greetingName = (nameFromDb && nameFromDb.trim()) ? nameFromDb.trim() : fallback
+
+    const { subject, html } = await renderAdminProjectApprovedEmail({
+      clientName,
+      projectTitle,
+      approvedVideos,
+      isComplete,
+      isApproval,
+      greetingName,
+    })
+
+    return sendEmail({
       to: email,
       subject,
       html,
     })
-  )
+  })
 
   const results = await Promise.allSettled(promises)
   const successCount = results.filter(r => r.status === 'fulfilled').length
 
   return {
     success: successCount > 0,
-    message: `Sent to ${successCount}/${adminEmails.length} admins`
+    message: `Sent to ${successCount}/${uniqueEmails.length} admins`
   }
 }
 

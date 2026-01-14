@@ -8,6 +8,7 @@ import { canSeeMenu, normalizeRolePermissions, type MenuKey } from '@/lib/rbac'
 const PATH_MENU_MAP: Record<string, MenuKey> = {
   projects: 'projects',
   clients: 'clients',
+  sales: 'sales',
   settings: 'settings',
   users: 'users',
   security: 'security',

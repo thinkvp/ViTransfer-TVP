@@ -29,6 +29,12 @@ interface PushNotificationsSectionProps {
   setNotifyClientComments: (value: boolean) => void
   notifyVideoApproval: boolean
   setNotifyVideoApproval: (value: boolean) => void
+  notifySalesQuoteViewed: boolean
+  setNotifySalesQuoteViewed: (value: boolean) => void
+  notifySalesQuoteAccepted: boolean
+  setNotifySalesQuoteAccepted: (value: boolean) => void
+  notifySalesInvoiceViewed: boolean
+  setNotifySalesInvoiceViewed: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -56,6 +62,12 @@ export function PushNotificationsSection({
   setNotifyClientComments,
   notifyVideoApproval,
   setNotifyVideoApproval,
+  notifySalesQuoteViewed,
+  setNotifySalesQuoteViewed,
+  notifySalesQuoteAccepted,
+  setNotifySalesQuoteAccepted,
+  notifySalesInvoiceViewed,
+  setNotifySalesInvoiceViewed,
   show,
   setShow,
 }: PushNotificationsSectionProps) {
@@ -277,6 +289,57 @@ export function PushNotificationsSection({
                           id="notifyVideoApproval"
                           checked={notifyVideoApproval}
                           onCheckedChange={setNotifyVideoApproval}
+                        />
+                      </div>
+
+                      {/* Sales Quote Viewed */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifySalesQuoteViewed" className="text-sm font-normal">
+                            Sales Quote Viewed
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When a client views the public quote link
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifySalesQuoteViewed"
+                          checked={notifySalesQuoteViewed}
+                          onCheckedChange={setNotifySalesQuoteViewed}
+                        />
+                      </div>
+
+                      {/* Sales Quote Accepted */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifySalesQuoteAccepted" className="text-sm font-normal">
+                            Sales Quote Accepted
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When a client accepts a quote from the public link
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifySalesQuoteAccepted"
+                          checked={notifySalesQuoteAccepted}
+                          onCheckedChange={setNotifySalesQuoteAccepted}
+                        />
+                      </div>
+
+                      {/* Sales Invoice Viewed */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifySalesInvoiceViewed" className="text-sm font-normal">
+                            Sales Invoice Viewed
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When a client views the public invoice link
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifySalesInvoiceViewed"
+                          checked={notifySalesInvoiceViewed}
+                          onCheckedChange={setNotifySalesInvoiceViewed}
                         />
                       </div>
                     </div>

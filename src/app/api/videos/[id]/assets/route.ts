@@ -223,7 +223,6 @@ export async function POST(
         fileType: 'application/octet-stream',
         storagePath,
         category: finalCategory,
-        uploadedBy: currentUser.id,
         uploadedByName: currentUser.name || currentUser.email,
       },
     })

@@ -37,6 +37,7 @@ export default function AdminIndexPage() {
         const candidates = [
           canSeeMenu(permissions, 'projects') ? '/admin/projects' : null,
           canSeeMenu(permissions, 'clients') ? '/admin/clients' : null,
+          canSeeMenu(permissions, 'sales') ? '/admin/sales' : null,
           canSeeMenu(permissions, 'settings') ? '/admin/settings' : null,
           canSeeMenu(permissions, 'users') ? '/admin/users' : null,
           securityEnabled && canSeeMenu(permissions, 'security') ? '/admin/security' : null,

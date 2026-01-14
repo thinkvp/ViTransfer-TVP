@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2 } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -41,6 +41,7 @@ export default function AdminHeader() {
   const navLinks = [
     canSeeMenu(permissions, 'projects') ? { href: '/admin/projects', label: 'Projects', icon: FolderKanban } : null,
     canSeeMenu(permissions, 'clients') ? { href: '/admin/clients', label: 'Clients', icon: Building2 } : null,
+    canSeeMenu(permissions, 'sales') ? { href: '/admin/sales', label: 'Sales', icon: DollarSign } : null,
     canSeeMenu(permissions, 'settings') ? { href: '/admin/settings', label: 'Settings', icon: Settings } : null,
     canSeeMenu(permissions, 'users') ? { href: '/admin/users', label: 'Users', icon: Users } : null,
   ].filter(Boolean) as Array<{ href: string; label: string; icon: any }>

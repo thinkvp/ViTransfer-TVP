@@ -90,6 +90,9 @@ interface PushNotificationSettings {
   notifySuccessfulShareAccess: boolean
   notifyClientComments: boolean
   notifyVideoApproval: boolean
+  notifySalesQuoteViewed: boolean
+  notifySalesQuoteAccepted: boolean
+  notifySalesInvoiceViewed: boolean
 }
 
 export default function GlobalSettingsPage() {
@@ -195,6 +198,9 @@ export default function GlobalSettingsPage() {
   const [pushNotifySuccessfulShareAccess, setPushNotifySuccessfulShareAccess] = useState(true)
   const [pushNotifyClientComments, setPushNotifyClientComments] = useState(true)
   const [pushNotifyVideoApproval, setPushNotifyVideoApproval] = useState(true)
+  const [pushNotifySalesQuoteViewed, setPushNotifySalesQuoteViewed] = useState(true)
+  const [pushNotifySalesQuoteAccepted, setPushNotifySalesQuoteAccepted] = useState(true)
+  const [pushNotifySalesInvoiceViewed, setPushNotifySalesInvoiceViewed] = useState(true)
 
   // Collapsible section state (all collapsed by default)
   const [showCompanyBranding, setShowCompanyBranding] = useState(false)
@@ -274,7 +280,12 @@ export default function GlobalSettingsPage() {
 
         // Load push notification settings
         const pushResponse = await apiFetch('/api/settings/push-notifications')
-        if (pushResponse.ok) {
+        if (!pushResponse.ok) {
+          const pushErr = await pushResponse
+            .json()
+            .catch(() => ({ error: 'Failed to load push notification settings' }))
+          setError(pushErr.error || 'Failed to load push notification settings')
+        } else {
           const pushData = await pushResponse.json()
           setPushNotificationSettings(pushData)
 
@@ -290,6 +301,9 @@ export default function GlobalSettingsPage() {
           setPushNotifySuccessfulShareAccess(pushData.notifySuccessfulShareAccess ?? true)
           setPushNotifyClientComments(pushData.notifyClientComments ?? true)
           setPushNotifyVideoApproval(pushData.notifyVideoApproval ?? true)
+          setPushNotifySalesQuoteViewed(pushData.notifySalesQuoteViewed ?? true)
+          setPushNotifySalesQuoteAccepted(pushData.notifySalesQuoteAccepted ?? true)
+          setPushNotifySalesInvoiceViewed(pushData.notifySalesInvoiceViewed ?? true)
         }
       } catch (err) {
         setError('Failed to load settings')
@@ -488,6 +502,9 @@ export default function GlobalSettingsPage() {
         notifySuccessfulShareAccess: pushNotifySuccessfulShareAccess,
         notifyClientComments: pushNotifyClientComments,
         notifyVideoApproval: pushNotifyVideoApproval,
+        notifySalesQuoteViewed: pushNotifySalesQuoteViewed,
+        notifySalesQuoteAccepted: pushNotifySalesQuoteAccepted,
+        notifySalesInvoiceViewed: pushNotifySalesInvoiceViewed,
       }
 
       await apiPatch('/api/settings/push-notifications', pushUpdates)
@@ -779,6 +796,12 @@ export default function GlobalSettingsPage() {
             setNotifyClientComments={setPushNotifyClientComments}
             notifyVideoApproval={pushNotifyVideoApproval}
             setNotifyVideoApproval={setPushNotifyVideoApproval}
+            notifySalesQuoteViewed={pushNotifySalesQuoteViewed}
+            setNotifySalesQuoteViewed={setPushNotifySalesQuoteViewed}
+            notifySalesQuoteAccepted={pushNotifySalesQuoteAccepted}
+            setNotifySalesQuoteAccepted={setPushNotifySalesQuoteAccepted}
+            notifySalesInvoiceViewed={pushNotifySalesInvoiceViewed}
+            setNotifySalesInvoiceViewed={setPushNotifySalesInvoiceViewed}
             show={showPushNotifications}
             setShow={setShowPushNotifications}
           />

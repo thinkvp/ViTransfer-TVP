@@ -497,7 +497,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               onClick={handleViewAnalytics}
             >
               <ExternalLink className="w-4 h-4 mr-2" />
-              View Analytics
+              View Analytics Page
             </Button>
           )}
 

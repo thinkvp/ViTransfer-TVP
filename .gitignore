@@ -51,6 +51,9 @@ postgres-data/
 redis-data/
 intergrations/
 
+# Local-only QuickBooks integration scratchpad (contains secrets/logs)
+.quickbooks/
+
 # Prisma
 prisma/.env
 

@@ -9,6 +9,9 @@ export interface PushNotificationPayload {
     | 'SHARE_ACCESS'
     | 'CLIENT_COMMENT'
     | 'VIDEO_APPROVAL'
+    | 'SALES_QUOTE_VIEWED'
+    | 'SALES_QUOTE_ACCEPTED'
+    | 'SALES_INVOICE_VIEWED'
   projectId?: string
   projectName?: string
   title: string
@@ -40,6 +43,9 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'SHARE_ACCESS': 'notifySuccessfulShareAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',
+      'SALES_QUOTE_VIEWED': 'notifySalesQuoteViewed',
+      'SALES_QUOTE_ACCEPTED': 'notifySalesQuoteAccepted',
+      'SALES_INVOICE_VIEWED': 'notifySalesInvoiceViewed',
     }
 
     const toggleKey = eventToggleMap[payload.type]
@@ -161,6 +167,12 @@ function getPriorityForType(type: string): number {
     case 'SUCCESSFUL_ADMIN_LOGIN':
       return 3 // Low
     case 'SHARE_ACCESS':
+      return 3 // Low
+    case 'SALES_QUOTE_VIEWED':
+      return 3 // Low
+    case 'SALES_QUOTE_ACCEPTED':
+      return 6 // Medium-High
+    case 'SALES_INVOICE_VIEWED':
       return 3 // Low
     default:
       return 5

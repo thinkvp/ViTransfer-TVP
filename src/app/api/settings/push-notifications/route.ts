@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAdmin(request)
@@ -31,6 +33,9 @@ export async function GET(request: NextRequest) {
         notifySuccessfulShareAccess: true,
         notifyClientComments: true,
         notifyVideoApproval: true,
+        notifySalesQuoteViewed: true,
+        notifySalesQuoteAccepted: true,
+        notifySalesInvoiceViewed: true,
       },
     })
 
@@ -40,8 +45,38 @@ export async function GET(request: NextRequest) {
     return response
   } catch (error) {
     console.error('Error fetching push notification settings:', error)
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2021' || error.code === 'P2022') {
+        return NextResponse.json(
+          {
+            error:
+              'Push notification settings table/columns are missing. Your database is likely out of date. Run Prisma migrations (npx prisma migrate deploy) and restart the app.',
+            code: error.code,
+          },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Failed to fetch push notification settings',
+          code: error.code,
+          ...(process.env.NODE_ENV !== 'production'
+            ? { details: error.message, meta: (error as any).meta }
+            : {}),
+        },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Failed to fetch push notification settings' },
+      {
+        error: 'Failed to fetch push notification settings',
+        ...(process.env.NODE_ENV !== 'production' && error instanceof Error
+          ? { details: error.message }
+          : {}),
+      },
       { status: 500 }
     )
   }
@@ -62,13 +97,17 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json()
 
+    const provider = typeof body?.provider === 'string' && body.provider.trim() ? body.provider.trim() : null
+    const webhookUrl = typeof body?.webhookUrl === 'string' && body.webhookUrl.trim() ? body.webhookUrl.trim() : null
+    const title = typeof body?.title === 'string' && body.title.trim() ? body.title.trim() : null
+
     const settings = await prisma.pushNotificationSettings.upsert({
       where: { id: 'default' },
       update: {
         enabled: body.enabled ?? false,
-        provider: body.provider || null,
-        webhookUrl: body.webhookUrl || null,
-        title: body.title || null,
+        provider,
+        webhookUrl,
+        title,
         notifyUnauthorizedOTP: body.notifyUnauthorizedOTP ?? true,
         notifyFailedAdminLogin: body.notifyFailedAdminLogin ?? true,
         notifySuccessfulAdminLogin: body.notifySuccessfulAdminLogin ?? true,
@@ -76,13 +115,16 @@ export async function PATCH(request: NextRequest) {
         notifySuccessfulShareAccess: body.notifySuccessfulShareAccess ?? true,
         notifyClientComments: body.notifyClientComments ?? true,
         notifyVideoApproval: body.notifyVideoApproval ?? true,
+        notifySalesQuoteViewed: body.notifySalesQuoteViewed ?? true,
+        notifySalesQuoteAccepted: body.notifySalesQuoteAccepted ?? true,
+        notifySalesInvoiceViewed: body.notifySalesInvoiceViewed ?? true,
       },
       create: {
         id: 'default',
         enabled: body.enabled ?? false,
-        provider: body.provider || null,
-        webhookUrl: body.webhookUrl || null,
-        title: body.title || null,
+        provider,
+        webhookUrl,
+        title,
         notifyUnauthorizedOTP: body.notifyUnauthorizedOTP ?? true,
         notifyFailedAdminLogin: body.notifyFailedAdminLogin ?? true,
         notifySuccessfulAdminLogin: body.notifySuccessfulAdminLogin ?? true,
@@ -90,6 +132,9 @@ export async function PATCH(request: NextRequest) {
         notifySuccessfulShareAccess: body.notifySuccessfulShareAccess ?? true,
         notifyClientComments: body.notifyClientComments ?? true,
         notifyVideoApproval: body.notifyVideoApproval ?? true,
+        notifySalesQuoteViewed: body.notifySalesQuoteViewed ?? true,
+        notifySalesQuoteAccepted: body.notifySalesQuoteAccepted ?? true,
+        notifySalesInvoiceViewed: body.notifySalesInvoiceViewed ?? true,
       },
     })
 
@@ -99,8 +144,38 @@ export async function PATCH(request: NextRequest) {
     return response
   } catch (error) {
     console.error('Error updating push notification settings:', error)
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      // Common when the database hasn't been migrated after upgrading.
+      if (error.code === 'P2021' || error.code === 'P2022') {
+        return NextResponse.json(
+          {
+            error: 'Push notification settings table/columns are missing. Your database is likely out of date. Run Prisma migrations (npx prisma migrate deploy) and restart the app.',
+            code: error.code,
+          },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Failed to update push notification settings',
+          code: error.code,
+          ...(process.env.NODE_ENV !== 'production'
+            ? { details: error.message, meta: (error as any).meta }
+            : {}),
+        },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Failed to update push notification settings' },
+      {
+        error: 'Failed to update push notification settings',
+        ...(process.env.NODE_ENV !== 'production' && error instanceof Error
+          ? { details: error.message }
+          : {}),
+      },
       { status: 500 }
     )
   }

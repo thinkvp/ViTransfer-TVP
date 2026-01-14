@@ -65,6 +65,11 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: 'sales',
+    label: 'Sales',
+    actions: [],
+  },
+  {
     key: 'settings',
     label: 'Settings',
     actions: [
