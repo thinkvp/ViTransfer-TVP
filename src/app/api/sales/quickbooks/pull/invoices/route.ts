@@ -4,6 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { getQuickBooksConfig, qboQuery, refreshQuickBooksAccessToken, toQboDateTime } from '@/lib/quickbooks/qbo'
+import { mergeQboInvoicesIntoSalesNativeStore } from '@/lib/sales/server-native-store'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -229,6 +230,22 @@ export async function POST(request: NextRequest) {
       customerName: inv?.CustomerRef?.name ?? null,
     }))
 
+    let vitransfer: any = null
+    try {
+      const merged = await mergeQboInvoicesIntoSalesNativeStore(nativeInvoices)
+      vitransfer = {
+        ingestedInvoices: merged.ingested,
+        skippedInvoicesMissingClient: merged.skippedMissingClient,
+        serverSync: { ok: true, updatedAt: merged.updatedAt },
+      }
+    } catch (e) {
+      vitransfer = {
+        ingestedInvoices: 0,
+        skippedInvoicesMissingClient: 0,
+        serverSync: { ok: false, error: e instanceof Error ? e.message : String(e) },
+      }
+    }
+
     const res = NextResponse.json({
       configured: true,
       rotatedRefreshToken: auth.rotatedRefreshToken,
@@ -240,6 +257,7 @@ export async function POST(request: NextRequest) {
       native: {
         invoices: nativeInvoices,
       },
+      vitransfer,
       preview,
       note: lookbackDays > 0
         ? `Stored as imports. Invoices modified in last ${lookbackDays} days.`

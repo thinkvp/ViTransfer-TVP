@@ -7,24 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { getInvoice, getSalesSettings, saveSalesSettings, upsertInvoice, upsertPayment, upsertQuote } from '@/lib/sales/local-store'
+import { getSalesSettings, saveSalesSettings } from '@/lib/sales/local-store'
 import { apiFetch } from '@/lib/api-client'
-import { pushSalesNativeStoreToServer } from '@/lib/sales/native-store-sync'
-
-function addDaysYmd(ymd: string, days: number): string {
-  const d = new Date(`${ymd}T00:00:00`)
-  if (!Number.isFinite(d.getTime())) return ymd
-  d.setDate(d.getDate() + (Number.isFinite(days) ? days : 0))
-  return d.toISOString().slice(0, 10)
-}
-
-function ensurePrefix(value: string, prefix: string): string {
-  const v = value.trim()
-  if (!v) return prefix
-  const upper = v.toUpperCase()
-  if (upper.startsWith(prefix.toUpperCase())) return v
-  return `${prefix}${v}`
-}
+import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
@@ -137,210 +122,39 @@ export default function SalesSettingsPage() {
         result: json,
       }
 
-      // Auto-ingest QuickBooks quotes/invoices into native (local) Sales records.
+      // QBO imports now write native Sales docs to the server first.
+      // After a successful pull, refresh this browser's local cache from the server.
       if (res.ok && method === 'POST' && (url.endsWith('/pull/quotes') || url.endsWith('/pull/invoices') || url.endsWith('/pull/payments'))) {
-        let didIngestNative = false
-        const settings = getSalesSettings()
+        const typeLabel = url.endsWith('/pull/quotes')
+          ? 'quotes'
+          : url.endsWith('/pull/invoices')
+            ? 'invoices'
+            : 'payments'
 
-        if (url.endsWith('/pull/quotes')) {
-          const items = Array.isArray(json?.native?.quotes) ? json.native.quotes : []
-          let upserted = 0
-          let skippedMissingClient = 0
+        payload.result = {
+          ...payload.result,
+          vitransfer: {
+            ...(json?.vitransfer ?? {}),
+            note: `Imported ${typeLabel} were saved to the server and synced down to this browser.`,
+          },
+        }
 
-          for (const q of items) {
-            const qboId = typeof q?.qboId === 'string' ? q.qboId : ''
-            if (!qboId) continue
-
-            const issueDate = typeof q?.txnDate === 'string' && q.txnDate ? q.txnDate : new Date().toISOString().slice(0, 10)
-            const validUntil = typeof q?.validUntil === 'string' && q.validUntil
-              ? q.validUntil
-              : addDaysYmd(issueDate, settings.defaultQuoteValidDays ?? 14)
-
-            const rawDocNumber = typeof q?.docNumber === 'string' && q.docNumber.trim() ? q.docNumber.trim() : `QBO-EST-${qboId}`
-            const docNumber = ensurePrefix(rawDocNumber, 'EST-')
-            const clientId = typeof q?.clientId === 'string' && q.clientId ? q.clientId : null
-
-            // Do not ingest into ViTransfer unless it maps to an existing Client.
-            if (!clientId) {
-              skippedMissingClient += 1
-              continue
-            }
-
-            const rawLines = Array.isArray(q?.lines) ? q.lines : []
-            const itemsMapped = rawLines.map((ln: any) => ({
-              id: globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}`,
-              description: String(ln?.description || '').trim() || 'Line item',
-              quantity: Number.isFinite(Number(ln?.quantity)) && Number(ln?.quantity) > 0 ? Number(ln?.quantity) : 1,
-              unitPriceCents: Number.isFinite(Number(ln?.unitPriceCents)) ? Math.round(Number(ln?.unitPriceCents)) : 0,
-              taxRatePercent: settings.taxRatePercent,
-            }))
-
-            upsertQuote({
-              id: `qbo-estimate-${qboId}`,
-              quoteNumber: docNumber,
-              status: 'OPEN',
-              clientId,
-              projectId: null,
-              issueDate,
-              validUntil: validUntil || null,
-              notes: typeof q?.privateNote === 'string' ? q.privateNote : '',
-              terms: settings.defaultTerms,
-              items: itemsMapped,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              sentAt: null,
-            })
-            upserted += 1
-          }
-
-          didIngestNative = true
-
+        try {
+          const hydrated = await pullAndHydrateSalesNativeStore()
           payload.result = {
             ...payload.result,
             vitransfer: {
-              ingestedQuotes: upserted,
-              skippedQuotesMissingClient: skippedMissingClient,
-              note: 'Imported quotes were saved to native Sales (local browser cache) and synced to the server when possible.',
+              ...(payload.result as any)?.vitransfer,
+              localHydrate: hydrated,
             },
           }
-        }
-
-        if (url.endsWith('/pull/invoices')) {
-          const items = Array.isArray(json?.native?.invoices) ? json.native.invoices : []
-          let upserted = 0
-          let skippedMissingClient = 0
-
-          for (const inv of items) {
-            const qboId = typeof inv?.qboId === 'string' ? inv.qboId : ''
-            if (!qboId) continue
-
-            const issueDate = typeof inv?.txnDate === 'string' && inv.txnDate ? inv.txnDate : new Date().toISOString().slice(0, 10)
-            const dueDate = typeof inv?.dueDate === 'string' && inv.dueDate
-              ? inv.dueDate
-              : addDaysYmd(issueDate, settings.defaultInvoiceDueDays ?? 7)
-
-            const rawDocNumber = typeof inv?.docNumber === 'string' && inv.docNumber.trim() ? inv.docNumber.trim() : `QBO-INV-${qboId}`
-            const docNumber = ensurePrefix(rawDocNumber, 'INV-')
-            const clientId = typeof inv?.clientId === 'string' && inv.clientId ? inv.clientId : null
-
-            // Do not ingest into ViTransfer unless it maps to an existing Client.
-            if (!clientId) {
-              skippedMissingClient += 1
-              continue
-            }
-
-            const rawLines = Array.isArray(inv?.lines) ? inv.lines : []
-            const itemsMapped = rawLines.map((ln: any) => ({
-              id: globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}`,
-              description: String(ln?.description || '').trim() || 'Line item',
-              quantity: Number.isFinite(Number(ln?.quantity)) && Number(ln?.quantity) > 0 ? Number(ln?.quantity) : 1,
-              unitPriceCents: Number.isFinite(Number(ln?.unitPriceCents)) ? Math.round(Number(ln?.unitPriceCents)) : 0,
-              taxRatePercent: settings.taxRatePercent,
-            }))
-
-            upsertInvoice({
-              id: `qbo-invoice-${qboId}`,
-              invoiceNumber: docNumber,
-              status: 'OPEN',
-              clientId,
-              projectId: null,
-              issueDate,
-              dueDate: dueDate || null,
-              notes: typeof inv?.privateNote === 'string' ? inv.privateNote : '',
-              terms: settings.defaultTerms,
-              items: itemsMapped,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              sentAt: null,
-            })
-            upserted += 1
-          }
-
-          didIngestNative = true
-
+        } catch (e) {
           payload.result = {
             ...payload.result,
             vitransfer: {
-              ingestedInvoices: upserted,
-              skippedInvoicesMissingClient: skippedMissingClient,
-              note: 'Imported invoices were saved to native Sales (local browser cache) and synced to the server when possible.',
+              ...(payload.result as any)?.vitransfer,
+              localHydrate: { ok: false, error: e instanceof Error ? e.message : String(e) },
             },
-          }
-        }
-
-        if (url.endsWith('/pull/payments')) {
-          const items = Array.isArray(json?.native?.payments) ? json.native.payments : []
-          let upserted = 0
-          let skippedMissingNativeInvoice = 0
-          let skippedMissingAmount = 0
-
-          for (const p of items) {
-            const paymentQboId = typeof p?.paymentQboId === 'string' ? p.paymentQboId : ''
-            const invoiceQboId = typeof p?.invoiceQboId === 'string' ? p.invoiceQboId : ''
-            if (!paymentQboId || !invoiceQboId) continue
-
-            const invoiceId = `qbo-invoice-${invoiceQboId}`
-            const invoice = getInvoice(invoiceId)
-            if (!invoice) {
-              skippedMissingNativeInvoice += 1
-              continue
-            }
-
-            const amountCents = Number.isFinite(Number(p?.amountCents)) ? Math.round(Number(p.amountCents)) : NaN
-            if (!Number.isFinite(amountCents) || amountCents <= 0) {
-              skippedMissingAmount += 1
-              continue
-            }
-
-            const paymentDate = typeof p?.txnDate === 'string' && p.txnDate ? p.txnDate : new Date().toISOString().slice(0, 10)
-            const method = typeof p?.method === 'string' && p.method.trim() ? p.method.trim() : 'QuickBooks'
-            const reference = typeof p?.reference === 'string' ? p.reference : `QBO-PAY-${paymentQboId}`
-            const clientId = typeof invoice.clientId === 'string' ? invoice.clientId : null
-
-            upsertPayment({
-              id: `qbo-payment-${paymentQboId}-inv-${invoiceQboId}`,
-              paymentDate,
-              amountCents,
-              method,
-              reference,
-              clientId,
-              invoiceId,
-              createdAt: new Date().toISOString(),
-            })
-            upserted += 1
-          }
-
-          didIngestNative = true
-
-          payload.result = {
-            ...payload.result,
-            vitransfer: {
-              ingestedPayments: upserted,
-              skippedPaymentsMissingNativeInvoice: skippedMissingNativeInvoice,
-              skippedPaymentsMissingAmount: skippedMissingAmount,
-              note: 'Imported payments were saved to native Sales (local browser cache) and synced to the server when possible.',
-            },
-          }
-        }
-
-        if (didIngestNative) {
-          try {
-            const sync = await pushSalesNativeStoreToServer()
-            payload.result = {
-              ...payload.result,
-              vitransfer: {
-                ...(payload.result as any)?.vitransfer,
-                serverSync: { ok: true, updatedAt: sync.updatedAt ?? null },
-              },
-            }
-          } catch (e) {
-            payload.result = {
-              ...payload.result,
-              vitransfer: {
-                ...(payload.result as any)?.vitransfer,
-                serverSync: { ok: false, error: e instanceof Error ? e.message : String(e) },
-              },
-            }
           }
         }
       }

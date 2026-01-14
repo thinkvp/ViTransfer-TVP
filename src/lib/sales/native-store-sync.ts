@@ -1,5 +1,6 @@
 import { apiFetch } from '@/lib/api-client'
 import type { SalesInvoice, SalesPayment, SalesQuote, SalesSettings } from '@/lib/sales/types'
+import type { SalesNativeStoreData } from '@/lib/sales/native-store-types'
 import {
   SALES_NATIVE_STORE_CHANGED_EVENT,
   getSalesSeqState,
@@ -13,14 +14,6 @@ import {
   upsertPayment,
   upsertQuote,
 } from '@/lib/sales/local-store'
-
-export type SalesNativeStoreData = {
-  quotes: SalesQuote[]
-  invoices: SalesInvoice[]
-  payments: SalesPayment[]
-  settings: SalesSettings
-  seq: { quote: number; invoice: number }
-}
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
