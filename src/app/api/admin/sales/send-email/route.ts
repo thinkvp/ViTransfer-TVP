@@ -107,18 +107,16 @@ export async function POST(request: NextRequest) {
   const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
-  const expiresText = share.expiresAt ? new Date(share.expiresAt).toLocaleDateString() : null
-
   const doc = share.docJson as unknown as SalesQuote | SalesInvoice
   const settings = share.settingsJson as unknown as SalesSettings
 
   let clientAddress: string | undefined
   const docAny: any = doc as any
+  const clientId = typeof docAny?.clientId === 'string' ? docAny.clientId.trim() : ''
   const addressFromDoc = typeof docAny?.clientAddress === 'string' ? docAny.clientAddress.trim() : ''
   if (addressFromDoc) {
     clientAddress = addressFromDoc
   } else {
-    const clientId = typeof docAny?.clientId === 'string' ? docAny.clientId.trim() : ''
     if (clientId) {
       const client = await prisma.client.findFirst({
         where: { id: clientId, deletedAt: null },
@@ -134,6 +132,8 @@ export async function POST(request: NextRequest) {
     clientName: share.clientName || undefined,
     clientAddress,
     projectTitle: share.projectTitle || undefined,
+    publicQuoteUrl: isQuote ? shareUrl : undefined,
+    publicInvoiceUrl: !isQuote ? shareUrl : undefined,
   }
 
   let pdfBytes: Uint8Array
@@ -163,12 +163,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Please select at least one recipient' }, { status: 400 })
   }
 
+  const recipientNameByEmail = new Map<string, string>()
+  if (clientId) {
+    const wantedEmails = new Set(uniqueToEmails.map((e) => e.toLowerCase()))
+    const recipients = await prisma.clientRecipient.findMany({
+      where: { clientId },
+      select: { email: true, name: true },
+    }).catch(() => [])
+
+    for (const r of recipients) {
+      const email = (typeof r?.email === 'string' ? r.email : '').trim().toLowerCase()
+      const name = (typeof r?.name === 'string' ? r.name : '').trim()
+      if (email && name && wantedEmails.has(email)) recipientNameByEmail.set(email, name)
+    }
+  }
+
   const sendErrors: Array<{ to: string; error: string }> = []
   let sentCount = 0
 
   for (const toEmail of uniqueToEmails) {
     // Generate a token for the email open tracking pixel.
     const trackingToken = randomToken()
+
+    const emailLower = toEmail.toLowerCase()
+    const recipientName = recipientNameByEmail.get(emailLower) || (toEmail.split('@')[0] || 'there')
+
+    const introLine = isQuote
+      ? 'Please find the attached Quote. You can also view and accept the quote using the link below.'
+      : 'Please find the attached Invoice. You can also view and pay the invoice using the link below.'
 
     const html = renderEmailShell({
       companyName,
@@ -182,11 +204,15 @@ export async function POST(request: NextRequest) {
       appDomain: emailSettings.appDomain || appBaseUrl,
       bodyContent: `
       <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
-        Hi${share.clientName ? ` <strong>${escapeHtml(share.clientName)}</strong>` : ''},
+        Hi <strong>${escapeHtml(recipientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-        Please view your ${isQuote ? 'quote' : 'invoice'} using the secure link below.
+        ${escapeHtml(introLine)}
+      </p>
+
+      <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+        If you have any questions, please don't hesitate to get in touch.
       </p>
 
       <div style="${cardStyle}">
@@ -196,11 +222,6 @@ export async function POST(request: NextRequest) {
         ${share.projectTitle ? `
           <div style="font-size: 14px; color: #374151; padding: 2px 0;">
             Project: ${escapeHtml(share.projectTitle)}
-          </div>
-        ` : ''}
-        ${expiresText ? `
-          <div style="font-size: 13px; color: #6b7280; padding: 2px 0;">
-            Link expires: ${escapeHtml(expiresText)}
           </div>
         ` : ''}
       </div>

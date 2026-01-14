@@ -699,6 +699,7 @@ model SalesDocumentShare {
   projectTitle String?
   viewEvents     SalesDocumentViewEvent[]
   emailTrackings SalesEmailTracking[]
+  stripePayments SalesInvoiceStripePayment[]
 
   lastAccessedAt DateTime?
   expiresAt      DateTime?
@@ -749,6 +750,49 @@ model SalesEmailTracking {
   @@index([recipientEmail])
 }
 
+model SalesStripeGatewaySettings {
+  id String @id @default("default")
+
+  enabled Boolean @default(false)
+  label String @default("Pay by Credit Card (attracts merchant fees of 1.70%)")
+  feePercent Float @default(1.7)
+
+  publishableKey String?
+  secretKeyEncrypted String?
+
+  dashboardPaymentDescription String @default("Payment for Invoice {invoice_number}")
+  currencies String @default("AUD")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SalesInvoiceStripePayment {
+  id String @id @default(cuid())
+
+  shareToken String
+  share SalesDocumentShare @relation(fields: [shareToken], references: [token], onDelete: Cascade)
+
+  invoiceDocId String
+  invoiceNumber String
+
+  currency String
+  invoiceAmountCents Int
+  feeAmountCents Int
+  totalAmountCents Int
+
+  stripeCheckoutSessionId String @unique
+  stripePaymentIntentId String?
+  stripeChargeId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceDocId])
+  @@index([invoiceNumber])
+  @@index([shareToken, createdAt])
+  @@index([stripePaymentIntentId])
+}
+
 model PushNotificationSettings {
   id String @id @default("default")
 
@@ -769,6 +813,7 @@ model PushNotificationSettings {
   notifySalesQuoteViewed Boolean @default(true)
   notifySalesQuoteAccepted Boolean @default(true)
   notifySalesInvoiceViewed Boolean @default(true)
+  notifySalesInvoicePaid Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

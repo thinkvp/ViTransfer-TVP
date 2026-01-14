@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
         notifySalesQuoteViewed: true,
         notifySalesQuoteAccepted: true,
         notifySalesInvoiceViewed: true,
+        notifySalesInvoicePaid: true,
       },
     })
 
@@ -118,6 +119,7 @@ export async function PATCH(request: NextRequest) {
         notifySalesQuoteViewed: body.notifySalesQuoteViewed ?? true,
         notifySalesQuoteAccepted: body.notifySalesQuoteAccepted ?? true,
         notifySalesInvoiceViewed: body.notifySalesInvoiceViewed ?? true,
+        notifySalesInvoicePaid: body.notifySalesInvoicePaid ?? true,
       },
       create: {
         id: 'default',
@@ -135,6 +137,7 @@ export async function PATCH(request: NextRequest) {
         notifySalesQuoteViewed: body.notifySalesQuoteViewed ?? true,
         notifySalesQuoteAccepted: body.notifySalesQuoteAccepted ?? true,
         notifySalesInvoiceViewed: body.notifySalesInvoiceViewed ?? true,
+        notifySalesInvoicePaid: body.notifySalesInvoicePaid ?? true,
       },
     })
 

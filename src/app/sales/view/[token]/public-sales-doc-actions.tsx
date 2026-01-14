@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Download, CheckCircle2 } from 'lucide-react'
+import { Download, CheckCircle2, CreditCard } from 'lucide-react'
 import { downloadInvoicePdf, downloadQuotePdf } from '@/lib/sales/pdf'
 
 type DocType = 'QUOTE' | 'INVOICE'
@@ -17,12 +17,15 @@ type Props = {
   clientAddress?: string
   projectTitle?: string | null
   canAcceptQuote?: boolean
+  canPayInvoice?: boolean
+  payLabel?: string | null
 }
 
 export default function PublicSalesDocActions(props: Props) {
   const router = useRouter()
   const [downloading, setDownloading] = useState(false)
   const [accepting, setAccepting] = useState(false)
+  const [paying, setPaying] = useState(false)
 
   const info = useMemo(
     () => ({
@@ -30,6 +33,9 @@ export default function PublicSalesDocActions(props: Props) {
       clientAddress: props.clientAddress || undefined,
       projectTitle: props.projectTitle || undefined,
       publicQuoteUrl: props.type === 'QUOTE'
+        ? `${typeof window !== 'undefined' ? window.location.origin : ''}/sales/view/${props.token}`
+        : undefined,
+      publicInvoiceUrl: props.type === 'INVOICE'
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/sales/view/${props.token}`
         : undefined,
     }),
@@ -73,8 +79,53 @@ export default function PublicSalesDocActions(props: Props) {
     }
   }, [accepting, props.canAcceptQuote, props.token, router])
 
+  const onPay = useCallback(async () => {
+    if (!props.canPayInvoice || paying) return
+    setPaying(true)
+    try {
+      const res = await fetch(`/api/sales/view/${encodeURIComponent(props.token)}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        const message = typeof data?.error === 'string' ? data.error : 'Unable to start payment'
+        alert(message)
+        return
+      }
+
+      const url = typeof data?.url === 'string' ? data.url : ''
+      if (!url) {
+        alert('Unable to start payment')
+        return
+      }
+
+      window.location.href = url
+    } finally {
+      setPaying(false)
+    }
+  }, [paying, props.canPayInvoice, props.token])
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      {props.type === 'INVOICE' && props.canPayInvoice && (
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            type="button"
+            onClick={() => void onPay()}
+            disabled={paying}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            <CreditCard className="h-4 w-4 mr-2" />
+            {paying ? 'Redirecting…' : 'Pay Invoice'}
+          </Button>
+          {typeof props.payLabel === 'string' && props.payLabel.trim() && (
+            <div className="text-xs text-muted-foreground max-w-[320px] text-right">{props.payLabel.trim()}</div>
+          )}
+        </div>
+      )}
       {props.type === 'QUOTE' && props.canAcceptQuote && (
         <Button
           type="button"

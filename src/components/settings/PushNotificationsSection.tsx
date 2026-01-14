@@ -35,6 +35,8 @@ interface PushNotificationsSectionProps {
   setNotifySalesQuoteAccepted: (value: boolean) => void
   notifySalesInvoiceViewed: boolean
   setNotifySalesInvoiceViewed: (value: boolean) => void
+  notifySalesInvoicePaid: boolean
+  setNotifySalesInvoicePaid: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -68,6 +70,8 @@ export function PushNotificationsSection({
   setNotifySalesQuoteAccepted,
   notifySalesInvoiceViewed,
   setNotifySalesInvoiceViewed,
+  notifySalesInvoicePaid,
+  setNotifySalesInvoicePaid,
   show,
   setShow,
 }: PushNotificationsSectionProps) {
@@ -340,6 +344,23 @@ export function PushNotificationsSection({
                           id="notifySalesInvoiceViewed"
                           checked={notifySalesInvoiceViewed}
                           onCheckedChange={setNotifySalesInvoiceViewed}
+                        />
+                      </div>
+
+                      {/* Sales Invoice Paid */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifySalesInvoicePaid" className="text-sm font-normal">
+                            Sales Invoice Paid
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When an invoice is paid via Stripe
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifySalesInvoicePaid"
+                          checked={notifySalesInvoicePaid}
+                          onCheckedChange={setNotifySalesInvoicePaid}
                         />
                       </div>
                     </div>

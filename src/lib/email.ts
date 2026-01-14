@@ -1278,6 +1278,287 @@ export async function sendAdminProjectApprovedEmail({
 }
 
 /**
+ * Email template: Invoice paid (to admins assigned to the project)
+ * Note: explicitly disables tracking pixels.
+ */
+export async function renderAdminInvoicePaidEmail({
+  greetingName,
+  projectTitle,
+  invoiceNumber,
+  clientName,
+  currency,
+  invoiceAmountCents,
+  feeAmountCents,
+  totalAmountCents,
+  paidAtYmd,
+  publicInvoiceUrl,
+  projectAdminUrl,
+  branding,
+}: {
+  greetingName?: string
+  projectTitle?: string | null
+  invoiceNumber: string
+  clientName?: string | null
+  currency?: string | null
+  invoiceAmountCents: number
+  feeAmountCents?: number | null
+  totalAmountCents?: number | null
+  paidAtYmd?: string | null
+  publicInvoiceUrl?: string | null
+  projectAdminUrl?: string | null
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const ccy = (currency || 'AUD').toString().toUpperCase()
+  const fmt = (cents: number | null | undefined): string => {
+    const n = Number(cents)
+    const safe = Number.isFinite(n) ? Math.round(n) : 0
+    return `${ccy} ${(safe / 100).toFixed(2)}`
+  }
+
+  const subject = `Invoice Paid: ${invoiceNumber}`
+
+  const headerGradient = EMAIL_THEME.headerBackground
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+  const cardTitleStyle = emailCardTitleStyle()
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient,
+    title: 'Invoice Paid',
+    subtitle: 'A customer has paid an invoice',
+    trackingPixelsEnabled: false,
+    appDomain: resolved.appDomain,
+    bodyContent: `
+      <p style="margin: 0 0 18px 0; font-size: 16px; color: #111827; line-height: 1.5;">
+        Hi <strong>${escapeHtml(greetingName || 'there')}</strong>,
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Invoice</div>
+        <div style="font-size: 16px; color: #111827; margin-bottom: 6px;">
+          <strong>${escapeHtml(invoiceNumber)}</strong>
+          ${paidAtYmd ? `<span style="color:#9ca3af;"> • Paid ${escapeHtml(paidAtYmd)}</span>` : ''}
+        </div>
+        ${clientName ? `<div style="font-size: 14px; color: #6b7280;">Client: ${escapeHtml(clientName)}</div>` : ''}
+        ${projectTitle ? `<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
+      </div>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Payment</div>
+        <div style="font-size: 14px; color: #374151; line-height: 1.6;">
+          Applied to invoice: <strong>${escapeHtml(fmt(invoiceAmountCents))}</strong><br />
+          ${feeAmountCents && feeAmountCents > 0 ? `Fee: ${escapeHtml(fmt(feeAmountCents))}<br />` : ''}
+          ${totalAmountCents && totalAmountCents > 0 ? `Total collected: <strong>${escapeHtml(fmt(totalAmountCents))}</strong>` : ''}
+        </div>
+      </div>
+
+      ${(publicInvoiceUrl || projectAdminUrl) ? `
+        <div style="text-align: center; margin: 28px 0;">
+          ${publicInvoiceUrl ? `<a href="${escapeHtml(publicInvoiceUrl)}" style="${primaryButtonStyle}">View Paid Invoice</a>` : ''}
+          ${projectAdminUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(projectAdminUrl)}" style="font-size: 14px; color: ${EMAIL_THEME.accent}; text-decoration: none;">Open Project</a></div>` : ''}
+        </div>
+      ` : ''}
+    `,
+  })
+
+  return { subject, html }
+}
+
+export async function sendAdminInvoicePaidEmail({
+  adminEmails,
+  projectTitle,
+  invoiceNumber,
+  clientName,
+  currency,
+  invoiceAmountCents,
+  feeAmountCents,
+  totalAmountCents,
+  paidAtYmd,
+  publicInvoiceUrl,
+  projectAdminUrl,
+}: {
+  adminEmails: string[]
+  projectTitle?: string | null
+  invoiceNumber: string
+  clientName?: string | null
+  currency?: string | null
+  invoiceAmountCents: number
+  feeAmountCents?: number | null
+  totalAmountCents?: number | null
+  paidAtYmd?: string | null
+  publicInvoiceUrl?: string | null
+  projectAdminUrl?: string | null
+}) {
+  const uniqueEmails = [...new Set(adminEmails.map((e) => String(e || '').trim()).filter(Boolean))]
+  if (!uniqueEmails.length) {
+    return { success: false, message: 'No admin recipients' }
+  }
+
+  const users = await prisma.user.findMany({
+    where: { email: { in: uniqueEmails } },
+    select: { email: true, name: true },
+  })
+  const nameByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.name]))
+
+  const promises = uniqueEmails.map(async (email) => {
+    const nameFromDb = nameByEmail.get(email.toLowerCase())
+    const fallback = email.split('@')[0] || 'there'
+    const greetingName = (nameFromDb && nameFromDb.trim()) ? nameFromDb.trim() : fallback
+
+    const { subject, html } = await renderAdminInvoicePaidEmail({
+      greetingName,
+      projectTitle,
+      invoiceNumber,
+      clientName,
+      currency,
+      invoiceAmountCents,
+      feeAmountCents,
+      totalAmountCents,
+      paidAtYmd,
+      publicInvoiceUrl,
+      projectAdminUrl,
+    })
+
+    return sendEmail({ to: email, subject, html })
+  })
+
+  const results = await Promise.allSettled(promises)
+  const successCount = results.filter((r) => r.status === 'fulfilled').length
+
+  return {
+    success: successCount > 0,
+    message: `Sent to ${successCount}/${uniqueEmails.length} admins`,
+  }
+}
+
+/**
+ * Email template: Quote accepted (to admins)
+ * Note: explicitly disables tracking pixels.
+ */
+export async function renderAdminQuoteAcceptedEmail({
+  greetingName,
+  quoteNumber,
+  clientName,
+  projectTitle,
+  acceptedAtYmd,
+  publicQuoteUrl,
+  adminQuoteUrl,
+  branding,
+}: {
+  greetingName?: string
+  quoteNumber?: string | null
+  clientName?: string | null
+  projectTitle?: string | null
+  acceptedAtYmd?: string | null
+  publicQuoteUrl?: string | null
+  adminQuoteUrl?: string | null
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const quoteLabel = (quoteNumber || '').trim() || 'Quote'
+  const subject = quoteNumber ? `Quote Accepted: ${quoteNumber}` : 'Quote Accepted'
+
+  const headerGradient = EMAIL_THEME.headerBackground
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+  const cardTitleStyle = emailCardTitleStyle()
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient,
+    title: 'Quote Accepted',
+    subtitle: 'A customer has accepted a quote',
+    trackingPixelsEnabled: false,
+    appDomain: resolved.appDomain,
+    bodyContent: `
+      <p style="margin: 0 0 18px 0; font-size: 16px; color: #111827; line-height: 1.5;">
+        Hi <strong>${escapeHtml(greetingName || 'there')}</strong>,
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Quote</div>
+        <div style="font-size: 16px; color: #111827; margin-bottom: 6px;">
+          <strong>${escapeHtml(quoteLabel)}</strong>
+          ${acceptedAtYmd ? `<span style="color:#9ca3af;"> • Accepted ${escapeHtml(acceptedAtYmd)}</span>` : ''}
+        </div>
+        ${clientName ? `<div style="font-size: 14px; color: #6b7280;">Client: ${escapeHtml(clientName)}</div>` : ''}
+        ${projectTitle ? `<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
+      </div>
+
+      ${(publicQuoteUrl || adminQuoteUrl) ? `
+        <div style="text-align: center; margin: 28px 0;">
+          ${publicQuoteUrl ? `<a href="${escapeHtml(publicQuoteUrl)}" style="${primaryButtonStyle}">View Quote</a>` : ''}
+          ${adminQuoteUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(adminQuoteUrl)}" style="font-size: 14px; color: ${EMAIL_THEME.accent}; text-decoration: none;">Open in Admin</a></div>` : ''}
+        </div>
+      ` : ''}
+    `,
+  })
+
+  return { subject, html }
+}
+
+export async function sendAdminQuoteAcceptedEmail({
+  adminEmails,
+  quoteNumber,
+  clientName,
+  projectTitle,
+  acceptedAtYmd,
+  publicQuoteUrl,
+  adminQuoteUrl,
+}: {
+  adminEmails: string[]
+  quoteNumber?: string | null
+  clientName?: string | null
+  projectTitle?: string | null
+  acceptedAtYmd?: string | null
+  publicQuoteUrl?: string | null
+  adminQuoteUrl?: string | null
+}) {
+  const uniqueEmails = [...new Set(adminEmails.map((e) => String(e || '').trim()).filter(Boolean))]
+  if (!uniqueEmails.length) {
+    return { success: false, message: 'No admin recipients' }
+  }
+
+  const users = await prisma.user.findMany({
+    where: { email: { in: uniqueEmails } },
+    select: { email: true, name: true },
+  })
+  const nameByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.name]))
+
+  const promises = uniqueEmails.map(async (email) => {
+    const nameFromDb = nameByEmail.get(email.toLowerCase())
+    const fallback = email.split('@')[0] || 'there'
+    const greetingName = (nameFromDb && nameFromDb.trim()) ? nameFromDb.trim() : fallback
+
+    const { subject, html } = await renderAdminQuoteAcceptedEmail({
+      greetingName,
+      quoteNumber,
+      clientName,
+      projectTitle,
+      acceptedAtYmd,
+      publicQuoteUrl,
+      adminQuoteUrl,
+    })
+
+    return sendEmail({ to: email, subject, html })
+  })
+
+  const results = await Promise.allSettled(promises)
+  const successCount = results.filter((r) => r.status === 'fulfilled').length
+
+  return {
+    success: successCount > 0,
+    message: `Sent to ${successCount}/${uniqueEmails.length} admins`,
+  }
+}
+
+/**
  * Email template: General project notification (entire project with all ready videos)
  */
 export async function renderProjectGeneralNotificationEmail({

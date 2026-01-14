@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { getInvoice, getSalesSettings, saveSalesSettings, upsertInvoice, upsertPayment, upsertQuote } from '@/lib/sales/local-store'
 import { apiFetch } from '@/lib/api-client'
@@ -46,6 +47,20 @@ export default function SalesSettingsPage() {
   const [defaultTerms, setDefaultTerms] = useState('')
   const [paymentDetails, setPaymentDetails] = useState('')
 
+  const [stripeLoaded, setStripeLoaded] = useState(false)
+  const [stripeSaving, setStripeSaving] = useState(false)
+  const [stripeSaved, setStripeSaved] = useState(false)
+
+  const [stripeEnabled, setStripeEnabled] = useState(false)
+  const [stripeLabel, setStripeLabel] = useState('')
+  const [stripeFeePercent, setStripeFeePercent] = useState('1.7')
+  const [stripePublishableKey, setStripePublishableKey] = useState('')
+  const [stripeSecretKey, setStripeSecretKey] = useState('')
+  const [stripeHasSecretKey, setStripeHasSecretKey] = useState(false)
+  const [stripeSecretKeySource, setStripeSecretKeySource] = useState<'env' | 'db' | 'none'>('none')
+  const [stripeDashboardPaymentDescription, setStripeDashboardPaymentDescription] = useState('Payment for Invoice {invoice_number}')
+  const [stripeCurrencies, setStripeCurrencies] = useState('AUD')
+
   useEffect(() => {
     const s = getSalesSettings()
     setBusinessName(s.businessName)
@@ -60,6 +75,42 @@ export default function SalesSettingsPage() {
     setDefaultTerms(s.defaultTerms)
     setPaymentDetails(s.paymentDetails)
     setLoaded(true)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadStripe = async () => {
+      try {
+        const res = await apiFetch('/api/admin/sales/stripe', { method: 'GET' })
+        const json = await res.json().catch(() => null)
+        if (!res.ok) return
+
+        if (cancelled) return
+
+        setStripeEnabled(Boolean(json?.enabled))
+        setStripeLabel(typeof json?.label === 'string' ? json.label : '')
+        setStripeFeePercent(String(typeof json?.feePercent === 'number' ? json.feePercent : 1.7))
+        setStripePublishableKey(typeof json?.publishableKey === 'string' ? json.publishableKey : '')
+        setStripeDashboardPaymentDescription(
+          typeof json?.dashboardPaymentDescription === 'string'
+            ? json.dashboardPaymentDescription
+            : 'Payment for Invoice {invoice_number}'
+        )
+        setStripeCurrencies(typeof json?.currencies === 'string' ? json.currencies : 'AUD')
+        setStripeHasSecretKey(Boolean(json?.hasSecretKey))
+
+        const src = typeof json?.secretKeySource === 'string' ? json.secretKeySource : 'none'
+        setStripeSecretKeySource(src === 'env' || src === 'db' || src === 'none' ? src : 'none')
+      } finally {
+        if (!cancelled) setStripeLoaded(true)
+      }
+    }
+
+    void loadStripe()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const runQuickBooksAction = async (label: string, url: string, method: 'GET' | 'POST') => {
@@ -366,6 +417,59 @@ export default function SalesSettingsPage() {
     }
   }
 
+  const onSaveStripe = async () => {
+    if (stripeSaving) return
+    setStripeSaving(true)
+    setStripeSaved(false)
+    try {
+      const parsedFee = Number(stripeFeePercent)
+
+      const res = await apiFetch('/api/admin/sales/stripe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: stripeEnabled,
+          label: stripeLabel,
+          feePercent: Number.isFinite(parsedFee) ? parsedFee : 0,
+          publishableKey: stripePublishableKey || null,
+          secretKey: stripeSecretKey || null,
+          dashboardPaymentDescription: stripeDashboardPaymentDescription,
+          currencies: stripeCurrencies,
+        }),
+      })
+
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        const message = typeof json?.error === 'string' ? json.error : 'Unable to save Stripe settings'
+        alert(message)
+        return
+      }
+
+      setStripeEnabled(Boolean(json?.enabled))
+      setStripeLabel(typeof json?.label === 'string' ? json.label : stripeLabel)
+      setStripeFeePercent(String(typeof json?.feePercent === 'number' ? json.feePercent : parsedFee))
+      setStripePublishableKey(typeof json?.publishableKey === 'string' ? json.publishableKey : stripePublishableKey)
+      setStripeDashboardPaymentDescription(
+        typeof json?.dashboardPaymentDescription === 'string'
+          ? json.dashboardPaymentDescription
+          : stripeDashboardPaymentDescription
+      )
+      setStripeCurrencies(typeof json?.currencies === 'string' ? json.currencies : stripeCurrencies)
+      setStripeHasSecretKey(Boolean(json?.hasSecretKey))
+
+      const src = typeof json?.secretKeySource === 'string' ? json.secretKeySource : stripeSecretKeySource
+      setStripeSecretKeySource(src === 'env' || src === 'db' || src === 'none' ? src : stripeSecretKeySource)
+
+      // Never keep secret in memory longer than necessary.
+      setStripeSecretKey('')
+
+      setStripeSaved(true)
+      setTimeout(() => setStripeSaved(false), 1500)
+    } finally {
+      setStripeSaving(false)
+    }
+  }
+
   if (!loaded) {
     return (
       <div className="flex items-center justify-center py-10 text-muted-foreground">Loading settings…</div>
@@ -463,6 +567,104 @@ export default function SalesSettingsPage() {
               {saving ? 'Saving…' : 'Save settings'}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Stripe Checkout</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!stripeLoaded ? (
+            <div className="text-sm text-muted-foreground">Loading Stripe settings…</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium">Enable Stripe payments</div>
+                  <div className="text-xs text-muted-foreground">Shows “Pay Invoice” on public invoice pages.</div>
+                </div>
+                <Switch checked={stripeEnabled} onCheckedChange={setStripeEnabled} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Label (shown under Pay Invoice button)</Label>
+                  <Input
+                    value={stripeLabel}
+                    onChange={(e) => setStripeLabel(e.target.value)}
+                    className="h-9"
+                    placeholder="Pay by Credit Card (attracts merchant fees of 1.70%)"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Percentage fee (%)</Label>
+                  <Input
+                    value={stripeFeePercent}
+                    onChange={(e) => setStripeFeePercent(e.target.value)}
+                    className="h-9"
+                    inputMode="decimal"
+                  />
+                  <p className="text-xs text-muted-foreground">Added on top of the invoice total for Stripe payments.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Currencies (comma separated)</Label>
+                  <Input
+                    value={stripeCurrencies}
+                    onChange={(e) => setStripeCurrencies(e.target.value)}
+                    className="h-9"
+                    placeholder="AUD, NZD"
+                  />
+                  <p className="text-xs text-muted-foreground">First currency is used for invoice payments.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Stripe Publishable Key</Label>
+                  <Input
+                    value={stripePublishableKey}
+                    onChange={(e) => setStripePublishableKey(e.target.value)}
+                    className="h-9"
+                    placeholder="pk_live_…"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Stripe API Secret Key</Label>
+                  <Input
+                    value={stripeSecretKey}
+                    onChange={(e) => setStripeSecretKey(e.target.value)}
+                    className="h-9"
+                    type="password"
+                    placeholder={stripeHasSecretKey ? '•••••••• (configured)' : 'sk_live_…'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Stored encrypted in Postgres. If `STRIPE_SECRET_KEY` is set in the environment, it takes precedence.
+                    Current source: <span className="font-medium">{stripeSecretKeySource}</span>
+                  </p>
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Gateway Dashboard Payment Description</Label>
+                  <Input
+                    value={stripeDashboardPaymentDescription}
+                    onChange={(e) => setStripeDashboardPaymentDescription(e.target.value)}
+                    className="h-9"
+                    placeholder="Payment for Invoice {invoice_number}"
+                  />
+                  <p className="text-xs text-muted-foreground">Supports: {`{invoice_number}`}</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                {stripeSaved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
+                <Button onClick={() => void onSaveStripe()} disabled={stripeSaving}>
+                  {stripeSaving ? 'Saving…' : 'Save Stripe settings'}
+                </Button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

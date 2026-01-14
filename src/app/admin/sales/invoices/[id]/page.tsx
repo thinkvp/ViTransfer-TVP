@@ -80,6 +80,19 @@ export default function InvoiceDetailPage() {
   const [clients, setClients] = useState<ClientOption[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [loadingProjects, setLoadingProjects] = useState(false)
+  const [stripePayments, setStripePayments] = useState<Array<{
+    id: string
+    invoiceDocId: string
+    invoiceNumber: string
+    currency: string
+    invoiceAmountCents: number
+    feeAmountCents: number
+    totalAmountCents: number
+    stripeCheckoutSessionId: string
+    stripePaymentIntentId: string | null
+    stripeChargeId: string | null
+    createdAt: string
+  }>>([])
 
   const [status, setStatus] = useState<InvoiceStatus>('OPEN')
   const [clientId, setClientId] = useState('')
@@ -132,6 +145,47 @@ export default function InvoiceDetailPage() {
     }
   }, [id])
 
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      if (!id) {
+        if (!cancelled) setStripePayments([])
+        return
+      }
+
+      try {
+        const res = await apiFetch(`/api/admin/sales/stripe-payments?invoiceDocId=${encodeURIComponent(id)}&limit=200`, { cache: 'no-store' })
+        if (!res.ok) return
+        const json = (await res.json().catch(() => null)) as { payments?: unknown[] } | null
+        const list = Array.isArray(json?.payments) ? json!.payments! : []
+
+        const parsed = list
+          .map((p: any) => ({
+            id: typeof p?.id === 'string' ? p.id : '',
+            invoiceDocId: typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : '',
+            invoiceNumber: typeof p?.invoiceNumber === 'string' ? p.invoiceNumber : '',
+            currency: typeof p?.currency === 'string' ? p.currency : '',
+            invoiceAmountCents: Number(p?.invoiceAmountCents),
+            feeAmountCents: Number(p?.feeAmountCents),
+            totalAmountCents: Number(p?.totalAmountCents),
+            stripeCheckoutSessionId: typeof p?.stripeCheckoutSessionId === 'string' ? p.stripeCheckoutSessionId : '',
+            stripePaymentIntentId: typeof p?.stripePaymentIntentId === 'string' ? p.stripePaymentIntentId : null,
+            stripeChargeId: typeof p?.stripeChargeId === 'string' ? p.stripeChargeId : null,
+            createdAt: typeof p?.createdAt === 'string' ? p.createdAt : '',
+          }))
+          .filter((p) => p.id && p.invoiceDocId && Number.isFinite(p.invoiceAmountCents))
+
+        if (!cancelled) setStripePayments(parsed)
+      } catch {
+        // ignore
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
   const onSendEmail = () => {
     if (!invoice) return
     setSendOpen(true)
@@ -170,7 +224,9 @@ export default function InvoiceDetailPage() {
   const totalCents = subtotalCents + taxCents
 
   const payments = useMemo(() => listPayments().filter((p) => p.invoiceId === id), [id])
-  const paidCents = useMemo(() => payments.reduce((acc, p) => acc + p.amountCents, 0), [payments])
+  const localPaidCents = useMemo(() => payments.reduce((acc, p) => acc + p.amountCents, 0), [payments])
+  const stripePaidCents = useMemo(() => stripePayments.reduce((acc, p) => acc + (Number.isFinite(p.invoiceAmountCents) ? p.invoiceAmountCents : 0), 0), [stripePayments])
+  const paidCents = localPaidCents + stripePaidCents
   const balanceCents = Math.max(0, totalCents - paidCents)
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
@@ -220,8 +276,20 @@ export default function InvoiceDetailPage() {
       .sort()
       .at(-1)
 
+    const latestStripeYmd = stripePayments
+      .map((p) => (typeof p.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : ''))
+      .filter((d) => Boolean(d))
+      .sort()
+      .at(-1)
+
+    const latestAnyPaymentYmd = [latestPaymentDate, latestStripeYmd]
+      .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+      .sort()
+      .at(-1)
+      ?? null
+
     const invoicePaidAt = (status === 'PAID' || (totalCents > 0 && balanceCents <= 0))
-      ? (latestPaymentDate ?? new Date().toISOString().slice(0, 10))
+      ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
       : null
 
     const url = await createSalesDocShareUrl({
@@ -345,9 +413,32 @@ export default function InvoiceDetailPage() {
           <div className="space-y-2">
             <Label>Payments</Label>
             <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-between text-sm">
-              <span>Paid: ${centsToDollars(paidCents)}</span>
+              <span>
+                Paid: ${centsToDollars(paidCents)}
+                {stripePaidCents > 0 ? <span className="text-muted-foreground"> (Stripe: ${centsToDollars(stripePaidCents)})</span> : null}
+              </span>
               <span>Balance: ${centsToDollars(balanceCents)}</span>
             </div>
+
+            {stripePayments.length > 0 && (
+              <div className="rounded-md border border-border bg-background p-3 text-sm">
+                <div className="font-medium mb-2">Stripe payments</div>
+                <div className="space-y-1 text-muted-foreground">
+                  {stripePayments.slice(0, 5).map((p) => (
+                    <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <div className="min-w-[220px]">
+                        {/^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : '—'}
+                        {p.stripePaymentIntentId ? <span> · {p.stripePaymentIntentId}</span> : p.stripeCheckoutSessionId ? <span> · {p.stripeCheckoutSessionId}</span> : null}
+                      </div>
+                      <div className="tabular-nums">
+                        Applied to invoice: ${centsToDollars(p.invoiceAmountCents)}
+                        {p.feeAmountCents > 0 ? <span> (Fee: ${centsToDollars(p.feeAmountCents)})</span> : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

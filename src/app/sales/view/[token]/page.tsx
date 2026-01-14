@@ -83,6 +83,12 @@ function safeString(v: unknown): string {
   return typeof v === 'string' ? v : ''
 }
 
+function firstCurrencyFromCsv(value: unknown): string {
+  const raw = typeof value === 'string' ? value : ''
+  const first = raw.split(',')[0]?.trim().toUpperCase()
+  return first && /^[A-Z]{3}$/.test(first) ? first : 'AUD'
+}
+
 function getClientIpFromHeaders(h: Headers): string | null {
   const forwarded = h.get('x-forwarded-for')
   const ip = (forwarded ? forwarded.split(',')[0] : h.get('x-real-ip'))
@@ -160,6 +166,11 @@ export default async function SalesDocPublicViewPage(
   const doc = share.docJson as any
   const settings = share.settingsJson as any
 
+  const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
+    where: { id: 'default' },
+    select: { enabled: true, label: true, currencies: true },
+  }).catch(() => null)
+
   const logoSettings = await prisma.settings.findUnique({
     where: { id: 'default' },
     select: { companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true },
@@ -211,6 +222,13 @@ export default async function SalesDocPublicViewPage(
   clientAddress = clientAddress.trim()
 
   const canAcceptQuote = type === 'QUOTE' && status === 'OPEN'
+  const canPayInvoice = type === 'INVOICE'
+    && Boolean(stripeGateway?.enabled)
+    && rawStatus !== 'PAID'
+
+  const displayCurrency = type === 'INVOICE'
+    ? firstCurrencyFromCsv(stripeGateway?.currencies)
+    : 'AUD'
 
   return (
     <div className="min-h-screen bg-background">
@@ -225,6 +243,8 @@ export default async function SalesDocPublicViewPage(
             clientAddress={clientAddress || undefined}
             projectTitle={projectTitle}
             canAcceptQuote={canAcceptQuote}
+            canPayInvoice={canPayInvoice}
+            payLabel={stripeGateway?.label ?? null}
           />
         </div>
         <div className="rounded-xl border bg-card overflow-hidden">
@@ -294,7 +314,7 @@ export default async function SalesDocPublicViewPage(
                 )}
               </div>
               <div className="text-sm text-muted-foreground sm:text-right">
-                <div className="text-xs">Amounts in AUD</div>
+                <div className="text-xs">Amounts in {displayCurrency}</div>
               </div>
             </div>
 

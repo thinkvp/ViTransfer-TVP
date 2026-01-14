@@ -93,6 +93,7 @@ interface PushNotificationSettings {
   notifySalesQuoteViewed: boolean
   notifySalesQuoteAccepted: boolean
   notifySalesInvoiceViewed: boolean
+  notifySalesInvoicePaid: boolean
 }
 
 export default function GlobalSettingsPage() {
@@ -201,6 +202,7 @@ export default function GlobalSettingsPage() {
   const [pushNotifySalesQuoteViewed, setPushNotifySalesQuoteViewed] = useState(true)
   const [pushNotifySalesQuoteAccepted, setPushNotifySalesQuoteAccepted] = useState(true)
   const [pushNotifySalesInvoiceViewed, setPushNotifySalesInvoiceViewed] = useState(true)
+  const [pushNotifySalesInvoicePaid, setPushNotifySalesInvoicePaid] = useState(true)
 
   // Collapsible section state (all collapsed by default)
   const [showCompanyBranding, setShowCompanyBranding] = useState(false)
@@ -304,6 +306,7 @@ export default function GlobalSettingsPage() {
           setPushNotifySalesQuoteViewed(pushData.notifySalesQuoteViewed ?? true)
           setPushNotifySalesQuoteAccepted(pushData.notifySalesQuoteAccepted ?? true)
           setPushNotifySalesInvoiceViewed(pushData.notifySalesInvoiceViewed ?? true)
+          setPushNotifySalesInvoicePaid(pushData.notifySalesInvoicePaid ?? true)
         }
       } catch (err) {
         setError('Failed to load settings')
@@ -505,6 +508,7 @@ export default function GlobalSettingsPage() {
         notifySalesQuoteViewed: pushNotifySalesQuoteViewed,
         notifySalesQuoteAccepted: pushNotifySalesQuoteAccepted,
         notifySalesInvoiceViewed: pushNotifySalesInvoiceViewed,
+        notifySalesInvoicePaid: pushNotifySalesInvoicePaid,
       }
 
       await apiPatch('/api/settings/push-notifications', pushUpdates)
@@ -802,6 +806,8 @@ export default function GlobalSettingsPage() {
             setNotifySalesQuoteAccepted={setPushNotifySalesQuoteAccepted}
             notifySalesInvoiceViewed={pushNotifySalesInvoiceViewed}
             setNotifySalesInvoiceViewed={setPushNotifySalesInvoiceViewed}
+            notifySalesInvoicePaid={pushNotifySalesInvoicePaid}
+            setNotifySalesInvoicePaid={setPushNotifySalesInvoicePaid}
             show={showPushNotifications}
             setShow={setShowPushNotifications}
           />

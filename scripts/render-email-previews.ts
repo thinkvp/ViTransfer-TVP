@@ -2,13 +2,20 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import {
+	EMAIL_THEME,
+	emailCardStyle,
+	emailPrimaryButtonStyle,
+	escapeHtml,
 	renderAdminCommentNotificationEmail,
+	renderAdminInvoicePaidEmail,
 	renderAdminProjectApprovedEmail,
+	renderAdminQuoteAcceptedEmail,
 	renderCommentNotificationEmail,
 	renderNewVersionEmail,
 	renderPasswordEmail,
 	renderProjectApprovedEmail,
 	renderProjectGeneralNotificationEmail,
+	renderEmailShell,
 } from '../src/lib/email'
 
 import {
@@ -229,6 +236,145 @@ async function main() {
 				{ fileName: 'Brief.pdf', fileSizeBytes: 2_345_678 },
 				{ fileName: 'Shotlist.xlsx', fileSizeBytes: 345_678 },
 			],
+		})
+	)
+
+	await writeHtml(
+		outDir,
+		'12-admin-invoice-paid.html',
+		(await renderAdminInvoicePaidEmail({
+			greetingName: 'Morgan',
+			projectTitle: 'Winter Campaign',
+			invoiceNumber: 'INV-2026-0007',
+			clientName: 'Alex',
+			currency: 'AUD',
+			invoiceAmountCents: 125_00,
+			feeAmountCents: 2_13,
+			totalAmountCents: 127_13,
+			paidAtYmd: '2026-01-14',
+			publicInvoiceUrl: 'http://localhost:3000/sales/view/demo-invoice',
+			projectAdminUrl: 'http://localhost:3000/admin/projects/demo',
+			branding,
+		})).html
+	)
+
+	await writeHtml(
+		outDir,
+		'13-admin-quote-accepted.html',
+		(await renderAdminQuoteAcceptedEmail({
+			greetingName: 'Morgan',
+			quoteNumber: 'Q-2026-0012',
+			clientName: 'Alex',
+			projectTitle: null,
+			acceptedAtYmd: '2026-01-14',
+			publicQuoteUrl: 'http://localhost:3000/sales/view/demo-quote',
+			adminQuoteUrl: 'http://localhost:3000/admin/sales/quotes/demo',
+			branding,
+		})).html
+	)
+
+	// Sales emails to clients (Quote / Invoice) - mirrors the HTML built in /api/admin/sales/send-email
+	const renderSalesDocClientEmail = ({
+		isQuote,
+		docNumber,
+		recipientName,
+		clientName,
+		projectTitle,
+		notes,
+		shareUrl,
+	}: {
+		isQuote: boolean
+		docNumber: string
+		recipientName: string
+		clientName?: string | null
+		projectTitle?: string | null
+		notes?: string | null
+		shareUrl: string
+	}): string => {
+		const docLabel = isQuote ? 'Quote' : 'Invoice'
+		const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+		const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+		const introLine = isQuote
+			? 'Please find the attached Quote. You can also view and accept the quote using the link below.'
+			: 'Please find the attached Invoice. You can also view and pay the invoice using the link below.'
+
+		return renderEmailShell({
+			companyName: branding.companyName,
+			companyLogoUrl: branding.companyLogoUrl,
+			headerGradient: EMAIL_THEME.headerBackground,
+			title: `${docLabel} ready`,
+			subtitle: clientName ? `For ${escapeHtml(clientName)}` : undefined,
+			trackingPixelsEnabled: false,
+			appDomain: branding.appDomain,
+			bodyContent: `
+			<p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
+				Hi <strong>${escapeHtml(recipientName)}</strong>,
+			</p>
+
+			<p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+				${escapeHtml(introLine)}
+			</p>
+
+			<p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+				If you have any questions, please don't hesitate to get in touch.
+			</p>
+
+			<div style="${cardStyle}">
+				<div style="font-size: 15px; color: #111827; padding: 4px 0;">
+					<strong>${escapeHtml(docLabel)} ${escapeHtml(docNumber)}</strong>
+				</div>
+				${projectTitle ? `
+					<div style="font-size: 14px; color: #374151; padding: 2px 0;">
+						Project: ${escapeHtml(projectTitle)}
+					</div>
+				` : ''}
+			</div>
+
+			${notes ? `
+				<div style="${cardStyle}">
+					<div style="font-size: 14px; color: #111827; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(notes)}</div>
+				</div>
+			` : ''}
+
+			<div style="text-align: center; margin: 28px 0;">
+				<a href="${escapeHtml(shareUrl)}" style="${primaryButtonStyle}">
+					View ${escapeHtml(docLabel)}
+				</a>
+			</div>
+
+			<p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
+				If the button doesn’t work, copy and paste this link into your browser:<br />
+				<a href="${escapeHtml(shareUrl)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+			</p>
+			`,
+		})
+	}
+
+	await writeHtml(
+		outDir,
+		'14-client-send-quote.html',
+		renderSalesDocClientEmail({
+			isQuote: true,
+			docNumber: 'Q-2026-0012',
+			recipientName: 'SimbaMcSimba',
+			clientName: 'SimbaMcSimba Industries',
+			projectTitle: 'Winter Campaign',
+			notes: 'Optional note from the studio goes here.',
+			shareUrl: 'http://localhost:3000/sales/view/demo-quote',
+		})
+	)
+
+	await writeHtml(
+		outDir,
+		'15-client-send-invoice.html',
+		renderSalesDocClientEmail({
+			isQuote: false,
+			docNumber: 'INV-2026-0007',
+			recipientName: 'SimbaMcSimba',
+			clientName: 'SimbaMcSimba Industries',
+			projectTitle: 'Winter Campaign',
+			notes: 'Payment is due within 7 days.',
+			shareUrl: 'http://localhost:3000/sales/view/demo-invoice',
 		})
 	)
 

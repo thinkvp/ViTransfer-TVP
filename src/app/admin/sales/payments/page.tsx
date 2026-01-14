@@ -20,6 +20,7 @@ import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, dollarsToCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { apiFetch } from '@/lib/api-client'
 
 type PaymentFilter = 'LINKED' | 'UNLINKED'
 
@@ -43,6 +44,7 @@ export default function SalesPaymentsPage() {
   const [amount, setAmount] = useState<string>('')
   const [method, setMethod] = useState<string>('Bank transfer')
   const [reference, setReference] = useState<string>('')
+  const [stripePaidCentsByInvoiceId, setStripePaidCentsByInvoiceId] = useState<Record<string, number>>({})
 
   useEffect(() => {
     const run = async () => {
@@ -93,6 +95,40 @@ export default function SalesPaymentsPage() {
     }
   }, [tick])
 
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      const ids = invoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
+      if (!ids.length) {
+        if (!cancelled) setStripePaidCentsByInvoiceId({})
+        return
+      }
+
+      try {
+        const res = await apiFetch(`/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`, { cache: 'no-store' })
+        if (!res.ok) return
+        const json = (await res.json().catch(() => null)) as { payments?: unknown[] } | null
+        const list = Array.isArray(json?.payments) ? json!.payments! : []
+
+        const next: Record<string, number> = {}
+        for (const p of list as any[]) {
+          const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
+          const amount = Number(p?.invoiceAmountCents)
+          if (!invoiceDocId || !Number.isFinite(amount)) continue
+          next[invoiceDocId] = (next[invoiceDocId] ?? 0) + Math.max(0, Math.trunc(amount))
+        }
+
+        if (!cancelled) setStripePaidCentsByInvoiceId(next)
+      } catch {
+        // ignore
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [invoices])
+
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const invoiceNumberById = useMemo(() => Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber])), [invoices])
 
@@ -103,12 +139,14 @@ export default function SalesPaymentsPage() {
       const subtotal = sumLineItemsSubtotal(inv.items)
       const tax = sumLineItemsTax(inv.items, taxRatePercent)
       const total = subtotal + tax
-      const paid = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const localPaid = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const stripePaid = stripePaidCentsByInvoiceId[inv.id] ?? 0
+      const paid = localPaid + stripePaid
       byId.set(inv.id, { totalCents: total, paidCents: paid, balanceCents: Math.max(0, total - paid) })
     }
 
     return byId
-  }, [invoices, payments, taxRatePercent])
+  }, [invoices, payments, stripePaidCentsByInvoiceId, taxRatePercent])
 
   const unpaidInvoices = useMemo(() => {
     return invoices.filter((inv) => (invoiceTotals.get(inv.id)?.balanceCents ?? 0) > 0)

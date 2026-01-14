@@ -1,0 +1,225 @@
+import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'crypto'
+import Stripe from 'stripe'
+import { prisma } from '@/lib/db'
+import { sendPushNotification } from '@/lib/push-notifications'
+import { sendAdminInvoicePaidEmail } from '@/lib/email'
+import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+function endOfDayLocal(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+}
+
+function addDaysLocal(d: Date, days: number): Date {
+  const out = new Date(d)
+  out.setDate(out.getDate() + days)
+  return out
+}
+
+function parseIntSafe(v: unknown): number | null {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return null
+  return Math.trunc(n)
+}
+
+export async function POST(request: NextRequest) {
+  const webhookSecret = typeof process.env.STRIPE_WEBHOOK_SECRET === 'string' ? process.env.STRIPE_WEBHOOK_SECRET.trim() : ''
+  if (!webhookSecret) {
+    return NextResponse.json({ error: 'STRIPE_WEBHOOK_SECRET is not configured' }, { status: 500 })
+  }
+
+  const sig = request.headers.get('stripe-signature')
+  if (!sig) return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 })
+
+  const rawBody = await request.text()
+
+  // API key is not used for signature verification, but Stripe SDK requires a non-empty string.
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY?.trim() || 'sk_test_dummy', {
+    apiVersion: '2023-10-16',
+    typescript: true,
+  })
+
+  let event: Stripe.Event
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Invalid signature'
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as Stripe.Checkout.Session
+
+    const metadata = (session.metadata ?? {}) as Record<string, string>
+    const shareToken = metadata.shareToken
+    const docId = metadata.docId
+    const invoiceNumber = metadata.invoiceNumber
+
+    if (!shareToken || !docId || !invoiceNumber) {
+      return NextResponse.json({ error: 'Missing required metadata' }, { status: 400 })
+    }
+
+    const currency = (metadata.currency || session.currency || 'aud').toString().toUpperCase()
+
+    const invoiceAmountCents = parseIntSafe(metadata.invoiceAmountCents)
+    const feeAmountCents = parseIntSafe(metadata.feeAmountCents) ?? 0
+    const totalAmountCents = parseIntSafe(metadata.totalAmountCents) ?? parseIntSafe(session.amount_total) ?? null
+
+    if (invoiceAmountCents == null || totalAmountCents == null) {
+      return NextResponse.json({ error: 'Missing amount metadata' }, { status: 400 })
+    }
+
+    // Idempotency via unique session id.
+    const sessionId = typeof session.id === 'string' ? session.id : ''
+    if (!sessionId) return NextResponse.json({ error: 'Missing session id' }, { status: 400 })
+
+    const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null
+
+    const recordId = crypto.randomUUID()
+
+    const inserted = await prisma.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO "SalesInvoiceStripePayment" (
+        "id",
+        "shareToken",
+        "invoiceDocId",
+        "invoiceNumber",
+        "currency",
+        "invoiceAmountCents",
+        "feeAmountCents",
+        "totalAmountCents",
+        "stripeCheckoutSessionId",
+        "stripePaymentIntentId",
+        "createdAt"
+      )
+      VALUES (
+        ${recordId},
+        ${shareToken},
+        ${docId},
+        ${invoiceNumber},
+        ${currency},
+        ${invoiceAmountCents},
+        ${feeAmountCents},
+        ${totalAmountCents},
+        ${sessionId},
+        ${paymentIntentId},
+        NOW()
+      )
+      ON CONFLICT ("stripeCheckoutSessionId") DO NOTHING
+      RETURNING "id"
+    `
+
+    const didInsert = Array.isArray(inserted) && inserted.length > 0
+
+    // Best-effort: mark the public invoice snapshot as paid.
+    const paidAtIso = new Date().toISOString()
+    const paidAtYmd = paidAtIso.slice(0, 10)
+
+    const expiresAt = addDaysLocal(endOfDayLocal(new Date()), 30)
+
+    const existingShare = await prisma.salesDocumentShare.findUnique({
+      where: { token: shareToken },
+      select: { docJson: true, clientName: true, projectTitle: true, docNumber: true },
+    }).catch(() => null)
+
+    const currentDoc = (existingShare?.docJson ?? {}) as any
+    const nextDoc = {
+      ...currentDoc,
+      status: 'PAID',
+      invoicePaidAt: paidAtYmd,
+      paidAt: paidAtIso,
+      stripePaymentIntentId: paymentIntentId,
+    }
+
+    await prisma.salesDocumentShare
+      .update({
+        where: { token: shareToken },
+        data: {
+          docJson: nextDoc,
+          expiresAt,
+        },
+      })
+      .catch(() => {})
+
+    // Notifications: only on first insert for this Checkout Session.
+    if (didInsert) {
+      const projectId = typeof currentDoc?.projectId === 'string' ? currentDoc.projectId : null
+      const clientName = typeof existingShare?.clientName === 'string' ? existingShare.clientName : null
+      const projectTitle = typeof existingShare?.projectTitle === 'string' ? existingShare.projectTitle : null
+      const docNumberSafe = typeof existingShare?.docNumber === 'string' ? existingShare.docNumber : invoiceNumber
+
+      await sendPushNotification({
+        type: 'SALES_INVOICE_PAID',
+        projectId: projectId || undefined,
+        projectName: projectTitle || undefined,
+        title: 'Invoice Paid',
+        message: `${docNumberSafe} was paid via Stripe`,
+        details: {
+          'Invoice': docNumberSafe,
+          'Client': clientName || undefined,
+          'Project': projectTitle || undefined,
+          'Currency': currency,
+          'Amount (invoice)': invoiceAmountCents,
+          'Amount (total)': totalAmountCents,
+          'Payment Intent': paymentIntentId || undefined,
+        },
+      }).catch(() => {})
+
+      if (projectId) {
+        const assignments = await prisma.projectUser.findMany({
+          where: {
+            projectId,
+            receiveNotifications: true,
+          },
+          select: {
+            user: {
+              select: {
+                email: true,
+                role: true,
+                appRole: { select: { isSystemAdmin: true, permissions: true } },
+              },
+            },
+          },
+        }).catch(() => [])
+
+        const adminEmails = Array.from(new Set(
+          (assignments || [])
+            .map((a: any) => a?.user)
+            .filter((u: any) => u && typeof u.email === 'string' && u.email.trim())
+            .filter((u: any) => u.role === 'ADMIN')
+            .filter((u: any) => {
+              const isSystemAdmin = u?.appRole?.isSystemAdmin === true
+              const perms = isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(u?.appRole?.permissions)
+              return canSeeMenu(perms, 'sales')
+            })
+            .map((u: any) => u.email.trim())
+            .filter(Boolean)
+        ))
+
+        const appDomain = (process.env.APP_DOMAIN || '').trim()
+        const publicInvoiceUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/sales/view/${encodeURIComponent(shareToken)}` : null
+        const projectAdminUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/admin/projects/${encodeURIComponent(projectId)}` : null
+
+        if (adminEmails.length > 0) {
+          await sendAdminInvoicePaidEmail({
+            adminEmails,
+            projectTitle,
+            invoiceNumber: docNumberSafe,
+            clientName,
+            currency,
+            invoiceAmountCents,
+            feeAmountCents,
+            totalAmountCents,
+            paidAtYmd,
+            publicInvoiceUrl,
+            projectAdminUrl,
+          }).catch(() => {})
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({ received: true })
+}

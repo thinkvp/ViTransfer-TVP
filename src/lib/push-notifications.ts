@@ -12,6 +12,7 @@ export interface PushNotificationPayload {
     | 'SALES_QUOTE_VIEWED'
     | 'SALES_QUOTE_ACCEPTED'
     | 'SALES_INVOICE_VIEWED'
+    | 'SALES_INVOICE_PAID'
   projectId?: string
   projectName?: string
   title: string
@@ -46,6 +47,7 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'SALES_QUOTE_VIEWED': 'notifySalesQuoteViewed',
       'SALES_QUOTE_ACCEPTED': 'notifySalesQuoteAccepted',
       'SALES_INVOICE_VIEWED': 'notifySalesInvoiceViewed',
+      'SALES_INVOICE_PAID': 'notifySalesInvoicePaid',
     }
 
     const toggleKey = eventToggleMap[payload.type]
@@ -174,6 +176,8 @@ function getPriorityForType(type: string): number {
       return 6 // Medium-High
     case 'SALES_INVOICE_VIEWED':
       return 3 // Low
+    case 'SALES_INVOICE_PAID':
+      return 7 // High
     default:
       return 5
   }

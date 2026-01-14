@@ -21,6 +21,7 @@ import { ArrowDown, ArrowUp, Download, Eye, Filter, Send, Trash2 } from 'lucide-
 import { cn } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
+import { apiFetch } from '@/lib/api-client'
 
 type InvoiceRow = {
   invoice: SalesInvoice
@@ -91,6 +92,18 @@ export default function SalesInvoicesPage() {
   const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
   const [tablePage, setTablePage] = useState(1)
+  const [stripePaidByInvoiceId, setStripePaidByInvoiceId] = useState<Record<string, { paidCents: number; latestYmd: string | null }>>({})
+
+  type StripePayment = {
+    invoiceDocId: string
+    invoiceAmountCents: number
+    createdAt: string
+  }
+
+  const ymdFromIso = (iso: string): string | null => {
+    const s = typeof iso === 'string' ? iso : ''
+    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null
+  }
 
   useEffect(() => {
     const onFocus = () => {
@@ -145,6 +158,49 @@ export default function SalesInvoicesPage() {
     return { invoices: listInvoices(), payments: listPayments(), taxRatePercent: settings.taxRatePercent, settings }
   }, [tick])
 
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      const ids = invoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
+      if (!ids.length) {
+        if (!cancelled) setStripePaidByInvoiceId({})
+        return
+      }
+
+      try {
+        const res = await apiFetch(`/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`, { cache: 'no-store' })
+        if (!res.ok) return
+        const json = (await res.json().catch(() => null)) as { payments?: StripePayment[] } | null
+        const list = Array.isArray(json?.payments) ? json!.payments! : []
+
+        const next: Record<string, { paidCents: number; latestYmd: string | null }> = {}
+        for (const p of list) {
+          const invoiceDocId = typeof (p as any)?.invoiceDocId === 'string' ? (p as any).invoiceDocId : ''
+          const amount = Number((p as any)?.invoiceAmountCents)
+          if (!invoiceDocId || !Number.isFinite(amount)) continue
+          const paidCents = Math.max(0, Math.trunc(amount))
+          const ymd = ymdFromIso(String((p as any)?.createdAt ?? ''))
+
+          const base = next[invoiceDocId] ?? { paidCents: 0, latestYmd: null }
+          const latestYmd = [base.latestYmd, ymd]
+            .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+            .sort()
+            .at(-1)
+            ?? null
+          next[invoiceDocId] = { paidCents: base.paidCents + paidCents, latestYmd }
+        }
+
+        if (!cancelled) setStripePaidByInvoiceId(next)
+      } catch {
+        // ignore
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [invoices])
+
   const onDownload = async (inv: SalesInvoice) => {
     const clientDetails = inv.clientId ? await fetchClientDetails(inv.clientId).catch(() => null) : null
     await downloadInvoicePdf(inv, settings, {
@@ -158,15 +214,24 @@ export default function SalesInvoicesPage() {
     const relevantPayments = payments.filter((p) => p.invoiceId === inv.id)
     const totalCents = invoiceTotalCents(inv)
     const paidCents = relevantPayments.reduce((acc, p) => acc + p.amountCents, 0)
-    const balanceCents = Math.max(0, totalCents - paidCents)
+    const stripeInfo = stripePaidByInvoiceId[inv.id]
+    const paidWithStripeCents = stripeInfo?.paidCents ?? 0
+    const balanceCents = Math.max(0, totalCents - (paidCents + paidWithStripeCents))
     const latestPaymentDate = relevantPayments
       .map((p) => p.paymentDate)
       .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
       .sort()
       .at(-1)
 
+    const latestStripeYmd = stripeInfo?.latestYmd ?? null
+    const latestAnyPaymentYmd = [latestPaymentDate, latestStripeYmd]
+      .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+      .sort()
+      .at(-1)
+      ?? null
+
     const invoicePaidAt = (totalCents > 0 && balanceCents <= 0)
-      ? (latestPaymentDate ?? new Date().toISOString().slice(0, 10))
+      ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
       : null
 
     const url = await createSalesDocShareUrl({
@@ -181,8 +246,12 @@ export default function SalesInvoicesPage() {
   }
 
   const invoicePaidCents = useCallback(
-    (inv: SalesInvoice): number => payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0),
-    [payments]
+    (inv: SalesInvoice): number => {
+      const localPaid = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const stripePaid = stripePaidByInvoiceId[inv.id]?.paidCents ?? 0
+      return localPaid + stripePaid
+    },
+    [payments, stripePaidByInvoiceId]
   )
 
   const invoiceTotalCents = useCallback(

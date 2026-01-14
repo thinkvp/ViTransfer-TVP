@@ -90,6 +90,10 @@ services:
       QBO_SANDBOX: ${QBO_SANDBOX:-false}
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
+
+      # Stripe Checkout (optional)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     ports:
       - "${APP_PORT:-4321}:4321"
     volumes:

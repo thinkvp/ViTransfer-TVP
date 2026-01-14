@@ -1,4 +1,7 @@
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
+import { prisma } from '@/lib/db'
+import { getFilePath } from '@/lib/storage'
+import fs from 'node:fs/promises'
 import {
   calcLineSubtotalCents,
   calcLineTaxCents,
@@ -12,6 +15,7 @@ export type PdfPartyInfo = {
   clientAddress?: string
   projectTitle?: string
   publicQuoteUrl?: string
+  publicInvoiceUrl?: string
 }
 
 function wrapUrl(url: string, maxWidth: number, font: any, size: number): string[] {
@@ -137,18 +141,49 @@ function detectImageKind(contentType: string | null, bytes: Uint8Array): 'png' |
   return null
 }
 
+function contentTypeFromPath(path: string): string {
+  const lower = path.toLowerCase()
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  return 'application/octet-stream'
+}
+
 async function tryEmbedCompanyLogo(doc: any, opts?: { baseUrl?: string }): Promise<EmbeddedLogo | null> {
   try {
-    const baseUrl = typeof opts?.baseUrl === 'string' ? opts.baseUrl.trim() : ''
-    const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/branding/logo` : '/api/branding/logo'
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) return null
+    // Prefer reading the logo from storage directly (most reliable in container deployments).
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true },
+    }).catch(() => null)
 
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    if (!bytes.length) return null
+    const mode = settings?.companyLogoMode || null
+    const logoPath = typeof settings?.companyLogoPath === 'string' ? settings.companyLogoPath : null
 
-    const kind = detectImageKind(res.headers.get('content-type'), bytes)
-    if (!kind) return null
+    let bytes: Uint8Array | null = null
+    let kind: 'png' | 'jpg' | null = null
+
+    if (mode === 'UPLOAD' && logoPath) {
+      const fullPath = getFilePath(logoPath)
+      const buf = await fs.readFile(fullPath)
+      bytes = new Uint8Array(buf)
+      if (!bytes.length) return null
+      kind = detectImageKind(contentTypeFromPath(logoPath), bytes)
+    }
+
+    // Fallback to hitting the branding logo endpoint (handles LINK mode, caching, etc).
+    if (!bytes) {
+      const baseUrl = typeof opts?.baseUrl === 'string' ? opts.baseUrl.trim() : ''
+      const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/branding/logo` : '/api/branding/logo'
+      const res = await fetch(url, { cache: 'no-store' })
+      if (!res.ok) return null
+
+      bytes = new Uint8Array(await res.arrayBuffer())
+      if (!bytes.length) return null
+
+      kind = detectImageKind(res.headers.get('content-type'), bytes)
+    }
+
+    if (!bytes || !kind) return null
 
     const image = kind === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes)
     const dims = image.scale(1)
@@ -312,7 +347,8 @@ async function buildQuotePdfBytes(
   }
 
   const headerTopY = 795
-  const companyStartY = logo ? headerTopY - logo.drawHeight - 10 : headerTopY
+  const reservedLogoHeight = Math.max(logo?.drawHeight ?? 0, 42)
+  const companyStartY = headerTopY - reservedLogoHeight - 10
   const headerRowStartY = companyStartY
 
   const companyLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
@@ -553,7 +589,7 @@ async function buildInvoicePdfBytes(
   info: PdfPartyInfo = {},
   opts?: { baseUrl?: string }
 ): Promise<Uint8Array> {
-  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
+  const { PDFArray, PDFDocument, PDFName, PDFString, StandardFonts, rgb } = await import('pdf-lib')
 
   const doc = await PDFDocument.create()
   let page = doc.addPage([595.28, 841.89]) // A4
@@ -595,6 +631,32 @@ async function buildInvoicePdfBytes(
       yy -= l.size + 5
     }
     return yy
+  }
+
+  const addLinkAnnotation = (x: number, y: number, width: number, height: number, url: string) => {
+    try {
+      const link = doc.context.obj({
+        Type: 'Annot',
+        Subtype: 'Link',
+        Rect: [x, y, x + width, y + height],
+        Border: [0, 0, 0],
+        A: {
+          Type: 'Action',
+          S: 'URI',
+          URI: PDFString.of(url),
+        },
+      })
+      const linkRef = doc.context.register(link)
+      const annotsKey = PDFName.of('Annots')
+      const annots = page.node.lookup(annotsKey, PDFArray)
+      if (annots) {
+        annots.push(linkRef)
+      } else {
+        page.node.set(annotsKey, doc.context.obj([linkRef]))
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const drawDocTitle = () => {
@@ -661,7 +723,8 @@ async function buildInvoicePdfBytes(
   }
 
   const headerTopY = 795
-  const companyStartY = logo ? headerTopY - logo.drawHeight - 10 : headerTopY
+  const reservedLogoHeight = Math.max(logo?.drawHeight ?? 0, 42)
+  const companyStartY = headerTopY - reservedLogoHeight - 10
   const headerRowStartY = companyStartY
 
   const companyLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
@@ -767,6 +830,43 @@ async function buildInvoicePdfBytes(
   drawTotalsLine('Subtotal', centsToDollars(subtotalCents))
   drawTotalsLine('Tax', centsToDollars(taxCents))
   drawTotalsLine('Total', centsToDollars(totalCents), true)
+
+  // Optional pay link (loads the web invoice where payment can be made)
+  if (info.publicInvoiceUrl) {
+    if (y - 70 < bottomMargin) newPage(false)
+    y -= 10
+    drawLeftText('Pay this invoice online', left, y, 10, true, textColor)
+    y -= 18
+
+    const buttonText = 'Pay Invoice'
+    const buttonFontSize = 12
+    const padX = 14
+    const padY = 8
+    const textW = fontBold.widthOfTextAtSize(buttonText, buttonFontSize)
+    const buttonW = Math.min(right - left, textW + padX * 2)
+    const buttonH = buttonFontSize + padY * 2
+    const buttonX = left
+    const buttonY = y - buttonH
+
+    page.drawRectangle({
+      x: buttonX,
+      y: buttonY,
+      width: buttonW,
+      height: buttonH,
+      color: rgb(0.92, 0.98, 0.95),
+      borderColor: rgb(0.2, 0.6, 0.4),
+      borderWidth: 1,
+    })
+    page.drawText(buttonText, {
+      x: buttonX + padX,
+      y: buttonY + padY,
+      size: buttonFontSize,
+      font: fontBold,
+      color: rgb(0.08, 0.35, 0.22),
+    })
+    addLinkAnnotation(buttonX, buttonY, buttonW, buttonH, info.publicInvoiceUrl)
+    y = buttonY - 14
+  }
 
   // Notes
   if (invoice.notes?.trim()) {
