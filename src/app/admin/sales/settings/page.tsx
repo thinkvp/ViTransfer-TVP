@@ -200,7 +200,7 @@ export default function SalesSettingsPage() {
             vitransfer: {
               ingestedQuotes: upserted,
               skippedQuotesMissingClient: skippedMissingClient,
-              note: 'Imported quotes were saved as native Sales quotes (browser storage).',
+              note: 'Imported quotes were saved to native Sales (local browser cache) and synced to the server when possible.',
             },
           }
         }
@@ -263,7 +263,7 @@ export default function SalesSettingsPage() {
             vitransfer: {
               ingestedInvoices: upserted,
               skippedInvoicesMissingClient: skippedMissingClient,
-              note: 'Imported invoices were saved as native Sales invoices (browser storage).',
+              note: 'Imported invoices were saved to native Sales (local browser cache) and synced to the server when possible.',
             },
           }
         }
@@ -318,7 +318,7 @@ export default function SalesSettingsPage() {
               ingestedPayments: upserted,
               skippedPaymentsMissingNativeInvoice: skippedMissingNativeInvoice,
               skippedPaymentsMissingAmount: skippedMissingAmount,
-              note: 'Imported payments were saved as native Sales payments (browser storage).',
+              note: 'Imported payments were saved to native Sales (local browser cache) and synced to the server when possible.',
             },
           }
         }
