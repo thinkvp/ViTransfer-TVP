@@ -1,6 +1,7 @@
 import { apiFetch } from '@/lib/api-client'
 import type { SalesInvoice, SalesPayment, SalesQuote, SalesSettings } from '@/lib/sales/types'
 import {
+  SALES_NATIVE_STORE_CHANGED_EVENT,
   getSalesSeqState,
   getSalesSettings,
   listInvoices,
@@ -119,4 +120,84 @@ export async function pullAndHydrateSalesNativeStore(): Promise<{ hydrated: bool
 
   hydrateSalesNativeStoreFromSnapshot(data)
   return { hydrated: true, updatedAt }
+}
+
+let autoSyncInstalled = false
+let readyToPush = false
+let pushTimer: ReturnType<typeof setTimeout> | null = null
+let pushInFlight: Promise<void> | null = null
+let pushQueued = false
+
+async function flushPush(): Promise<void> {
+  if (!readyToPush) return
+
+  if (pushInFlight) {
+    pushQueued = true
+    return
+  }
+
+  pushInFlight = (async () => {
+    try {
+      await pushSalesNativeStoreToServer()
+    } catch {
+      // best-effort
+    }
+  })()
+
+  try {
+    await pushInFlight
+  } finally {
+    pushInFlight = null
+    if (pushQueued) {
+      pushQueued = false
+      scheduleSalesNativeStorePush()
+    }
+  }
+}
+
+export function scheduleSalesNativeStorePush(debounceMs: number = 800): void {
+  if (!readyToPush) return
+  if (pushTimer) clearTimeout(pushTimer)
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    void flushPush()
+  }, debounceMs)
+}
+
+export function installSalesNativeStoreAutoSync(options?: { debounceMs?: number }): () => void {
+  if (typeof window === 'undefined') return () => {}
+  if (autoSyncInstalled) return () => {}
+
+  autoSyncInstalled = true
+  readyToPush = false
+
+  const debounceMs = typeof options?.debounceMs === 'number' && options.debounceMs >= 0 ? options.debounceMs : 800
+
+  const onChanged = () => scheduleSalesNativeStorePush(debounceMs)
+  window.addEventListener(SALES_NATIVE_STORE_CHANGED_EVENT, onChanged)
+
+  ;(async () => {
+    try {
+      await pullAndHydrateSalesNativeStore()
+    } catch {
+      // best-effort
+    } finally {
+      // Even if pull fails (offline), allow future pushes.
+      readyToPush = true
+    }
+  })()
+
+  return () => {
+    try {
+      window.removeEventListener(SALES_NATIVE_STORE_CHANGED_EVENT, onChanged)
+    } catch {
+      // ignore
+    }
+    autoSyncInstalled = false
+    readyToPush = false
+    if (pushTimer) {
+      clearTimeout(pushTimer)
+      pushTimer = null
+    }
+  }
 }

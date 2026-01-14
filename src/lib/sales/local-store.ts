@@ -1,5 +1,7 @@
 import type { SalesInvoice, SalesPayment, SalesQuote, SalesSettings } from '@/lib/sales/types'
 
+export const SALES_NATIVE_STORE_CHANGED_EVENT = 'vitransfer:sales-native-store-changed'
+
 const KEYS = {
   quotes: 'vitransfer.sales.quotes',
   invoices: 'vitransfer.sales.invoices',
@@ -40,6 +42,15 @@ function assertBrowser(): void {
   if (!isBrowser()) throw new Error('Sales storage is only available in the browser')
 }
 
+function emitSalesNativeStoreChanged(): void {
+  if (!isBrowser()) return
+  try {
+    window.dispatchEvent(new CustomEvent(SALES_NATIVE_STORE_CHANGED_EVENT))
+  } catch {
+    // ignore
+  }
+}
+
 function readSeq(): SeqState {
   if (!isBrowser()) return { quote: 0, invoice: 0 }
   return safeJsonParse<SeqState>(localStorage.getItem(KEYS.seq), { quote: 0, invoice: 0 })
@@ -48,6 +59,7 @@ function readSeq(): SeqState {
 function writeSeq(next: SeqState): void {
   assertBrowser()
   localStorage.setItem(KEYS.seq, JSON.stringify(next))
+  emitSalesNativeStoreChanged()
 }
 
 export function getSalesSeqState(): SeqState {
@@ -80,6 +92,7 @@ function readList<T>(key: string): T[] {
 function writeList<T>(key: string, list: T[]): void {
   assertBrowser()
   localStorage.setItem(key, JSON.stringify(list))
+  emitSalesNativeStoreChanged()
 }
 
 export function listQuotes(): SalesQuote[] {
@@ -312,6 +325,7 @@ export function saveSalesSettings(patch: Partial<SalesSettings>): SalesSettings 
     updatedAt: nowIso(),
   }
   localStorage.setItem(KEYS.settings, JSON.stringify(next))
+  emitSalesNativeStoreChanged()
   return next
 }
 

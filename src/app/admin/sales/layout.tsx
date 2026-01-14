@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { DollarSign } from 'lucide-react'
+import { useEffect } from 'react'
+import { installSalesNativeStoreAutoSync } from '@/lib/sales/native-store-sync'
 
 const NAV = [
   { href: '/admin/sales', label: 'Dashboard' },
@@ -14,6 +16,10 @@ const NAV = [
 
 export default function SalesLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+
+  useEffect(() => {
+    return installSalesNativeStoreAutoSync({ debounceMs: 800 })
+  }, [])
 
   return (
     <div className="flex-1 min-h-0 bg-background">
