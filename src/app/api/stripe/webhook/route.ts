@@ -167,26 +167,49 @@ export async function POST(request: NextRequest) {
         },
       }).catch(() => {})
 
-      if (projectId) {
-        const assignments = await prisma.projectUser.findMany({
-          where: {
-            projectId,
-            receiveNotifications: true,
-          },
-          select: {
-            user: {
-              select: {
-                email: true,
-                role: true,
-                appRole: { select: { isSystemAdmin: true, permissions: true } },
+      // Email: send to all admins who can access the Sales menu.
+      // (Project assignment is not required; otherwise admins may miss invoice paid events.)
+      try {
+        const appDomain = (process.env.APP_DOMAIN || '').trim()
+        const publicInvoiceUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/sales/view/${encodeURIComponent(shareToken)}` : null
+        const projectAdminUrl = (appDomain && projectId)
+          ? `${appDomain.replace(/\/$/, '')}/admin/projects/${encodeURIComponent(projectId)}`
+          : null
+
+        // If the invoice belongs to a project, include project-assigned admins who opted into notifications.
+        const assigned = projectId
+          ? await prisma.projectUser.findMany({
+              where: {
+                projectId,
+                receiveNotifications: true,
               },
-            },
+              select: {
+                user: {
+                  select: {
+                    email: true,
+                    role: true,
+                    appRole: { select: { isSystemAdmin: true, permissions: true } },
+                  },
+                },
+              },
+            }).catch(() => [])
+          : []
+
+        const globalAdmins = await prisma.user.findMany({
+          select: {
+            email: true,
+            role: true,
+            appRole: { select: { isSystemAdmin: true, permissions: true } },
           },
         }).catch(() => [])
 
+        const candidates = [
+          ...(assigned || []).map((a: any) => a?.user).filter(Boolean),
+          ...(globalAdmins || []),
+        ]
+
         const adminEmails = Array.from(new Set(
-          (assignments || [])
-            .map((a: any) => a?.user)
+          candidates
             .filter((u: any) => u && typeof u.email === 'string' && u.email.trim())
             .filter((u: any) => u.role === 'ADMIN')
             .filter((u: any) => {
@@ -198,12 +221,10 @@ export async function POST(request: NextRequest) {
             .filter(Boolean)
         ))
 
-        const appDomain = (process.env.APP_DOMAIN || '').trim()
-        const publicInvoiceUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/sales/view/${encodeURIComponent(shareToken)}` : null
-        const projectAdminUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/admin/projects/${encodeURIComponent(projectId)}` : null
-
-        if (adminEmails.length > 0) {
-          await sendAdminInvoicePaidEmail({
+        if (adminEmails.length === 0) {
+          console.warn('[STRIPE_WEBHOOK] No admin recipients for invoice paid email', { projectId, shareToken })
+        } else {
+          const result = await sendAdminInvoicePaidEmail({
             adminEmails,
             projectTitle,
             invoiceNumber: docNumberSafe,
@@ -215,8 +236,14 @@ export async function POST(request: NextRequest) {
             paidAtYmd,
             publicInvoiceUrl,
             projectAdminUrl,
-          }).catch(() => {})
+          })
+
+          if (!result?.success) {
+            console.error('[STRIPE_WEBHOOK] Invoice paid email send failed', { message: result?.message })
+          }
         }
+      } catch (e) {
+        console.error('[STRIPE_WEBHOOK] Unexpected error sending invoice paid email', e)
       }
     }
   }

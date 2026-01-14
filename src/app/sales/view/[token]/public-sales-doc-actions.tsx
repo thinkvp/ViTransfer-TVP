@@ -108,10 +108,12 @@ export default function PublicSalesDocActions(props: Props) {
     }
   }, [paying, props.canPayInvoice, props.token])
 
+  const payLabel = typeof props.payLabel === 'string' && props.payLabel.trim() ? props.payLabel.trim() : null
+
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {props.type === 'INVOICE' && props.canPayInvoice && (
-        <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {props.type === 'INVOICE' && props.canPayInvoice && (
           <Button
             type="button"
             onClick={() => void onPay()}
@@ -121,31 +123,34 @@ export default function PublicSalesDocActions(props: Props) {
             <CreditCard className="h-4 w-4 mr-2" />
             {paying ? 'Redirecting…' : 'Pay Invoice'}
           </Button>
-          {typeof props.payLabel === 'string' && props.payLabel.trim() && (
-            <div className="text-xs text-muted-foreground max-w-[320px] text-right">{props.payLabel.trim()}</div>
-          )}
-        </div>
-      )}
-      {props.type === 'QUOTE' && props.canAcceptQuote && (
+        )}
+
+        {props.type === 'QUOTE' && props.canAcceptQuote && (
+          <Button
+            type="button"
+            onClick={() => void onAccept()}
+            disabled={accepting}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            {accepting ? 'Accepting…' : 'Accept Quote'}
+          </Button>
+        )}
+
         <Button
           type="button"
-          onClick={() => void onAccept()}
-          disabled={accepting}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          onClick={() => void onDownload()}
+          disabled={downloading}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
         >
-          <CheckCircle2 className="h-4 w-4 mr-2" />
-          {accepting ? 'Accepting…' : 'Accept Quote'}
+          <Download className="h-4 w-4 mr-2" />
+          {downloading ? 'Preparing…' : 'Download PDF'}
         </Button>
+      </div>
+
+      {props.type === 'INVOICE' && props.canPayInvoice && payLabel && (
+        <div className="text-xs text-muted-foreground max-w-[340px] text-right">{payLabel}</div>
       )}
-      <Button
-        type="button"
-        onClick={() => void onDownload()}
-        disabled={downloading}
-        className="bg-blue-600 hover:bg-blue-700 text-white"
-      >
-        <Download className="h-4 w-4 mr-2" />
-        {downloading ? 'Preparing…' : 'Download PDF'}
-      </Button>
     </div>
   )
 }

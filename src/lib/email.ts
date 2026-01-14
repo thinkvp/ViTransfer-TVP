@@ -1427,11 +1427,31 @@ export async function sendAdminInvoicePaidEmail({
   })
 
   const results = await Promise.allSettled(promises)
-  const successCount = results.filter((r) => r.status === 'fulfilled').length
+  const successCount = results.filter((r) => r.status === 'fulfilled' && r.value?.success === true).length
+  const failureCount = uniqueEmails.length - successCount
+  const failureSummaries = results
+    .map((r, idx) => {
+      const email = uniqueEmails[idx] ?? '(unknown)'
+      if (r.status === 'rejected') {
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason || 'Unknown error')
+        return `${email}: ${msg}`
+      }
+
+      if (r.value?.success !== true) {
+        const msg = typeof r.value?.error === 'string' ? r.value.error : 'Failed to send'
+        return `${email}: ${msg}`
+      }
+
+      return null
+    })
+    .filter(Boolean)
+    .slice(0, 3)
 
   return {
     success: successCount > 0,
-    message: `Sent to ${successCount}/${uniqueEmails.length} admins`,
+    message: failureCount > 0
+      ? `Sent to ${successCount}/${uniqueEmails.length} admins (failed ${failureCount}). ${failureSummaries.length ? `Examples: ${failureSummaries.join(' | ')}` : ''}`.trim()
+      : `Sent to ${successCount}/${uniqueEmails.length} admins`,
   }
 }
 

@@ -1,8 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api-client'
+
+const MAX_ENTRIES = 30
+const PAGE_SIZE = 10
 
 type TrackingPayload = {
   share: {
@@ -39,6 +43,8 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
   const [data, setData] = useState<TrackingPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [viewsPage, setViewsPage] = useState(1)
+  const [emailsPage, setEmailsPage] = useState(1)
 
   useEffect(() => {
     let cancelled = false
@@ -47,7 +53,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
       setLoading(true)
       setError(null)
       try {
-        const res = await apiFetch(`/api/admin/sales/tracking/${shareToken}`, { cache: 'no-store' })
+        const res = await apiFetch(`/api/admin/sales/tracking/${shareToken}?limit=${MAX_ENTRIES}`, { cache: 'no-store' })
         if (!res.ok) {
           const msg = (await res.json().catch(() => null)) as { error?: string } | null
           throw new Error(msg?.error || `Failed to load tracking (${res.status})`)
@@ -66,9 +72,38 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
     }
   }, [refreshKey, shareToken])
 
-  const openedCount = useMemo(() => (data?.emails || []).filter((e) => e.openedAt).length, [data])
-  const emailCount = data?.emails?.length || 0
-  const viewCount = data?.views?.length || 0
+  useEffect(() => {
+    setViewsPage(1)
+    setEmailsPage(1)
+  }, [data?.share?.token])
+
+  const views = useMemo(() => (data?.views || []).slice(0, MAX_ENTRIES), [data])
+  const emails = useMemo(() => (data?.emails || []).slice(0, MAX_ENTRIES), [data])
+
+  const viewCount = views.length
+  const emailCount = emails.length
+  const openedCount = useMemo(() => emails.filter((e) => e.openedAt).length, [emails])
+
+  const viewTotalPages = Math.max(1, Math.ceil(viewCount / PAGE_SIZE))
+  const emailTotalPages = Math.max(1, Math.ceil(emailCount / PAGE_SIZE))
+
+  useEffect(() => {
+    setViewsPage((p) => Math.min(Math.max(1, p), viewTotalPages))
+  }, [viewTotalPages])
+
+  useEffect(() => {
+    setEmailsPage((p) => Math.min(Math.max(1, p), emailTotalPages))
+  }, [emailTotalPages])
+
+  const visibleViews = useMemo(() => {
+    const start = (viewsPage - 1) * PAGE_SIZE
+    return views.slice(start, start + PAGE_SIZE)
+  }, [views, viewsPage])
+
+  const visibleEmails = useMemo(() => {
+    const start = (emailsPage - 1) * PAGE_SIZE
+    return emails.slice(start, start + PAGE_SIZE)
+  }, [emails, emailsPage])
 
   return (
     <Card>
@@ -83,6 +118,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
           <div className="text-right text-sm text-muted-foreground">
             <div>Emails: {emailCount} (opened {openedCount})</div>
             <div>Views: {viewCount}</div>
+            <div className="text-xs">Showing up to {MAX_ENTRIES}</div>
           </div>
         </div>
       </CardHeader>
@@ -118,7 +154,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
               <span className="text-xs text-gray-500">Token: {data.share.token.slice(0, 8)}…</span>
             </div>
 
-            {data.views.length === 0 ? (
+            {views.length === 0 ? (
               <div className="text-sm text-gray-600">No views recorded yet.</div>
             ) : (
               <div className="overflow-x-auto">
@@ -131,7 +167,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                     </tr>
                   </thead>
                   <tbody>
-                    {data.views.map((v) => (
+                    {visibleViews.map((v) => (
                       <tr key={v.id} className="border-b last:border-0">
                         <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(v.createdAt)}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{v.ipAddress || '—'}</td>
@@ -142,6 +178,32 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                     ))}
                   </tbody>
                 </table>
+
+                {viewTotalPages > 1 && (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground tabular-nums">Page {viewsPage} of {viewTotalPages}</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setViewsPage((p) => Math.max(1, p - 1))}
+                        disabled={viewsPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setViewsPage((p) => Math.min(viewTotalPages, p + 1))}
+                        disabled={viewsPage === viewTotalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -152,7 +214,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
               <span className="text-xs text-gray-500">Opens require tracking pixels</span>
             </div>
 
-            {data.emails.length === 0 ? (
+            {emails.length === 0 ? (
               <div className="text-sm text-gray-600">No emails recorded yet.</div>
             ) : (
               <div className="overflow-x-auto">
@@ -165,7 +227,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                     </tr>
                   </thead>
                   <tbody>
-                    {data.emails.map((e) => (
+                    {visibleEmails.map((e) => (
                       <tr key={e.id} className="border-b last:border-0">
                         <td className="py-2 pr-3 whitespace-nowrap">{e.recipientEmail}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(e.sentAt)}</td>
@@ -174,6 +236,32 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                     ))}
                   </tbody>
                 </table>
+
+                {emailTotalPages > 1 && (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground tabular-nums">Page {emailsPage} of {emailTotalPages}</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEmailsPage((p) => Math.max(1, p - 1))}
+                        disabled={emailsPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEmailsPage((p) => Math.min(emailTotalPages, p + 1))}
+                        disabled={emailsPage === emailTotalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

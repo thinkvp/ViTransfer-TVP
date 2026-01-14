@@ -45,6 +45,7 @@ export default function SalesPaymentsPage() {
   const [method, setMethod] = useState<string>('Bank transfer')
   const [reference, setReference] = useState<string>('')
   const [stripePaidCentsByInvoiceId, setStripePaidCentsByInvoiceId] = useState<Record<string, number>>({})
+  const [stripePayments, setStripePayments] = useState<SalesPayment[]>([])
 
   useEffect(() => {
     const run = async () => {
@@ -101,6 +102,7 @@ export default function SalesPaymentsPage() {
       const ids = invoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
       if (!ids.length) {
         if (!cancelled) setStripePaidCentsByInvoiceId({})
+        if (!cancelled) setStripePayments([])
         return
       }
 
@@ -110,15 +112,49 @@ export default function SalesPaymentsPage() {
         const json = (await res.json().catch(() => null)) as { payments?: unknown[] } | null
         const list = Array.isArray(json?.payments) ? json!.payments! : []
 
-        const next: Record<string, number> = {}
+        const nextPaidByInvoiceId: Record<string, number> = {}
+        const nextPayments: SalesPayment[] = []
+
+        const invoiceById = new Map(invoices.map((inv) => [inv.id, inv]))
+
         for (const p of list as any[]) {
           const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
-          const amount = Number(p?.invoiceAmountCents)
-          if (!invoiceDocId || !Number.isFinite(amount)) continue
-          next[invoiceDocId] = (next[invoiceDocId] ?? 0) + Math.max(0, Math.trunc(amount))
+          const invoiceAmountCents = Number(p?.invoiceAmountCents)
+          if (!invoiceDocId || !Number.isFinite(invoiceAmountCents)) continue
+
+          const normalizedInvoiceCents = Math.max(0, Math.trunc(invoiceAmountCents))
+          nextPaidByInvoiceId[invoiceDocId] = (nextPaidByInvoiceId[invoiceDocId] ?? 0) + normalizedInvoiceCents
+
+          const createdAt = typeof p?.createdAt === 'string' ? p.createdAt : new Date().toISOString()
+          const ymd = /^\d{4}-\d{2}-\d{2}/.test(createdAt) ? createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
+
+          const paymentIntentId = typeof p?.stripePaymentIntentId === 'string' && p.stripePaymentIntentId.trim()
+            ? p.stripePaymentIntentId.trim()
+            : null
+          const sessionId = typeof p?.stripeCheckoutSessionId === 'string' && p.stripeCheckoutSessionId.trim()
+            ? p.stripeCheckoutSessionId.trim()
+            : null
+          const invoiceNumber = typeof p?.invoiceNumber === 'string' ? p.invoiceNumber : ''
+
+          const inv = invoiceById.get(invoiceDocId)
+          const clientId = inv?.clientId ?? null
+
+          const recordId = typeof p?.id === 'string' && p.id.trim() ? p.id.trim() : crypto.randomUUID()
+
+          nextPayments.push({
+            id: `stripe-payment-${recordId}`,
+            paymentDate: ymd,
+            amountCents: normalizedInvoiceCents,
+            method: 'Stripe',
+            reference: paymentIntentId ?? sessionId ?? (invoiceNumber ? `Stripe payment for ${invoiceNumber}` : 'Stripe payment'),
+            clientId,
+            invoiceId: invoiceDocId,
+            createdAt,
+          })
         }
 
-        if (!cancelled) setStripePaidCentsByInvoiceId(next)
+        if (!cancelled) setStripePaidCentsByInvoiceId(nextPaidByInvoiceId)
+        if (!cancelled) setStripePayments(nextPayments)
       } catch {
         // ignore
       }
@@ -128,6 +164,15 @@ export default function SalesPaymentsPage() {
       cancelled = true
     }
   }, [invoices])
+
+  const displayPayments = useMemo(() => {
+    const local = payments
+    if (!stripePayments.length) return local
+    const existingIds = new Set(local.map((p) => p.id))
+    return [...local, ...stripePayments.filter((p) => !existingIds.has(p.id))]
+  }, [payments, stripePayments])
+
+  const isReadOnlyPayment = (p: SalesPayment): boolean => p.id.startsWith('stripe-payment-')
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const invoiceNumberById = useMemo(() => Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber])), [invoices])
@@ -186,14 +231,14 @@ export default function SalesPaymentsPage() {
   }, [filterSelected, recordsPerPage, tableSortDirection, tableSortKey])
 
   const filteredPayments = useMemo(() => {
-    if (filterSelected.size === 0) return payments
-    return payments.filter((p) => {
+    if (filterSelected.size === 0) return displayPayments
+    return displayPayments.filter((p) => {
       const linked = Boolean(p.invoiceId)
       if (linked && filterSelected.has('LINKED')) return true
       if (!linked && filterSelected.has('UNLINKED')) return true
       return false
     })
-  }, [filterSelected, payments])
+  }, [displayPayments, filterSelected])
 
   const sortedPayments = useMemo(() => {
     const dir = tableSortDirection === 'asc' ? 1 : -1
@@ -395,7 +440,7 @@ export default function SalesPaymentsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {payments.length === 0 ? (
+          {displayPayments.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground">No payments yet.</div>
           ) : (
             <div className="rounded-md border border-border bg-card overflow-hidden">
@@ -477,8 +522,9 @@ export default function SalesPaymentsPage() {
                                 size="icon"
                                 variant="destructive"
                                 onClick={() => onDelete(p.id)}
-                                title="Delete"
-                                aria-label="Delete"
+                                disabled={isReadOnlyPayment(p)}
+                                title={isReadOnlyPayment(p) ? 'Stripe payments are read-only' : 'Delete'}
+                                aria-label={isReadOnlyPayment(p) ? 'Read-only payment' : 'Delete'}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

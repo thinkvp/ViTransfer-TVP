@@ -3,6 +3,13 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 
+function parseLimit(searchParams: URLSearchParams): number {
+  const raw = searchParams.get('limit')
+  const n = raw ? Number(raw) : NaN
+  if (!Number.isFinite(n)) return 30
+  return Math.min(30, Math.max(1, Math.trunc(n)))
+}
+
 export async function GET(
   request: NextRequest,
   ctx: { params: Promise<{ token: string }> }
@@ -13,6 +20,8 @@ export async function GET(
   const forbiddenMenu = requireMenuAccess(authResult, 'sales')
   if (forbiddenMenu) return forbiddenMenu
   const { token } = await ctx.params
+
+  const limit = parseLimit(new URL(request.url).searchParams)
 
   const share = await prisma.salesDocumentShare.findUnique({
     where: { token },
@@ -34,7 +43,7 @@ export async function GET(
     prisma.salesDocumentViewEvent.findMany({
       where: { shareToken: token },
       orderBy: { createdAt: 'desc' },
-      take: 200,
+      take: limit,
       select: {
         id: true,
         createdAt: true,
@@ -48,7 +57,7 @@ export async function GET(
         docId: share.docId,
       },
       orderBy: { sentAt: 'desc' },
-      take: 200,
+      take: limit,
       select: {
         id: true,
         token: true,
