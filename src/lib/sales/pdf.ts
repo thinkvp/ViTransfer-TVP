@@ -1,7 +1,4 @@
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
-import { prisma } from '@/lib/db'
-import { getFilePath } from '@/lib/storage'
-import fs from 'node:fs/promises'
 import {
   calcLineSubtotalCents,
   calcLineTaxCents,
@@ -141,67 +138,71 @@ function detectImageKind(contentType: string | null, bytes: Uint8Array): 'png' |
   return null
 }
 
-function contentTypeFromPath(path: string): string {
-  const lower = path.toLowerCase()
-  if (lower.endsWith('.png')) return 'image/png'
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
-  return 'application/octet-stream'
-}
-
 async function tryEmbedCompanyLogo(doc: any, opts?: { baseUrl?: string }): Promise<EmbeddedLogo | null> {
   try {
-    // Prefer reading the logo from storage directly (most reliable in container deployments).
-    const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
-      select: { companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true },
-    }).catch(() => null)
+    const baseUrl = typeof opts?.baseUrl === 'string' ? opts.baseUrl.trim() : ''
+    const isBrowser = typeof window !== 'undefined'
 
-    const mode = settings?.companyLogoMode || null
-    const logoPath = typeof settings?.companyLogoPath === 'string' ? settings.companyLogoPath : null
+    const candidates: string[] = []
+    if (baseUrl) candidates.push(`${baseUrl.replace(/\/$/, '')}/api/branding/logo`)
+    if (isBrowser) {
+      candidates.push('/api/branding/logo')
+    } else {
+      // Container-friendly fallbacks (avoid external TLS/proxy issues).
+      candidates.push('http://localhost:4321/api/branding/logo')
+      candidates.push('http://127.0.0.1:4321/api/branding/logo')
 
-    let bytes: Uint8Array | null = null
-    let kind: 'png' | 'jpg' | null = null
-
-    if (mode === 'UPLOAD' && logoPath) {
-      const fullPath = getFilePath(logoPath)
-      const buf = await fs.readFile(fullPath)
-      bytes = new Uint8Array(buf)
-      if (!bytes.length) return null
-      kind = detectImageKind(contentTypeFromPath(logoPath), bytes)
+      // Last resort: if NEXT_PUBLIC_APP_URL is set to a valid absolute URL, try it.
+      const envUrl = typeof process.env.NEXT_PUBLIC_APP_URL === 'string' ? process.env.NEXT_PUBLIC_APP_URL.trim() : ''
+      if (envUrl && /^(https?:)\/\//i.test(envUrl)) {
+        try {
+          const origin = new URL(envUrl).origin
+          candidates.push(`${origin}/api/branding/logo`)
+        } catch {
+          // ignore
+        }
+      }
     }
 
-    // Fallback to hitting the branding logo endpoint (handles LINK mode, caching, etc).
-    if (!bytes) {
-      const baseUrl = typeof opts?.baseUrl === 'string' ? opts.baseUrl.trim() : ''
-      const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/branding/logo` : '/api/branding/logo'
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res.ok) return null
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, {
+          cache: 'no-store',
+          headers: {
+            Accept: 'image/png,image/jpeg,image/*;q=0.8,*/*;q=0.1',
+          },
+        })
+        if (!res.ok) continue
 
-      bytes = new Uint8Array(await res.arrayBuffer())
-      if (!bytes.length) return null
+        const bytes = new Uint8Array(await res.arrayBuffer())
+        if (!bytes.length) continue
 
-      kind = detectImageKind(res.headers.get('content-type'), bytes)
+        const kind = detectImageKind(res.headers.get('content-type'), bytes)
+        if (!kind) continue
+
+        const image = kind === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes)
+        const dims = image.scale(1)
+
+        const drawHeight = 42
+        const scale = drawHeight / dims.height
+        const drawWidth = dims.width * scale
+
+        return {
+          width: dims.width,
+          height: dims.height,
+          drawWidth,
+          drawHeight,
+          drawX: 50,
+          drawY: 800 - drawHeight + 6,
+          kind,
+          image,
+        }
+      } catch {
+        // ignore and try next candidate
+      }
     }
 
-    if (!bytes || !kind) return null
-
-    const image = kind === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes)
-    const dims = image.scale(1)
-
-    const drawHeight = 42
-    const scale = drawHeight / dims.height
-    const drawWidth = dims.width * scale
-
-    return {
-      width: dims.width,
-      height: dims.height,
-      drawWidth,
-      drawHeight,
-      drawX: 50,
-      drawY: 800 - drawHeight + 6,
-      kind,
-      image,
-    }
+    return null
   } catch {
     return null
   }
