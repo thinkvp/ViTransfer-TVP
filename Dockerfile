@@ -56,6 +56,7 @@ FROM base-worker AS deps-full
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
 
 RUN npm install --legacy-peer-deps
@@ -99,6 +100,7 @@ FROM base-common AS deps-app
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
 
 ENV NODE_ENV=production

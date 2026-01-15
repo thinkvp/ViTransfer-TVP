@@ -14,6 +14,9 @@ interface ProjectFile {
   category: string | null
   createdAt: string
   uploadedByName: string | null
+  sourceType?: 'projectFile' | 'emailAttachment'
+  downloadUrl?: string
+  deleteUrl?: string | null
 }
 
 interface ProjectFileListProps {
@@ -32,7 +35,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true }:
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/projects/${projectId}/files`)
+      const res = await apiFetch(`/api/projects/${projectId}/files?includeEmailAttachments=1`)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data?.error || 'Failed to fetch files')
@@ -51,37 +54,39 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, refreshTrigger])
 
-  const handleDownload = async (fileId: string, fileName: string) => {
+  const handleDownload = async (file: ProjectFile) => {
     try {
-      const res = await apiFetch(`/api/projects/${projectId}/files/${fileId}`)
+      const downloadEndpoint = file.downloadUrl || `/api/projects/${projectId}/files/${file.id}`
+      const res = await apiFetch(downloadEndpoint)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data?.error || 'Failed to download file')
       }
 
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
+      const blobUrl = URL.createObjectURL(blob)
 
       const a = document.createElement('a')
-      a.href = url
-      a.download = fileName
+      a.href = blobUrl
+      a.download = file.fileName
       document.body.appendChild(a)
       a.click()
       a.remove()
 
-      URL.revokeObjectURL(url)
+      URL.revokeObjectURL(blobUrl)
     } catch (e: any) {
       alert(e?.message || 'Failed to download file')
     }
   }
 
-  const handleDelete = async (fileId: string, fileName: string) => {
-    if (!confirm(`Delete file "${fileName}"?`)) return
+  const handleDelete = async (file: ProjectFile) => {
+    if (!file.deleteUrl) return
+    if (!confirm(`Delete file "${file.fileName}"?`)) return
 
-    setDeletingId(fileId)
+    setDeletingId(file.id)
     try {
-      await apiDelete(`/api/projects/${projectId}/files/${fileId}`)
-      setFiles((prev) => prev.filter((f) => f.id !== fileId))
+      await apiDelete(file.deleteUrl)
+      setFiles((prev) => prev.filter((f) => f.id !== file.id))
     } catch (e: any) {
       alert(e?.message || 'Failed to delete file')
     } finally {
@@ -112,20 +117,25 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true }:
           <div className="min-w-0">
             <div className="text-sm font-medium truncate">{f.fileName}</div>
             <div className="text-xs text-muted-foreground truncate">
-              {formatFileSize(Number(f.fileSize))}{f.uploadedByName ? ` • Uploaded by ${f.uploadedByName}` : ''}
+              {formatFileSize(Number(f.fileSize))}
+              {f.sourceType === 'emailAttachment'
+                ? ' • Email Attachment'
+                : f.uploadedByName
+                  ? ` • Uploaded by ${f.uploadedByName}`
+                  : ''}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button type="button" variant="outline" size="sm" onClick={() => void handleDownload(f.id, f.fileName)}>
+            <Button type="button" variant="outline" size="sm" onClick={() => void handleDownload(f)}>
               <Download className="w-4 h-4" />
             </Button>
-            {canDelete && (
+            {canDelete && !!f.deleteUrl && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 disabled={deletingId === f.id}
-                onClick={() => void handleDelete(f.id, f.fileName)}
+                onClick={() => void handleDelete(f)}
               >
                 <Trash2 className="w-4 h-4 text-destructive" />
               </Button>

@@ -6,6 +6,7 @@ let videoQueueInstance: Queue<VideoProcessingJob> | null = null
 let assetQueueInstance: Queue<AssetProcessingJob> | null = null
 let clientFileQueueInstance: Queue<ClientFileProcessingJob> | null = null
 let projectFileQueueInstance: Queue<ProjectFileProcessingJob> | null = null
+let projectEmailQueueInstance: Queue<ProjectEmailProcessingJob> | null = null
 let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
 let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
 
@@ -31,6 +32,12 @@ export interface ProjectFileProcessingJob {
   projectFileId: string
   storagePath: string
   expectedCategory?: string
+}
+
+export interface ProjectEmailProcessingJob {
+  projectEmailId: string
+  projectId: string
+  rawStoragePath: string
 }
 
 export interface AlbumPhotoSocialJob {
@@ -148,6 +155,33 @@ export function getProjectFileQueue(): Queue<ProjectFileProcessingJob> {
     })
   }
   return projectFileQueueInstance
+}
+
+export function getProjectEmailQueue(): Queue<ProjectEmailProcessingJob> {
+  // Don't create queue during build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!projectEmailQueueInstance) {
+    projectEmailQueueInstance = new Queue<ProjectEmailProcessingJob>('project-email-processing', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+  return projectEmailQueueInstance
 }
 
 export function getAlbumPhotoSocialQueue(): Queue<AlbumPhotoSocialJob> {

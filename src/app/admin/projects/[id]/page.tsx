@@ -16,6 +16,8 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { ProjectFileUpload } from '@/components/ProjectFileUpload'
 import { ProjectFileList } from '@/components/ProjectFileList'
+import { ProjectEmailUpload } from '@/components/ProjectEmailUpload'
+import { ProjectEmailTable } from '@/components/ProjectEmailTable'
 import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
@@ -39,6 +41,7 @@ export default function ProjectPage() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
   const [projectFilesRefresh, setProjectFilesRefresh] = useState(0)
+  const [projectEmailsRefresh, setProjectEmailsRefresh] = useState(0)
 
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
   const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
@@ -529,6 +532,36 @@ export default function ProjectPage() {
                   )}
                 </CardContent>
               </Card>
+            )}
+
+            {canAccessProjectSettings && (
+              <div className="border rounded-lg p-4 bg-card space-y-4">
+                {canUploadFilesToProjectInternal ? (
+                  <ProjectEmailUpload
+                    title="External Communication"
+                    description="Drag & drop .eml files from email clients"
+                    layout="headerRow"
+                    projectId={project.id}
+                    maxConcurrent={3}
+                    onUploadComplete={() => {
+                      setProjectEmailsRefresh((v) => v + 1)
+                      setProjectFilesRefresh((v) => v + 1)
+                    }}
+                  />
+                ) : (
+                  <div>
+                    <div className="text-base font-medium">External Communication</div>
+                    <p className="text-xs text-muted-foreground mt-1 hidden sm:block">Drag & drop .eml files from email clients</p>
+                  </div>
+                )}
+
+                <ProjectEmailTable
+                  projectId={project.id}
+                  refreshTrigger={projectEmailsRefresh}
+                  canDelete={canUploadFilesToProjectInternal}
+                  onExternalFilesChanged={() => setProjectFilesRefresh((v) => v + 1)}
+                />
+              </div>
             )}
 
             {project.enableVideos !== false && (

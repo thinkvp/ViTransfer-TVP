@@ -54,19 +54,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       assetAgg,
       commentFileAgg,
       projectFileAgg,
+      projectEmailAttachmentAgg,
       albumPhotoAgg,
     ] = await Promise.all([
       prisma.video.aggregate({ where: { projectId }, _sum: { originalFileSize: true } }),
       prisma.videoAsset.aggregate({ where: { video: { projectId } }, _sum: { fileSize: true } }),
       prisma.commentFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
       prisma.projectFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
+      prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
       prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true } }),
     ])
 
     const videosBytes = asNumberBigInt(videoAgg._sum.originalFileSize)
     const videoAssetsBytes = asNumberBigInt(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumberBigInt(commentFileAgg._sum.fileSize)
-    const projectFilesBytes = asNumberBigInt(projectFileAgg._sum.fileSize)
+    const projectFilesBytes = asNumberBigInt(projectFileAgg._sum.fileSize) + asNumberBigInt(projectEmailAttachmentAgg._sum.fileSize)
     const photosBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
 
     const totalBytes = videosBytes + videoAssetsBytes + commentAttachmentsBytes + photosBytes + projectFilesBytes

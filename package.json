@@ -1,16 +1,16 @@
 {
   "name": "vitransfer",
-  "version": "1.12.0-tvp-v1.16",
+  "version": "1.12.0-tvp-v1.17",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "prisma generate && node scripts/clean-next.mjs",
+    "prebuild": "prisma generate && node scripts/ensure-prisma-client.mjs && node scripts/clean-next.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
     "check:rbac": "node scripts/check-rbac-gates.mjs",
     "lint": "eslint .",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/ensure-prisma-client.mjs",
     "worker": "tsx src/worker/index.ts",
     "preview:emails": "tsx scripts/render-email-previews.ts"
   },
@@ -39,6 +39,7 @@
     "isomorphic-dompurify": "^2.31.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.553.0",
+    "mailparser": "^3.9.1",
     "next": "^16.0.7",
     "nodemailer": "^7.0.9",
     "pdf-lib": "^1.17.1",
@@ -56,6 +57,7 @@
   "devDependencies": {
     "@types/archiver": "^6.0.2",
     "@types/bcryptjs": "^2.4.6",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22",
     "@types/nodemailer": "^7.0.2",
     "@types/react": "^19",

@@ -47,6 +47,11 @@ async function assertProjectAccessOr404(projectId: string, auth: any) {
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await params
 
+  const url = new URL(request.url)
+  const includeEmailAttachments = ['1', 'true', 'yes'].includes(
+    (url.searchParams.get('includeEmailAttachments') || '').toLowerCase()
+  )
+
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
@@ -80,12 +85,52 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   })
 
-  const serialized = files.map((f) => ({
+  const serializedProjectFiles = files.map((f) => ({
     ...f,
     fileSize: f.fileSize.toString(),
+    sourceType: 'projectFile' as const,
+    downloadUrl: `/api/projects/${projectId}/files/${f.id}`,
+    deleteUrl: `/api/projects/${projectId}/files/${f.id}`,
   }))
 
-  return NextResponse.json({ files: serialized })
+  if (!includeEmailAttachments) {
+    return NextResponse.json({ files: serializedProjectFiles })
+  }
+
+  const emailAttachments = await prisma.projectEmailAttachment.findMany({
+    where: { projectEmail: { projectId }, isInline: false },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      projectEmailId: true,
+      fileName: true,
+      fileSize: true,
+      fileType: true,
+      createdAt: true,
+    },
+  })
+
+  const serializedEmailAttachments = emailAttachments.map((a) => ({
+    id: `emailAttachment:${a.id}`,
+    fileName: a.fileName,
+    fileSize: a.fileSize.toString(),
+    fileType: a.fileType,
+    category: null as string | null,
+    createdAt: a.createdAt,
+    uploadedByName: null as string | null,
+    sourceType: 'emailAttachment' as const,
+    downloadUrl: `/api/projects/${projectId}/emails/${a.projectEmailId}/attachments/${a.id}`,
+    deleteUrl: null as string | null,
+  }))
+
+  const combined = [...serializedProjectFiles, ...serializedEmailAttachments]
+  combined.sort((a, b) => {
+    const aTime = new Date(a.createdAt).getTime()
+    const bTime = new Date(b.createdAt).getTime()
+    return bTime - aTime
+  })
+
+  return NextResponse.json({ files: combined })
 }
 
 // POST /api/projects/[id]/files - create file record for TUS upload (internal only)

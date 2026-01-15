@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, ProjectFileProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
@@ -9,6 +9,7 @@ import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
 import { processProjectFile } from './project-file-processor'
+import { processProjectEmail } from './project-email-processor'
 import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processAdminNotifications } from './admin-notifications'
@@ -202,6 +203,29 @@ async function main() {
   })
 
   console.log('[WORKER] Project file processing worker started')
+
+  // Create project email processing worker
+  const projectEmailWorker = new Worker<ProjectEmailProcessingJob>('project-email-processing', processProjectEmail, {
+    connection: getRedisForQueue(),
+    concurrency: Math.max(1, concurrency * 2),
+  })
+
+  projectEmailWorker.on('completed', (job) => {
+    console.log(`[WORKER] Project email job ${job.id} completed successfully`)
+  })
+
+  projectEmailWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Project email job ${job?.id} failed:`, err)
+    if (DEBUG) {
+      console.error('[WORKER DEBUG] Project email job failure details:', {
+        jobId: job?.id,
+        jobData: job?.data,
+        error: err instanceof Error ? err.stack : err,
+      })
+    }
+  })
+
+  console.log('[WORKER] Project email processing worker started')
 
   // Create album photo social derivative worker
   const albumPhotoSocialWorker = new Worker<AlbumPhotoSocialJob>('album-photo-social', processAlbumPhotoSocial, {

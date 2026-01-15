@@ -88,6 +88,7 @@ const tusServer: Server = new Server({
       const assetId = upload.metadata?.assetId as string
       const clientFileId = upload.metadata?.clientFileId as string
       const projectFileId = upload.metadata?.projectFileId as string
+      const projectEmailId = upload.metadata?.projectEmailId as string
       const photoId = upload.metadata?.photoId as string
 
       const declaredSize = Number(upload.size)
@@ -106,10 +107,10 @@ const tusServer: Server = new Server({
         }
       }
 
-      if (!videoId && !assetId && !clientFileId && !projectFileId && !photoId) {
+      if (!videoId && !assetId && !clientFileId && !projectFileId && !projectEmailId && !photoId) {
         throw {
           status_code: 400,
-          body: 'Missing required metadata: videoId, assetId, clientFileId, projectFileId, or photoId'
+          body: 'Missing required metadata: videoId, assetId, clientFileId, projectFileId, projectEmailId, or photoId'
         }
       }
 
@@ -172,6 +173,19 @@ const tusServer: Server = new Server({
         }
       }
 
+      if (projectEmailId) {
+        const email = await prisma.projectEmail.findUnique({
+          where: { id: projectEmailId }
+        })
+
+        if (!email) {
+          throw {
+            status_code: 404,
+            body: 'Project email record not found'
+          }
+        }
+      }
+
       if (photoId) {
         const photo = await prisma.albumPhoto.findUnique({
           where: { id: photoId }
@@ -205,6 +219,7 @@ const tusServer: Server = new Server({
     const assetId = upload.metadata?.assetId as string
     const clientFileId = upload.metadata?.clientFileId as string
     const projectFileId = upload.metadata?.projectFileId as string
+    const projectEmailId = upload.metadata?.projectEmailId as string
     const photoId = upload.metadata?.photoId as string
 
     try {
@@ -217,6 +232,8 @@ const tusServer: Server = new Server({
         return await handleClientFileUploadFinish(tusFilePath, upload, clientFileId, tusServer, maxUploadSizeBytes)
       } else if (projectFileId) {
         return await handleProjectFileUploadFinish(tusFilePath, upload, projectFileId, tusServer, maxUploadSizeBytes)
+      } else if (projectEmailId) {
+        return await handleProjectEmailUploadFinish(tusFilePath, upload, projectEmailId, tusServer, maxUploadSizeBytes)
       } else if (photoId) {
         return await handleAlbumPhotoUploadFinish(tusFilePath, upload, photoId, tusServer, maxUploadSizeBytes)
       } else {
@@ -229,6 +246,10 @@ const tusServer: Server = new Server({
 
       if (videoId) {
         await markVideoAsError(videoId, error)
+      }
+
+      if (projectEmailId) {
+        await markProjectEmailAsError(projectEmailId, error)
       }
 
       if (photoId) {
@@ -466,6 +487,58 @@ async function handleProjectFileUploadFinish(
   return {}
 }
 
+async function handleProjectEmailUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  projectEmailId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
+  const email = await prisma.projectEmail.findUnique({
+    where: { id: projectEmailId }
+  })
+
+  if (!email) {
+    console.error(`[UPLOAD] Project email not found: ${projectEmailId}`)
+    return {}
+  }
+
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
+
+  await validateEmlFile(tusFilePath, upload.metadata?.filename as string)
+
+  const { uploadFile, initStorage } = await import('@/lib/storage')
+  await initStorage()
+
+  const fileStream = (tusServer.datastore as any).read(upload.id)
+
+  const actualFileType = 'message/rfc822'
+  await uploadFile(email.rawStoragePath, fileStream, fileSize, actualFileType)
+
+  await prisma.projectEmail.update({
+    where: { id: projectEmailId },
+    data: {
+      rawFileType: actualFileType,
+      status: 'PROCESSING',
+      errorMessage: null,
+    },
+  })
+
+  // Queue email parsing + attachment extraction
+  const { getProjectEmailQueue } = await import('@/lib/queue')
+  const q = getProjectEmailQueue()
+  await q.add('process-project-email', {
+    projectEmailId: email.id,
+    projectId: email.projectId,
+    rawStoragePath: email.rawStoragePath,
+  })
+
+  console.log(`[UPLOAD] Project email uploaded and queued for processing: ${projectEmailId}`)
+
+  await cleanupTUSFile(tusFilePath)
+  return {}
+}
+
 async function handleAlbumPhotoUploadFinish(
   tusFilePath: string,
   upload: any,
@@ -643,6 +716,16 @@ async function validateAlbumPhotoFile(tusFilePath: string, filename?: string) {
   console.log(`[UPLOAD] Album photo extension validation passed`)
 }
 
+async function validateEmlFile(tusFilePath: string, filename?: string) {
+  if (filename) {
+    const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
+    if (ext !== '.eml') {
+      await cleanupTUSFile(tusFilePath)
+      throw new Error('Invalid file extension. Only .eml files are supported')
+    }
+  }
+}
+
 async function cleanupTUSFile(tusFilePath: string) {
   try {
     if (fs.existsSync(tusFilePath)) {
@@ -682,6 +765,20 @@ async function markPhotoAsError(photoId: string, error: any) {
     })
   } catch (dbError) {
     console.error('[UPLOAD] Failed to mark album photo as ERROR:', dbError)
+  }
+}
+
+async function markProjectEmailAsError(projectEmailId: string, error: any) {
+  try {
+    await prisma.projectEmail.update({
+      where: { id: projectEmailId },
+      data: {
+        status: 'ERROR',
+        errorMessage: error instanceof Error ? error.message : 'Unknown upload error',
+      },
+    })
+  } catch (dbError) {
+    console.error('[UPLOAD] Failed to mark project email as ERROR:', dbError)
   }
 }
 

@@ -175,7 +175,79 @@ model Project {
   commentFiles      CommentFile[] // Files uploaded with comments
   files             ProjectFile[] // Internal-only project documents (briefs, references)
 
+  // Imported communications (uploaded .eml emails)
+  emails            ProjectEmail[]
+
   statusChanges      ProjectStatusChange[]
+}
+
+enum ProjectEmailStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  ERROR
+}
+
+model ProjectEmail {
+  id        String @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Original uploaded EML
+  rawFileName    String
+  rawFileSize    BigInt
+  rawFileType    String
+  rawStoragePath String
+  rawSha256      String? @db.VarChar(64)
+
+  // Parsed metadata
+  subject   String?
+  fromName  String?
+  fromEmail String?
+  sentAt    DateTime?
+
+  // Parsed bodies
+  textBody String?
+  htmlBody String?
+
+  // Attachments summary
+  attachmentsCount Int     @default(0)
+  hasAttachments   Boolean @default(false)
+
+  status       ProjectEmailStatus @default(UPLOADING)
+  errorMessage String?
+
+  uploadedBy     String?
+  uploadedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attachments ProjectEmailAttachment[]
+
+  @@index([projectId])
+  @@index([projectId, sentAt])
+  @@index([projectId, createdAt])
+  @@unique([projectId, rawSha256])
+}
+
+model ProjectEmailAttachment {
+  id             String @id @default(cuid())
+  projectEmailId String
+  projectEmail   ProjectEmail @relation(fields: [projectEmailId], references: [id], onDelete: Cascade)
+
+  fileName    String
+  fileSize    BigInt
+  fileType    String
+  storagePath String
+
+  // Inline images support (cid:)
+  isInline  Boolean @default(false)
+  contentId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectEmailId])
 }
 
 model Album {
