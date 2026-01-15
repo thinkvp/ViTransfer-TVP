@@ -284,20 +284,15 @@ export default function VideoPlayer({
 
     const fps = (selectedVideo as any)?.fps || 24
 
-    const flattened: any[] = []
-    for (const c of commentsForTimeline || []) {
-      flattened.push(c)
-      if (Array.isArray((c as any)?.replies)) {
-        flattened.push(...((c as any).replies as any[]))
-      }
-    }
-
     const markers: Array<{ id: string; seconds: number; isInternal: boolean; displayColor?: string | null }> = []
-    for (const comment of flattened) {
+    // Only show markers for top-level comments.
+    // Replies are nested and should not create their own timeline markers.
+    for (const comment of commentsForTimeline || []) {
       if (!comment) continue
       if (comment.videoId !== selectedVideo.id) continue
       if (!comment.timecode) continue
       if (!comment.id) continue
+      if ((comment as any).parentId) continue
       try {
         const seconds = timecodeToSeconds(String(comment.timecode), fps)
         if (!Number.isFinite(seconds)) continue

@@ -291,15 +291,50 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get video version if videoId is provided but version isn't
+    // Replies should not create their own timeline marker/time.
+    // For replies, inherit the parent comment's timecode (and version).
+    let finalTimecode = timecode
+
     let finalVideoVersion = videoVersion
-    if (videoId && !videoVersion) {
-      const video = await prisma.video.findUnique({
-        where: { id: videoId },
-        select: { version: true }
+    if (parentId) {
+      const parent = await prisma.comment.findUnique({
+        where: { id: parentId },
+        select: {
+          id: true,
+          projectId: true,
+          videoId: true,
+          videoVersion: true,
+          timecode: true,
+        },
       })
-      if (video) {
-        finalVideoVersion = video.version
+
+      if (!parent) {
+        return NextResponse.json(
+          { error: 'Invalid parent comment' },
+          { status: 400, headers: noStoreHeaders }
+        )
+      }
+
+      // Prevent cross-project/video reply injection.
+      if (parent.projectId !== projectId || parent.videoId !== videoId) {
+        return NextResponse.json(
+          { error: 'Invalid parent comment' },
+          { status: 400, headers: noStoreHeaders }
+        )
+      }
+
+      finalTimecode = parent.timecode
+      finalVideoVersion = parent.videoVersion ?? finalVideoVersion
+    } else {
+      // Non-reply: infer videoVersion if missing
+      if (videoId && !videoVersion) {
+        const video = await prisma.video.findUnique({
+          where: { id: videoId },
+          select: { version: true }
+        })
+        if (video) {
+          finalVideoVersion = video.version
+        }
       }
     }
 
@@ -335,7 +370,7 @@ export async function POST(request: NextRequest) {
         projectId,
         videoId,
         videoVersion: finalVideoVersion || null,
-        timecode,
+        timecode: finalTimecode,
         content: contentValidation.sanitizedContent!,
         authorName: contentValidation.sanitizedAuthorName,
         authorEmail: finalAuthorEmail,
