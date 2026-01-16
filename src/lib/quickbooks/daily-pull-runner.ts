@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db'
 import { getQuickBooksConfig, qboQuery, refreshQuickBooksAccessToken, toQboDateTime } from '@/lib/quickbooks/qbo'
-import { mergeQboInvoicesIntoSalesNativeStore, mergeQboPaymentsIntoSalesNativeStore, mergeQboQuotesIntoSalesNativeStore } from '@/lib/sales/server-native-store'
+import { mergeQboInvoicesIntoSalesTables, mergeQboPaymentsIntoSalesTables, mergeQboQuotesIntoSalesTables } from '@/lib/sales/server-qbo-merge'
 
 export type QboDailyPullStepSummary = {
   step: 'customers' | 'quotes' | 'invoices' | 'payments'
@@ -490,7 +490,7 @@ async function pullQuotes(lookbackDays: number, auth: Awaited<ReturnType<typeof 
     })
     .filter((q) => q.qboId)
 
-  await mergeQboQuotesIntoSalesNativeStore(nativeQuotes)
+  await mergeQboQuotesIntoSalesTables(nativeQuotes)
 
   return { step: 'quotes', fetched: all.length, stored: { created, updated, skipped } }
 }
@@ -599,7 +599,7 @@ async function pullInvoices(lookbackDays: number, auth: Awaited<ReturnType<typeo
     })
     .filter((i) => i.qboId)
 
-  await mergeQboInvoicesIntoSalesNativeStore(nativeInvoices)
+  await mergeQboInvoicesIntoSalesTables(nativeInvoices)
 
   return { step: 'invoices', fetched: all.length, stored: { created, updated, skipped } }
 }
@@ -771,7 +771,7 @@ async function pullPayments(lookbackDays: number, auth: Awaited<ReturnType<typeo
     }
   }
 
-  await mergeQboPaymentsIntoSalesNativeStore(nativePayments)
+  await mergeQboPaymentsIntoSalesTables(nativePayments)
 
   return {
     step: 'payments',

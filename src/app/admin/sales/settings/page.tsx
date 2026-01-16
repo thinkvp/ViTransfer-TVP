@@ -7,9 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { getSalesSettings, saveSalesSettings } from '@/lib/sales/local-store'
+import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi } from '@/lib/sales/admin-api'
 import { apiFetch } from '@/lib/api-client'
-import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
@@ -68,19 +67,33 @@ export default function SalesSettingsPage() {
   const [quoteExpiryBusinessDaysBeforeValidUntil, setQuoteExpiryBusinessDaysBeforeValidUntil] = useState('3')
 
   useEffect(() => {
-    const s = getSalesSettings()
-    setBusinessName(s.businessName)
-    setAddress(s.address)
-    setAbn(s.abn)
-    setPhone(s.phone ?? '')
-    setEmail(s.email ?? '')
-    setWebsite(s.website ?? '')
-    setTaxRatePercent(String(s.taxRatePercent))
-    setDefaultQuoteValidDays(String(s.defaultQuoteValidDays ?? 14))
-    setDefaultInvoiceDueDays(String(s.defaultInvoiceDueDays ?? 7))
-    setDefaultTerms(s.defaultTerms)
-    setPaymentDetails(s.paymentDetails)
-    setLoaded(true)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const s = await fetchSalesSettings()
+        if (cancelled) return
+
+        setBusinessName(s.businessName)
+        setAddress(s.address)
+        setAbn(s.abn)
+        setPhone(s.phone ?? '')
+        setEmail(s.email ?? '')
+        setWebsite(s.website ?? '')
+        setTaxRatePercent(String(s.taxRatePercent))
+        setDefaultQuoteValidDays(String(s.defaultQuoteValidDays ?? 14))
+        setDefaultInvoiceDueDays(String(s.defaultInvoiceDueDays ?? 7))
+        setDefaultTerms(s.defaultTerms)
+        setPaymentDetails(s.paymentDetails)
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoaded(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -235,16 +248,6 @@ export default function SalesSettingsPage() {
       })
       const json = await res.json().catch(() => null)
 
-      // QBO imports now write native Sales docs to the server first.
-      // After a successful pull, refresh this browser's local cache from the server.
-      if (res.ok && method === 'POST' && (url.endsWith('/pull/quotes') || url.endsWith('/pull/invoices') || url.endsWith('/pull/payments'))) {
-        try {
-          await pullAndHydrateSalesNativeStore()
-        } catch (e) {
-          // ignore
-        }
-      }
-
       setQbManualStatus(res.ok ? `${label} completed.` : `${label} failed (${res.status}).`)
 
       // Refresh daily pull summary (single last attempt) after any successful action.
@@ -355,7 +358,8 @@ export default function SalesSettingsPage() {
       const parsedTax = Number(taxRatePercent)
       const parsedQuoteDays = Number(defaultQuoteValidDays)
       const parsedInvoiceDays = Number(defaultInvoiceDueDays)
-      saveSalesSettings({
+
+      await saveSalesSettingsApi({
         businessName,
         address,
         abn,
@@ -367,7 +371,9 @@ export default function SalesSettingsPage() {
         defaultInvoiceDueDays: Number.isFinite(parsedInvoiceDays) ? parsedInvoiceDays : 7,
         defaultTerms,
         paymentDetails,
+        updatedAt: new Date().toISOString(),
       })
+
       setSaved(true)
       setTimeout(() => setSaved(false), 1500)
     } finally {

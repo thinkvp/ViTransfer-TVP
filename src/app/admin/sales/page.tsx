@@ -4,8 +4,14 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { listInvoices, listPayments, listQuotes, getSalesSettings } from '@/lib/sales/local-store'
-import type { InvoiceStatus, QuoteStatus } from '@/lib/sales/types'
+import {
+  fetchSalesSettings,
+  listSalesInvoices,
+  listSalesPayments,
+  listSalesQuotes,
+} from '@/lib/sales/admin-api'
+import type { SalesInvoiceWithVersion, SalesQuoteWithVersion } from '@/lib/sales/admin-api'
+import type { InvoiceStatus, QuoteStatus, SalesPayment, SalesSettings } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 
@@ -89,6 +95,25 @@ export default function SalesDashboardPage() {
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [clientNameById, setClientNameById] = useState<Record<string, string>>({})
 
+  const [loading, setLoading] = useState(true)
+  const [settings, setSettings] = useState<SalesSettings>({
+    businessName: '',
+    address: '',
+    abn: '',
+    phone: '',
+    email: '',
+    website: '',
+    taxRatePercent: 10,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
+    defaultTerms: '',
+    paymentDetails: '',
+    updatedAt: new Date(0).toISOString(),
+  })
+  const [quotes, setQuotes] = useState<SalesQuoteWithVersion[]>([])
+  const [invoices, setInvoices] = useState<SalesInvoiceWithVersion[]>([])
+  const [payments, setPayments] = useState<SalesPayment[]>([])
+
   useEffect(() => {
     // Local-storage pages: re-render when returning to this tab.
     const onFocus = () => {
@@ -98,6 +123,35 @@ export default function SalesDashboardPage() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+
+    ;(async () => {
+      try {
+        const [s, q, inv, pay] = await Promise.all([
+          fetchSalesSettings(),
+          listSalesQuotes(),
+          listSalesInvoices(),
+          listSalesPayments(),
+        ])
+        if (cancelled) return
+        setSettings(s)
+        setQuotes(q)
+        setInvoices(inv)
+        setPayments(pay)
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [tick])
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -112,12 +166,7 @@ export default function SalesDashboardPage() {
   }, [])
 
   const stats = useMemo(() => {
-    void tick
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-    const quotes = listQuotes()
-    const invoices = listInvoices()
-    const payments = listPayments()
-    const settings = getSalesSettings()
 
     const quoteEffectiveStatus = (q: { status: QuoteStatus; validUntil: string | null }): QuoteStatus => {
       if (q.status === 'CLOSED' || q.status === 'ACCEPTED') return q.status
@@ -172,15 +221,10 @@ export default function SalesDashboardPage() {
       overdueInvoices: overdueInvoices.length,
       openBalanceCents,
     }
-  }, [nowIso, tick])
+  }, [invoices, nowIso, payments, quotes, settings.taxRatePercent])
 
   const dashboardData = useMemo(() => {
-    void tick
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-    const quotes = listQuotes()
-    const invoices = listInvoices()
-    const payments = listPayments()
-    const settings = getSalesSettings()
 
     const quoteRows = quotes
       .map((q) => {
@@ -246,7 +290,7 @@ export default function SalesDashboardPage() {
     const invoiceNumberById = Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber]))
 
     return { quoteRows, invoiceRows, recentPayments, invoiceNumberById }
-  }, [nowIso, tick])
+  }, [invoices, nowIso, payments, quotes, settings.taxRatePercent])
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -289,7 +333,9 @@ export default function SalesDashboardPage() {
             <Link href="/admin/sales/quotes/new"><Button size="sm">Create quote</Button></Link>
           </CardHeader>
           <CardContent>
-            {dashboardData.quoteRows.length === 0 ? (
+            {loading ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : dashboardData.quoteRows.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">No open quotes.</div>
             ) : (
               <div className="overflow-x-auto">
@@ -346,7 +392,9 @@ export default function SalesDashboardPage() {
             <Link href="/admin/sales/invoices/new"><Button size="sm">Create invoice</Button></Link>
           </CardHeader>
           <CardContent>
-            {dashboardData.invoiceRows.length === 0 ? (
+            {loading ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : dashboardData.invoiceRows.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">No open invoices.</div>
             ) : (
               <div className="overflow-x-auto">
@@ -404,7 +452,9 @@ export default function SalesDashboardPage() {
           <Link href="/admin/sales/payments"><Button variant="outline" size="sm">View all</Button></Link>
         </CardHeader>
         <CardContent>
-          {dashboardData.recentPayments.length === 0 ? (
+          {loading ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+          ) : dashboardData.recentPayments.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">No recent payments.</div>
           ) : (
             <div className="overflow-x-auto">

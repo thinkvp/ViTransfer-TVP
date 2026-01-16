@@ -22,16 +22,9 @@ import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 import { ProjectKeyDates } from '@/components/ProjectKeyDates'
-import {
-  SALES_NATIVE_STORE_CHANGED_EVENT,
-  getSalesSettings,
-  listInvoices,
-  listPayments,
-  listQuotes,
-} from '@/lib/sales/local-store'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
-import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
-import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
+import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
+import { fetchSalesSettings, listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -57,6 +50,12 @@ export default function ProjectPage() {
   const [stripePaidByInvoiceId, setStripePaidByInvoiceId] = useState<
     Record<string, { paidCents: number; latestYmd: string | null }>
   >({})
+
+  const [salesLoading, setSalesLoading] = useState(false)
+  const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
+  const [payments, setPayments] = useState<SalesPayment[]>([])
+  const [projectQuotes, setProjectQuotes] = useState<SalesQuote[]>([])
+  const [projectInvoices, setProjectInvoices] = useState<SalesInvoice[]>([])
 
   type StripePayment = {
     invoiceDocId: string
@@ -107,24 +106,36 @@ export default function ProjectPage() {
       setSalesTick((v) => v + 1)
     }
 
-    const onSalesChanged = () => setSalesTick((v) => v + 1)
-
     window.addEventListener('focus', onFocus)
-    window.addEventListener(SALES_NATIVE_STORE_CHANGED_EVENT, onSalesChanged)
     return () => {
       window.removeEventListener('focus', onFocus)
-      window.removeEventListener(SALES_NATIVE_STORE_CHANGED_EVENT, onSalesChanged)
     }
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    const run = async () => {
+    async function run() {
+      if (!project?.id) return
+
       try {
-        const result = await pullAndHydrateSalesNativeStore()
-        if (!cancelled && result.hydrated) setSalesTick((v) => v + 1)
-      } catch {
-        // best-effort
+        setSalesLoading(true)
+        const [settings, quotes, invoices, allPayments] = await Promise.all([
+          fetchSalesSettings(),
+          listSalesQuotes({ projectId: project.id, limit: 500 }),
+          listSalesInvoices({ projectId: project.id, limit: 500 }),
+          listSalesPayments({ limit: 500 }),
+        ])
+
+        if (cancelled) return
+        setTaxRatePercent(settings.taxRatePercent)
+        setProjectQuotes(quotes as any)
+        setProjectInvoices(invoices as any)
+
+        const invoiceIds = new Set((invoices as any[]).map((i: any) => String(i?.id ?? '')).filter((x) => x.trim()))
+        const filteredPayments = allPayments.filter((p) => p.invoiceId && invoiceIds.has(p.invoiceId))
+        setPayments(filteredPayments)
+      } finally {
+        if (!cancelled) setSalesLoading(false)
       }
     }
 
@@ -132,29 +143,12 @@ export default function ProjectPage() {
     return () => {
       cancelled = true
     }
-  }, [])
-
-  const salesSettings = useMemo(() => {
-    void salesTick
-    return getSalesSettings()
-  }, [salesTick])
-
-  const payments = useMemo(() => {
-    void salesTick
-    return listPayments()
-  }, [salesTick])
-
-  const projectQuotes = useMemo((): SalesQuote[] => {
-    void salesTick
-    if (!project?.id) return []
-    return listQuotes().filter((q) => q.projectId === project.id)
   }, [project?.id, salesTick])
 
-  const projectInvoices = useMemo((): SalesInvoice[] => {
-    void salesTick
-    if (!project?.id) return []
-    return listInvoices().filter((inv) => inv.projectId === project.id)
-  }, [project?.id, salesTick])
+  const projectPayments = useMemo(() => {
+    const invoiceIds = new Set(projectInvoices.map((i) => i.id))
+    return payments.filter((p) => p.invoiceId && invoiceIds.has(p.invoiceId))
+  }, [payments, projectInvoices])
 
   useEffect(() => {
     let cancelled = false
@@ -223,8 +217,8 @@ export default function ProjectPage() {
         ? inv.status
         : (inv.sentAt ? 'SENT' : 'OPEN')
 
-      const totalCents = sumLineItemsTotal(inv.items, salesSettings.taxRatePercent)
-      const paidLocalCents = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const totalCents = sumLineItemsTotal(inv.items, taxRatePercent)
+      const paidLocalCents = projectPayments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
       const paidStripeCents = stripePaidByInvoiceId[inv.id]?.paidCents ?? 0
       const paidCents = paidLocalCents + paidStripeCents
       const balanceCents = Math.max(0, totalCents - paidCents)
@@ -240,7 +234,7 @@ export default function ProjectPage() {
 
       return baseStatus
     },
-    [nowIso, payments, salesSettings.taxRatePercent, stripePaidByInvoiceId]
+    [nowIso, projectPayments, taxRatePercent, stripePaidByInvoiceId]
   )
 
   function invoiceStatusLabel(status: InvoiceStatus): string {
@@ -688,9 +682,12 @@ export default function ProjectPage() {
               </CardContent>
             </Card>
 
-            {(projectQuotes.length > 0 || projectInvoices.length > 0) && (
+            {(salesLoading || projectQuotes.length > 0 || projectInvoices.length > 0) && (
               <Card>
                 <CardContent className="pt-6 space-y-6">
+                  {salesLoading && projectQuotes.length === 0 && projectInvoices.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">Loading sales…</div>
+                  ) : null}
                   {projectQuotes.length > 0 && (
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Quotes</div>
@@ -705,7 +702,7 @@ export default function ProjectPage() {
                           </thead>
                           <tbody>
                             {projectQuotes.slice(0, 5).map((q: SalesQuote) => {
-                              const totalCents = sumLineItemsTotal(Array.isArray(q.items) ? q.items : [], salesSettings.taxRatePercent)
+                              const totalCents = sumLineItemsTotal(Array.isArray(q.items) ? q.items : [], taxRatePercent)
                               const effectiveStatus = quoteEffectiveStatus(q)
                               return (
                                 <tr key={q.id} className="border-t">
@@ -745,7 +742,7 @@ export default function ProjectPage() {
                           </thead>
                           <tbody>
                             {projectInvoices.slice(0, 5).map((inv: SalesInvoice) => {
-                              const totalCents = sumLineItemsTotal(Array.isArray(inv.items) ? inv.items : [], salesSettings.taxRatePercent)
+                              const totalCents = sumLineItemsTotal(Array.isArray(inv.items) ? inv.items : [], taxRatePercent)
                               const effectiveStatus = invoiceEffectiveStatus(inv)
                               return (
                                 <tr key={inv.id} className="border-t">

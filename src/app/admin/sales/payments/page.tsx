@@ -14,14 +14,19 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createPayment, deletePayment, getSalesSettings, listInvoices, listPayments } from '@/lib/sales/local-store'
 import type { ClientOption, SalesInvoice, SalesPayment } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, dollarsToCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
-import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
+import {
+  createSalesPayment,
+  deleteSalesPayment,
+  fetchSalesSettings,
+  listSalesInvoices,
+  listSalesPayments,
+} from '@/lib/sales/admin-api'
 
 type PaymentFilter = 'LINKED' | 'UNLINKED'
 
@@ -30,6 +35,13 @@ export default function SalesPaymentsPage() {
   const [tick, setTick] = useState(0)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [loadingClients, setLoadingClients] = useState(true)
+
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [invoices, setInvoices] = useState<SalesInvoice[]>([])
+  const [payments, setPayments] = useState<SalesPayment[]>([])
+  const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
 
   const [filterSelected, setFilterSelected] = useState<Set<PaymentFilter>>(new Set())
   const [tableSortKey, setTableSortKey] = useState<'paymentDate' | 'amount' | 'method' | 'reference' | 'client' | 'invoice'>(
@@ -68,12 +80,21 @@ export default function SalesPaymentsPage() {
 
   useEffect(() => {
     let cancelled = false
-    const run = async () => {
+    async function run() {
       try {
-        const result = await pullAndHydrateSalesNativeStore()
-        if (!cancelled && result.hydrated) setTick((v) => v + 1)
-      } catch {
-        // best-effort
+        setLoading(true)
+        const [settings, invs, pays] = await Promise.all([
+          fetchSalesSettings(),
+          listSalesInvoices({ limit: 500 }),
+          listSalesPayments({ limit: 500 }),
+        ])
+
+        if (cancelled) return
+        setTaxRatePercent(settings.taxRatePercent)
+        setInvoices(invs)
+        setPayments(pays)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
 
@@ -81,7 +102,7 @@ export default function SalesPaymentsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [tick])
 
   useEffect(() => {
     const stored = localStorage.getItem('admin_sales_payments_filter')
@@ -103,16 +124,6 @@ export default function SalesPaymentsPage() {
   useEffect(() => {
     localStorage.setItem('admin_sales_payments_filter', JSON.stringify([...filterSelected]))
   }, [filterSelected])
-
-  const { invoices, payments, taxRatePercent } = useMemo(() => {
-    void tick
-    const settings = getSalesSettings()
-    return {
-      invoices: listInvoices(),
-      payments: listPayments(),
-      taxRatePercent: settings.taxRatePercent,
-    }
-  }, [tick])
 
   useEffect(() => {
     let cancelled = false
@@ -217,31 +228,47 @@ export default function SalesPaymentsPage() {
 
   const selectedInvoice: SalesInvoice | undefined = invoiceId ? invoices.find((i) => i.id === invoiceId) : undefined
 
-  const onCreatePayment = () => {
+  const onCreatePayment = async () => {
+    if (creating) return
     const amountCents = dollarsToCents(amount)
     if (!amountCents || amountCents <= 0) {
       alert('Enter a payment amount.')
       return
     }
 
-    createPayment({
-      paymentDate,
-      amountCents,
-      method,
-      reference,
-      clientId: clientId || null,
-      invoiceId: invoiceId || null,
-    })
+    try {
+      setCreating(true)
+      await createSalesPayment({
+        paymentDate,
+        amountCents,
+        method,
+        reference,
+        clientId: clientId || null,
+        invoiceId: invoiceId || null,
+      })
 
-    setAmount('')
-    setReference('')
-    setTick((v) => v + 1)
+      setAmount('')
+      setReference('')
+      setTick((v) => v + 1)
+    } catch {
+      alert('Failed to save payment.')
+    } finally {
+      setCreating(false)
+    }
   }
 
-  const onDelete = (paymentId: string) => {
+  const onDelete = async (paymentId: string) => {
     if (!confirm('Delete this payment?')) return
-    deletePayment(paymentId)
-    setTick((v) => v + 1)
+
+    try {
+      setDeletingId(paymentId)
+      await deleteSalesPayment(paymentId)
+      setTick((v) => v + 1)
+    } catch {
+      alert('Failed to delete payment.')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   useEffect(() => {
@@ -347,7 +374,15 @@ export default function SalesPaymentsPage() {
               }}
             >
               <SelectTrigger className="h-9">
-                <SelectValue placeholder={unpaidInvoices.length ? 'Select invoice' : 'No unpaid invoices'} />
+                <SelectValue
+                  placeholder={
+                    loading
+                      ? 'Loading…'
+                      : unpaidInvoices.length
+                        ? 'Select invoice'
+                        : 'No unpaid invoices'
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>(none)</SelectItem>
@@ -384,7 +419,13 @@ export default function SalesPaymentsPage() {
           </div>
 
           <div className="lg:col-span-3 flex justify-end">
-            <Button variant="default" onClick={onCreatePayment}>Save payment</Button>
+            <Button
+              variant="default"
+              onClick={onCreatePayment}
+              disabled={creating || loading}
+            >
+              {creating ? 'Saving…' : 'Save payment'}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -458,7 +499,9 @@ export default function SalesPaymentsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {displayPayments.length === 0 ? (
+          {loading ? (
+            <div className="py-10 text-center text-muted-foreground">Loading…</div>
+          ) : displayPayments.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground">No payments yet.</div>
           ) : (
             <div className="rounded-md border border-border bg-card overflow-hidden">
@@ -541,7 +584,7 @@ export default function SalesPaymentsPage() {
                                 size="sm"
                                 className="h-9 w-9 p-0"
                                 onClick={() => onDelete(p.id)}
-                                disabled={isReadOnlyPayment(p)}
+                                disabled={isReadOnlyPayment(p) || deletingId === p.id}
                                 title={isReadOnlyPayment(p) ? 'Stripe payments are read-only' : 'Delete'}
                                 aria-label={isReadOnlyPayment(p) ? 'Read-only payment' : 'Delete'}
                               >

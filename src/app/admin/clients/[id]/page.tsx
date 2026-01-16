@@ -16,9 +16,9 @@ import { ClientFileList } from '@/components/ClientFileList'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
-import { listInvoices, listPayments, listQuotes } from '@/lib/sales/local-store'
 import { centsToDollars } from '@/lib/sales/money'
-import type { InvoiceStatus, QuoteStatus } from '@/lib/sales/types'
+import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
+import { listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
 
 type ClientResponse = {
   id: string
@@ -141,6 +141,11 @@ export default function ClientDetailPage() {
 
   const [salesTick, setSalesTick] = useState(0)
 
+  const [salesLoading, setSalesLoading] = useState(false)
+  const [salesQuotes, setSalesQuotes] = useState<SalesQuote[]>([])
+  const [salesInvoices, setSalesInvoices] = useState<SalesInvoice[]>([])
+  const [salesPayments, setSalesPayments] = useState<SalesPayment[]>([])
+
   const [extraProjectTitles, setExtraProjectTitles] = useState<Record<string, string>>({})
 
   const projectsPageSize = 10
@@ -158,6 +163,32 @@ export default function ClientDetailPage() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      try {
+        setSalesLoading(true)
+        const [quotes, invoices, payments] = await Promise.all([
+          listSalesQuotes({ clientId, limit: 500 }),
+          listSalesInvoices({ clientId, limit: 500 }),
+          listSalesPayments({ clientId, limit: 500 }),
+        ])
+
+        if (cancelled) return
+        setSalesQuotes(quotes as any)
+        setSalesInvoices(invoices as any)
+        setSalesPayments(payments)
+      } finally {
+        if (!cancelled) setSalesLoading(false)
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [clientId, salesTick])
 
   const loadClient = useCallback(async () => {
     setLoading(true)
@@ -329,10 +360,9 @@ export default function ClientDetailPage() {
   }, [extraProjectTitles, projectTitleById])
 
   const sales = useMemo(() => {
-    void salesTick
-    const quotes = listQuotes().filter((q) => q.clientId === clientId)
-    const invoices = listInvoices().filter((i) => i.clientId === clientId)
-    const payments = listPayments().filter((p) => p.clientId === clientId)
+    const quotes = [...salesQuotes]
+    const invoices = [...salesInvoices]
+    const payments = [...salesPayments]
 
     const invoiceNumberById = Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber]))
 
@@ -346,7 +376,7 @@ export default function ClientDetailPage() {
       payments,
       invoiceNumberById,
     }
-  }, [clientId, salesTick])
+  }, [salesInvoices, salesPayments, salesQuotes])
 
   useEffect(() => {
     const idsToFetch = new Set<string>()
@@ -784,7 +814,7 @@ export default function ClientDetailPage() {
                   <Link href="/admin/sales/quotes" className="text-sm text-muted-foreground hover:underline">View all</Link>
                 </div>
                 {sales.quotes.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No quotes for this client yet.</div>
+                  <div className="text-sm text-muted-foreground">{salesLoading ? 'Loading…' : 'No quotes for this client yet.'}</div>
                 ) : (
                   <div className="overflow-x-auto rounded-md border border-border">
                     <table className="w-full text-sm">
@@ -838,7 +868,7 @@ export default function ClientDetailPage() {
                   <Link href="/admin/sales/invoices" className="text-sm text-muted-foreground hover:underline">View all</Link>
                 </div>
                 {sales.invoices.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No invoices for this client yet.</div>
+                  <div className="text-sm text-muted-foreground">{salesLoading ? 'Loading…' : 'No invoices for this client yet.'}</div>
                 ) : (
                   <div className="overflow-x-auto rounded-md border border-border">
                     <table className="w-full text-sm">
@@ -894,7 +924,7 @@ export default function ClientDetailPage() {
                   <Link href="/admin/sales/payments" className="text-sm text-muted-foreground hover:underline">View all</Link>
                 </div>
                 {sales.payments.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No payments for this client yet.</div>
+                  <div className="text-sm text-muted-foreground">{salesLoading ? 'Loading…' : 'No payments for this client yet.'}</div>
                 ) : (
                   <div className="overflow-x-auto rounded-md border border-border">
                     <table className="w-full text-sm">

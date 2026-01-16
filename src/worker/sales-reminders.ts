@@ -15,6 +15,7 @@ import type { PdfPartyInfo } from '../lib/sales/pdf'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '../lib/sales/types'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '../lib/sales/money'
 import { calcStripeGrossUpCents } from '../lib/sales/stripe-fees'
+import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '../lib/sales/db-mappers'
 
 function parseYmd(value: unknown): Date | null {
   const s = typeof value === 'string' ? value.trim() : ''
@@ -142,15 +143,26 @@ export async function processSalesReminders() {
 
   if (!overdueEnabled && !quoteExpiryEnabled) return
 
-  const storeRow = await (prisma as any).salesNativeStore
-    .findUnique({ where: { id: 'default' }, select: { data: true } })
-    .catch(() => null)
+  const settingsRow = await prisma.salesSettings.upsert({
+    where: { id: 'default' },
+    create: { id: 'default' },
+    update: {},
+  }).catch(() => null)
 
-  const store = (storeRow?.data || null) as any
-  const invoices: SalesInvoice[] = Array.isArray(store?.invoices) ? store.invoices : []
-  const quotes: SalesQuote[] = Array.isArray(store?.quotes) ? store.quotes : []
-  const payments: any[] = Array.isArray(store?.payments) ? store.payments : []
-  const settings: SalesSettings = (store?.settings || {}) as SalesSettings
+  const settings: SalesSettings = settingsRow ? salesSettingsFromDb(settingsRow as any) : ({} as SalesSettings)
+
+  const invoiceRows = await prisma.salesInvoice.findMany({
+    where: { dueDate: { not: null }, remindersEnabled: true },
+    take: 5000,
+  }).catch(() => [])
+
+  const quoteRows = await prisma.salesQuote.findMany({
+    where: { validUntil: { not: null }, remindersEnabled: true },
+    take: 5000,
+  }).catch(() => [])
+
+  const invoices: SalesInvoice[] = invoiceRows.map((r: any) => salesInvoiceFromDb(r as any))
+  const quotes: SalesQuote[] = quoteRows.map((r: any) => salesQuoteFromDb(r as any))
 
   const emailSettings = await getEmailSettings()
   const fromAddress = emailSettings.smtpFromAddress || emailSettings.smtpUsername || 'noreply@vitransfer.com'
@@ -205,7 +217,7 @@ export async function processSalesReminders() {
     stripePaidByInvoiceId[id] = { paidCents: base.paidCents + paidCents, latestYmd }
   }
 
-  let changedStore = false
+  void today
 
   async function getRecipientEmailsForClient(clientId: string): Promise<string[]> {
     const list = await (prisma as any).clientRecipient
@@ -410,8 +422,15 @@ export async function processSalesReminders() {
 
       if (!sendResult.success) continue
 
-      invoices[i] = { ...(inv as any), lastOverdueReminderSentYmd: today }
-      changedStore = true
+      try {
+        await prisma.salesInvoice.update({
+          where: { id: String(inv.id) },
+          data: { lastOverdueReminderSentYmd: today },
+          select: { id: true },
+        })
+      } catch {
+        // Best-effort. If we fail to mark it, the next run may resend.
+      }
     }
   }
 
@@ -536,25 +555,15 @@ export async function processSalesReminders() {
 
       if (!sendResult.success) continue
 
-      quotes[i] = { ...(q as any), lastExpiryReminderSentYmd: today }
-      changedStore = true
+      try {
+        await prisma.salesQuote.update({
+          where: { id: String(q.id) },
+          data: { lastExpiryReminderSentYmd: today },
+          select: { id: true },
+        })
+      } catch {
+        // Best-effort. If we fail to mark it, the next run may resend.
+      }
     }
-  }
-
-  if (changedStore) {
-    const nextStore = {
-      ...store,
-      invoices,
-      quotes,
-      settings,
-      payments,
-    }
-
-    await (prisma as any).salesNativeStore.upsert({
-      where: { id: 'default' },
-      create: { id: 'default', data: nextStore as any },
-      update: { data: nextStore as any },
-      select: { id: true },
-    })
   }
 }

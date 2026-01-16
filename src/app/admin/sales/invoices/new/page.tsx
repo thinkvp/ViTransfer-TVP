@@ -10,8 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
-import { createInvoice, getSalesSettings, getTodayYmd } from '@/lib/sales/local-store'
-import type { ClientOption, ProjectOption, SalesLineItem } from '@/lib/sales/types'
+import { createSalesInvoice, fetchSalesSettings } from '@/lib/sales/admin-api'
+import type { ClientOption, ProjectOption, SalesLineItem, SalesSettings } from '@/lib/sales/types'
 import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
   calcLineSubtotalCents,
@@ -22,6 +22,14 @@ import {
 } from '@/lib/sales/money'
 
 const TAX_RATE_OPTIONS = [0, 10]
+
+function getTodayYmdLocal(): string {
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -52,17 +60,56 @@ export default function NewInvoicePage() {
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [loadingClients, setLoadingClients] = useState(true)
   const [loadingProjects, setLoadingProjects] = useState(false)
+  const [loadingSettings, setLoadingSettings] = useState(true)
+  const [creating, setCreating] = useState(false)
 
   const [clientId, setClientId] = useState<string>('')
   const [projectId, setProjectId] = useState<string>('')
-  const [issueDate, setIssueDate] = useState<string>(() => getTodayYmd())
+  const [issueDate, setIssueDate] = useState<string>(() => getTodayYmdLocal())
   const [dueDate, setDueDate] = useState<string>('')
 
-  const settings = useMemo(() => getSalesSettings(), [])
+  const [settings, setSettings] = useState<SalesSettings>({
+    businessName: '',
+    address: '',
+    abn: '',
+    phone: '',
+    email: '',
+    website: '',
+    taxRatePercent: 10,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
+    defaultTerms: '',
+    paymentDetails: '',
+    updatedAt: new Date(0).toISOString(),
+  })
 
   const [notes, setNotes] = useState<string>('')
-  const [terms, setTerms] = useState<string>(settings.defaultTerms)
-  const [items, setItems] = useState<SalesLineItem[]>(() => [newLineItem(settings.taxRatePercent)])
+  const [terms, setTerms] = useState<string>('')
+  const [items, setItems] = useState<SalesLineItem[]>(() => [newLineItem(10)])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoadingSettings(true)
+    ;(async () => {
+      try {
+        const s = await fetchSalesSettings()
+        if (cancelled) return
+        setSettings(s)
+        setTerms((prev) => (prev ? prev : s.defaultTerms))
+        setItems((prev) => {
+          if (!prev.length) return [newLineItem(s.taxRatePercent)]
+          return prev
+        })
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoadingSettings(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const run = async () => {
@@ -109,31 +156,43 @@ export default function NewInvoicePage() {
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
   const totalCents = subtotalCents + taxCents
 
-  const onCreate = () => {
+  const onCreate = async () => {
+    if (!clientId) {
+      alert('Select a client.')
+      return
+    }
+
     if (items.every((it) => !it.description.trim())) {
       alert('Add at least one line item item name.')
       return
     }
 
-    const inv = createInvoice({
-      status: 'OPEN',
-      clientId: clientId || null,
-      projectId: projectId || null,
-      issueDate,
-      dueDate: dueDate || null,
-      notes,
-      terms,
-      items: items.map((it) => ({
-        ...it,
-        details: it.details?.trim() ? it.details : undefined,
-        quantity: Number.isFinite(it.quantity) && it.quantity > 0 ? it.quantity : 1,
-        unitPriceCents: Number.isFinite(it.unitPriceCents) ? it.unitPriceCents : 0,
-        taxRatePercent: normalizeTaxRatePercent(it.taxRatePercent, settings.taxRatePercent),
-      })),
-    })
+    setCreating(true)
+    try {
+      const inv = await createSalesInvoice({
+        clientId,
+        projectId: projectId || null,
+        issueDate,
+        dueDate: dueDate || null,
+        notes,
+        terms,
+        items: items.map((it) => ({
+          ...it,
+          details: it.details?.trim() ? it.details : undefined,
+          quantity: Number.isFinite(it.quantity) && it.quantity > 0 ? it.quantity : 1,
+          unitPriceCents: Number.isFinite(it.unitPriceCents) ? it.unitPriceCents : 0,
+          taxRatePercent: normalizeTaxRatePercent(it.taxRatePercent, settings.taxRatePercent),
+        })),
+      })
 
-    alert(`Created invoice ${inv.invoiceNumber}`)
-    window.location.href = `/admin/sales/invoices/${inv.id}`
+      alert(`Created invoice ${inv.invoiceNumber}`)
+      window.location.href = `/admin/sales/invoices/${inv.id}`
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to create invoice'
+      alert(msg)
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (
@@ -326,7 +385,13 @@ export default function NewInvoicePage() {
       </Card>
 
       <div className="flex justify-end gap-2">
-        <Button variant="default" onClick={onCreate}>Create invoice</Button>
+        <Button
+          variant="default"
+          onClick={() => void onCreate()}
+          disabled={creating || loadingSettings}
+        >
+          {creating ? 'Creating…' : 'Create invoice'}
+        </Button>
       </div>
     </div>
   )

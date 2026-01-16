@@ -12,8 +12,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { deleteInvoice, listInvoices, listPayments, updateInvoice, getSalesSettings } from '@/lib/sales/local-store'
-import type { InvoiceStatus, SalesInvoice } from '@/lib/sales/types'
+import {
+  deleteSalesInvoice,
+  fetchSalesSettings,
+  listSalesInvoices,
+  listSalesPayments,
+  patchSalesInvoice,
+} from '@/lib/sales/admin-api'
+import type { SalesInvoiceWithVersion } from '@/lib/sales/admin-api'
+import type { InvoiceStatus, SalesSettings } from '@/lib/sales/types'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadInvoicePdf } from '@/lib/sales/pdf'
@@ -22,10 +29,9 @@ import { cn } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
-import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 type InvoiceRow = {
-  invoice: SalesInvoice
+  invoice: SalesInvoiceWithVersion
   effectiveStatus: InvoiceStatus
   totalCents: number
 }
@@ -83,7 +89,24 @@ export default function SalesInvoicesPage() {
   const [tick, setTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
-  const [sendTarget, setSendTarget] = useState<SalesInvoice | null>(null)
+  const [sendTarget, setSendTarget] = useState<SalesInvoiceWithVersion | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [settings, setSettings] = useState<SalesSettings>({
+    businessName: '',
+    address: '',
+    abn: '',
+    phone: '',
+    email: '',
+    website: '',
+    taxRatePercent: 10,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
+    defaultTerms: '',
+    paymentDetails: '',
+    updatedAt: new Date(0).toISOString(),
+  })
+  const [invoices, setInvoices] = useState<SalesInvoiceWithVersion[]>([])
+  const [payments, setPayments] = useState<Array<{ invoiceId: string | null; amountCents: number; paymentDate: string }>>([])
   const [clientNameById, setClientNameById] = useState<Record<string, string>>({})
   const [projectTitleById, setProjectTitleById] = useState<Record<string, string>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<InvoiceStatus>>(new Set())
@@ -117,20 +140,30 @@ export default function SalesInvoicesPage() {
 
   useEffect(() => {
     let cancelled = false
-    const run = async () => {
-      try {
-        const result = await pullAndHydrateSalesNativeStore()
-        if (!cancelled && result.hydrated) setTick((v) => v + 1)
-      } catch {
-        // best-effort
-      }
-    }
+    setLoading(true)
 
-    void run()
+    ;(async () => {
+      try {
+        const [s, inv, pay] = await Promise.all([
+          fetchSalesSettings(),
+          listSalesInvoices(),
+          listSalesPayments({ limit: 5000 }),
+        ])
+        if (cancelled) return
+        setSettings(s)
+        setInvoices(inv)
+        setPayments(pay)
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [tick])
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -170,11 +203,7 @@ export default function SalesInvoicesPage() {
     localStorage.setItem('admin_sales_invoices_status_filter', JSON.stringify([...statusFilterSelected]))
   }, [statusFilterSelected])
 
-  const { invoices, payments, taxRatePercent, settings } = useMemo(() => {
-    void tick
-    const settings = getSalesSettings()
-    return { invoices: listInvoices(), payments: listPayments(), taxRatePercent: settings.taxRatePercent, settings }
-  }, [tick])
+  const taxRatePercent = settings.taxRatePercent
 
   useEffect(() => {
     let cancelled = false
@@ -219,7 +248,7 @@ export default function SalesInvoicesPage() {
     }
   }, [invoices])
 
-  const onDownload = async (inv: SalesInvoice) => {
+  const onDownload = async (inv: SalesInvoiceWithVersion) => {
     const clientDetails = inv.clientId ? await fetchClientDetails(inv.clientId).catch(() => null) : null
     await downloadInvoicePdf(inv, settings, {
       clientName: inv.clientId ? (clientNameById[inv.clientId] ?? undefined) : undefined,
@@ -228,7 +257,7 @@ export default function SalesInvoicesPage() {
     })
   }
 
-  const onView = async (inv: SalesInvoice) => {
+  const onView = async (inv: SalesInvoiceWithVersion) => {
     const relevantPayments = payments.filter((p) => p.invoiceId === inv.id)
     const totalCents = invoiceTotalCents(inv)
     const paidCents = relevantPayments.reduce((acc, p) => acc + p.amountCents, 0)
@@ -264,7 +293,7 @@ export default function SalesInvoicesPage() {
   }
 
   const invoicePaidCents = useCallback(
-    (inv: SalesInvoice): number => {
+    (inv: SalesInvoiceWithVersion): number => {
       const localPaid = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
       const stripePaid = stripePaidByInvoiceId[inv.id]?.paidCents ?? 0
       return localPaid + stripePaid
@@ -273,7 +302,7 @@ export default function SalesInvoicesPage() {
   )
 
   const invoiceTotalCents = useCallback(
-    (inv: SalesInvoice): number => {
+    (inv: SalesInvoiceWithVersion): number => {
       const subtotal = sumLineItemsSubtotal(inv.items)
       const tax = sumLineItemsTax(inv.items, taxRatePercent)
       return subtotal + tax
@@ -282,7 +311,7 @@ export default function SalesInvoicesPage() {
   )
 
   const invoiceEffectiveStatus = useCallback(
-    (inv: SalesInvoice): InvoiceStatus => {
+    (inv: SalesInvoiceWithVersion): InvoiceStatus => {
       const baseStatus: InvoiceStatus = inv.status === 'OPEN' || inv.status === 'SENT'
         ? inv.status
         : (inv.sentAt ? 'SENT' : 'OPEN')
@@ -323,8 +352,8 @@ export default function SalesInvoicesPage() {
 
   const sortedInvoices = useMemo(() => {
     const dir = tableSortDirection === 'asc' ? 1 : -1
-    const getClientName = (inv: SalesInvoice) => (inv.clientId ? clientNameById[inv.clientId] ?? inv.clientId : '')
-    const getProjectTitle = (inv: SalesInvoice) => (inv.projectId ? projectTitleById[inv.projectId] ?? inv.projectId : '')
+    const getClientName = (inv: SalesInvoiceWithVersion) => (inv.clientId ? clientNameById[inv.clientId] ?? inv.clientId : '')
+    const getProjectTitle = (inv: SalesInvoiceWithVersion) => (inv.projectId ? projectTitleById[inv.projectId] ?? inv.projectId : '')
 
     return [...filteredInvoices].sort((a, b) => {
       if (tableSortKey === 'invoiceNumber') return dir * String(a.invoice.invoiceNumber).localeCompare(String(b.invoice.invoiceNumber))
@@ -365,16 +394,25 @@ export default function SalesInvoicesPage() {
     })
   }
 
-  const onSend = (inv: SalesInvoice) => {
+  const onSend = (inv: SalesInvoiceWithVersion) => {
     if (!inv) return
     setSendTarget(inv)
     setSendOpen(true)
   }
 
-  const onDelete = (inv: SalesInvoice) => {
+  const onDelete = async (inv: SalesInvoiceWithVersion) => {
     if (!confirm(`Delete invoice ${inv.invoiceNumber}?`)) return
-    deleteInvoice(inv.id)
-    setTick((v) => v + 1)
+    try {
+      await deleteSalesInvoice(inv.id)
+      setInvoices((prev) => prev.filter((x) => x.id !== inv.id))
+      if (sendTarget?.id === inv.id) {
+        setSendOpen(false)
+        setSendTarget(null)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to delete invoice'
+      alert(msg)
+    }
   }
 
   return (
@@ -455,7 +493,9 @@ export default function SalesInvoicesPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {invoices.length === 0 ? (
+          {loading ? (
+            <div className="py-10 text-center text-muted-foreground">Loading…</div>
+          ) : invoices.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground">No invoices yet.</div>
           ) : (
             <div className="rounded-md border border-border bg-card overflow-hidden">
@@ -635,10 +675,26 @@ export default function SalesInvoicesPage() {
           clientName={sendTarget.clientId ? (clientNameById[sendTarget.clientId] ?? undefined) : undefined}
           projectTitle={sendTarget.projectId ? (projectTitleById[sendTarget.projectId] ?? undefined) : undefined}
           onSent={() => {
-            const updates: any = { sentAt: new Date().toISOString() }
-            if (sendTarget.status === 'OPEN') updates.status = 'SENT'
-            updateInvoice(sendTarget.id, updates)
-            setTick((v) => v + 1)
+            ;(async () => {
+              try {
+                const updates: any = { sentAt: new Date().toISOString() }
+                if (sendTarget.status === 'OPEN') updates.status = 'SENT'
+                const next = await patchSalesInvoice(sendTarget.id, {
+                  version: sendTarget.version,
+                  ...updates,
+                })
+                setInvoices((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+                setSendTarget(next)
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : 'Failed to update invoice'
+                if (msg === 'Conflict') {
+                  alert('This invoice was updated in another session. Reloading.')
+                  setTick((v) => v + 1)
+                  return
+                }
+                alert(msg)
+              }
+            })()
           }}
         />
       ) : null}

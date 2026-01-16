@@ -11,13 +11,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
-import {
-  deleteQuote,
-  getQuote,
-  getSalesSettings,
-  updateQuote,
-} from '@/lib/sales/local-store'
-import type { ClientOption, ProjectOption, QuoteStatus, SalesLineItem, SalesQuote } from '@/lib/sales/types'
+import { deleteSalesQuote, fetchSalesQuote, fetchSalesSettings, patchSalesQuote } from '@/lib/sales/admin-api'
+import type { SalesQuoteWithVersion } from '@/lib/sales/admin-api'
+import type { ClientOption, ProjectOption, QuoteStatus, SalesLineItem, SalesSettings } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
   calcLineSubtotalCents,
@@ -67,12 +63,25 @@ export default function QuoteDetailPage() {
     return ''
   }, [params])
 
-  const settings = useMemo(() => getSalesSettings(), [])
-
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const [quote, setQuote] = useState<SalesQuote | null>(null)
+  const [settings, setSettings] = useState<SalesSettings>({
+    businessName: '',
+    address: '',
+    abn: '',
+    phone: '',
+    email: '',
+    website: '',
+    taxRatePercent: 10,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
+    defaultTerms: '',
+    paymentDetails: '',
+    updatedAt: new Date(0).toISOString(),
+  })
+
+  const [quote, setQuote] = useState<SalesQuoteWithVersion | null>(null)
   const [shareToken, setShareToken] = useState<string | null | undefined>(undefined)
   const [trackingRefreshKey, setTrackingRefreshKey] = useState(0)
   const [sendOpen, setSendOpen] = useState(false)
@@ -90,33 +99,54 @@ export default function QuoteDetailPage() {
   const [issueDate, setIssueDate] = useState('')
   const [validUntil, setValidUntil] = useState('')
   const [notes, setNotes] = useState('')
-  const [terms, setTerms] = useState(settings.defaultTerms)
+  const [terms, setTerms] = useState('')
   const [items, setItems] = useState<SalesLineItem[]>([])
 
   useEffect(() => {
-    const q = id ? getQuote(id) : null
-    setQuote(q)
-    if (q) {
-      setStatus(q.status)
-      setClientId(q.clientId ?? '')
-      setProjectId(q.projectId ?? '')
-      setIssueDate(q.issueDate)
-      setValidUntil(q.validUntil ?? '')
-      setNotes(q.notes)
-      setTerms(q.terms)
-      setItems(
-        q.items.map((it) => ({
-          ...it,
-          details: (it as any).details ?? '',
-          taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, settings.taxRatePercent),
-        }))
-      )
+    let cancelled = false
+    setLoaded(false)
 
-      setEditingClient(!Boolean(q.clientId))
-      setEditingProject(!Boolean(q.projectId))
+    ;(async () => {
+      if (!id) {
+        setQuote(null)
+        setLoaded(true)
+        return
+      }
+
+      try {
+        const [s, q] = await Promise.all([fetchSalesSettings(), fetchSalesQuote(id)])
+        if (cancelled) return
+
+        setSettings(s)
+        setQuote(q)
+        setStatus(q.status)
+        setClientId(q.clientId ?? '')
+        setProjectId(q.projectId ?? '')
+        setIssueDate(q.issueDate)
+        setValidUntil(q.validUntil ?? '')
+        setNotes(q.notes)
+        setTerms(q.terms ?? s.defaultTerms)
+        setItems(
+          q.items.map((it) => ({
+            ...it,
+            details: (it as any).details ?? '',
+            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
+          }))
+        )
+
+        setEditingClient(!Boolean(q.clientId))
+        setEditingProject(!Boolean(q.projectId))
+      } catch {
+        if (!cancelled) setQuote(null)
+      } finally {
+        if (!cancelled) setLoaded(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
-    setLoaded(true)
-  }, [id, settings.taxRatePercent])
+  }, [id])
 
   useEffect(() => {
     let cancelled = false
@@ -210,11 +240,17 @@ export default function QuoteDetailPage() {
 
   const onSave = async () => {
     if (!quote) return
+    if (!clientId) {
+      alert('Select a client.')
+      return
+    }
     setSaving(true)
     try {
-      const next = updateQuote(quote.id, {
+      const next = await patchSalesQuote(quote.id, {
+        version: quote.version,
         status,
-        clientId: clientId || null,
+        acceptedFromStatus: quote.acceptedFromStatus ?? null,
+        clientId,
         projectId: projectId || null,
         issueDate,
         validUntil: validUntil || null,
@@ -230,6 +266,7 @@ export default function QuoteDetailPage() {
         })),
       })
       setQuote(next)
+      setStatus(next.status)
       alert('Saved')
     } finally {
       setSaving(false)
@@ -239,8 +276,15 @@ export default function QuoteDetailPage() {
   const onDelete = () => {
     if (!quote) return
     if (!confirm(`Delete quote ${quote.quoteNumber}?`)) return
-    deleteQuote(quote.id)
-    window.location.href = '/admin/sales/quotes'
+    ;(async () => {
+      try {
+        await deleteSalesQuote(quote.id)
+        window.location.href = '/admin/sales/quotes'
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to delete quote'
+        alert(msg)
+      }
+    })()
   }
 
   const onViewPublic = async () => {
@@ -318,12 +362,23 @@ export default function QuoteDetailPage() {
             }
             onClick={() => {
               const enabled = (quote as any)?.remindersEnabled !== false
-              try {
-                const next = updateQuote(quote.id, { remindersEnabled: !enabled } as any)
-                setQuote(next)
-              } catch {
-                // ignore
-              }
+              ;(async () => {
+                try {
+                  const next = await patchSalesQuote(quote.id, {
+                    version: quote.version,
+                    remindersEnabled: !enabled,
+                  })
+                  setQuote(next)
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : 'Failed to update quote'
+                  if (msg === 'Conflict') {
+                    alert('This quote was updated in another session. Reloading.')
+                    window.location.reload()
+                    return
+                  }
+                  alert(msg)
+                }
+              })()
             }}
           >
             {((quote as any)?.remindersEnabled !== false) ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
@@ -604,13 +659,29 @@ export default function QuoteDetailPage() {
         clientName={clientId ? clientNameById[clientId] : undefined}
         projectTitle={projectId ? projectTitleById[projectId] : undefined}
         onSent={({ shareToken: token }) => {
-          const updates: any = { sentAt: new Date().toISOString() }
-          if (quote.status === 'OPEN') updates.status = 'SENT'
-          const next = updateQuote(quote.id, updates)
-          setQuote(next)
-          setStatus(next.status)
-          setShareToken(token)
-          setTrackingRefreshKey((v) => v + 1)
+          ;(async () => {
+            try {
+              const updates: any = { sentAt: new Date().toISOString() }
+              if (quote.status === 'OPEN') updates.status = 'SENT'
+
+              const next = await patchSalesQuote(quote.id, {
+                version: quote.version,
+                ...updates,
+              })
+              setQuote(next)
+              setStatus(next.status)
+              setShareToken(token)
+              setTrackingRefreshKey((v) => v + 1)
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Failed to update quote'
+              if (msg === 'Conflict') {
+                alert('This quote was updated in another session. Reloading.')
+                window.location.reload()
+                return
+              }
+              alert(msg)
+            }
+          })()
         }}
       />
 

@@ -4,7 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { getQuickBooksConfig, qboQuery, refreshQuickBooksAccessToken, toQboDateTime } from '@/lib/quickbooks/qbo'
-import { mergeQboInvoicesIntoSalesNativeStore } from '@/lib/sales/server-native-store'
+import { mergeQboInvoicesIntoSalesTables } from '@/lib/sales/server-qbo-merge'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
 
     let vitransfer: any = null
     try {
-      const merged = await mergeQboInvoicesIntoSalesNativeStore(nativeInvoices)
+      const merged = await mergeQboInvoicesIntoSalesTables(nativeInvoices)
       vitransfer = {
         ingestedInvoices: merged.ingested,
         skippedInvoicesMissingClient: merged.skippedMissingClient,

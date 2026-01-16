@@ -12,8 +12,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { deleteQuote, getSalesSettings, listQuotes, updateQuote } from '@/lib/sales/local-store'
-import type { QuoteStatus, SalesQuote } from '@/lib/sales/types'
+import { deleteSalesQuote, fetchSalesSettings, listSalesQuotes, patchSalesQuote } from '@/lib/sales/admin-api'
+import type { SalesQuoteWithVersion } from '@/lib/sales/admin-api'
+import type { QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
@@ -21,10 +22,9 @@ import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Send, Trash2 } f
 import { cn } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
-import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 type QuoteRow = {
-  quote: SalesQuote
+  quote: SalesQuoteWithVersion
   effectiveStatus: QuoteStatus
   totalCents: number
 }
@@ -78,11 +78,23 @@ export default function SalesQuotesPage() {
   const [tick, setTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
-  const [sendTarget, setSendTarget] = useState<SalesQuote | null>(null)
-  const settings = useMemo(() => {
-    void tick
-    return getSalesSettings()
-  }, [tick])
+  const [sendTarget, setSendTarget] = useState<SalesQuoteWithVersion | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [settings, setSettings] = useState<SalesSettings>({
+    businessName: '',
+    address: '',
+    abn: '',
+    phone: '',
+    email: '',
+    website: '',
+    taxRatePercent: 10,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
+    defaultTerms: '',
+    paymentDetails: '',
+    updatedAt: new Date(0).toISOString(),
+  })
+  const [quotes, setQuotes] = useState<SalesQuoteWithVersion[]>([])
   const [clientNameById, setClientNameById] = useState<Record<string, string>>({})
   const [projectTitleById, setProjectTitleById] = useState<Record<string, string>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<QuoteStatus>>(new Set())
@@ -106,20 +118,25 @@ export default function SalesQuotesPage() {
 
   useEffect(() => {
     let cancelled = false
-    const run = async () => {
-      try {
-        const result = await pullAndHydrateSalesNativeStore()
-        if (!cancelled && result.hydrated) setTick((v) => v + 1)
-      } catch {
-        // best-effort
-      }
-    }
+    setLoading(true)
 
-    void run()
+    ;(async () => {
+      try {
+        const [s, q] = await Promise.all([fetchSalesSettings(), listSalesQuotes()])
+        if (cancelled) return
+        setSettings(s)
+        setQuotes(q)
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [tick])
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -163,13 +180,8 @@ export default function SalesQuotesPage() {
     setTablePage(1)
   }, [recordsPerPage, tableSortDirection, tableSortKey, statusFilterSelected])
 
-  const quotes = useMemo(() => {
-    void tick
-    return listQuotes()
-  }, [tick])
-
   const quoteTotalCents = useCallback(
-    (q: SalesQuote): number => {
+    (q: SalesQuoteWithVersion): number => {
       const subtotal = sumLineItemsSubtotal(q.items)
       const tax = sumLineItemsTax(q.items, settings.taxRatePercent)
       return subtotal + tax
@@ -177,7 +189,7 @@ export default function SalesQuotesPage() {
     [settings.taxRatePercent]
   )
 
-  const quoteEffectiveStatus = useCallback((q: SalesQuote): QuoteStatus => {
+  const quoteEffectiveStatus = useCallback((q: SalesQuoteWithVersion): QuoteStatus => {
     if (q.status === 'ACCEPTED') return 'ACCEPTED'
     if (q.status === 'CLOSED') return 'CLOSED'
 
@@ -200,8 +212,8 @@ export default function SalesQuotesPage() {
 
   const sortedQuotes = useMemo(() => {
     const dir = tableSortDirection === 'asc' ? 1 : -1
-    const getClientName = (q: SalesQuote) => (q.clientId ? clientNameById[q.clientId] ?? q.clientId : '')
-    const getProjectTitle = (q: SalesQuote) => (q.projectId ? projectTitleById[q.projectId] ?? q.projectId : '')
+    const getClientName = (q: SalesQuoteWithVersion) => (q.clientId ? clientNameById[q.clientId] ?? q.clientId : '')
+    const getProjectTitle = (q: SalesQuoteWithVersion) => (q.projectId ? projectTitleById[q.projectId] ?? q.projectId : '')
 
     return [...filteredQuotes].sort((a, b) => {
       if (tableSortKey === 'quoteNumber') return dir * String(a.quote.quoteNumber).localeCompare(String(b.quote.quoteNumber))
@@ -239,28 +251,56 @@ export default function SalesQuotesPage() {
     })
   }
 
-  const onSend = (q: SalesQuote) => {
+  const onSend = (q: SalesQuoteWithVersion) => {
     if (!q) return
     setSendTarget(q)
     setSendOpen(true)
   }
 
-  const onAccept = (q: SalesQuote) => {
-    if (q.status === 'ACCEPTED') {
-      updateQuote(q.id, { status: q.acceptedFromStatus ?? 'OPEN', acceptedFromStatus: null })
-    } else {
-      updateQuote(q.id, { status: 'ACCEPTED', acceptedFromStatus: q.status })
+  const onAccept = async (q: SalesQuoteWithVersion) => {
+    try {
+      const next =
+        q.status === 'ACCEPTED'
+          ? await patchSalesQuote(q.id, {
+              status: q.acceptedFromStatus ?? 'OPEN',
+              acceptedFromStatus: null,
+              version: q.version,
+            })
+          : await patchSalesQuote(q.id, {
+              status: 'ACCEPTED',
+              acceptedFromStatus: q.status,
+              version: q.version,
+            })
+
+      setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+      setSendTarget((prev) => (prev?.id === next.id ? next : prev))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to update quote'
+      if (msg === 'Conflict') {
+        alert('This quote was updated in another session. Reloading.')
+        setTick((v) => v + 1)
+        return
+      }
+      alert(msg)
     }
-    setTick((v) => v + 1)
   }
 
-  const onDelete = (q: SalesQuote) => {
+  const onDelete = async (q: SalesQuoteWithVersion) => {
     if (!confirm(`Delete quote ${q.quoteNumber}?`)) return
-    deleteQuote(q.id)
-    setTick((v) => v + 1)
+    try {
+      await deleteSalesQuote(q.id)
+      setQuotes((prev) => prev.filter((x) => x.id !== q.id))
+      if (sendTarget?.id === q.id) {
+        setSendOpen(false)
+        setSendTarget(null)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to delete quote'
+      alert(msg)
+    }
   }
 
-  const onDownload = async (q: SalesQuote) => {
+  const onDownload = async (q: SalesQuoteWithVersion) => {
     const clientDetails = q.clientId ? await fetchClientDetails(q.clientId).catch(() => null) : null
 
     const publicQuoteUrl = await createSalesDocShareUrl({
@@ -279,7 +319,7 @@ export default function SalesQuotesPage() {
     })
   }
 
-  const onView = async (q: SalesQuote) => {
+  const onView = async (q: SalesQuoteWithVersion) => {
     const url = await createSalesDocShareUrl({
       type: 'QUOTE',
       doc: q,
@@ -368,7 +408,9 @@ export default function SalesQuotesPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {quotes.length === 0 ? (
+          {loading ? (
+            <div className="py-10 text-center text-muted-foreground">Loading…</div>
+          ) : quotes.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground">No quotes yet.</div>
           ) : (
             <div className="rounded-md border border-border bg-card overflow-hidden">
@@ -561,8 +603,25 @@ export default function SalesQuotesPage() {
           clientName={sendTarget.clientId ? (clientNameById[sendTarget.clientId] ?? undefined) : undefined}
           projectTitle={sendTarget.projectId ? (projectTitleById[sendTarget.projectId] ?? undefined) : undefined}
           onSent={() => {
-            updateQuote(sendTarget.id, { status: 'SENT', sentAt: new Date().toISOString() })
-            setTick((v) => v + 1)
+            ;(async () => {
+              try {
+                const next = await patchSalesQuote(sendTarget.id, {
+                  status: 'SENT',
+                  sentAt: new Date().toISOString(),
+                  version: sendTarget.version,
+                })
+                setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+                setSendTarget(next)
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : 'Failed to update quote'
+                if (msg === 'Conflict') {
+                  alert('This quote was updated in another session. Reloading.')
+                  setTick((v) => v + 1)
+                  return
+                }
+                alert(msg)
+              }
+            })()
           }}
         />
       ) : null}

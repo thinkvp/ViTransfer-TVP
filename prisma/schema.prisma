@@ -32,6 +32,9 @@ model User {
   internalProjectComments ProjectInternalComment[]
   passkeys                PasskeyCredential[]
   projectStatusChanges    ProjectStatusChange[]
+
+  salesQuoteRevisions   SalesQuoteRevision[]
+  salesInvoiceRevisions SalesInvoiceRevision[]
 }
 
 model Role {
@@ -61,6 +64,10 @@ model Client {
   recipients ClientRecipient[]
   files      ClientFile[]
   projects   Project[]
+
+  salesQuotes   SalesQuote[]
+  salesInvoices SalesInvoice[]
+  salesPayments SalesPayment[]
 
   @@index([deletedAt])
   @@index([active])
@@ -199,6 +206,9 @@ model Project {
   keyDates ProjectKeyDate[]
 
   statusChanges ProjectStatusChange[]
+
+  salesQuotes   SalesQuote[]
+  salesInvoices SalesInvoice[]
 }
 
 enum ProjectKeyDateType {
@@ -822,6 +832,27 @@ enum SalesDocShareType {
   INVOICE
 }
 
+enum SalesQuoteStatus {
+  OPEN
+  SENT
+  ACCEPTED
+  CLOSED
+}
+
+enum SalesInvoiceStatus {
+  OPEN
+  SENT
+  OVERDUE
+  PARTIALLY_PAID
+  PAID
+}
+
+enum SalesPaymentSource {
+  MANUAL
+  STRIPE
+  QUICKBOOKS
+}
+
 model SalesDocumentShare {
   id String @id @default(cuid())
 
@@ -906,6 +937,183 @@ model SalesStripeGatewaySettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model SalesSettings {
+  id String @id @default("default")
+
+  businessName String @default("")
+  address      String @default("")
+  abn          String @default("")
+  phone        String @default("")
+  email        String @default("")
+  website      String @default("")
+
+  taxRatePercent        Float  @default(10)
+  defaultQuoteValidDays Int    @default(14)
+  defaultInvoiceDueDays Int    @default(7)
+  defaultTerms          String @default("Payment due within 7 days unless otherwise agreed.")
+  paymentDetails        String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SalesSequence {
+  id String @id @default("default")
+
+  quote   Int @default(0)
+  invoice Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SalesQuote {
+  id String @id @default(cuid())
+
+  quoteNumber String @unique
+  status      SalesQuoteStatus @default(OPEN)
+
+  acceptedFromStatus SalesQuoteStatus?
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  issueDate  String
+  validUntil String?
+
+  notes String @default("")
+  terms String @default("")
+
+  itemsJson Json
+
+  sentAt DateTime?
+
+  remindersEnabled        Boolean @default(true)
+  lastExpiryReminderSentYmd String?
+
+  qboId String? @unique
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  revisions SalesQuoteRevision[]
+
+  @@index([clientId])
+  @@index([projectId])
+  @@index([status])
+  @@index([issueDate])
+}
+
+model SalesQuoteRevision {
+  id String @id @default(cuid())
+
+  quoteId String
+  quote   SalesQuote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  version Int
+  docJson Json
+
+  createdByUserId String?
+  createdByUser   User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([quoteId, version])
+  @@index([quoteId])
+  @@index([createdByUserId])
+}
+
+model SalesInvoice {
+  id String @id @default(cuid())
+
+  invoiceNumber String @unique
+  status        SalesInvoiceStatus @default(OPEN)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  issueDate String
+  dueDate   String?
+
+  notes String @default("")
+  terms String @default("")
+
+  itemsJson Json
+
+  sentAt DateTime?
+
+  remindersEnabled          Boolean @default(true)
+  lastOverdueReminderSentYmd String?
+
+  qboId String? @unique
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  revisions SalesInvoiceRevision[]
+  payments  SalesPayment[]
+
+  @@index([clientId])
+  @@index([projectId])
+  @@index([status])
+  @@index([issueDate])
+  @@index([dueDate])
+}
+
+model SalesInvoiceRevision {
+  id String @id @default(cuid())
+
+  invoiceId String
+  invoice   SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  version Int
+  docJson Json
+
+  createdByUserId String?
+  createdByUser   User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([invoiceId, version])
+  @@index([invoiceId])
+  @@index([createdByUserId])
+}
+
+model SalesPayment {
+  id String @id @default(cuid())
+
+  source SalesPaymentSource @default(MANUAL)
+
+  paymentDate String
+  amountCents Int
+  method      String @default("")
+  reference   String @default("")
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  invoiceId String?
+  invoice   SalesInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  qboId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([paymentDate])
+  @@index([clientId])
+  @@index([invoiceId])
+  @@index([source])
 }
 
 model SalesNativeStore {
