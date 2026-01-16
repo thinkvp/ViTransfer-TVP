@@ -19,6 +19,8 @@ type Props = {
   canAcceptQuote?: boolean
   canPayInvoice?: boolean
   payLabel?: string | null
+  processingFeeCents?: number | null
+  processingFeeCurrency?: string | null
 }
 
 export default function PublicSalesDocActions(props: Props) {
@@ -32,6 +34,8 @@ export default function PublicSalesDocActions(props: Props) {
       clientName: props.clientName || undefined,
       clientAddress: props.clientAddress || undefined,
       projectTitle: props.projectTitle || undefined,
+      stripeProcessingFeeCents: typeof props.processingFeeCents === 'number' ? props.processingFeeCents : undefined,
+      stripeProcessingFeeCurrency: typeof props.processingFeeCurrency === 'string' ? props.processingFeeCurrency : undefined,
       publicQuoteUrl: props.type === 'QUOTE'
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/sales/view/${props.token}`
         : undefined,
@@ -39,7 +43,7 @@ export default function PublicSalesDocActions(props: Props) {
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/sales/view/${props.token}`
         : undefined,
     }),
-    [props.clientAddress, props.clientName, props.projectTitle, props.token, props.type]
+    [props.clientAddress, props.clientName, props.processingFeeCents, props.processingFeeCurrency, props.projectTitle, props.token, props.type]
   )
 
   const onDownload = useCallback(async () => {
@@ -109,6 +113,11 @@ export default function PublicSalesDocActions(props: Props) {
   }, [paying, props.canPayInvoice, props.token])
 
   const payLabel = typeof props.payLabel === 'string' && props.payLabel.trim() ? props.payLabel.trim() : null
+  const feeCents = typeof props.processingFeeCents === 'number' && Number.isFinite(props.processingFeeCents) ? Math.max(0, Math.trunc(props.processingFeeCents)) : 0
+  const feeCurrency = typeof props.processingFeeCurrency === 'string' && props.processingFeeCurrency.trim() ? props.processingFeeCurrency.trim().toUpperCase() : 'AUD'
+  const feeText = feeCents > 0
+    ? `Attracts ${feeCurrency === 'AUD' ? 'A$' : `${feeCurrency} `}${(feeCents / 100).toFixed(2)} in card processing fees`
+    : null
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -150,6 +159,10 @@ export default function PublicSalesDocActions(props: Props) {
 
       {props.type === 'INVOICE' && props.canPayInvoice && payLabel && (
         <div className="text-xs text-muted-foreground max-w-[340px] text-right">{payLabel}</div>
+      )}
+
+      {props.type === 'INVOICE' && props.canPayInvoice && feeText && (
+        <div className="text-xs text-muted-foreground max-w-[340px] text-right">{feeText}</div>
       )}
     </div>
   )

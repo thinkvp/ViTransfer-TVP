@@ -447,8 +447,8 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
                 </div>
               )}
 
-              <div className="border rounded-lg bg-card">
-                <div className="max-h-[55vh] overflow-auto p-4 prose prose-sm max-w-none">
+              <div className="border rounded-lg bg-white">
+                <div className="max-h-[55vh] overflow-auto p-4 prose prose-sm max-w-none text-black">
                   {detail.htmlBody ? (
                     <div dangerouslySetInnerHTML={{ __html: detail.htmlBody }} />
                   ) : detail.textBody ? (

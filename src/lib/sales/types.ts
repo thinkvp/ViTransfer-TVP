@@ -26,6 +26,10 @@ export type SalesQuote = {
   projectId: string | null
   issueDate: string // YYYY-MM-DD
   validUntil: string | null // YYYY-MM-DD
+  /** Enable/disable automated reminders for this document (default: enabled). */
+  remindersEnabled?: boolean
+  /** YYYY-MM-DD when the last expiry reminder was sent (prevents daily duplicates). */
+  lastExpiryReminderSentYmd?: string | null
   notes: string
   terms: string
   items: SalesLineItem[]
@@ -42,6 +46,10 @@ export type SalesInvoice = {
   projectId: string | null
   issueDate: string // YYYY-MM-DD
   dueDate: string | null // YYYY-MM-DD
+  /** Enable/disable automated reminders for this document (default: enabled). */
+  remindersEnabled?: boolean
+  /** YYYY-MM-DD when the last overdue reminder was sent (prevents daily duplicates). */
+  lastOverdueReminderSentYmd?: string | null
   notes: string
   terms: string
   items: SalesLineItem[]

@@ -35,6 +35,7 @@ type ClientResponse = {
     displayColor: string | null
     isPrimary: boolean
     receiveNotifications: boolean
+    receiveSalesReminders: boolean
   }>
 }
 
@@ -190,6 +191,7 @@ export default function ClientDetailPage() {
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: r.receiveNotifications !== false,
+          receiveSalesReminders: (r as any).receiveSalesReminders !== false,
         }))
       )
     } catch (err: any) {
@@ -561,6 +563,7 @@ export default function ClientDetailPage() {
                     onChange={setRecipients}
                     addButtonLabel="Add Recipient"
                     showNotificationsToggle={false}
+                    showSalesRemindersToggle
                   />
                 </div>
 

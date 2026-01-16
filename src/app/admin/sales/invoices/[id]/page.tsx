@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Check, Pencil, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,7 @@ import {
   updateInvoice,
 } from '@/lib/sales/local-store'
 import type { ClientOption, InvoiceStatus, ProjectOption, SalesInvoice, SalesLineItem } from '@/lib/sales/types'
-import { fetchClientDetails, fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
+import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
   calcLineSubtotalCents,
   centsToDollars,
@@ -34,6 +34,55 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 
 const TAX_RATE_OPTIONS = [0, 10]
+
+function parseDateOnlyLocal(value: string | null | undefined): Date | null {
+  if (!value) return null
+  const s = String(value).trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (m) {
+    const yyyy = Number(m[1])
+    const mm = Number(m[2])
+    const dd = Number(m[3])
+    if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null
+    return new Date(yyyy, mm - 1, dd)
+  }
+  const d = new Date(s)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+function endOfDayLocal(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+}
+
+function statusBadgeClass(status: InvoiceStatus): string {
+  switch (status) {
+    case 'OPEN':
+      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
+    case 'SENT':
+      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
+    case 'OVERDUE':
+      return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
+    case 'PARTIALLY_PAID':
+      return 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20'
+    case 'PAID':
+      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+  }
+}
+
+function statusLabel(status: InvoiceStatus): string {
+  switch (status) {
+    case 'OPEN':
+      return 'Open'
+    case 'SENT':
+      return 'Sent'
+    case 'OVERDUE':
+      return 'Overdue'
+    case 'PARTIALLY_PAID':
+      return 'Partially Paid'
+    case 'PAID':
+      return 'Paid'
+  }
+}
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -56,6 +105,7 @@ const INVOICE_STATUSES: { value: InvoiceStatus; label: string }[] = [
   { value: 'OPEN', label: 'Open' },
   { value: 'SENT', label: 'Sent' },
   { value: 'OVERDUE', label: 'Overdue' },
+  { value: 'PARTIALLY_PAID', label: 'Partially Paid (auto)' },
   { value: 'PAID', label: 'Paid' },
 ]
 
@@ -72,6 +122,7 @@ export default function InvoiceDetailPage() {
 
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [nowIso, setNowIso] = useState<string | null>(null)
 
   const [invoice, setInvoice] = useState<SalesInvoice | null>(null)
   const [shareToken, setShareToken] = useState<string | null | undefined>(undefined)
@@ -79,7 +130,11 @@ export default function InvoiceDetailPage() {
   const [sendOpen, setSendOpen] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
+  const [allProjects, setAllProjects] = useState<ProjectOption[]>([])
   const [loadingProjects, setLoadingProjects] = useState(false)
+
+  const [editingClient, setEditingClient] = useState(false)
+  const [editingProject, setEditingProject] = useState(false)
   const [stripePayments, setStripePayments] = useState<Array<{
     id: string
     invoiceDocId: string
@@ -121,9 +176,19 @@ export default function InvoiceDetailPage() {
           taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, settings.taxRatePercent),
         }))
       )
+
+      setEditingClient(!Boolean(inv.clientId))
+      setEditingProject(!Boolean(inv.projectId))
     }
     setLoaded(true)
   }, [id, settings.taxRatePercent])
+
+  useEffect(() => {
+    setNowIso(new Date().toISOString())
+    const onFocus = () => setNowIso(new Date().toISOString())
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -201,23 +266,55 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => {
     const run = async () => {
+      const p = await fetchProjectOptions().catch(() => [])
+      setAllProjects(p)
+    }
+    void run()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!clientId) return
+      // Ensure current client label is available even if options haven't loaded yet.
+      if (clients.some((c) => c.id === clientId)) return
+      try {
+        const details = await fetchClientDetails(clientId)
+        if (!details?.id || !details?.name) return
+        if (cancelled) return
+        setClients((prev) => (prev.some((c) => c.id === details.id) ? prev : [{ id: details.id, name: details.name }, ...prev]))
+      } catch {
+        // ignore
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [clientId, clients])
+
+  useEffect(() => {
+    const run = async () => {
       if (!clientId) {
         setProjects([])
-        setProjectId('')
         return
       }
 
       setLoadingProjects(true)
       try {
         const p = await fetchProjectOptionsForClient(clientId)
-        setProjects(p)
-        setProjectId((prev) => (p.some((x) => x.id === prev) ? prev : ''))
+        const current = projectId
+        const includeCurrent = current && !p.some((x) => x.id === current)
+          ? allProjects.find((x) => x.id === current)
+          : null
+        setProjects(includeCurrent ? [...p, includeCurrent] : p)
       } finally {
         setLoadingProjects(false)
       }
     }
     void run()
-  }, [clientId])
+  }, [allProjects, clientId, projectId])
 
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
@@ -229,8 +326,57 @@ export default function InvoiceDetailPage() {
   const paidCents = localPaidCents + stripePaidCents
   const balanceCents = Math.max(0, totalCents - paidCents)
 
+  const paidOnYmd = useMemo((): string | null => {
+    if (paidCents <= 0) return null
+
+    const latestLocalYmd = payments
+      .map((p) => p.paymentDate)
+      .filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort()
+      .at(-1)
+      ?? null
+
+    const latestStripeYmd = stripePayments
+      .map((p) => (typeof p.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : null))
+      .filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort()
+      .at(-1)
+      ?? null
+
+    return [latestLocalYmd, latestStripeYmd]
+      .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+      .sort()
+      .at(-1)
+      ?? null
+  }, [paidCents, payments, stripePayments])
+
+  const paidOnDisplay = useMemo((): string | null => {
+    if (!paidOnYmd) return null
+    return paidOnYmd.replaceAll('-', '/')
+  }, [paidOnYmd])
+
+  const effectiveStatus = useMemo((): InvoiceStatus => {
+    const baseStatus: InvoiceStatus = status === 'OPEN' || status === 'SENT'
+      ? status
+      : (invoice?.sentAt ? 'SENT' : 'OPEN')
+
+    if (totalCents <= 0) return baseStatus
+    if (balanceCents <= 0) return 'PAID'
+
+    const due = parseDateOnlyLocal(dueDate || invoice?.dueDate)
+    const nowMs = nowIso ? new Date(nowIso).getTime() : 0
+    const isPastDue = Boolean(due) && nowMs > endOfDayLocal(due as Date).getTime()
+    if (isPastDue) return 'OVERDUE'
+    if (paidCents > 0) return 'PARTIALLY_PAID'
+
+    return baseStatus
+  }, [balanceCents, dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
+
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
-  const projectTitleById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.title])), [projects])
+  const projectTitleById = useMemo(
+    () => Object.fromEntries([...projects, ...allProjects].map((p) => [p.id, p.title])),
+    [allProjects, projects]
+  )
 
   const onSave = async () => {
     if (!invoice) return
@@ -288,7 +434,7 @@ export default function InvoiceDetailPage() {
       .at(-1)
       ?? null
 
-    const invoicePaidAt = (status === 'PAID' || (totalCents > 0 && balanceCents <= 0))
+    const invoicePaidAt = (effectiveStatus === 'PAID' || (totalCents > 0 && balanceCents <= 0))
       ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
       : null
 
@@ -335,11 +481,37 @@ export default function InvoiceDetailPage() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-xl font-semibold">{invoice.invoiceNumber}</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-semibold">{invoice.invoiceNumber}</h2>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(effectiveStatus)}`}>
+              {statusLabel(effectiveStatus)}
+            </span>
+          </div>
           <p className="text-sm text-muted-foreground">View and edit invoice details.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Link href="/admin/sales/invoices"><Button variant="outline">Back</Button></Link>
+          <Button
+            type="button"
+            variant="outline"
+            title={((invoice as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
+            aria-label={((invoice as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
+            className={
+              ((invoice as any)?.remindersEnabled !== false)
+                ? 'text-success hover:text-success hover:bg-success-visible'
+                : 'text-destructive hover:text-destructive hover:bg-destructive-visible'
+            }
+            onClick={() => {
+              const enabled = (invoice as any)?.remindersEnabled !== false
+              try {
+                const next = updateInvoice(invoice.id, { remindersEnabled: !enabled } as any)
+                setInvoice(next)
+              } catch {
+                // ignore
+              }
+            }}
+          >
+            {((invoice as any)?.remindersEnabled !== false) ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+          </Button>
           <Button variant="outline" onClick={() => void onViewPublic()}>
             View Invoice
           </Button>
@@ -360,29 +532,89 @@ export default function InvoiceDetailPage() {
         <CardContent className="space-y-4 pt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Client</Label>
-              <TypeaheadSelect
-                value={clientId}
-                onValueChange={(v) => {
-                  setClientId(v)
-                  setProjectId('')
-                }}
-                options={clients.map((c) => ({ value: c.id, label: c.name }))}
-                placeholder="Search client"
-                allowNone
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label>Client</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  title={editingClient ? 'Stop editing' : 'Edit client'}
+                  onClick={() => setEditingClient((v) => !v)}
+                >
+                  {editingClient ? <X className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+                </Button>
+              </div>
+
+              {editingClient ? (
+                <TypeaheadSelect
+                  value={clientId}
+                  onValueChange={(v) => {
+                    setClientId(v)
+                    setProjectId('')
+                    setEditingClient(false)
+                    setEditingProject(true)
+                  }}
+                  options={clients.map((c) => ({ value: c.id, label: c.name }))}
+                  placeholder="Search client"
+                  allowNone
+                />
+              ) : clientId ? (
+                <Link
+                  href={`/admin/clients/${encodeURIComponent(clientId)}`}
+                  className="h-9 rounded-md border border-border bg-muted px-3 flex items-center hover:underline"
+                  title="Open client"
+                >
+                  <span className="text-sm">{clientNameById[clientId] ?? clientId}</span>
+                </Link>
+              ) : (
+                <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center text-sm text-muted-foreground">
+                  None
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label>Project</Label>
-              <TypeaheadSelect
-                value={projectId}
-                onValueChange={setProjectId}
-                options={projects.map((p) => ({ value: p.id, label: p.title }))}
-                placeholder={!clientId ? 'Select a client first' : loadingProjects ? 'Loading…' : 'Search project'}
-                disabled={!clientId}
-                allowNone
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label>Project</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  title={editingProject ? 'Stop editing' : 'Edit project'}
+                  onClick={() => setEditingProject((v) => !v)}
+                  disabled={!clientId}
+                >
+                  {editingProject ? <X className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+                </Button>
+              </div>
+
+              {editingProject ? (
+                <TypeaheadSelect
+                  value={projectId}
+                  onValueChange={(v) => {
+                    setProjectId(v)
+                    setEditingProject(false)
+                  }}
+                  options={projects.map((p) => ({ value: p.id, label: p.title }))}
+                  placeholder={!clientId ? 'Select a client first' : loadingProjects ? 'Loading…' : 'Search project'}
+                  disabled={!clientId}
+                  allowNone
+                />
+              ) : projectId ? (
+                <Link
+                  href={`/admin/projects/${encodeURIComponent(projectId)}`}
+                  className="h-9 rounded-md border border-border bg-muted px-3 flex items-center hover:underline"
+                  title="Open project"
+                >
+                  <span className="text-sm">{projectTitleById[projectId] ?? projectId}</span>
+                </Link>
+              ) : (
+                <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center text-sm text-muted-foreground">
+                  {!clientId ? 'Select a client first' : 'None'}
+                </div>
+              )}
             </div>
           </div>
 
@@ -403,10 +635,17 @@ export default function InvoiceDetailPage() {
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {INVOICE_STATUSES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    <SelectItem key={s.value} value={s.value} disabled={s.value === 'PARTIALLY_PAID'}>
+                      {s.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {effectiveStatus !== status ? (
+                <div className="text-xs text-muted-foreground">
+                  Effective status is {statusLabel(effectiveStatus)} (based on payments / due date).
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -414,7 +653,7 @@ export default function InvoiceDetailPage() {
             <Label>Payments</Label>
             <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-between text-sm">
               <span>
-                Paid: ${centsToDollars(paidCents)}
+                Paid: ${centsToDollars(paidCents)}{paidOnDisplay ? <span> on {paidOnDisplay}</span> : null}
                 {stripePaidCents > 0 ? <span className="text-muted-foreground"> (Stripe: ${centsToDollars(stripePaidCents)})</span> : null}
               </span>
               <span>Balance: ${centsToDollars(balanceCents)}</span>

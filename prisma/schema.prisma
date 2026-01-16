@@ -77,10 +77,24 @@ model ClientRecipient {
   displayColor         String?  @db.VarChar(7)
   isPrimary            Boolean  @default(false)
   receiveNotifications Boolean  @default(true)
+  receiveSalesReminders Boolean @default(true)
   createdAt            DateTime @default(now())
 
   @@index([clientId])
   @@index([clientId, email])
+}
+
+model SalesReminderSettings {
+  id String @id @default("default")
+
+  overdueInvoiceRemindersEnabled     Boolean @default(false)
+  overdueInvoiceBusinessDaysAfterDue Int     @default(3)
+
+  quoteExpiryRemindersEnabled             Boolean @default(false)
+  quoteExpiryBusinessDaysBeforeValidUntil Int     @default(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ClientFile {
@@ -880,8 +894,9 @@ model SalesStripeGatewaySettings {
   id String @id @default("default")
 
   enabled    Boolean @default(false)
-  label      String  @default("Pay by Credit Card (attracts merchant fees of 1.70%)")
+  label      String  @default("Pay by Credit Card (card processing fee applies)")
   feePercent Float   @default(1.7)
+  feeFixedCents Int  @default(30)
 
   publishableKey     String?
   secretKeyEncrypted String?

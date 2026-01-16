@@ -22,8 +22,16 @@ import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 import { ProjectKeyDates } from '@/components/ProjectKeyDates'
-import { getSalesSettings, listInvoices, listQuotes } from '@/lib/sales/local-store'
+import {
+  SALES_NATIVE_STORE_CHANGED_EVENT,
+  getSalesSettings,
+  listInvoices,
+  listPayments,
+  listQuotes,
+} from '@/lib/sales/local-store'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
+import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
+import { pullAndHydrateSalesNativeStore } from '@/lib/sales/native-store-sync'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -44,6 +52,42 @@ export default function ProjectPage() {
   const [projectFilesRefresh, setProjectFilesRefresh] = useState(0)
   const [projectEmailsRefresh, setProjectEmailsRefresh] = useState(0)
 
+  const [salesTick, setSalesTick] = useState(0)
+  const [nowIso, setNowIso] = useState<string | null>(null)
+  const [stripePaidByInvoiceId, setStripePaidByInvoiceId] = useState<
+    Record<string, { paidCents: number; latestYmd: string | null }>
+  >({})
+
+  type StripePayment = {
+    invoiceDocId: string
+    invoiceAmountCents: number
+    createdAt: string
+  }
+
+  const ymdFromIso = (iso: string): string | null => {
+    const s = typeof iso === 'string' ? iso : ''
+    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null
+  }
+
+  function parseDateOnlyLocal(value: string | null | undefined): Date | null {
+    if (!value) return null
+    const s = String(value).trim()
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+    if (m) {
+      const yyyy = Number(m[1])
+      const mm = Number(m[2])
+      const dd = Number(m[3])
+      if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null
+      return new Date(yyyy, mm - 1, dd)
+    }
+    const d = new Date(s)
+    return Number.isFinite(d.getTime()) ? d : null
+  }
+
+  function endOfDayLocal(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+  }
+
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
   const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
   const [projectClientName, setProjectClientName] = useState<string | null>(null)
@@ -55,16 +99,205 @@ export default function ProjectPage() {
   const canUploadFilesToProjectInternal = canDoAction(permissions, 'uploadFilesToProjectInternal')
   const canMakeProjectComments = canDoAction(permissions, 'makeCommentsOnProjects')
 
-  const salesSettings = useMemo(() => getSalesSettings(), [])
-  const projectQuotes = useMemo(() => {
+  useEffect(() => {
+    setNowIso(new Date().toISOString())
+
+    const onFocus = () => {
+      setNowIso(new Date().toISOString())
+      setSalesTick((v) => v + 1)
+    }
+
+    const onSalesChanged = () => setSalesTick((v) => v + 1)
+
+    window.addEventListener('focus', onFocus)
+    window.addEventListener(SALES_NATIVE_STORE_CHANGED_EVENT, onSalesChanged)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener(SALES_NATIVE_STORE_CHANGED_EVENT, onSalesChanged)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const result = await pullAndHydrateSalesNativeStore()
+        if (!cancelled && result.hydrated) setSalesTick((v) => v + 1)
+      } catch {
+        // best-effort
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const salesSettings = useMemo(() => {
+    void salesTick
+    return getSalesSettings()
+  }, [salesTick])
+
+  const payments = useMemo(() => {
+    void salesTick
+    return listPayments()
+  }, [salesTick])
+
+  const projectQuotes = useMemo((): SalesQuote[] => {
+    void salesTick
     if (!project?.id) return []
     return listQuotes().filter((q) => q.projectId === project.id)
-  }, [project?.id])
+  }, [project?.id, salesTick])
 
-  const projectInvoices = useMemo(() => {
+  const projectInvoices = useMemo((): SalesInvoice[] => {
+    void salesTick
     if (!project?.id) return []
     return listInvoices().filter((inv) => inv.projectId === project.id)
-  }, [project?.id])
+  }, [project?.id, salesTick])
+
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      const ids = projectInvoices.map((i) => i.id).filter((docId) => typeof docId === 'string' && docId.trim())
+      if (!ids.length) {
+        if (!cancelled) setStripePaidByInvoiceId({})
+        return
+      }
+
+      try {
+        const res = await apiFetch(
+          `/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`,
+          { cache: 'no-store' }
+        )
+        if (!res.ok) return
+        const json = (await res.json().catch(() => null)) as { payments?: StripePayment[] } | null
+        const list = Array.isArray(json?.payments) ? json!.payments! : []
+
+        const next: Record<string, { paidCents: number; latestYmd: string | null }> = {}
+        for (const p of list) {
+          const invoiceDocId = typeof (p as any)?.invoiceDocId === 'string' ? (p as any).invoiceDocId : ''
+          const amount = Number((p as any)?.invoiceAmountCents)
+          if (!invoiceDocId || !Number.isFinite(amount)) continue
+          const paidCents = Math.max(0, Math.trunc(amount))
+          const ymd = ymdFromIso(String((p as any)?.createdAt ?? ''))
+
+          const base = next[invoiceDocId] ?? { paidCents: 0, latestYmd: null }
+          const latestYmd = [base.latestYmd, ymd]
+            .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+            .sort()
+            .at(-1)
+            ?? null
+          next[invoiceDocId] = { paidCents: base.paidCents + paidCents, latestYmd }
+        }
+
+        if (!cancelled) setStripePaidByInvoiceId(next)
+      } catch {
+        // ignore
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [projectInvoices])
+
+  const quoteEffectiveStatus = useCallback(
+    (q: SalesQuote): QuoteStatus => {
+      if (q.status === 'ACCEPTED') return 'ACCEPTED'
+      if (q.status === 'CLOSED') return 'CLOSED'
+
+      const until = parseDateOnlyLocal(q.validUntil)
+      const nowMs = nowIso ? new Date(nowIso).getTime() : 0
+      const isExpired = Boolean(until) && nowMs > endOfDayLocal(until as Date).getTime()
+      if (isExpired) return 'CLOSED'
+
+      return q.status
+    },
+    [nowIso]
+  )
+
+  const invoiceEffectiveStatus = useCallback(
+    (inv: SalesInvoice): InvoiceStatus => {
+      const baseStatus: InvoiceStatus = inv.status === 'OPEN' || inv.status === 'SENT'
+        ? inv.status
+        : (inv.sentAt ? 'SENT' : 'OPEN')
+
+      const totalCents = sumLineItemsTotal(inv.items, salesSettings.taxRatePercent)
+      const paidLocalCents = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const paidStripeCents = stripePaidByInvoiceId[inv.id]?.paidCents ?? 0
+      const paidCents = paidLocalCents + paidStripeCents
+      const balanceCents = Math.max(0, totalCents - paidCents)
+
+      if (totalCents <= 0) return baseStatus
+      if (balanceCents <= 0) return 'PAID'
+
+      const due = parseDateOnlyLocal(inv.dueDate)
+      const nowMs = nowIso ? new Date(nowIso).getTime() : 0
+      const isPastDue = Boolean(due) && nowMs > endOfDayLocal(due as Date).getTime()
+      if (isPastDue) return 'OVERDUE'
+      if (paidCents > 0) return 'PARTIALLY_PAID'
+
+      return baseStatus
+    },
+    [nowIso, payments, salesSettings.taxRatePercent, stripePaidByInvoiceId]
+  )
+
+  function invoiceStatusLabel(status: InvoiceStatus): string {
+    switch (status) {
+      case 'OPEN':
+        return 'Open'
+      case 'SENT':
+        return 'Sent'
+      case 'OVERDUE':
+        return 'Overdue'
+      case 'PARTIALLY_PAID':
+        return 'Partially Paid'
+      case 'PAID':
+        return 'Paid'
+    }
+  }
+
+  function invoiceStatusBadgeClass(status: InvoiceStatus): string {
+    switch (status) {
+      case 'OPEN':
+        return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
+      case 'SENT':
+        return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
+      case 'OVERDUE':
+        return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
+      case 'PARTIALLY_PAID':
+        return 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20'
+      case 'PAID':
+        return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+    }
+  }
+
+  function quoteStatusLabel(status: QuoteStatus): string {
+    switch (status) {
+      case 'OPEN':
+        return 'Open'
+      case 'SENT':
+        return 'Sent'
+      case 'ACCEPTED':
+        return 'Accepted'
+      case 'CLOSED':
+        return 'Closed'
+    }
+  }
+
+  function quoteStatusBadgeClass(status: QuoteStatus): string {
+    switch (status) {
+      case 'OPEN':
+        return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
+      case 'SENT':
+        return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
+      case 'ACCEPTED':
+        return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+      case 'CLOSED':
+        return 'bg-muted text-muted-foreground border border-border'
+    }
+  }
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -471,8 +704,9 @@ export default function ProjectPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {projectQuotes.slice(0, 5).map((q: any) => {
+                            {projectQuotes.slice(0, 5).map((q: SalesQuote) => {
                               const totalCents = sumLineItemsTotal(Array.isArray(q.items) ? q.items : [], salesSettings.taxRatePercent)
+                              const effectiveStatus = quoteEffectiveStatus(q)
                               return (
                                 <tr key={q.id} className="border-t">
                                   <td className="px-3 py-2">
@@ -481,8 +715,10 @@ export default function ProjectPage() {
                                     </Link>
                                   </td>
                                   <td className="px-3 py-2">
-                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
-                                      {q.status}
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${quoteStatusBadgeClass(effectiveStatus)}`}
+                                    >
+                                      {quoteStatusLabel(effectiveStatus)}
                                     </span>
                                   </td>
                                   <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
@@ -508,8 +744,9 @@ export default function ProjectPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {projectInvoices.slice(0, 5).map((inv: any) => {
+                            {projectInvoices.slice(0, 5).map((inv: SalesInvoice) => {
                               const totalCents = sumLineItemsTotal(Array.isArray(inv.items) ? inv.items : [], salesSettings.taxRatePercent)
+                              const effectiveStatus = invoiceEffectiveStatus(inv)
                               return (
                                 <tr key={inv.id} className="border-t">
                                   <td className="px-3 py-2">
@@ -518,8 +755,10 @@ export default function ProjectPage() {
                                     </Link>
                                   </td>
                                   <td className="px-3 py-2">
-                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
-                                      {inv.status}
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${invoiceStatusBadgeClass(effectiveStatus)}`}
+                                    >
+                                      {invoiceStatusLabel(effectiveStatus)}
                                     </span>
                                   </td>
                                   <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>

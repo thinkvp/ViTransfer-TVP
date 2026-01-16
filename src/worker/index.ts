@@ -19,6 +19,7 @@ import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
+import { processSalesReminders } from './sales-reminders'
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 
@@ -336,6 +337,20 @@ async function main() {
     }
   )
 
+  // Sales reminder emails (weekdays @ 9am server/container time)
+  await notificationQueue.add(
+    'sales-reminders',
+    {},
+    {
+      repeat: {
+        pattern: '0 9 * * 1-5',
+      },
+      jobId: 'sales-reminders',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Add repeatable daily job to auto-close approved projects (if enabled)
   await notificationQueue.add(
     'auto-close-approved-projects',
@@ -404,6 +419,17 @@ async function main() {
         console.log('Running scheduled auto-close check...')
         const result = await processAutoCloseApprovedProjects()
         console.log(`Auto-close check completed (closed=${result.closedCount})`)
+        return
+      }
+
+      if (job.name === 'sales-reminders') {
+        try {
+          console.log('[SALES] Running scheduled sales reminders...')
+          await processSalesReminders()
+          console.log('[SALES] Sales reminders run completed')
+        } catch (e) {
+          console.warn('[SALES] Sales reminders failed (continuing):', e instanceof Error ? e.message : e)
+        }
         return
       }
 

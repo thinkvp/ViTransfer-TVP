@@ -15,6 +15,7 @@ const recipientSchema = z.object({
   displayColor: z.string().trim().max(7).nullable().optional(),
   isPrimary: z.boolean().optional(),
   receiveNotifications: z.boolean().optional(),
+  receiveSalesReminders: z.boolean().optional(),
 })
 
 const updateClientSchema = z.object({
@@ -65,8 +66,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           displayColor: true,
           isPrimary: true,
           receiveNotifications: true,
+          // NOTE: new column; keep types happy if prisma client isn't regenerated yet.
+          receiveSalesReminders: true,
           createdAt: true,
-        },
+        } as any,
       },
       files: {
         orderBy: { createdAt: 'desc' },
@@ -81,7 +84,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         },
       },
     },
-  })
+  } as any)
 
   if (!client) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 })
@@ -90,7 +93,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // BigInt serialization
   const serialized = {
     ...client,
-    files: client.files.map((f) => ({
+    files: (client as any).files.map((f: any) => ({
       ...f,
       fileSize: f.fileSize.toString(),
     })),
@@ -139,6 +142,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: r.receiveNotifications !== false,
+          receiveSalesReminders: r.receiveSalesReminders !== false,
         }))
       : undefined
 

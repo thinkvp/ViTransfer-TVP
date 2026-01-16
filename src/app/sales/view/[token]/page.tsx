@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/db'
 import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
 import { sendPushNotification } from '@/lib/push-notifications'
@@ -168,7 +169,7 @@ export default async function SalesDocPublicViewPage(
 
   const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
     where: { id: 'default' },
-    select: { enabled: true, label: true, currencies: true },
+    select: { enabled: true, label: true, currencies: true, feePercent: true, feeFixedCents: true },
   }).catch(() => null)
 
   const logoSettings = await prisma.settings.findUnique({
@@ -230,6 +231,14 @@ export default async function SalesDocPublicViewPage(
     ? firstCurrencyFromCsv(stripeGateway?.currencies)
     : 'AUD'
 
+  const processingFeeCents = (type === 'INVOICE' && canPayInvoice)
+    ? calcStripeGrossUpCents(
+        totalCents,
+        Number(stripeGateway?.feePercent ?? 0),
+        Number(stripeGateway?.feeFixedCents ?? 0)
+      ).feeCents
+    : null
+
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-4xl mx-auto px-4 py-6 sm:py-10">
@@ -245,6 +254,8 @@ export default async function SalesDocPublicViewPage(
             canAcceptQuote={canAcceptQuote}
             canPayInvoice={canPayInvoice}
             payLabel={stripeGateway?.label ?? null}
+            processingFeeCents={processingFeeCents}
+            processingFeeCurrency={displayCurrency}
           />
         </div>
         <div className="rounded-xl border bg-card overflow-hidden">

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { formatStripeDashboardDescription, getStripeGatewaySettings } from '@/lib/sales/stripe-gateway'
+import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -88,7 +89,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const feePercent = Number.isFinite(gateway.feePercent) ? gateway.feePercent : 0
-  const feeCents = feePercent > 0 ? Math.max(0, Math.round((invoiceTotalCents * feePercent) / 100)) : 0
+  const feeFixedCents = Number.isFinite(gateway.feeFixedCents) ? Math.max(0, Math.trunc(gateway.feeFixedCents)) : 0
+  const { feeCents, chargeCents } = calcStripeGrossUpCents(invoiceTotalCents, feePercent, feeFixedCents)
 
   const currency = (gateway.currencies[0] || 'AUD').toLowerCase()
 
@@ -122,7 +124,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               price_data: {
                 currency,
                 product_data: {
-                  name: `Payment fee (${feePercent.toFixed(2)}%)`,
+                  name: `Card processing fee (${feePercent.toFixed(2)}% + ${(currency || 'aud').toUpperCase()} ${(feeFixedCents / 100).toFixed(2)})`,
                 },
                 unit_amount: feeCents,
               },
@@ -142,7 +144,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         currency: currency.toUpperCase(),
         invoiceAmountCents: String(invoiceTotalCents),
         feeAmountCents: String(feeCents),
-        totalAmountCents: String(invoiceTotalCents + feeCents),
+        totalAmountCents: String(chargeCents),
       },
     },
     metadata: {
@@ -152,7 +154,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       currency: currency.toUpperCase(),
       invoiceAmountCents: String(invoiceTotalCents),
       feeAmountCents: String(feeCents),
-      totalAmountCents: String(invoiceTotalCents + feeCents),
+      totalAmountCents: String(chargeCents),
     },
   })
 

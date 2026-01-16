@@ -12,6 +12,8 @@ import {
 	renderAdminQuoteAcceptedEmail,
 	renderCommentNotificationEmail,
 	renderProjectKeyDateReminderEmail,
+	renderSalesInvoiceOverdueReminderEmail,
+	renderSalesQuoteExpiryReminderEmail,
 	renderNewVersionEmail,
 	renderPasswordEmail,
 	renderProjectApprovedEmail,
@@ -255,6 +257,32 @@ async function main() {
 			paidAtYmd: '2026-01-14',
 			publicInvoiceUrl: 'http://localhost:3000/sales/view/demo-invoice',
 			projectAdminUrl: 'http://localhost:3000/admin/projects/demo',
+			branding,
+		})).html
+	)
+
+	await writeHtml(
+		outDir,
+		'13-sales-invoice-overdue.html',
+		(await renderSalesInvoiceOverdueReminderEmail({
+			invoiceNumber: 'INV-2026-0008',
+			dueDateYmd: '2026-01-10',
+			shareUrl: 'http://localhost:3000/sales/view/demo-invoice',
+			clientName: 'Alex',
+			projectTitle: 'Winter Campaign',
+			branding,
+		})).html
+	)
+
+	await writeHtml(
+		outDir,
+		'14-sales-quote-expiring.html',
+		(await renderSalesQuoteExpiryReminderEmail({
+			quoteNumber: 'QUO-2026-0003',
+			validUntilYmd: '2026-01-20',
+			shareUrl: 'http://localhost:3000/sales/view/demo-quote',
+			clientName: 'Alex',
+			projectTitle: 'Winter Campaign',
 			branding,
 		})).html
 	)

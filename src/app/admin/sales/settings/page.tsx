@@ -50,12 +50,22 @@ export default function SalesSettingsPage() {
   const [stripeEnabled, setStripeEnabled] = useState(false)
   const [stripeLabel, setStripeLabel] = useState('')
   const [stripeFeePercent, setStripeFeePercent] = useState('1.7')
+  const [stripeFeeFixed, setStripeFeeFixed] = useState('0.30')
   const [stripePublishableKey, setStripePublishableKey] = useState('')
   const [stripeSecretKey, setStripeSecretKey] = useState('')
   const [stripeHasSecretKey, setStripeHasSecretKey] = useState(false)
   const [stripeSecretKeySource, setStripeSecretKeySource] = useState<'env' | 'db' | 'none'>('none')
   const [stripeDashboardPaymentDescription, setStripeDashboardPaymentDescription] = useState('Payment for Invoice {invoice_number}')
   const [stripeCurrencies, setStripeCurrencies] = useState('AUD')
+
+  const [remindersLoaded, setRemindersLoaded] = useState(false)
+  const [remindersSaving, setRemindersSaving] = useState(false)
+  const [remindersSaved, setRemindersSaved] = useState(false)
+
+  const [overdueInvoiceRemindersEnabled, setOverdueInvoiceRemindersEnabled] = useState(false)
+  const [overdueInvoiceBusinessDaysAfterDue, setOverdueInvoiceBusinessDaysAfterDue] = useState('3')
+  const [quoteExpiryRemindersEnabled, setQuoteExpiryRemindersEnabled] = useState(false)
+  const [quoteExpiryBusinessDaysBeforeValidUntil, setQuoteExpiryBusinessDaysBeforeValidUntil] = useState('3')
 
   useEffect(() => {
     const s = getSalesSettings()
@@ -87,6 +97,13 @@ export default function SalesSettingsPage() {
         setStripeEnabled(Boolean(json?.enabled))
         setStripeLabel(typeof json?.label === 'string' ? json.label : '')
         setStripeFeePercent(String(typeof json?.feePercent === 'number' ? json.feePercent : 1.7))
+        setStripeFeeFixed(
+          String(
+            typeof json?.feeFixedCents === 'number'
+              ? (Math.max(0, Math.trunc(json.feeFixedCents)) / 100).toFixed(2)
+              : '0.30'
+          )
+        )
         setStripePublishableKey(typeof json?.publishableKey === 'string' ? json.publishableKey : '')
         setStripeDashboardPaymentDescription(
           typeof json?.dashboardPaymentDescription === 'string'
@@ -108,6 +125,68 @@ export default function SalesSettingsPage() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadReminders = async () => {
+      try {
+        const res = await apiFetch('/api/admin/sales/reminder-settings', { method: 'GET' })
+        const json = await res.json().catch(() => null)
+        if (!res.ok) return
+        if (cancelled) return
+
+        setOverdueInvoiceRemindersEnabled(Boolean(json?.overdueInvoiceRemindersEnabled))
+        setOverdueInvoiceBusinessDaysAfterDue(String(typeof json?.overdueInvoiceBusinessDaysAfterDue === 'number' ? json.overdueInvoiceBusinessDaysAfterDue : 3))
+        setQuoteExpiryRemindersEnabled(Boolean(json?.quoteExpiryRemindersEnabled))
+        setQuoteExpiryBusinessDaysBeforeValidUntil(String(typeof json?.quoteExpiryBusinessDaysBeforeValidUntil === 'number' ? json.quoteExpiryBusinessDaysBeforeValidUntil : 3))
+      } finally {
+        if (!cancelled) setRemindersLoaded(true)
+      }
+    }
+
+    void loadReminders()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const onSaveReminders = async () => {
+    setRemindersSaving(true)
+    setRemindersSaved(false)
+    try {
+      const parsedOverdue = Math.trunc(Number(overdueInvoiceBusinessDaysAfterDue))
+      const parsedExpiry = Math.trunc(Number(quoteExpiryBusinessDaysBeforeValidUntil))
+
+      const body = {
+        overdueInvoiceRemindersEnabled,
+        overdueInvoiceBusinessDaysAfterDue: Number.isFinite(parsedOverdue) ? Math.max(1, parsedOverdue) : 3,
+        quoteExpiryRemindersEnabled,
+        quoteExpiryBusinessDaysBeforeValidUntil: Number.isFinite(parsedExpiry) ? Math.max(1, parsedExpiry) : 3,
+      }
+
+      const res = await apiFetch('/api/admin/sales/reminder-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        alert(typeof json?.error === 'string' ? json.error : 'Failed to save Sales Notifications settings')
+        return
+      }
+
+      setOverdueInvoiceRemindersEnabled(Boolean(json?.overdueInvoiceRemindersEnabled))
+      setOverdueInvoiceBusinessDaysAfterDue(String(typeof json?.overdueInvoiceBusinessDaysAfterDue === 'number' ? json.overdueInvoiceBusinessDaysAfterDue : body.overdueInvoiceBusinessDaysAfterDue))
+      setQuoteExpiryRemindersEnabled(Boolean(json?.quoteExpiryRemindersEnabled))
+      setQuoteExpiryBusinessDaysBeforeValidUntil(String(typeof json?.quoteExpiryBusinessDaysBeforeValidUntil === 'number' ? json.quoteExpiryBusinessDaysBeforeValidUntil : body.quoteExpiryBusinessDaysBeforeValidUntil))
+
+      setRemindersSaved(true)
+      setTimeout(() => setRemindersSaved(false), 2000)
+    } finally {
+      setRemindersSaving(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -302,6 +381,8 @@ export default function SalesSettingsPage() {
     setStripeSaved(false)
     try {
       const parsedFee = Number(stripeFeePercent)
+      const parsedFixed = Number(stripeFeeFixed)
+      const feeFixedCents = Number.isFinite(parsedFixed) ? Math.max(0, Math.round(parsedFixed * 100)) : 0
 
       const res = await apiFetch('/api/admin/sales/stripe', {
         method: 'POST',
@@ -310,6 +391,7 @@ export default function SalesSettingsPage() {
           enabled: stripeEnabled,
           label: stripeLabel,
           feePercent: Number.isFinite(parsedFee) ? parsedFee : 0,
+          feeFixedCents,
           publishableKey: stripePublishableKey || null,
           secretKey: stripeSecretKey || null,
           dashboardPaymentDescription: stripeDashboardPaymentDescription,
@@ -327,6 +409,13 @@ export default function SalesSettingsPage() {
       setStripeEnabled(Boolean(json?.enabled))
       setStripeLabel(typeof json?.label === 'string' ? json.label : stripeLabel)
       setStripeFeePercent(String(typeof json?.feePercent === 'number' ? json.feePercent : parsedFee))
+      setStripeFeeFixed(
+        String(
+          typeof json?.feeFixedCents === 'number'
+            ? (Math.max(0, Math.trunc(json.feeFixedCents)) / 100).toFixed(2)
+            : (feeFixedCents / 100).toFixed(2)
+        )
+      )
       setStripePublishableKey(typeof json?.publishableKey === 'string' ? json.publishableKey : stripePublishableKey)
       setStripeDashboardPaymentDescription(
         typeof json?.dashboardPaymentDescription === 'string'
@@ -450,6 +539,76 @@ export default function SalesSettingsPage() {
       </Card>
 
       <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Sales Notifications</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!remindersLoaded ? (
+            <div className="text-sm text-muted-foreground">Loading Sales Notifications settings…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <Label>Overdue invoice reminders</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sends reminder emails to client recipients marked with the green $ icon.
+                      </p>
+                    </div>
+                    <Switch checked={overdueInvoiceRemindersEnabled} onCheckedChange={setOverdueInvoiceRemindersEnabled} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Business days after due</Label>
+                  <Input
+                    value={overdueInvoiceBusinessDaysAfterDue}
+                    onChange={(e) => setOverdueInvoiceBusinessDaysAfterDue(e.target.value)}
+                    className="h-9"
+                    inputMode="numeric"
+                    disabled={!overdueInvoiceRemindersEnabled}
+                  />
+                  <p className="text-xs text-muted-foreground">Runs at 9am weekdays (server/container time).</p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <Label>Quote expiry reminders</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sends reminder emails for quotes nearing “Valid until”.
+                      </p>
+                    </div>
+                    <Switch checked={quoteExpiryRemindersEnabled} onCheckedChange={setQuoteExpiryRemindersEnabled} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Business days before valid-until</Label>
+                  <Input
+                    value={quoteExpiryBusinessDaysBeforeValidUntil}
+                    onChange={(e) => setQuoteExpiryBusinessDaysBeforeValidUntil(e.target.value)}
+                    className="h-9"
+                    inputMode="numeric"
+                    disabled={!quoteExpiryRemindersEnabled}
+                  />
+                  <p className="text-xs text-muted-foreground">Runs at 9am weekdays (server/container time).</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                {remindersSaved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
+                <Button onClick={onSaveReminders} disabled={remindersSaving}>
+                  {remindersSaving ? 'Saving…' : 'Save notifications'}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-base">Stripe Checkout</CardTitle>
           <Switch checked={stripeEnabled} onCheckedChange={setStripeEnabled} disabled={!stripeLoaded} />
@@ -466,30 +625,44 @@ export default function SalesSettingsPage() {
                     value={stripeLabel}
                     onChange={(e) => setStripeLabel(e.target.value)}
                     className="h-9"
-                    placeholder="Pay by Credit Card (attracts merchant fees of 1.70%)"
+                    placeholder="Pay by Credit Card (card processing fee applies)"
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Percentage fee (%)</Label>
-                  <Input
-                    value={stripeFeePercent}
-                    onChange={(e) => setStripeFeePercent(e.target.value)}
-                    className="h-9"
-                    inputMode="decimal"
-                  />
-                  <p className="text-xs text-muted-foreground">Added on top of the invoice total for Stripe payments.</p>
-                </div>
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label>Percentage fee (%)</Label>
+                    <Input
+                      value={stripeFeePercent}
+                      onChange={(e) => setStripeFeePercent(e.target.value)}
+                      className="h-9"
+                      inputMode="decimal"
+                    />
+                    <p className="text-xs text-muted-foreground">Used to calculate a gross-up so your net matches the invoice total.</p>
+                  </div>
 
-                <div className="space-y-2">
-                  <Label>Currencies (comma separated)</Label>
-                  <Input
-                    value={stripeCurrencies}
-                    onChange={(e) => setStripeCurrencies(e.target.value)}
-                    className="h-9"
-                    placeholder="AUD, NZD"
-                  />
-                  <p className="text-xs text-muted-foreground">First currency is used for invoice payments.</p>
+                  <div className="space-y-2">
+                    <Label>Fixed fee (A$)</Label>
+                    <Input
+                      value={stripeFeeFixed}
+                      onChange={(e) => setStripeFeeFixed(e.target.value)}
+                      className="h-9"
+                      inputMode="decimal"
+                      placeholder="0.30"
+                    />
+                    <p className="text-xs text-muted-foreground">Flat Stripe processing fee per successful charge.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Currencies (comma separated)</Label>
+                    <Input
+                      value={stripeCurrencies}
+                      onChange={(e) => setStripeCurrencies(e.target.value)}
+                      className="h-9"
+                      placeholder="AUD, NZD"
+                    />
+                    <p className="text-xs text-muted-foreground">First currency is used for invoice payments.</p>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

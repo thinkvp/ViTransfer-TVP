@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Mail, Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X } from 'lucide-react'
+import { Mail, Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X, DollarSign } from 'lucide-react'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from '@/lib/display-color'
 
 export interface EditableRecipient {
@@ -18,6 +18,7 @@ export interface EditableRecipient {
   alsoAddToClient?: boolean
   isPrimary: boolean
   receiveNotifications: boolean
+  receiveSalesReminders?: boolean
 }
 
 export interface ClientRecipientPickItem {
@@ -35,6 +36,7 @@ interface RecipientsEditorProps {
   addButtonLabel?: string
   emptyStateText?: string
   showNotificationsToggle?: boolean
+  showSalesRemindersToggle?: boolean
   showDisplayColor?: boolean
   showAlsoAddToClient?: boolean
   addMode?: 'inline' | 'dialog'
@@ -54,6 +56,7 @@ export function RecipientsEditor({
   addButtonLabel = 'Add Recipient',
   emptyStateText,
   showNotificationsToggle = true,
+  showSalesRemindersToggle = false,
   showDisplayColor = true,
   showAlsoAddToClient = false,
   addMode = 'inline',
@@ -316,6 +319,16 @@ export function RecipientsEditor({
     onChange(next)
   }
 
+  const toggleSalesReminders = (idx: number) => {
+    const next = recipients.map((r, i) => {
+      if (i !== idx) return r
+      const current = (r as any)?.receiveSalesReminders
+      const enabled = current !== false
+      return { ...r, receiveSalesReminders: !enabled }
+    })
+    onChange(next)
+  }
+
   const resolvedEmptyStateText =
     emptyStateText ?? `No recipients added yet. Click "${addButtonLabel}" to add one.`
 
@@ -363,6 +376,23 @@ export function RecipientsEditor({
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
+                  {showSalesRemindersToggle && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleSalesReminders(idx)}
+                      title="Toggle sales reminders"
+                      aria-label="Toggle sales reminders"
+                      className={
+                        recipient.receiveSalesReminders !== false
+                          ? `${actionButtonClassName} text-success hover:text-success hover:bg-success-visible`
+                          : `${actionButtonClassName} text-muted-foreground hover:text-muted-foreground`
+                      }
+                    >
+                      <DollarSign className="w-4 h-4" />
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

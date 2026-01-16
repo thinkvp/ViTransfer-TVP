@@ -11,6 +11,8 @@ export type PdfPartyInfo = {
   clientName?: string
   clientAddress?: string
   projectTitle?: string
+  stripeProcessingFeeCents?: number
+  stripeProcessingFeeCurrency?: string
   publicQuoteUrl?: string
   publicInvoiceUrl?: string
 }
@@ -451,6 +453,9 @@ async function buildQuotePdfBytes(
   drawTotalsLine('Tax', centsToDollars(taxCents))
   drawTotalsLine('Total', centsToDollars(totalCents), true)
 
+  // A little breathing room after totals.
+  y -= 12
+
   // Optional accept link
   if (info.publicQuoteUrl) {
     if (y - 70 < bottomMargin) newPage(false)
@@ -614,6 +619,13 @@ async function buildInvoicePdfBytes(
     page.drawText(text, { x, y: yPos, size, font: bold ? fontBold : font, color })
   }
 
+  const formatMoneyWithCurrency = (cents: number, currency: string): string => {
+    const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : 'AUD'
+    const amount = centsToDollars(cents)
+    if (cur === 'AUD') return `A$${amount}`
+    return `${cur} ${amount}`
+  }
+
   const drawLeftBlock = (lines: Array<{ text: string; size: number; bold?: boolean; color?: any }>, x: number, yStart: number) => {
     let yy = yStart
     for (const l of lines) {
@@ -747,24 +759,36 @@ async function buildInvoicePdfBytes(
 
   const afterCompanyY = drawLeftBlock(companyLines, left, headerRowStartY)
   const afterMetaY = drawRightBlock(metaLines, right, headerRowStartY)
-  y = Math.min(afterCompanyY, afterMetaY) - 14
 
+  let afterBillToY = afterMetaY
   if (info.clientName || info.clientAddress || info.projectTitle) {
     const billToLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
     billToLines.push({ text: 'Bill To', size: 9, bold: true, color: subtleText })
-    if (info.clientName) billToLines.push({ text: info.clientName, size: 11, bold: true })
+    if (info.clientName) {
+      for (const wrapped of wrapText(info.clientName, 220, fontBold, 11)) {
+        if (wrapped.trim()) billToLines.push({ text: wrapped, size: 11, bold: true })
+      }
+    }
     if (info.clientAddress) {
       for (const rawLine of info.clientAddress.split('\n')) {
         const line = rawLine.trim()
         if (!line) continue
-        for (const wrapped of wrapText(line, 280, font, 10)) {
+        for (const wrapped of wrapText(line, 220, font, 10)) {
           if (wrapped.trim()) billToLines.push({ text: wrapped, size: 10, color: subtleText })
         }
       }
     }
-    if (info.projectTitle) billToLines.push({ text: `Project: ${info.projectTitle}`, size: 9, color: subtleText })
-    y = drawLeftBlock(billToLines, left, y) - 12
+    if (info.projectTitle) {
+      for (const wrapped of wrapText(`Project: ${info.projectTitle}`, 220, font, 9)) {
+        if (wrapped.trim()) billToLines.push({ text: wrapped, size: 9, color: subtleText })
+      }
+    }
+
+    const billToStartY = afterMetaY - 12
+    afterBillToY = drawRightBlock(billToLines, right, billToStartY)
   }
+
+  y = Math.min(afterCompanyY, afterBillToY) - 14
 
   y = drawTableHeader(y)
 
@@ -836,8 +860,42 @@ async function buildInvoicePdfBytes(
   if (info.publicInvoiceUrl) {
     if (y - 70 < bottomMargin) newPage(false)
     y -= 10
-    drawLeftText('Pay this invoice online', left, y, 10, true, textColor)
-    y -= 18
+
+    const sectionHeaderY = y
+    drawLeftText('Pay this invoice online', left, sectionHeaderY, 10, true, textColor)
+
+    const paymentDetails = typeof settings.paymentDetails === 'string' ? settings.paymentDetails.trim() : ''
+    const paymentDetailsLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
+    if (paymentDetails) {
+      paymentDetailsLines.push({ text: 'Payment details', size: 10, bold: true, color: textColor })
+      for (const rawLine of paymentDetails.split('\n')) {
+        const line = rawLine.trim()
+        if (!line) continue
+        for (const wrapped of wrapText(line, 220, font, 9)) {
+          if (wrapped.trim()) paymentDetailsLines.push({ text: wrapped, size: 9, color: subtleText })
+        }
+      }
+    }
+
+    const afterPaymentDetailsY = paymentDetailsLines.length
+      ? drawRightBlock(paymentDetailsLines, right, sectionHeaderY)
+      : (sectionHeaderY - 16)
+
+    const feeCentsRaw = typeof info.stripeProcessingFeeCents === 'number' ? info.stripeProcessingFeeCents : NaN
+    const feeCents = Number.isFinite(feeCentsRaw) ? Math.max(0, Math.trunc(feeCentsRaw)) : 0
+    const feeCurrency = typeof info.stripeProcessingFeeCurrency === 'string' ? info.stripeProcessingFeeCurrency : 'AUD'
+
+    let leftAfterHeaderY = sectionHeaderY - 18
+    if (feeCents > 0) {
+      const feeText = `Attracts ${formatMoneyWithCurrency(feeCents, feeCurrency)} in card processing fees`
+      drawLeftText(feeText, left, sectionHeaderY - 14, 9, false, subtleText)
+      // Keep the Pay button close under the fee line.
+      leftAfterHeaderY = sectionHeaderY - 26
+    }
+
+    // The Pay button should be positioned from the left content,
+    // not pushed down by multi-line payment details.
+    y = leftAfterHeaderY - 4
 
     const buttonText = 'Pay Invoice'
     const buttonFontSize = 12
@@ -866,7 +924,10 @@ async function buildInvoicePdfBytes(
       color: rgb(0.08, 0.35, 0.22),
     })
     addLinkAnnotation(buttonX, buttonY, buttonW, buttonH, info.publicInvoiceUrl)
-    y = buttonY - 14
+
+    // Continue below whichever side (left button or right payment details) is lower.
+    // Add extra spacing after this section.
+    y = Math.min(buttonY - 14, afterPaymentDetailsY) - 20
   }
 
   // Notes

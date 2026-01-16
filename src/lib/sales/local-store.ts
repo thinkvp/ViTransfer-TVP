@@ -137,6 +137,7 @@ export function createQuote(input: Omit<SalesQuote, 'id' | 'quoteNumber' | 'crea
     createdAt: now,
     updatedAt: now,
     sentAt: null,
+    remindersEnabled: (input as any)?.remindersEnabled !== false,
   }
 
   const next = [quote, ...listQuotes()]
@@ -204,6 +205,7 @@ export function createInvoice(input: Omit<SalesInvoice, 'id' | 'invoiceNumber' |
     createdAt: now,
     updatedAt: now,
     sentAt: null,
+    remindersEnabled: (input as any)?.remindersEnabled !== false,
   }
 
   const next = [invoice, ...listInvoices()]

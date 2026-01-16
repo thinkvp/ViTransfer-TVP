@@ -1817,6 +1817,138 @@ export async function renderProjectKeyDateReminderEmail({
 }
 
 /**
+ * Email template: Sales invoice overdue reminder
+ */
+export async function renderSalesInvoiceOverdueReminderEmail({
+  invoiceNumber,
+  dueDateYmd,
+  shareUrl,
+  clientName,
+  projectTitle,
+  trackingToken,
+  branding,
+}: {
+  invoiceNumber: string
+  dueDateYmd: string
+  shareUrl: string
+  clientName?: string | null
+  projectTitle?: string | null
+  trackingToken?: string
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const subject = `Invoice ${escapeHtml(invoiceNumber)} is overdue`
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient: EMAIL_THEME.headerBackground,
+    title: 'Invoice overdue',
+    subtitle: clientName ? `For ${escapeHtml(clientName)}` : undefined,
+    trackingToken,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain: resolved.appDomain,
+    bodyContent: `
+      <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
+        Hi,
+      </p>
+
+      <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+        Just a friendly reminder that <strong>Invoice ${escapeHtml(invoiceNumber)}</strong> is overdue.
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="font-size: 15px; color: #111827; padding: 4px 0;">
+          <strong>Invoice ${escapeHtml(invoiceNumber)}</strong>
+        </div>
+        ${projectTitle ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
+        <div style="font-size: 14px; color: #374151; padding: 2px 0;">Due date: ${escapeHtml(dueDateYmd)}</div>
+      </div>
+
+      <div style="text-align: center; margin: 28px 0;">
+        <a href="${escapeHtml(shareUrl)}" style="${primaryButtonStyle}">View Invoice</a>
+      </div>
+
+      <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
+        If the button doesn’t work, copy and paste this link into your browser:<br />
+        <a href="${escapeHtml(shareUrl)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+      </p>
+    `,
+  }).trim()
+
+  return { subject, html }
+}
+
+/**
+ * Email template: Sales quote expiry reminder
+ */
+export async function renderSalesQuoteExpiryReminderEmail({
+  quoteNumber,
+  validUntilYmd,
+  shareUrl,
+  clientName,
+  projectTitle,
+  trackingToken,
+  branding,
+}: {
+  quoteNumber: string
+  validUntilYmd: string
+  shareUrl: string
+  clientName?: string | null
+  projectTitle?: string | null
+  trackingToken?: string
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const subject = `Quote ${escapeHtml(quoteNumber)} expiring soon`
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient: EMAIL_THEME.headerBackground,
+    title: 'Quote expiring soon',
+    subtitle: clientName ? `For ${escapeHtml(clientName)}` : undefined,
+    trackingToken,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain: resolved.appDomain,
+    bodyContent: `
+      <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
+        Hi,
+      </p>
+
+      <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+        Just a friendly reminder that <strong>Quote ${escapeHtml(quoteNumber)}</strong> expires on <strong>${escapeHtml(validUntilYmd)}</strong>.
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="font-size: 15px; color: #111827; padding: 4px 0;">
+          <strong>Quote ${escapeHtml(quoteNumber)}</strong>
+        </div>
+        ${projectTitle ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
+        <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(validUntilYmd)}</div>
+      </div>
+
+      <div style="text-align: center; margin: 28px 0;">
+        <a href="${escapeHtml(shareUrl)}" style="${primaryButtonStyle}">View Quote</a>
+      </div>
+
+      <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
+        If the button doesn’t work, copy and paste this link into your browser:<br />
+        <a href="${escapeHtml(shareUrl)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+      </p>
+    `,
+  }).trim()
+
+  return { subject, html }
+}
+
+/**
  * Email template: Send password in separate email for security
  */
 export async function renderPasswordEmail({

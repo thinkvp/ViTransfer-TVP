@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Check, Pencil, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,7 +18,7 @@ import {
   updateQuote,
 } from '@/lib/sales/local-store'
 import type { ClientOption, ProjectOption, QuoteStatus, SalesLineItem, SalesQuote } from '@/lib/sales/types'
-import { fetchClientDetails, fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
+import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
   calcLineSubtotalCents,
   centsToDollars,
@@ -78,7 +78,11 @@ export default function QuoteDetailPage() {
   const [sendOpen, setSendOpen] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
+  const [allProjects, setAllProjects] = useState<ProjectOption[]>([])
   const [loadingProjects, setLoadingProjects] = useState(false)
+
+  const [editingClient, setEditingClient] = useState(false)
+  const [editingProject, setEditingProject] = useState(false)
 
   const [status, setStatus] = useState<QuoteStatus>('OPEN')
   const [clientId, setClientId] = useState('')
@@ -107,6 +111,9 @@ export default function QuoteDetailPage() {
           taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, settings.taxRatePercent),
         }))
       )
+
+      setEditingClient(!Boolean(q.clientId))
+      setEditingProject(!Boolean(q.projectId))
     }
     setLoaded(true)
   }, [id, settings.taxRatePercent])
@@ -141,9 +148,37 @@ export default function QuoteDetailPage() {
 
   useEffect(() => {
     const run = async () => {
+      const p = await fetchProjectOptions().catch(() => [])
+      setAllProjects(p)
+    }
+    void run()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!clientId) return
+      if (clients.some((c) => c.id === clientId)) return
+      try {
+        const details = await fetchClientDetails(clientId)
+        if (!details?.id || !details?.name) return
+        if (cancelled) return
+        setClients((prev) => (prev.some((c) => c.id === details.id) ? prev : [{ id: details.id, name: details.name }, ...prev]))
+      } catch {
+        // ignore
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [clientId, clients])
+
+  useEffect(() => {
+    const run = async () => {
       if (!clientId) {
         setProjects([])
-        setProjectId('')
         return
       }
 
@@ -151,21 +186,27 @@ export default function QuoteDetailPage() {
       try {
         const p = await fetchProjectOptionsForClient(clientId)
         setProjects(p)
-        // If existing project is not in the list, clear it.
-        setProjectId((prev) => (p.some((x) => x.id === prev) ? prev : ''))
+        const current = projectId
+        const includeCurrent = current && !p.some((x) => x.id === current)
+          ? allProjects.find((x) => x.id === current)
+          : null
+        setProjects(includeCurrent ? [...p, includeCurrent] : p)
       } finally {
         setLoadingProjects(false)
       }
     }
     void run()
-  }, [clientId])
+  }, [allProjects, clientId, projectId])
 
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
   const totalCents = subtotalCents + taxCents
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
-  const projectTitleById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.title])), [projects])
+  const projectTitleById = useMemo(
+    () => Object.fromEntries([...projects, ...allProjects].map((p) => [p.id, p.title])),
+    [allProjects, projects]
+  )
 
   const onSave = async () => {
     if (!quote) return
@@ -265,7 +306,28 @@ export default function QuoteDetailPage() {
           <p className="text-sm text-muted-foreground">View and edit quote details.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Link href="/admin/sales/quotes"><Button variant="outline">Back</Button></Link>
+          <Button
+            type="button"
+            variant="outline"
+            title={((quote as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
+            aria-label={((quote as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
+            className={
+              ((quote as any)?.remindersEnabled !== false)
+                ? 'text-success hover:text-success hover:bg-success-visible'
+                : 'text-destructive hover:text-destructive hover:bg-destructive-visible'
+            }
+            onClick={() => {
+              const enabled = (quote as any)?.remindersEnabled !== false
+              try {
+                const next = updateQuote(quote.id, { remindersEnabled: !enabled } as any)
+                setQuote(next)
+              } catch {
+                // ignore
+              }
+            }}
+          >
+            {((quote as any)?.remindersEnabled !== false) ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+          </Button>
           <Button variant="outline" onClick={() => void onViewPublic()}>
             View Quote
           </Button>
@@ -286,29 +348,89 @@ export default function QuoteDetailPage() {
         <CardContent className="space-y-4 pt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Client</Label>
-              <TypeaheadSelect
-                value={clientId}
-                onValueChange={(v) => {
-                  setClientId(v)
-                  setProjectId('')
-                }}
-                options={clients.map((c) => ({ value: c.id, label: c.name }))}
-                placeholder="Search client"
-                allowNone
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label>Client</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  title={editingClient ? 'Stop editing' : 'Edit client'}
+                  onClick={() => setEditingClient((v) => !v)}
+                >
+                  {editingClient ? <X className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+                </Button>
+              </div>
+
+              {editingClient ? (
+                <TypeaheadSelect
+                  value={clientId}
+                  onValueChange={(v) => {
+                    setClientId(v)
+                    setProjectId('')
+                    setEditingClient(false)
+                    setEditingProject(true)
+                  }}
+                  options={clients.map((c) => ({ value: c.id, label: c.name }))}
+                  placeholder="Search client"
+                  allowNone
+                />
+              ) : clientId ? (
+                <Link
+                  href={`/admin/clients/${encodeURIComponent(clientId)}`}
+                  className="h-9 rounded-md border border-border bg-muted px-3 flex items-center hover:underline"
+                  title="Open client"
+                >
+                  <span className="text-sm">{clientNameById[clientId] ?? clientId}</span>
+                </Link>
+              ) : (
+                <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center text-sm text-muted-foreground">
+                  None
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label>Project</Label>
-              <TypeaheadSelect
-                value={projectId}
-                onValueChange={setProjectId}
-                options={projects.map((p) => ({ value: p.id, label: p.title }))}
-                placeholder={!clientId ? 'Select a client first' : loadingProjects ? 'Loading…' : 'Search project'}
-                disabled={!clientId}
-                allowNone
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label>Project</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  title={editingProject ? 'Stop editing' : 'Edit project'}
+                  onClick={() => setEditingProject((v) => !v)}
+                  disabled={!clientId}
+                >
+                  {editingProject ? <X className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+                </Button>
+              </div>
+
+              {editingProject ? (
+                <TypeaheadSelect
+                  value={projectId}
+                  onValueChange={(v) => {
+                    setProjectId(v)
+                    setEditingProject(false)
+                  }}
+                  options={projects.map((p) => ({ value: p.id, label: p.title }))}
+                  placeholder={!clientId ? 'Select a client first' : loadingProjects ? 'Loading…' : 'Search project'}
+                  disabled={!clientId}
+                  allowNone
+                />
+              ) : projectId ? (
+                <Link
+                  href={`/admin/projects/${encodeURIComponent(projectId)}`}
+                  className="h-9 rounded-md border border-border bg-muted px-3 flex items-center hover:underline"
+                  title="Open project"
+                >
+                  <span className="text-sm">{projectTitleById[projectId] ?? projectId}</span>
+                </Link>
+              ) : (
+                <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center text-sm text-muted-foreground">
+                  {!clientId ? 'Select a client first' : 'None'}
+                </div>
+              )}
             </div>
           </div>
 

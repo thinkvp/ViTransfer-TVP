@@ -18,6 +18,8 @@ import {
 import { renderInvoicePdfBytes, renderQuotePdfBytes } from '@/lib/sales/pdf'
 import type { PdfPartyInfo } from '@/lib/sales/pdf'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
+import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -41,6 +43,12 @@ function normalizeBaseUrl(input: string | null | undefined): string | null {
   } catch {
     return null
   }
+}
+
+function firstCurrencyFromCsv(value: unknown): string {
+  const raw = typeof value === 'string' ? value : ''
+  const first = raw.split(',')[0]?.trim().toUpperCase()
+  return first && /^[A-Z]{3}$/.test(first) ? first : 'AUD'
 }
 
 export async function POST(request: NextRequest) {
@@ -110,6 +118,11 @@ export async function POST(request: NextRequest) {
   const doc = share.docJson as unknown as SalesQuote | SalesInvoice
   const settings = share.settingsJson as unknown as SalesSettings
 
+  const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
+    where: { id: 'default' },
+    select: { enabled: true, feePercent: true, feeFixedCents: true, currencies: true },
+  }).catch(() => null)
+
   let clientAddress: string | undefined
   const docAny: any = doc as any
   const clientId = typeof docAny?.clientId === 'string' ? docAny.clientId.trim() : ''
@@ -134,6 +147,24 @@ export async function POST(request: NextRequest) {
     projectTitle: share.projectTitle || undefined,
     publicQuoteUrl: isQuote ? shareUrl : undefined,
     publicInvoiceUrl: !isQuote ? shareUrl : undefined,
+  }
+
+  if (!isQuote && stripeGateway?.enabled) {
+    const inv = doc as SalesInvoice
+    const taxRatePercent = Number((settings as any)?.taxRatePercent)
+    const defaultTaxRate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
+    const items = Array.isArray((inv as any)?.items) ? (inv as any).items : []
+    const subtotalCents = sumLineItemsSubtotal(items)
+    const taxCents = sumLineItemsTax(items, defaultTaxRate)
+    const totalCents = subtotalCents + taxCents
+
+    const currency = firstCurrencyFromCsv(stripeGateway?.currencies)
+    const feePercent = Number(stripeGateway?.feePercent ?? 0)
+    const feeFixedCents = Number(stripeGateway?.feeFixedCents ?? 0)
+
+    const feeCents = calcStripeGrossUpCents(totalCents, feePercent, feeFixedCents).feeCents
+    pdfInfo.stripeProcessingFeeCents = feeCents
+    pdfInfo.stripeProcessingFeeCurrency = currency
   }
 
   let pdfBytes: Uint8Array
@@ -181,10 +212,6 @@ export async function POST(request: NextRequest) {
   const sendErrors: Array<{ to: string; error: string }> = []
   let sentCount = 0
 
-  const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
-    where: { id: 'default' },
-    select: { enabled: true },
-  }).catch(() => null)
   const stripePaymentsEnabled = Boolean(stripeGateway?.enabled)
 
   for (const toEmail of uniqueToEmails) {

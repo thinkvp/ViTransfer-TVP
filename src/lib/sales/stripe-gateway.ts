@@ -5,6 +5,7 @@ export type StripeGatewaySettings = {
   enabled: boolean
   label: string
   feePercent: number
+  feeFixedCents: number
   publishableKey: string | null
   secretKey: string | null
   secretKeySource: 'env' | 'db' | 'none'
@@ -33,8 +34,9 @@ export async function getStripeGatewaySettings(): Promise<StripeGatewaySettings>
   const row = rows?.[0] as any
 
   const enabled = row?.enabled ?? false
-  const label = (row?.label ?? 'Pay by Credit Card (attracts merchant fees of 1.70%)').trim()
+  const label = (row?.label ?? 'Pay by Credit Card (card processing fee applies)').trim()
   const feePercent = Number.isFinite(Number(row?.feePercent)) ? Number(row?.feePercent) : 1.7
+  const feeFixedCents = Number.isFinite(Number(row?.feeFixedCents)) ? Math.max(0, Math.trunc(Number(row?.feeFixedCents))) : 30
   const publishableKey = row?.publishableKey ?? null
   const dashboardPaymentDescription = (row?.dashboardPaymentDescription ?? 'Payment for Invoice {invoice_number}').trim()
   const currencies = parseCurrencies(row?.currencies)
@@ -45,6 +47,7 @@ export async function getStripeGatewaySettings(): Promise<StripeGatewaySettings>
       enabled,
       label,
       feePercent,
+      feeFixedCents,
       publishableKey,
       secretKey: envSecret,
       secretKeySource: 'env',
@@ -61,6 +64,7 @@ export async function getStripeGatewaySettings(): Promise<StripeGatewaySettings>
       enabled,
       label,
       feePercent,
+      feeFixedCents,
       publishableKey,
       secretKey: trimmed || null,
       secretKeySource: trimmed ? 'db' : 'none',
@@ -73,6 +77,7 @@ export async function getStripeGatewaySettings(): Promise<StripeGatewaySettings>
     enabled,
     label,
     feePercent,
+    feeFixedCents,
     publishableKey,
     secretKey: null,
     secretKeySource: 'none',

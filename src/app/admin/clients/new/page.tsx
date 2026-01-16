@@ -50,6 +50,7 @@ export default function NewClientPage() {
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: Boolean(r.receiveNotifications),
+          receiveSalesReminders: (r as any)?.receiveSalesReminders !== false,
         })),
       })
 
@@ -154,6 +155,7 @@ export default function NewClientPage() {
                     onChange={setRecipients}
                     addButtonLabel="Add Recipient"
                     showNotificationsToggle={false}
+                    showSalesRemindersToggle
                   />
                 </div>
 

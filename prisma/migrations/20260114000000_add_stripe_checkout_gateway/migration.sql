@@ -3,8 +3,9 @@
 CREATE TABLE IF NOT EXISTS "SalesStripeGatewaySettings" (
   "id" TEXT NOT NULL,
   "enabled" BOOLEAN NOT NULL DEFAULT FALSE,
-  "label" TEXT NOT NULL DEFAULT 'Pay by Credit Card (attracts merchant fees of 1.70%)',
+  "label" TEXT NOT NULL DEFAULT 'Pay by Credit Card (card processing fee applies)',
   "feePercent" DOUBLE PRECISION NOT NULL DEFAULT 1.7,
+  "feeFixedCents" INTEGER NOT NULL DEFAULT 30,
   "publishableKey" TEXT,
   "secretKeyEncrypted" TEXT,
   "dashboardPaymentDescription" TEXT NOT NULL DEFAULT 'Payment for Invoice {invoice_number}',
