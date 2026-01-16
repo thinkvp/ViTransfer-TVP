@@ -63,9 +63,12 @@ function formatEmailDate(value: string | null): string {
   return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-function displayFrom(row: { fromName: string | null }) {
+function displayFrom(row: { fromName: string | null; fromEmail: string | null }) {
   const name = (row.fromName || '').trim()
-  return name || '—'
+  if (name) return name
+
+  const email = (row.fromEmail || '').trim()
+  return email || '—'
 }
 
 export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true, onExternalFilesChanged }: ProjectEmailTableProps) {
