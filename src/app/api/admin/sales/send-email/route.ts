@@ -181,6 +181,12 @@ export async function POST(request: NextRequest) {
   const sendErrors: Array<{ to: string; error: string }> = []
   let sentCount = 0
 
+  const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
+    where: { id: 'default' },
+    select: { enabled: true },
+  }).catch(() => null)
+  const stripePaymentsEnabled = Boolean(stripeGateway?.enabled)
+
   for (const toEmail of uniqueToEmails) {
     // Generate a token for the email open tracking pixel.
     const trackingToken = randomToken()
@@ -190,7 +196,9 @@ export async function POST(request: NextRequest) {
 
     const introLine = isQuote
       ? 'Please find the attached Quote. You can also view and accept the quote using the link below.'
-      : 'Please find the attached Invoice. You can also view and pay the invoice using the link below.'
+      : stripePaymentsEnabled
+        ? 'Please find the attached Invoice. You can also view and pay the invoice using the link below.'
+        : 'Please find the attached Invoice. You can also view the invoice using the link below.'
 
     const html = renderEmailShell({
       companyName,

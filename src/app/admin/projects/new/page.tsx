@@ -480,10 +480,11 @@ export default function NewProjectPage() {
               <div className="border rounded-lg p-4 bg-card">
                 <RecipientsEditor
                   label="Recipients"
-                  description="Manage who receives notifications and updates"
+                  description="Allow access and manage notifications"
                   value={recipients}
                   onChange={setRecipients}
                   addButtonLabel="Add Recipient"
+                  emptyStateText="No recipients added yet."
                   showAlsoAddToClient
                   addMode="dialog"
                   clientRecipients={selectedClientRecipients}
@@ -494,11 +495,12 @@ export default function NewProjectPage() {
               <div className="border rounded-lg p-4 bg-card">
                 <ProjectUsersEditor
                   label="Users"
-                  description="Assign internal users who can access this project"
+                  description="Assign internal users to this project"
                   value={assignedUsers}
                   onChange={setAssignedUsers}
                   addButtonLabel="Add Users"
-                  addButtonSize="default"
+                  addButtonSize="sm"
+                  addButtonClassName="w-auto"
                 />
               </div>
 

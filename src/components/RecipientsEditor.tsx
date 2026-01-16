@@ -33,6 +33,7 @@ interface RecipientsEditorProps {
   value: EditableRecipient[]
   onChange: (next: EditableRecipient[]) => void
   addButtonLabel?: string
+  emptyStateText?: string
   showNotificationsToggle?: boolean
   showDisplayColor?: boolean
   showAlsoAddToClient?: boolean
@@ -51,6 +52,7 @@ export function RecipientsEditor({
   value,
   onChange,
   addButtonLabel = 'Add Recipient',
+  emptyStateText,
   showNotificationsToggle = true,
   showDisplayColor = true,
   showAlsoAddToClient = false,
@@ -314,6 +316,9 @@ export function RecipientsEditor({
     onChange(next)
   }
 
+  const resolvedEmptyStateText =
+    emptyStateText ?? `No recipients added yet. Click "${addButtonLabel}" to add one.`
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -331,7 +336,7 @@ export function RecipientsEditor({
 
       {recipients.length === 0 && !showAddForm ? (
         <div className="text-sm text-muted-foreground py-4 text-center border border-dashed rounded-lg">
-          No recipients added yet. Click &quot;{addButtonLabel}&quot; to add one.
+          {resolvedEmptyStateText}
         </div>
       ) : (
         <div className="space-y-2">

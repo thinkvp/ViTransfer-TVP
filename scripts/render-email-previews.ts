@@ -11,6 +11,7 @@ import {
 	renderAdminProjectApprovedEmail,
 	renderAdminQuoteAcceptedEmail,
 	renderCommentNotificationEmail,
+	renderProjectKeyDateReminderEmail,
 	renderNewVersionEmail,
 	renderPasswordEmail,
 	renderProjectApprovedEmail,
@@ -376,6 +377,25 @@ async function main() {
 			notes: 'Payment is due within 7 days.',
 			shareUrl: 'http://localhost:3000/sales/view/demo-invoice',
 		})
+	)
+
+	await writeHtml(
+		outDir,
+		'16-project-key-date-reminder.html',
+		(await renderProjectKeyDateReminderEmail({
+			projectTitle: 'Winter Campaign',
+			projectCompanyName: 'SimbaMcSimba Industries',
+			shareUrl: 'http://localhost:3000/admin/projects/demo',
+			keyDate: {
+				date: '2026-02-03',
+				allDay: false,
+				startTime: '09:00',
+				finishTime: '11:00',
+				type: 'SHOOTING',
+				notes: 'Call time 08:30. Bring ND filters and a backup lav.',
+			},
+			branding,
+		})).html
 	)
 
 	console.log(`Wrote email previews to: ${outDir}`)

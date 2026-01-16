@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Picker-only date/time inputs: hide browser icons (esp. dark mode). */
+input.no-picker-icon::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+
+input.no-picker-icon::-webkit-clear-button {
+  display: none;
+}
+
+input.no-picker-icon::-webkit-inner-spin-button {
+  display: none;
+}
+
 @layer base {
   /* Light Mode Theme */
   :root {

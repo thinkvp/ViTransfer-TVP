@@ -440,12 +440,14 @@ async function createTransporter(customConfig?: any) {
  */
 export async function sendEmail({
   to,
+  bcc,
   subject,
   html,
   text,
   attachments,
 }: {
   to: string
+  bcc?: string | string[]
   subject: string
   html: string
   text?: string
@@ -461,6 +463,7 @@ export async function sendEmail({
     const info = await transporter.sendMail({
       from: `"${companyName}" <${fromAddress}>`,
       to,
+      bcc,
       subject,
       text: text || html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
       html,
@@ -1716,6 +1719,101 @@ export async function sendProjectGeneralNotificationEmail({
     subject,
     html,
   })
+}
+
+function formatProjectKeyDateTypeLabel(type: string): string {
+  if (type === 'PRE_PRODUCTION') return 'Pre-production'
+  if (type === 'SHOOTING') return 'Shooting'
+  if (type === 'DUE_DATE') return 'Due date'
+  if (type === 'OTHER') return 'Other'
+  return String(type)
+}
+
+function formatYmdHuman(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map((n) => Number(n))
+  const dt = new Date(y, (m || 1) - 1, d || 1)
+  return dt.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+/**
+ * Email template: Key Date Reminder (internal users + project recipients)
+ */
+export async function renderProjectKeyDateReminderEmail({
+  projectTitle,
+  projectCompanyName,
+  shareUrl,
+  keyDate,
+  branding,
+}: {
+  projectTitle: string
+  projectCompanyName?: string | null
+  shareUrl: string
+  keyDate: {
+    date: string
+    allDay: boolean
+    startTime: string | null
+    finishTime: string | null
+    type: string
+    notes: string | null
+  }
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const subject = `Reminder: ${projectTitle} — ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
+
+  const cardStyle = emailCardStyle({ borderRadiusPx: 12, paddingPx: 14, marginBottomPx: 16 })
+  const cardTitleStyle = emailCardTitleStyle()
+
+  const timePart = keyDate.allDay
+    ? 'All day'
+    : keyDate.startTime && keyDate.finishTime
+      ? `${keyDate.startTime}–${keyDate.finishTime}`
+      : keyDate.startTime
+        ? keyDate.startTime
+        : ''
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain: resolved.appDomain,
+    headerGradient: EMAIL_THEME.headerBackground,
+    title: 'Key Date Reminder',
+    subtitle: projectTitle,
+    footerNote: resolved.companyName,
+    bodyContent: `
+      <p style="margin:0 0 20px; font-size:15px; color:#374151;">
+        This is an automated reminder for an upcoming key date. No action is necessarily required, but please contact us if there any issues.
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Project</div>
+        <div style="font-size:15px; color:#111827; font-weight:700; margin-bottom:4px;">${escapeHtml(projectTitle)}</div>
+        ${projectCompanyName ? `<div style="font-size:13px; color:#6b7280;">${escapeHtml(projectCompanyName)}</div>` : ''}
+      </div>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Key date</div>
+        <div style="font-size:15px; color:#111827; font-weight:700; margin-bottom:6px;">${escapeHtml(formatProjectKeyDateTypeLabel(keyDate.type))}</div>
+        <div style="font-size:14px; color:#374151; line-height:1.6;">
+          <div><strong>Date:</strong> ${escapeHtml(formatYmdHuman(keyDate.date))}</div>
+          ${timePart ? `<div><strong>Time:</strong> ${escapeHtml(timePart)}</div>` : ''}
+        </div>
+        ${keyDate.notes && keyDate.notes.trim()
+          ? `<div style="margin-top:10px; font-size:14px; color:#374151; white-space:pre-wrap;"><strong>Notes:</strong><br/>${escapeHtml(keyDate.notes)}</div>`
+          : ''}
+      </div>
+
+      <div style="text-align:center; margin:24px 0 10px;">
+        <a href="${escapeHtml(shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 15, borderRadiusPx: 10 })}">
+          View Project
+        </a>
+      </div>
+    `,
+  }).trim()
+
+  return { subject, html }
 }
 
 /**

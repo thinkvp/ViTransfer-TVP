@@ -18,6 +18,9 @@ import { processInternalCommentNotifications } from './internal-comment-notifica
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
+import { processProjectKeyDateReminders } from './project-key-date-reminders'
+import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
+import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -319,6 +322,20 @@ async function main() {
     }
   )
 
+  // Key date reminders need minute-level scheduling.
+  await notificationQueue.add(
+    'project-key-date-reminders',
+    {},
+    {
+      repeat: {
+        pattern: '* * * * *',
+      },
+      jobId: 'project-key-date-reminders',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Add repeatable daily job to auto-close approved projects (if enabled)
   await notificationQueue.add(
     'auto-close-approved-projects',
@@ -346,6 +363,39 @@ async function main() {
     }
   )
 
+  // Add repeatable daily job to pull QuickBooks data (if enabled)
+  // Note: Schedule is configurable via Sales > Settings > QuickBooks.
+  // Runs at the configured HH:MM server/container time (see TZ env var).
+  try {
+    const repeatables = await notificationQueue.getRepeatableJobs()
+    const toRemove = repeatables.filter((job) => job.name === 'quickbooks-daily-pull')
+    for (const job of toRemove) {
+      await notificationQueue.removeRepeatableByKey(job.key)
+    }
+
+    const qbSettings = await getQuickBooksDailyPullSettings()
+    if (qbSettings.dailyPullEnabled) {
+      const cron = parseDailyTimeToCronPattern(qbSettings.dailyPullTime)
+      await notificationQueue.add(
+        'quickbooks-daily-pull',
+        {},
+        {
+          repeat: {
+            pattern: cron.pattern,
+          },
+          jobId: 'quickbooks-daily-pull',
+          removeOnComplete: true,
+          removeOnFail: true,
+        }
+      )
+      console.log('[QBO] Scheduled daily pull job', { time: qbSettings.dailyPullTime, pattern: cron.pattern })
+    } else {
+      console.log('[QBO] Daily pull disabled; job not scheduled')
+    }
+  } catch (e) {
+    console.warn('[QBO] Failed to schedule daily pull job (continuing):', e instanceof Error ? e.message : e)
+  }
+
   // Create worker to process notification jobs
   const notificationWorker = new Worker(
     'notification-processing',
@@ -370,6 +420,48 @@ async function main() {
           // Non-fatal: integration is optional
           console.warn('[QBO] Token refresh skipped/failed:', e instanceof Error ? e.message : e)
         }
+        return
+      }
+
+      if (job.name === 'quickbooks-daily-pull') {
+        const attemptedAt = new Date()
+        try {
+          const qbSettings = await getQuickBooksDailyPullSettings()
+          if (!qbSettings.dailyPullEnabled) {
+            console.log('[QBO] Daily pull disabled; skipping run')
+            return
+          }
+
+          console.log('[QBO] Running scheduled daily pull...', {
+            time: qbSettings.dailyPullTime,
+            lookbackDays: qbSettings.pullLookbackDays,
+          })
+
+          // Run the 4 pulls in order, spaced by 1 minute.
+          // (This avoids bursts and gives QBO time between large pulls.)
+          const pullResult = await runQuickBooksDailyPull(qbSettings.pullLookbackDays, { sleepBetweenStepsMs: 60 * 1000 })
+          if (!pullResult.ok) {
+            await recordQuickBooksDailyPullAttempt({ attemptedAt, succeeded: false, message: pullResult.message })
+            console.warn('[QBO] Daily pull failed:', pullResult.message)
+            return
+          }
+
+          await recordQuickBooksDailyPullAttempt({
+            attemptedAt,
+            succeeded: true,
+            message: pullResult.message,
+          })
+          console.log('[QBO] Daily pull ok', { message: pullResult.message })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          await recordQuickBooksDailyPullAttempt({ attemptedAt, succeeded: false, message: msg })
+          console.warn('[QBO] Daily pull errored:', msg)
+        }
+        return
+      }
+
+      if (job.name === 'project-key-date-reminders') {
+        await processProjectKeyDateReminders()
         return
       }
 

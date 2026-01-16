@@ -19,6 +19,14 @@ function exists(p) {
   }
 }
 
+function readTextIfExists(p) {
+  try {
+    return fs.readFileSync(p, 'utf8')
+  } catch {
+    return null
+  }
+}
+
 function copyDirRecursive(srcDir, destDir) {
   fs.mkdirSync(destDir, { recursive: true })
   for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
@@ -36,7 +44,12 @@ function copyDirRecursive(srcDir, destDir) {
 // On some Windows setups this symlink isn't created, which breaks runtime requires from @prisma/client.
 const expectedEntry = path.join(prismaClientShimDir, 'default.js')
 if (exists(expectedEntry)) {
-  process.exit(0)
+  // If the shim exists but is stale (schema changed), refresh it.
+  const generatedSchema = readTextIfExists(path.join(generatedClientDir, 'schema.prisma'))
+  const shimSchema = readTextIfExists(path.join(prismaClientShimDir, 'schema.prisma'))
+  if (generatedSchema && shimSchema && generatedSchema === shimSchema) {
+    process.exit(0)
+  }
 }
 
 if (!exists(generatedClientDir)) {

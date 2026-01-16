@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Download, Eye, FolderKanban, Image as ImageIcon, Layers, Plus, Video } from 'lucide-react'
 import ProjectsList from '@/components/ProjectsList'
+import ProjectsDashboardKeyDates from '@/components/ProjectsDashboardKeyDates'
 import { apiFetch } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
 import { useAuth } from '@/components/AuthProvider'
@@ -223,6 +224,8 @@ export default function AdminPage() {
             </CardContent>
           </Card>
 
+          <ProjectsDashboardKeyDates />
+
           <div className="text-muted-foreground">No projects found.</div>
         </div>
       </div>
@@ -317,6 +320,7 @@ export default function AdminPage() {
         </Card>
 
         <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} />
+        <ProjectsDashboardKeyDates />
       </div>
     </div>
   )

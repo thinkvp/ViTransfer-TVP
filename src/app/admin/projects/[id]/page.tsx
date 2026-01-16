@@ -21,6 +21,7 @@ import { ProjectEmailTable } from '@/components/ProjectEmailTable'
 import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
+import { ProjectKeyDates } from '@/components/ProjectKeyDates'
 import { getSalesSettings, listInvoices, listQuotes } from '@/lib/sales/local-store'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
 
@@ -532,6 +533,10 @@ export default function ProjectPage() {
                   )}
                 </CardContent>
               </Card>
+            )}
+
+            {canAccessProjectSettings && (
+              <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} />
             )}
 
             {canAccessProjectSettings && (
