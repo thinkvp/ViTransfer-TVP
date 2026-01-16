@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "0.8.2-tvp-v1.19",
+  "version": "0.8.2-tvp-v1.20",
   "private": true,
   "scripts": {
     "dev": "next dev",

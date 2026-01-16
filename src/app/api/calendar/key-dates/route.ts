@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { icsJoinLines, icsProperty, icsTextProperty } from '@/lib/ics'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -62,9 +63,14 @@ function typeLabel(type: string): string {
 // GET /api/calendar/key-dates?token=... (ICS)
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get('token')?.trim()
-  if (!token) {
-    return NextResponse.json({ error: 'Missing token' }, { status: 400 })
-  }
+  if (!token) return new NextResponse('Not found', { status: 404 })
+
+  const rateLimitResult = await rateLimit(
+    request,
+    { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many requests. Please slow down.' },
+    'calendar-key-dates-ics'
+  )
+  if (rateLimitResult) return rateLimitResult
 
   const user = await prisma.user.findFirst({
     where: { calendarFeedToken: token },
@@ -76,7 +82,7 @@ export async function GET(request: NextRequest) {
 
   if (!user) {
     // Avoid leaking whether a token exists.
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return new NextResponse('Not found', { status: 404 })
   }
 
   const permissions = getUserPermissions({ permissions: user.appRole?.permissions } as any)
@@ -130,7 +136,8 @@ export async function GET(request: NextRequest) {
     calLines.push(icsProperty('UID', `${k.id}@vitransfer`))
     calLines.push(icsProperty('DTSTAMP', dtstamp))
     calLines.push(icsProperty('LAST-MODIFIED', formatDtstampUtc(k.updatedAt)))
-    calLines.push(icsProperty('SUMMARY', summary))
+    const summaryProp = icsTextProperty('SUMMARY', summary)
+    if (summaryProp) calLines.push(summaryProp)
     const desc = icsTextProperty('DESCRIPTION', k.notes)
     if (desc) calLines.push(desc)
 
@@ -166,6 +173,7 @@ export async function GET(request: NextRequest) {
       'Content-Disposition': 'inline; filename="vitransfer-key-dates.ics"',
       'Cache-Control': 'no-store',
       Pragma: 'no-cache',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
     },
   })
 
