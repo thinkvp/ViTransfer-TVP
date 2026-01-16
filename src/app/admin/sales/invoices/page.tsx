@@ -250,10 +250,47 @@ export default function SalesInvoicesPage() {
 
   const onDownload = async (inv: SalesInvoiceWithVersion) => {
     const clientDetails = inv.clientId ? await fetchClientDetails(inv.clientId).catch(() => null) : null
+    let publicInvoiceUrl: string | undefined
+    try {
+      const relevantPayments = payments.filter((p) => p.invoiceId === inv.id)
+      const totalCents = invoiceTotalCents(inv)
+      const paidCents = relevantPayments.reduce((acc, p) => acc + p.amountCents, 0)
+      const stripeInfo = stripePaidByInvoiceId[inv.id]
+      const paidWithStripeCents = stripeInfo?.paidCents ?? 0
+      const balanceCents = Math.max(0, totalCents - (paidCents + paidWithStripeCents))
+      const latestPaymentDate = relevantPayments
+        .map((p) => p.paymentDate)
+        .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+        .sort()
+        .at(-1)
+
+      const latestStripeYmd = stripeInfo?.latestYmd ?? null
+      const latestAnyPaymentYmd = [latestPaymentDate, latestStripeYmd]
+        .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+        .sort()
+        .at(-1)
+        ?? null
+
+      const invoicePaidAt = (totalCents > 0 && balanceCents <= 0)
+        ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
+        : null
+
+      publicInvoiceUrl = await createSalesDocShareUrl({
+        type: 'INVOICE',
+        doc: inv,
+        settings,
+        clientName: inv.clientId ? (clientNameById[inv.clientId] ?? undefined) : undefined,
+        projectTitle: inv.projectId ? (projectTitleById[inv.projectId] ?? undefined) : undefined,
+        invoicePaidAt,
+      })
+    } catch {
+      // ignore; PDF should still download with payment details
+    }
     await downloadInvoicePdf(inv, settings, {
       clientName: inv.clientId ? (clientNameById[inv.clientId] ?? undefined) : undefined,
       clientAddress: clientDetails?.address ?? undefined,
       projectTitle: inv.projectId ? (projectTitleById[inv.projectId] ?? undefined) : undefined,
+      publicInvoiceUrl,
     })
   }
 

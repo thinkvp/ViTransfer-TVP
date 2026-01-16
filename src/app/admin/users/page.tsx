@@ -476,7 +476,7 @@ export default function UsersPage() {
         </div>
 
         <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-          <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{roleDialogMode === 'create' ? 'Add New Role' : 'Edit Role'}</DialogTitle>
               <DialogDescription>

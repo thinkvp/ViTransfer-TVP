@@ -2,11 +2,14 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw } from 'lucide-react'
-import { apiJson, apiPost } from '@/lib/api-client'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { apiDelete, apiJson, apiPost } from '@/lib/api-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
@@ -32,10 +35,25 @@ type ProjectKeyDateRow = {
   }
 }
 
+type PersonalKeyDateRow = {
+  id: string
+  date: string // YYYY-MM-DD
+  allDay: boolean
+  startTime: string | null
+  finishTime: string | null
+  title: string
+  notes: string | null
+}
+
 type KeyDatesResponse = {
   today: string // YYYY-MM-DD
   keyDates: ProjectKeyDateRow[]
+  personalKeyDates?: PersonalKeyDateRow[]
 }
+
+type CalendarItem =
+  | ({ kind: 'project' } & ProjectKeyDateRow)
+  | ({ kind: 'personal' } & PersonalKeyDateRow)
 
 function parseYmdToDateLocal(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map((n) => Number(n))
@@ -84,6 +102,12 @@ function typeColorClasses(type: string): { pill: string; dot: string } {
   }
 }
 
+function isValidTime24h(value: string): boolean {
+  const v = value.trim()
+  if (!v) return true
+  return Boolean(/^([0-1]\d|2[0-3]):([0-5]\d)$/.exec(v))
+}
+
 function addMonths(date: Date, delta: number): Date {
   const next = new Date(date)
   next.setMonth(next.getMonth() + delta)
@@ -102,6 +126,18 @@ export default function ProjectsDashboardKeyDates() {
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<KeyDatesResponse | null>(null)
   const [showAllUpcoming, setShowAllUpcoming] = useState(false)
+
+  const [personalOpen, setPersonalOpen] = useState(false)
+  const [personalSaving, setPersonalSaving] = useState(false)
+  const [personalError, setPersonalError] = useState<string | null>(null)
+  const [personalDraft, setPersonalDraft] = useState<{
+    date: string
+    allDay: boolean
+    startTime: string
+    finishTime: string
+    title: string
+    notes: string
+  }>({ date: '', allDay: false, startTime: '', finishTime: '', title: '', notes: '' })
 
   const [calendarFeedOpen, setCalendarFeedOpen] = useState(false)
   const [calendarFeedUrl, setCalendarFeedUrl] = useState<string | null>(null)
@@ -138,6 +174,19 @@ export default function ProjectsDashboardKeyDates() {
     load()
   }, [])
 
+  const reload = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const result = await apiJson<KeyDatesResponse>('/api/projects/key-dates')
+      setData(result)
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load key dates')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const ensureCalendarFeedUrl = async () => {
     if (calendarFeedUrl) return
     try {
@@ -166,9 +215,20 @@ export default function ProjectsDashboardKeyDates() {
   }
 
   const upcoming = useMemo(() => {
-    const all = data?.keyDates || []
-    return all.filter((k) => k.date >= today)
-  }, [data?.keyDates, today])
+    const project = (data?.keyDates || []).map((k) => ({ ...k, kind: 'project' as const }))
+    const personal = (data?.personalKeyDates || []).map((k) => ({ ...k, kind: 'personal' as const }))
+    const all: CalendarItem[] = [...project, ...personal]
+
+    return all
+      .filter((k) => k.date >= today)
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date)
+        const aStart = (a.startTime || '').toString()
+        const bStart = (b.startTime || '').toString()
+        if (aStart !== bStart) return aStart.localeCompare(bStart)
+        return a.id.localeCompare(b.id)
+      })
+  }, [data?.keyDates, data?.personalKeyDates, today])
 
   const upcomingVisible = useMemo(() => {
     if (showAllUpcoming) return upcoming
@@ -208,25 +268,97 @@ export default function ProjectsDashboardKeyDates() {
   }, [monthCursor])
 
   const keyDatesByYmd = useMemo(() => {
-    const map = new Map<string, ProjectKeyDateRow[]>()
+    const map = new Map<string, CalendarItem[]>()
+
     for (const k of data?.keyDates || []) {
       const list = map.get(k.date) || []
-      list.push(k)
+      list.push({ ...k, kind: 'project' })
+      map.set(k.date, list)
+    }
+
+    for (const k of data?.personalKeyDates || []) {
+      const list = map.get(k.date) || []
+      list.push({ ...k, kind: 'personal' })
       map.set(k.date, list)
     }
 
     for (const [ymd, list] of map.entries()) {
       list.sort((a, b) => {
-        if (a.startTime && b.startTime) return a.startTime.localeCompare(b.startTime)
-        if (a.startTime && !b.startTime) return -1
-        if (!a.startTime && b.startTime) return 1
+        const aStart = (a.startTime || '').toString()
+        const bStart = (b.startTime || '').toString()
+        if (aStart !== bStart) return aStart.localeCompare(bStart)
         return a.id.localeCompare(b.id)
       })
       map.set(ymd, list)
     }
 
     return map
-  }, [data?.keyDates])
+  }, [data?.keyDates, data?.personalKeyDates])
+
+  const openPersonalDialog = () => {
+    setPersonalError(null)
+    setPersonalDraft({
+      date: today,
+      allDay: false,
+      startTime: '',
+      finishTime: '',
+      title: '',
+      notes: '',
+    })
+    setPersonalOpen(true)
+  }
+
+  const savePersonalKeyDate = async () => {
+    setPersonalError(null)
+
+    if (!personalDraft.date.trim()) {
+      setPersonalError('Date is required')
+      return
+    }
+    if (!personalDraft.title.trim()) {
+      setPersonalError('Title is required')
+      return
+    }
+    if (!personalDraft.allDay) {
+      if (!isValidTime24h(personalDraft.startTime)) {
+        setPersonalError('Start time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+        return
+      }
+      if (!isValidTime24h(personalDraft.finishTime)) {
+        setPersonalError('Finish time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+        return
+      }
+    }
+
+    setPersonalSaving(true)
+    try {
+      await apiPost('/api/users/me/key-dates', {
+        date: personalDraft.date,
+        allDay: personalDraft.allDay,
+        startTime: personalDraft.allDay ? '' : personalDraft.startTime,
+        finishTime: personalDraft.allDay ? '' : personalDraft.finishTime,
+        title: personalDraft.title,
+        notes: personalDraft.notes,
+      })
+
+      setPersonalOpen(false)
+      await reload()
+    } catch (e: any) {
+      setPersonalError(e?.message || 'Failed to save key date')
+    } finally {
+      setPersonalSaving(false)
+    }
+  }
+
+  const deletePersonalKeyDate = async (id: string) => {
+    if (!confirm('Delete this key date?')) return
+    try {
+      await apiDelete(`/api/users/me/key-dates/${id}`)
+      await reload()
+    } catch (e: any) {
+      setError(e?.message || 'Failed to delete key date')
+    }
+  }
 
   return (
     <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -245,8 +377,11 @@ export default function ProjectsDashboardKeyDates() {
           ) : (
             <div className="space-y-2">
               {upcomingVisible.map((k) => {
-                const colors = typeColorClasses(k.type)
-                const projectLabel = k.project.companyName || k.project.title
+                const colors = k.kind === 'project' ? typeColorClasses(k.type) : typeColorClasses('')
+                const label =
+                  k.kind === 'project'
+                    ? (k.project.companyName || k.project.title)
+                    : k.title
 
                 return (
                   <div
@@ -255,7 +390,9 @@ export default function ProjectsDashboardKeyDates() {
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full ${colors.pill}`}>{typeLabel(k.type)}</span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full ${colors.pill}`}>
+                          {k.kind === 'project' ? typeLabel(k.type) : 'Personal'}
+                        </span>
                         <span className="text-sm font-medium tabular-nums">{formatHumanDate(k.date)}</span>
                         <span className="text-xs text-muted-foreground">
                           {k.allDay
@@ -268,16 +405,33 @@ export default function ProjectsDashboardKeyDates() {
                         </span>
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <Link href={`/admin/projects/${k.projectId}`} className="text-sm underline underline-offset-2">
-                          {projectLabel}
-                        </Link>
+                        {k.kind === 'project' ? (
+                          <Link href={`/admin/projects/${k.projectId}`} className="text-sm underline underline-offset-2">
+                            {label}
+                          </Link>
+                        ) : (
+                          <span className="text-sm font-medium">{label}</span>
+                        )}
                         {k.notes ? <span className="text-xs text-muted-foreground truncate">— {k.notes}</span> : null}
                       </div>
                     </div>
 
-                    <Link href={`/admin/projects/${k.projectId}`} className="flex-shrink-0">
-                      <Button variant="secondary" size="sm">Open</Button>
-                    </Link>
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      {k.kind === 'project' ? (
+                        <Link href={`/admin/projects/${k.projectId}`} className="flex-shrink-0">
+                          <Button variant="secondary" size="sm">Open</Button>
+                        </Link>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void deletePersonalKeyDate(k.id)}
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -344,6 +498,18 @@ export default function ProjectsDashboardKeyDates() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+
+            <Button
+              variant="outline"
+              size="icon"
+              className="mr-2"
+              onClick={openPersonalDialog}
+              aria-label="Add key date"
+              title="Add key date"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+
             <Button
               variant="ghost"
               size="icon"
@@ -397,19 +563,34 @@ export default function ProjectsDashboardKeyDates() {
                       {dayKeyDates.length > 0 ? (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {dayKeyDates.slice(0, 6).map((k) => {
-                            const colors = typeColorClasses(k.type)
+                            if (k.kind === 'project') {
+                              const colors = typeColorClasses(k.type)
+                              return (
+                                <Link
+                                  key={k.id}
+                                  href={`/admin/projects/${k.projectId}`}
+                                  className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
+                                  title={`${typeLabel(k.type)} — ${k.project.companyName || k.project.title}`}
+                                >
+                                  <span className={`inline-block w-2 h-2 rounded-full ${colors.dot}`} />
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
+                                    {k.project.companyName || k.project.title}
+                                  </span>
+                                </Link>
+                              )
+                            }
+
                             return (
-                              <Link
+                              <span
                                 key={k.id}
-                                href={`/admin/projects/${k.projectId}`}
                                 className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
-                                title={`${typeLabel(k.type)} — ${k.project.companyName || k.project.title}`}
+                                title={k.notes ? `${k.title} — ${k.notes}` : k.title}
                               >
-                                <span className={`inline-block w-2 h-2 rounded-full ${colors.dot}`} />
+                                <span className="inline-block w-2 h-2 rounded-full bg-foreground/40" />
                                 <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
-                                  {k.project.companyName || k.project.title}
+                                  {k.title}
                                 </span>
-                              </Link>
+                              </span>
                             )
                           })}
                           {dayKeyDates.length > 6 ? (
@@ -432,11 +613,135 @@ export default function ProjectsDashboardKeyDates() {
                     </div>
                   )
                 })}
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-foreground/40" />
+                  <span>Personal</span>
+                </div>
               </div>
             </div>
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={personalOpen}
+        onOpenChange={(open) => {
+          setPersonalOpen(open)
+          if (!open) setPersonalError(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Key Date</DialogTitle>
+            <DialogDescription>This key date is not associated with a project.</DialogDescription>
+          </DialogHeader>
+
+          {personalError ? (
+            <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded">
+              {personalError}
+            </div>
+          ) : null}
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Date</div>
+              <Input
+                type="date"
+                value={personalDraft.date}
+                onChange={(e) => setPersonalDraft((p) => ({ ...p, date: e.target.value }))}
+                className="h-10"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={personalDraft.allDay}
+                onCheckedChange={(v) =>
+                  setPersonalDraft((p) => ({ ...p, allDay: Boolean(v), startTime: '', finishTime: '' }))
+                }
+              />
+              <div className="text-sm">All day</div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Start</div>
+                <Input
+                  type="text"
+                  value={personalDraft.startTime}
+                  disabled={personalDraft.allDay}
+                  placeholder="HH:MM"
+                  inputMode="numeric"
+                  onChange={(e) => setPersonalDraft((p) => ({ ...p, startTime: e.target.value }))}
+                  className="h-10"
+                  list="personal-key-date-start-times"
+                />
+                <datalist id="personal-key-date-start-times">
+                  {Array.from({ length: 24 * 4 }).map((_, i) => {
+                    const minutes = i * 15
+                    const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+                    const mm = String(minutes % 60).padStart(2, '0')
+                    const t = `${hh}:${mm}`
+                    return <option key={t} value={t} />
+                  })}
+                </datalist>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Finish</div>
+                <Input
+                  type="text"
+                  value={personalDraft.finishTime}
+                  disabled={personalDraft.allDay}
+                  placeholder="HH:MM"
+                  inputMode="numeric"
+                  onChange={(e) => setPersonalDraft((p) => ({ ...p, finishTime: e.target.value }))}
+                  className="h-10"
+                  list="personal-key-date-finish-times"
+                />
+                <datalist id="personal-key-date-finish-times">
+                  {Array.from({ length: 24 * 4 }).map((_, i) => {
+                    const minutes = i * 15
+                    const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+                    const mm = String(minutes % 60).padStart(2, '0')
+                    const t = `${hh}:${mm}`
+                    return <option key={t} value={t} />
+                  })}
+                </datalist>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Title</div>
+              <Input
+                value={personalDraft.title}
+                onChange={(e) => setPersonalDraft((p) => ({ ...p, title: e.target.value }))}
+                placeholder="e.g., Studio maintenance"
+                maxLength={120}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Notes</div>
+              <Textarea
+                value={personalDraft.notes}
+                onChange={(e) => setPersonalDraft((p) => ({ ...p, notes: e.target.value }))}
+                className="min-h-[90px] resize-y whitespace-pre-wrap"
+                placeholder="Notes"
+                maxLength={500}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPersonalOpen(false)} disabled={personalSaving}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void savePersonalKeyDate()} disabled={personalSaving}>
+              {personalSaving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -252,7 +252,7 @@ export function SalesSendEmailDialog(props: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-lg">
+      <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

@@ -7,6 +7,33 @@ import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+function getCalendarTimeZone(): string {
+  // Google Calendar subscriptions can default to GMT if the feed doesn't specify a timezone.
+  // Prefer an explicit tz; allow deployments to override.
+  return (
+    process.env.VITRANSFER_ICS_TIMEZONE ||
+    process.env.TZ ||
+    'Australia/Brisbane'
+  ).trim() || 'Australia/Brisbane'
+}
+
+function maybeBrisbaneVTimeZoneBlock(tz: string): string[] {
+  if (tz !== 'Australia/Brisbane') return []
+  // Brisbane has no DST; a minimal VTIMEZONE block is sufficient.
+  return [
+    'BEGIN:VTIMEZONE',
+    'TZID:Australia/Brisbane',
+    'X-LIC-LOCATION:Australia/Brisbane',
+    'BEGIN:STANDARD',
+    'TZOFFSETFROM:+1000',
+    'TZOFFSETTO:+1000',
+    'TZNAME:AEST',
+    'DTSTART:19700101T000000',
+    'END:STANDARD',
+    'END:VTIMEZONE',
+  ]
+}
+
 function isoDateTodayUtc(): string {
   const now = new Date()
   const y = now.getUTCFullYear()
@@ -117,8 +144,27 @@ export async function GET(request: NextRequest) {
       })
     : []
 
+  const personalRows = await (prisma as any).userKeyDate.findMany({
+    where: {
+      userId: user.id,
+      date: { gte: today, lte: end },
+    },
+    select: {
+      id: true,
+      date: true,
+      allDay: true,
+      startTime: true,
+      finishTime: true,
+      title: true,
+      notes: true,
+      updatedAt: true,
+    },
+    orderBy: [{ date: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }],
+  })
+
   const now = new Date()
   const dtstamp = formatDtstampUtc(now)
+  const tz = getCalendarTimeZone()
   const calLines: string[] = []
 
   calLines.push('BEGIN:VCALENDAR')
@@ -127,6 +173,8 @@ export async function GET(request: NextRequest) {
   calLines.push(icsProperty('CALSCALE', 'GREGORIAN'))
   calLines.push(icsProperty('METHOD', 'PUBLISH'))
   calLines.push(icsProperty('X-WR-CALNAME', 'ViTransfer Key Dates'))
+  calLines.push(icsProperty('X-WR-TIMEZONE', tz))
+  calLines.push(...maybeBrisbaneVTimeZoneBlock(tz))
 
   for (const k of rows) {
     const projectLabel = k.project.companyName || k.project.title
@@ -149,11 +197,44 @@ export async function GET(request: NextRequest) {
       calLines.push(icsProperty('DTEND;VALUE=DATE', endExclusive))
     } else {
       const start = `${ymdToCompact(k.date)}T${hhmmToCompact(k.startTime!)}00`
-      calLines.push(icsProperty('DTSTART', start))
+      calLines.push(icsProperty(`DTSTART;TZID=${tz}`, start))
 
       if (k.finishTime) {
         const endDt = `${ymdToCompact(k.date)}T${hhmmToCompact(k.finishTime)}00`
-        calLines.push(icsProperty('DTEND', endDt))
+        calLines.push(icsProperty(`DTEND;TZID=${tz}`, endDt))
+      } else {
+        calLines.push(icsProperty('DURATION', 'PT1H'))
+      }
+    }
+
+    calLines.push('END:VEVENT')
+  }
+
+  for (const k of personalRows) {
+    const summary = `Personal: ${k.title}`
+
+    calLines.push('BEGIN:VEVENT')
+    calLines.push(icsProperty('UID', `${k.id}@vitransfer-personal`))
+    calLines.push(icsProperty('DTSTAMP', dtstamp))
+    calLines.push(icsProperty('LAST-MODIFIED', formatDtstampUtc(k.updatedAt)))
+    const summaryProp = icsTextProperty('SUMMARY', summary)
+    if (summaryProp) calLines.push(summaryProp)
+    const desc = icsTextProperty('DESCRIPTION', k.notes)
+    if (desc) calLines.push(desc)
+
+    const isTimed = k.allDay !== true && !!k.startTime
+    if (!isTimed) {
+      const start = ymdToCompact(k.date)
+      const endExclusive = ymdToCompact(nextDayYmdUtc(k.date))
+      calLines.push(icsProperty('DTSTART;VALUE=DATE', start))
+      calLines.push(icsProperty('DTEND;VALUE=DATE', endExclusive))
+    } else {
+      const start = `${ymdToCompact(k.date)}T${hhmmToCompact(k.startTime)}00`
+      calLines.push(icsProperty(`DTSTART;TZID=${tz}`, start))
+
+      if (k.finishTime) {
+        const endDt = `${ymdToCompact(k.date)}T${hhmmToCompact(k.finishTime)}00`
+        calLines.push(icsProperty(`DTEND;TZID=${tz}`, endDt))
       } else {
         calLines.push(icsProperty('DURATION', 'PT1H'))
       }

@@ -55,13 +55,14 @@ export default function NewProjectPage() {
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
   const clientSearchRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(false)
+  const [authModeError, setAuthModeError] = useState<string | null>(null)
   const [passwordProtected, setPasswordProtected] = useState(true)
   const [sharePassword, setSharePassword] = useState('')
   const [showPassword, setShowPassword] = useState(true)
   const [copied, setCopied] = useState(false)
 
   // Authentication mode
-  const [authMode, setAuthMode] = useState<'PASSWORD' | 'OTP' | 'BOTH'>('PASSWORD')
+  const [authMode, setAuthMode] = useState<'PASSWORD' | 'OTP' | 'BOTH'>('OTP')
   const [smtpConfigured, setSmtpConfigured] = useState(false)
   const [companyNameValue, setCompanyNameValue] = useState('')
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
@@ -208,6 +209,7 @@ export default function NewProjectPage() {
     e.preventDefault()
     setLoading(true)
     setProjectTypeError('')
+    setAuthModeError(null)
 
     if (!selectedClientId) {
       setClientFieldError('Please choose an existing client')
@@ -219,6 +221,19 @@ export default function NewProjectPage() {
       setProjectTypeError('Select at least one project type (Video and/or Photo)')
       setLoading(false)
       return
+    }
+
+    if (passwordProtected && (authMode === 'OTP' || authMode === 'BOTH')) {
+      if (!smtpConfigured) {
+        setAuthModeError('SMTP must be configured in Settings to use Email OTP')
+        setLoading(false)
+        return
+      }
+      if (!hasAnyRecipientEmail) {
+        setAuthModeError('Add at least one recipient email address to use Email OTP')
+        setLoading(false)
+        return
+      }
     }
 
     const formData = new FormData(e.currentTarget)
@@ -505,7 +520,7 @@ export default function NewProjectPage() {
               </div>
 
               <Dialog open={createClientOpen} onOpenChange={setCreateClientOpen}>
-                <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-2xl">
+                <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-2xl">
                   <DialogHeader>
                     <DialogTitle>Create Client</DialogTitle>
                     <DialogDescription>Create a client record and default recipients</DialogDescription>
@@ -631,17 +646,22 @@ export default function NewProjectPage() {
                       <select
                         id="authMode"
                         value={authMode}
-                        onChange={(e) => setAuthMode(e.target.value as any)}
+                        onChange={(e) => {
+                          setAuthMode(e.target.value as any)
+                          setAuthModeError(null)
+                        }}
                         className="w-full px-3 py-2 bg-card border border-border rounded-md"
                       >
                         <option value="PASSWORD">Password Only</option>
-                        <option value="OTP" disabled={!canUseOTP}>
-                          Email OTP Only {!canUseOTP ? '(requires SMTP & client email)' : ''}
-                        </option>
-                        <option value="BOTH" disabled={!canUseOTP}>
-                          Both Password and OTP {!canUseOTP ? '(requires SMTP & client email)' : ''}
-                        </option>
+                        <option value="OTP">Email OTP Only {!canUseOTP ? '(requires SMTP & client email)' : ''}</option>
+                        <option value="BOTH">Both Password and OTP {!canUseOTP ? '(requires SMTP & client email)' : ''}</option>
                       </select>
+
+                      {authModeError ? (
+                        <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded">
+                          {authModeError}
+                        </div>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">
                         {authMode === 'PASSWORD' && 'Clients must enter a password to access the project'}
                         {authMode === 'OTP' && 'Clients receive a one-time code via email (must be a registered recipient)'}

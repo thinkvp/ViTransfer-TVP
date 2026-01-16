@@ -856,78 +856,108 @@ async function buildInvoicePdfBytes(
   drawTotalsLine('Tax', centsToDollars(taxCents))
   drawTotalsLine('Total', centsToDollars(totalCents), true)
 
-  // Optional pay link (loads the web invoice where payment can be made)
-  if (info.publicInvoiceUrl) {
-    if (y - 70 < bottomMargin) newPage(false)
-    y -= 10
+  // Payment section
+  const paymentDetails = typeof settings.paymentDetails === 'string' ? settings.paymentDetails.trim() : ''
+  const hasPaymentDetails = Boolean(paymentDetails)
+  const hasPayOnline = Boolean(info.publicInvoiceUrl)
 
-    const sectionHeaderY = y
-    drawLeftText('Pay this invoice online', left, sectionHeaderY, 10, true, textColor)
-
-    const paymentDetails = typeof settings.paymentDetails === 'string' ? settings.paymentDetails.trim() : ''
+  if (hasPayOnline || hasPaymentDetails) {
     const paymentDetailsLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
-    if (paymentDetails) {
-      paymentDetailsLines.push({ text: 'Payment details', size: 10, bold: true, color: textColor })
+    if (hasPaymentDetails) {
       for (const rawLine of paymentDetails.split('\n')) {
         const line = rawLine.trim()
         if (!line) continue
-        for (const wrapped of wrapText(line, 220, font, 9)) {
+        for (const wrapped of wrapText(line, hasPayOnline ? 220 : (right - left), font, 9)) {
           if (wrapped.trim()) paymentDetailsLines.push({ text: wrapped, size: 9, color: subtleText })
         }
       }
     }
 
-    const afterPaymentDetailsY = paymentDetailsLines.length
-      ? drawRightBlock(paymentDetailsLines, right, sectionHeaderY)
-      : (sectionHeaderY - 16)
+    const estimatedNeeded = Math.max(
+      hasPayOnline ? 110 : 70,
+      (paymentDetailsLines.length + (hasPaymentDetails ? 2 : 0)) * 14 + 30
+    )
+    if (y - estimatedNeeded < bottomMargin) newPage(false)
 
-    const feeCentsRaw = typeof info.stripeProcessingFeeCents === 'number' ? info.stripeProcessingFeeCents : NaN
-    const feeCents = Number.isFinite(feeCentsRaw) ? Math.max(0, Math.trunc(feeCentsRaw)) : 0
-    const feeCurrency = typeof info.stripeProcessingFeeCurrency === 'string' ? info.stripeProcessingFeeCurrency : 'AUD'
+    y -= 10
+    const sectionHeaderY = y
 
-    let leftAfterHeaderY = sectionHeaderY - 18
-    if (feeCents > 0) {
-      const feeText = `Attracts ${formatMoneyWithCurrency(feeCents, feeCurrency)} in card processing fees`
-      drawLeftText(feeText, left, sectionHeaderY - 14, 9, false, subtleText)
-      // Keep the Pay button close under the fee line.
-      leftAfterHeaderY = sectionHeaderY - 26
+    if (hasPayOnline) {
+      drawLeftText('Pay this invoice online', left, sectionHeaderY, 10, true, textColor)
+    } else {
+      drawLeftText('Payment details', left, sectionHeaderY, 10, true, textColor)
     }
 
-    // The Pay button should be positioned from the left content,
-    // not pushed down by multi-line payment details.
-    y = leftAfterHeaderY - 4
+    // Right column: payment details (when pay-online is present)
+    let afterPaymentDetailsY = sectionHeaderY - 16
+    if (hasPayOnline) {
+      if (hasPaymentDetails) {
+        const rightLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
+        rightLines.push({ text: 'Payment details', size: 10, bold: true, color: textColor })
+        rightLines.push(...paymentDetailsLines)
+        afterPaymentDetailsY = drawRightBlock(rightLines, right, sectionHeaderY)
+      }
+    } else {
+      // Full width payment details (no public pay link)
+      y = sectionHeaderY - 16
+      for (const l of paymentDetailsLines) {
+        if (y < bottomMargin) newPage(false)
+        drawLeftText(l.text, left, y, l.size, false, l.color ?? subtleText)
+        y -= l.size + 5
+      }
+      y -= 14
+    }
 
-    const buttonText = 'Pay Invoice'
-    const buttonFontSize = 12
-    const padX = 14
-    const padY = 8
-    const textW = fontBold.widthOfTextAtSize(buttonText, buttonFontSize)
-    const buttonW = Math.min(right - left, textW + padX * 2)
-    const buttonH = buttonFontSize + padY * 2
-    const buttonX = left
-    const buttonY = y - buttonH
+    // Left column: pay button (only when we have a public invoice URL)
+    if (hasPayOnline && info.publicInvoiceUrl) {
+      const feeCentsRaw = typeof info.stripeProcessingFeeCents === 'number' ? info.stripeProcessingFeeCents : NaN
+      const feeCents = Number.isFinite(feeCentsRaw) ? Math.max(0, Math.trunc(feeCentsRaw)) : 0
+      const feeCurrency = typeof info.stripeProcessingFeeCurrency === 'string' ? info.stripeProcessingFeeCurrency : 'AUD'
 
-    page.drawRectangle({
-      x: buttonX,
-      y: buttonY,
-      width: buttonW,
-      height: buttonH,
-      color: rgb(0.92, 0.98, 0.95),
-      borderColor: rgb(0.2, 0.6, 0.4),
-      borderWidth: 1,
-    })
-    page.drawText(buttonText, {
-      x: buttonX + padX,
-      y: buttonY + padY,
-      size: buttonFontSize,
-      font: fontBold,
-      color: rgb(0.08, 0.35, 0.22),
-    })
-    addLinkAnnotation(buttonX, buttonY, buttonW, buttonH, info.publicInvoiceUrl)
+      let leftAfterHeaderY = sectionHeaderY - 18
+      if (feeCents > 0) {
+        const feeText = `Attracts ${formatMoneyWithCurrency(feeCents, feeCurrency)} in card processing fees`
+        drawLeftText(feeText, left, sectionHeaderY - 14, 9, false, subtleText)
+        // Keep the Pay button close under the fee line.
+        leftAfterHeaderY = sectionHeaderY - 26
+      }
 
-    // Continue below whichever side (left button or right payment details) is lower.
-    // Add extra spacing after this section.
-    y = Math.min(buttonY - 14, afterPaymentDetailsY) - 20
+      // The Pay button should be positioned from the left content,
+      // not pushed down by multi-line payment details.
+      const payButtonTopY = leftAfterHeaderY - 4
+
+      const buttonText = 'Pay Invoice'
+      const buttonFontSize = 12
+      const padX = 14
+      const padY = 8
+      const textW = fontBold.widthOfTextAtSize(buttonText, buttonFontSize)
+      const buttonW = Math.min(right - left, textW + padX * 2)
+      const buttonH = buttonFontSize + padY * 2
+      const buttonX = left
+      const buttonY = payButtonTopY - buttonH
+
+      page.drawRectangle({
+        x: buttonX,
+        y: buttonY,
+        width: buttonW,
+        height: buttonH,
+        color: rgb(0.92, 0.98, 0.95),
+        borderColor: rgb(0.2, 0.6, 0.4),
+        borderWidth: 1,
+      })
+      page.drawText(buttonText, {
+        x: buttonX + padX,
+        y: buttonY + padY,
+        size: buttonFontSize,
+        font: fontBold,
+        color: rgb(0.08, 0.35, 0.22),
+      })
+      addLinkAnnotation(buttonX, buttonY, buttonW, buttonH, info.publicInvoiceUrl)
+
+      // Continue below whichever side (left button or right payment details) is lower.
+      // Add extra spacing after this section.
+      y = Math.min(buttonY - 14, afterPaymentDetailsY) - 20
+    }
   }
 
   // Notes

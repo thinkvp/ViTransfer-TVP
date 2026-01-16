@@ -68,7 +68,21 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }],
   })
 
-  const response = NextResponse.json({ keyDates: rows, today: isoDateTodayUtc() })
+  const personalRows = await prisma.userKeyDate.findMany({
+    where: { userId: authResult.id },
+    select: {
+      id: true,
+      date: true,
+      allDay: true,
+      startTime: true,
+      finishTime: true,
+      title: true,
+      notes: true,
+    },
+    orderBy: [{ date: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }],
+  })
+
+  const response = NextResponse.json({ keyDates: rows, personalKeyDates: personalRows, today: isoDateTodayUtc() })
   response.headers.set('Cache-Control', 'no-store')
   response.headers.set('Pragma', 'no-cache')
   return response

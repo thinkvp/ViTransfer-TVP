@@ -43,7 +43,7 @@ export default function ClientsPage() {
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
   const [tablePage, setTablePage] = useState(1)
 
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('all')
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('active')
   const [updatingClientIds, setUpdatingClientIds] = useState<Set<string>>(new Set())
 
   const [sortKey, setSortKey] = useState<SortKey>('name')

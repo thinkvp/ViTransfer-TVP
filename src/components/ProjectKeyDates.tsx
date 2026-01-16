@@ -141,6 +141,54 @@ function PickerOnlyInput({
   )
 }
 
+function isValidTime24h(value: string): boolean {
+  const v = value.trim()
+  if (!v) return true
+  const m = /^([0-1]\d|2[0-3]):([0-5]\d)$/.exec(v)
+  return Boolean(m)
+}
+
+function TimeInput24h({
+  value,
+  onChange,
+  disabled,
+  className,
+  placeholder,
+  listId,
+}: {
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+  className?: string
+  placeholder?: string
+  listId: string
+}) {
+  return (
+    <>
+      <Input
+        type="text"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder || 'HH:MM'}
+        inputMode="numeric"
+        pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
+        list={listId}
+        onChange={(e) => onChange(e.target.value)}
+        className={className}
+      />
+      <datalist id={listId}>
+        {Array.from({ length: 24 * 4 }).map((_, i) => {
+          const minutes = i * 15
+          const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+          const mm = String(minutes % 60).padStart(2, '0')
+          const t = `${hh}:${mm}`
+          return <option key={t} value={t} />
+        })}
+      </datalist>
+    </>
+  )
+}
+
 function toDraft(item: ProjectKeyDate): Draft {
   const targets = (item.reminderTargets || null) as any
   const userIds = Array.isArray(targets?.userIds) ? targets.userIds.map(String) : []
@@ -169,7 +217,7 @@ function createEmptyDraft(): Draft {
     allDay: false,
     startTime: '',
     finishTime: '',
-    type: 'PRE_PRODUCTION',
+    type: 'SHOOTING',
     notes: '',
     reminderDate: '',
     reminderTime: '',
@@ -268,6 +316,22 @@ export function ProjectKeyDates({
 
     if (!draft.date.trim()) {
       setDialogError('Date is required')
+      return
+    }
+
+    if (!draft.allDay) {
+      if (!isValidTime24h(draft.startTime)) {
+        setDialogError('Start time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+        return
+      }
+      if (!isValidTime24h(draft.finishTime)) {
+        setDialogError('Finish time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+        return
+      }
+    }
+
+    if (!isValidTime24h(draft.reminderTime)) {
+      setDialogError('Reminder time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
       return
     }
 
@@ -486,22 +550,22 @@ export function ProjectKeyDates({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Start</div>
-                  <PickerOnlyInput
-                    type="time"
+                  <TimeInput24h
                     value={draft.startTime}
                     disabled={draft.allDay}
                     onChange={(v) => setDraft((p) => (p ? { ...p, startTime: v } : p))}
                     className="h-10"
+                    listId="project-key-date-start-times"
                   />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Finish</div>
-                  <PickerOnlyInput
-                    type="time"
+                  <TimeInput24h
                     value={draft.finishTime}
                     disabled={draft.allDay}
                     onChange={(v) => setDraft((p) => (p ? { ...p, finishTime: v } : p))}
                     className="h-10"
+                    listId="project-key-date-finish-times"
                   />
                 </div>
               </div>
@@ -568,11 +632,11 @@ export function ProjectKeyDates({
                   </div>
                   <div className="space-y-2">
                     <div className="text-sm">Reminder time</div>
-                    <PickerOnlyInput
-                      type="time"
+                    <TimeInput24h
                       value={draft.reminderTime}
                       onChange={(v) => setDraft((p) => (p ? { ...p, reminderTime: v } : p))}
                       className="h-10"
+                      listId="project-key-date-reminder-times"
                     />
                   </div>
                 </div>

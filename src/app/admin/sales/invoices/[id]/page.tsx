@@ -537,10 +537,46 @@ export default function InvoiceDetailPage() {
 
   const onDownloadPdf = async () => {
     const clientDetails = clientId ? await fetchClientDetails(clientId).catch(() => null) : null
+    let publicInvoiceUrl: string | undefined
+    try {
+      const latestPaymentDate = payments
+        .map((p) => p.paymentDate)
+        .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+        .sort()
+        .at(-1)
+
+      const latestStripeYmd = stripePayments
+        .map((p) => (typeof p.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : ''))
+        .filter((d) => Boolean(d))
+        .sort()
+        .at(-1)
+
+      const latestAnyPaymentYmd = [latestPaymentDate, latestStripeYmd]
+        .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+        .sort()
+        .at(-1)
+        ?? null
+
+      const invoicePaidAt = (effectiveStatus === 'PAID' || (totalCents > 0 && balanceCents <= 0))
+        ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
+        : null
+
+      publicInvoiceUrl = await createSalesDocShareUrl({
+        type: 'INVOICE',
+        doc: invoice,
+        settings,
+        clientName: clientId ? clientNameById[clientId] : undefined,
+        projectTitle: projectId ? projectTitleById[projectId] : undefined,
+        invoicePaidAt,
+      })
+    } catch {
+      // ignore; PDF should still download with payment details
+    }
     await downloadInvoicePdf(invoice, settings, {
       clientName: clientId ? clientNameById[clientId] : undefined,
       clientAddress: clientDetails?.address ?? undefined,
       projectTitle: projectId ? projectTitleById[projectId] : undefined,
+      publicInvoiceUrl,
     })
   }
 

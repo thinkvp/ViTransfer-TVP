@@ -201,8 +201,8 @@ export function VideoAssetDownloadModal({
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-black/50" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[200] w-[calc(100vw-2rem)] max-w-3xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-card border border-border rounded-lg flex flex-col">
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-[1px]" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[200] w-[calc(100vw-2rem)] max-w-3xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-background dark:bg-card border border-border rounded-lg flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-border">
             <div>

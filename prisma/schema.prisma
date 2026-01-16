@@ -33,6 +33,8 @@ model User {
   passkeys                PasskeyCredential[]
   projectStatusChanges    ProjectStatusChange[]
 
+  userKeyDates UserKeyDate[]
+
   salesQuoteRevisions   SalesQuoteRevision[]
   salesInvoiceRevisions SalesInvoiceRevision[]
 }
@@ -247,6 +249,27 @@ model ProjectKeyDate {
   @@index([projectId, date])
   @@index([reminderAt])
   @@index([reminderSentAt])
+}
+
+model UserKeyDate {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ISO date and time strings (avoid timezone drift)
+  date       String // YYYY-MM-DD
+  allDay     Boolean @default(false)
+  startTime  String? // HH:MM
+  finishTime String? // HH:MM
+
+  title String
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, date])
 }
 
 enum ProjectEmailStatus {
