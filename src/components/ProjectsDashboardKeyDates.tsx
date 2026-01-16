@@ -2,10 +2,20 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react'
-import { apiJson } from '@/lib/api-client'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw } from 'lucide-react'
+import { apiJson, apiPost } from '@/lib/api-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import ShareLink from '@/components/ShareLink'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 
 type ProjectKeyDateRow = {
   id: string
@@ -93,6 +103,11 @@ export default function ProjectsDashboardKeyDates() {
   const [data, setData] = useState<KeyDatesResponse | null>(null)
   const [showAllUpcoming, setShowAllUpcoming] = useState(false)
 
+  const [calendarFeedOpen, setCalendarFeedOpen] = useState(false)
+  const [calendarFeedUrl, setCalendarFeedUrl] = useState<string | null>(null)
+  const [calendarFeedLoading, setCalendarFeedLoading] = useState(false)
+  const [calendarFeedError, setCalendarFeedError] = useState<string | null>(null)
+
   const today = data?.today || ymdForDateLocal(new Date())
 
   const [monthCursor, setMonthCursor] = useState<Date>(() => {
@@ -122,6 +137,33 @@ export default function ProjectsDashboardKeyDates() {
 
     load()
   }, [])
+
+  const ensureCalendarFeedUrl = async () => {
+    if (calendarFeedUrl) return
+    try {
+      setCalendarFeedLoading(true)
+      setCalendarFeedError(null)
+      const result = await apiJson<{ url: string }>('/api/users/me/calendar-feed')
+      setCalendarFeedUrl(result.url)
+    } catch (e: any) {
+      setCalendarFeedError(e?.message || 'Failed to load calendar link')
+    } finally {
+      setCalendarFeedLoading(false)
+    }
+  }
+
+  const rotateCalendarFeedUrl = async () => {
+    try {
+      setCalendarFeedLoading(true)
+      setCalendarFeedError(null)
+      const result = await apiPost<{ url: string }>('/api/users/me/calendar-feed', {})
+      setCalendarFeedUrl(result.url)
+    } catch (e: any) {
+      setCalendarFeedError(e?.message || 'Failed to regenerate calendar link')
+    } finally {
+      setCalendarFeedLoading(false)
+    }
+  }
 
   const upcoming = useMemo(() => {
     const all = data?.keyDates || []
@@ -259,6 +301,49 @@ export default function ProjectsDashboardKeyDates() {
             <CardTitle className="text-base">Calendar</CardTitle>
           </div>
           <div className="flex items-center gap-1">
+            <Dialog
+              open={calendarFeedOpen}
+              onOpenChange={(open) => {
+                setCalendarFeedOpen(open)
+                if (open) void ensureCalendarFeedUrl()
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="mr-2">
+                  Subscribe
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Subscribe in Google Calendar</DialogTitle>
+                  <DialogDescription>
+                    Add this URL as an “iCal from URL” subscription in Google Calendar. Treat it like a password.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {calendarFeedLoading ? (
+                  <div className="text-sm text-muted-foreground">Loading…</div>
+                ) : calendarFeedError ? (
+                  <div className="text-sm text-destructive">{calendarFeedError}</div>
+                ) : calendarFeedUrl ? (
+                  <ShareLink shareUrl={calendarFeedUrl} label="Calendar feed URL" />
+                ) : (
+                  <div className="text-sm text-muted-foreground">No calendar link yet.</div>
+                )}
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void rotateCalendarFeedUrl()}
+                    disabled={calendarFeedLoading}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Regenerate link
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <Button
               variant="ghost"
               size="icon"
