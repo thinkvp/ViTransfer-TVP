@@ -27,6 +27,7 @@ import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesViewsAndTrackingSection'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
+import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 
 const TAX_RATE_OPTIONS = [0, 10]
 
@@ -85,6 +86,7 @@ export default function QuoteDetailPage() {
   const [shareToken, setShareToken] = useState<string | null | undefined>(undefined)
   const [trackingRefreshKey, setTrackingRefreshKey] = useState(0)
   const [sendOpen, setSendOpen] = useState(false)
+  const [quoteExpiryRemindersEnabled, setQuoteExpiryRemindersEnabled] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [allProjects, setAllProjects] = useState<ProjectOption[]>([])
@@ -147,6 +149,27 @@ export default function QuoteDetailPage() {
       cancelled = true
     }
   }, [id])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadReminders = async () => {
+      try {
+        const res = await apiFetch('/api/admin/sales/reminder-settings', { method: 'GET' })
+        const json = await res.json().catch(() => null)
+        if (!res.ok) return
+        if (cancelled) return
+        setQuoteExpiryRemindersEnabled(Boolean((json as any)?.quoteExpiryRemindersEnabled))
+      } catch {
+        // ignore
+      }
+    }
+
+    void loadReminders()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -350,39 +373,31 @@ export default function QuoteDetailPage() {
           <p className="text-sm text-muted-foreground">View and edit quote details.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button
-            type="button"
-            variant="outline"
-            title={((quote as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
-            aria-label={((quote as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
-            className={
-              ((quote as any)?.remindersEnabled !== false)
-                ? 'text-success hover:text-success hover:bg-success-visible'
-                : 'text-destructive hover:text-destructive hover:bg-destructive-visible'
-            }
-            onClick={() => {
-              const enabled = (quote as any)?.remindersEnabled !== false
-              ;(async () => {
-                try {
-                  const next = await patchSalesQuote(quote.id, {
-                    version: quote.version,
-                    remindersEnabled: !enabled,
-                  })
-                  setQuote(next)
-                } catch (e) {
-                  const msg = e instanceof Error ? e.message : 'Failed to update quote'
-                  if (msg === 'Conflict') {
-                    alert('This quote was updated in another session. Reloading.')
-                    window.location.reload()
-                    return
+          {quoteExpiryRemindersEnabled ? (
+            <SalesRemindersBellButton
+              enabled={(quote as any)?.remindersEnabled !== false}
+              onToggle={() => {
+                const enabled = (quote as any)?.remindersEnabled !== false
+                ;(async () => {
+                  try {
+                    const next = await patchSalesQuote(quote.id, {
+                      version: quote.version,
+                      remindersEnabled: !enabled,
+                    })
+                    setQuote(next)
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : 'Failed to update quote'
+                    if (msg === 'Conflict') {
+                      alert('This quote was updated in another session. Reloading.')
+                      window.location.reload()
+                      return
+                    }
+                    alert(msg)
                   }
-                  alert(msg)
-                }
-              })()
-            }}
-          >
-            {((quote as any)?.remindersEnabled !== false) ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-          </Button>
+                })()
+              }}
+            />
+          ) : null}
           <Button variant="outline" onClick={() => void onViewPublic()}>
             View Quote
           </Button>

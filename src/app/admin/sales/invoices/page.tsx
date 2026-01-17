@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
+import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 
 type InvoiceRow = {
   invoice: SalesInvoiceWithVersion
@@ -117,6 +118,7 @@ export default function SalesInvoicesPage() {
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
   const [tablePage, setTablePage] = useState(1)
   const [stripePaidByInvoiceId, setStripePaidByInvoiceId] = useState<Record<string, { paidCents: number; latestYmd: string | null }>>({})
+  const [overdueInvoiceRemindersEnabled, setOverdueInvoiceRemindersEnabled] = useState<boolean | null>(null)
 
   type StripePayment = {
     invoiceDocId: string
@@ -144,15 +146,24 @@ export default function SalesInvoicesPage() {
 
     ;(async () => {
       try {
-        const [s, inv, pay] = await Promise.all([
+        const reminderResPromise = apiFetch('/api/admin/sales/reminder-settings', { method: 'GET' }).catch(() => null)
+        const [s, inv, pay, reminderRes] = await Promise.all([
           fetchSalesSettings(),
           listSalesInvoices(),
           listSalesPayments({ limit: 5000 }),
+          reminderResPromise,
         ])
         if (cancelled) return
         setSettings(s)
         setInvoices(inv)
         setPayments(pay)
+
+        if (reminderRes && 'ok' in reminderRes) {
+          const json = await (reminderRes as Response).json().catch(() => null)
+          setOverdueInvoiceRemindersEnabled((reminderRes as Response).ok ? Boolean((json as any)?.overdueInvoiceRemindersEnabled) : false)
+        } else {
+          setOverdueInvoiceRemindersEnabled(false)
+        }
       } catch {
         // ignore
       } finally {
@@ -164,6 +175,28 @@ export default function SalesInvoicesPage() {
       cancelled = true
     }
   }, [tick])
+
+  const onToggleReminders = useCallback(
+    async (inv: SalesInvoiceWithVersion) => {
+      const enabled = (inv as any)?.remindersEnabled !== false
+      try {
+        const next = await patchSalesInvoice(inv.id, {
+          version: inv.version,
+          remindersEnabled: !enabled,
+        })
+        setInvoices((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to update invoice'
+        if (msg === 'Conflict') {
+          alert('This invoice was updated in another session. Reloading.')
+          setTick((v) => v + 1)
+          return
+        }
+        alert(msg)
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -617,6 +650,12 @@ export default function SalesInvoicesPage() {
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex justify-end gap-2">
+                              {overdueInvoiceRemindersEnabled ? (
+                                <SalesRemindersBellButton
+                                  enabled={(row.invoice as any)?.remindersEnabled !== false}
+                                  onToggle={() => void onToggleReminders(row.invoice)}
+                                />
+                              ) : null}
                               <Button
                                 type="button"
                                 size="icon"

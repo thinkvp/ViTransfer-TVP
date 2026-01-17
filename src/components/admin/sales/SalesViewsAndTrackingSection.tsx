@@ -108,14 +108,14 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <CardTitle>Views &amp; Tracking</CardTitle>
-            <p className="text-sm text-muted-foreground">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            <CardTitle className="whitespace-normal">Views &amp; Tracking</CardTitle>
+            <p className="hidden sm:block text-sm text-muted-foreground">
               Email sends/opens and public link views (if analytics tracking is enabled).
             </p>
           </div>
-          <div className="text-right text-sm text-muted-foreground">
+          <div className="shrink-0 text-right text-sm text-muted-foreground">
             <div>Emails: {emailCount} (opened {openedCount})</div>
             <div>Views: {viewCount}</div>
             <div className="text-xs">Showing up to {MAX_ENTRIES}</div>

@@ -780,7 +780,6 @@ export default function ProjectPage() {
                 {canUploadFilesToProjectInternal ? (
                   <ProjectEmailUpload
                     title="External Communication"
-                    description="Drag & drop .eml files from email clients"
                     layout="headerRow"
                     projectId={project.id}
                     maxConcurrent={3}
@@ -792,7 +791,6 @@ export default function ProjectPage() {
                 ) : (
                   <div>
                     <div className="text-base font-medium">External Communication</div>
-                    <p className="text-xs text-muted-foreground mt-1 hidden sm:block">Drag & drop .eml files from email clients</p>
                   </div>
                 )}
 
@@ -872,7 +870,7 @@ export default function ProjectPage() {
               <CardContent className="pt-6">
                 <ProjectUsersEditor
                   label="Users"
-                  description="Add internal users"
+                  description=""
                   value={assignedUsers}
                   onChange={(next) => {
                     setAssignedUsers(next)
@@ -890,7 +888,7 @@ export default function ProjectPage() {
               {canUploadFilesToProjectInternal ? (
                 <ProjectFileUpload
                   title="Project Files"
-                  description="Internal use only"
+                  description=""
                   layout="headerRow"
                   projectId={project.id}
                   maxConcurrent={3}
@@ -899,7 +897,6 @@ export default function ProjectPage() {
               ) : (
                 <div>
                   <div className="text-base font-medium">Project Files</div>
-                  <p className="text-xs text-muted-foreground mt-1">Internal use only</p>
                 </div>
               )}
 

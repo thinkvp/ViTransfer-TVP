@@ -248,7 +248,26 @@ export default function SalesSettingsPage() {
       })
       const json = await res.json().catch(() => null)
 
-      setQbManualStatus(res.ok ? `${label} completed.` : `${label} failed (${res.status}).`)
+      const summarySuffix = (() => {
+        const stored = (json as any)?.stored
+        const created = stored && typeof stored?.created === 'number' ? stored.created : (typeof (json as any)?.created === 'number' ? (json as any).created : null)
+        const updatedRaw = stored && typeof stored?.updated === 'number' ? stored.updated : (typeof (json as any)?.updated === 'number' ? (json as any).updated : null)
+        const skipped = stored && typeof stored?.skipped === 'number' ? stored.skipped : (typeof (json as any)?.skipped === 'number' ? (json as any).skipped : null)
+
+        if (created === null || updatedRaw === null || skipped === null) return ''
+
+        // Customer pulls report linked-by-name separately; treat that as an update for the concise summary.
+        const linkedByName = typeof (json as any)?.linkedByName === 'number' ? (json as any).linkedByName : 0
+        const updated = updatedRaw + linkedByName
+        return ` (c=${created},u=${updated},s=${skipped})`
+      })()
+
+      if (res.ok) {
+        setQbManualStatus(`${label} completed${summarySuffix}.`)
+      } else {
+        const err = typeof (json as any)?.error === 'string' ? (json as any).error : null
+        setQbManualStatus(err ? `${label} failed: ${err}` : `${label} failed (${res.status}).`)
+      }
 
       // Refresh daily pull summary (single last attempt) after any successful action.
       if (res.ok) {

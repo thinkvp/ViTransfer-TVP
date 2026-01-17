@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -28,12 +29,27 @@ const bodySchema = z.object({
     .optional(),
   title: z.string().trim().min(1, { message: 'title is required' }).max(120),
   notes: z.union([z.string().max(500), z.literal(''), z.null(), z.undefined()]).optional(),
+  reminderAt: z.union([z.string().datetime(), z.literal(''), z.null(), z.undefined()]).optional(),
+  reminderTargets: z
+    .object({
+      userIds: z.array(z.string()).optional(),
+    })
+    .optional(),
 })
 
 function normalize(input: z.infer<typeof bodySchema>) {
   const startTime = input.allDay ? null : (input.startTime || null)
   const finishTime = input.allDay ? null : (input.finishTime || null)
   const notes = (input.notes || null) as string | null
+
+  const reminderAtParsed = input.reminderAt ? new Date(input.reminderAt as any) : null
+  const reminderAt = reminderAtParsed && !isNaN(reminderAtParsed.getTime()) ? reminderAtParsed : null
+
+  const reminderTargetsRaw = (input.reminderTargets || null) as any
+  const userIds = Array.isArray(reminderTargetsRaw?.userIds)
+    ? reminderTargetsRaw.userIds.map(String).filter(Boolean)
+    : []
+  const reminderTargets = userIds.length ? ({ userIds } as Prisma.InputJsonValue) : undefined
 
   return {
     date: input.date,
@@ -42,6 +58,8 @@ function normalize(input: z.infer<typeof bodySchema>) {
     finishTime,
     title: input.title,
     notes,
+    reminderAt,
+    reminderTargets,
   }
 }
 
@@ -92,10 +110,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
+  const normalized = normalize(parsed.data)
+
+  if (normalized.reminderAt && normalized.reminderAt.getTime() <= Date.now()) {
+    return NextResponse.json({ error: 'Reminder must be set to a future date and time' }, { status: 400 })
+  }
+
   const created = await prisma.userKeyDate.create({
     data: {
       userId: authResult.id,
-      ...normalize(parsed.data),
+      ...normalized,
     },
   })
 

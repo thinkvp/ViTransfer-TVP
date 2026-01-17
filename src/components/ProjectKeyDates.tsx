@@ -38,6 +38,13 @@ function formatTypeLabel(type: ProjectKeyDateType): string {
   return typeOptions.find((o) => o.value === type)?.label || type
 }
 
+function truncateNotes(notes: string | null | undefined, maxChars = 120): string {
+  if (!notes) return ''
+  const chars = Array.from(notes)
+  if (chars.length <= maxChars) return notes
+  return `${chars.slice(0, maxChars).join('').trimEnd()}...`
+}
+
 type Draft = {
   id: string | null
   date: string
@@ -471,7 +478,9 @@ export function ProjectKeyDates({
                     <td className="px-3 py-2 whitespace-nowrap">{item.allDay ? '-' : (item.startTime || '-')}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{item.allDay ? '-' : (item.finishTime || '-')}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{formatTypeLabel(item.type)}</td>
-                    <td className="px-3 py-2 whitespace-normal break-words">{item.notes || ''}</td>
+                    <td className="px-3 py-2 whitespace-normal break-words">
+                      <span title={item.notes || ''}>{truncateNotes(item.notes, 120)}</span>
+                    </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {canEdit ? (
                         <div className="flex items-center justify-end gap-2">

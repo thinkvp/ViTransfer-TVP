@@ -19,6 +19,7 @@ import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
+import { processUserKeyDateReminders } from './user-key-date-reminders'
 import { processSalesReminders } from './sales-reminders'
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
@@ -288,9 +289,13 @@ async function main() {
   // Clean up any existing repeatable notification processor jobs (e.g. old every-minute schedule)
   try {
     const repeatables = await notificationQueue.getRepeatableJobs()
-    const toRemove = repeatables.filter(
-      (job) => job.name === 'process-notifications' || job.pattern === '* * * * *'
-    )
+    const toRemove = repeatables.filter((job) => {
+      // Keep this targeted so we don't accidentally remove unrelated every-minute schedules.
+      if (job.name === 'process-notifications') return true
+      if (job.name === 'project-key-date-reminders') return true
+      if (job.name === 'user-key-date-reminders') return true
+      return false
+    })
 
     for (const job of toRemove) {
       await notificationQueue.removeRepeatableByKey(job.key)
@@ -323,15 +328,28 @@ async function main() {
     }
   )
 
-  // Key date reminders need minute-level scheduling.
+  // Key date reminders are set in 15-minute intervals.
   await notificationQueue.add(
     'project-key-date-reminders',
     {},
     {
       repeat: {
-        pattern: '* * * * *',
+        pattern: '*/15 * * * *',
       },
       jobId: 'project-key-date-reminders',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
+  await notificationQueue.add(
+    'user-key-date-reminders',
+    {},
+    {
+      repeat: {
+        pattern: '*/15 * * * *',
+      },
+      jobId: 'user-key-date-reminders',
       removeOnComplete: true,
       removeOnFail: true,
     }
@@ -488,6 +506,11 @@ async function main() {
 
       if (job.name === 'project-key-date-reminders') {
         await processProjectKeyDateReminders()
+        return
+      }
+
+      if (job.name === 'user-key-date-reminders') {
+        await processUserKeyDateReminders()
         return
       }
 

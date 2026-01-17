@@ -1744,8 +1744,9 @@ export async function renderProjectKeyDateReminderEmail({
   shareUrl,
   keyDate,
   branding,
+  primaryActionLabel,
 }: {
-  projectTitle: string
+  projectTitle?: string
   projectCompanyName?: string | null
   shareUrl: string
   keyDate: {
@@ -1757,10 +1758,15 @@ export async function renderProjectKeyDateReminderEmail({
     notes: string | null
   }
   branding?: EmailBrandingOverrides
+  primaryActionLabel?: string
 }): Promise<RenderedEmail> {
   const resolved = await resolveEmailBranding(branding)
 
-  const subject = `Reminder: ${projectTitle} — ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
+  const hasProject = Boolean(projectTitle && projectTitle.trim())
+
+  const subject = hasProject
+    ? `Reminder: ${projectTitle} — ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
+    : `Reminder: ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
 
   const cardStyle = emailCardStyle({ borderRadiusPx: 12, paddingPx: 14, marginBottomPx: 16 })
   const cardTitleStyle = emailCardTitleStyle()
@@ -1780,18 +1786,20 @@ export async function renderProjectKeyDateReminderEmail({
     appDomain: resolved.appDomain,
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Key Date Reminder',
-    subtitle: projectTitle,
+    subtitle: hasProject ? projectTitle : 'Personal',
     footerNote: resolved.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:15px; color:#374151;">
         This is an automated reminder for an upcoming key date. No action is necessarily required, but please contact us if there any issues.
       </p>
 
+      ${hasProject ? `
       <div style="${cardStyle}">
         <div style="${cardTitleStyle}">Project</div>
-        <div style="font-size:15px; color:#111827; font-weight:700; margin-bottom:4px;">${escapeHtml(projectTitle)}</div>
+        <div style="font-size:15px; color:#111827; font-weight:700; margin-bottom:4px;">${escapeHtml(projectTitle!)}</div>
         ${projectCompanyName ? `<div style="font-size:13px; color:#6b7280;">${escapeHtml(projectCompanyName)}</div>` : ''}
       </div>
+      ` : ''}
 
       <div style="${cardStyle}">
         <div style="${cardTitleStyle}">Key date</div>
@@ -1807,7 +1815,7 @@ export async function renderProjectKeyDateReminderEmail({
 
       <div style="text-align:center; margin:24px 0 10px;">
         <a href="${escapeHtml(shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 15, borderRadiusPx: 10 })}">
-          View Project
+          ${escapeHtml(primaryActionLabel || (hasProject ? 'View Project' : 'View Dashboard'))}
         </a>
       </div>
     `,

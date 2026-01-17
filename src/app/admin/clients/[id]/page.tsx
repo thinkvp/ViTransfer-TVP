@@ -16,9 +16,9 @@ import { ClientFileList } from '@/components/ClientFileList'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
-import { centsToDollars } from '@/lib/sales/money'
+import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
-import { listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
+import { fetchSalesSettings, listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
 
 type ClientResponse = {
   id: string
@@ -145,6 +145,8 @@ export default function ClientDetailPage() {
   const [salesQuotes, setSalesQuotes] = useState<SalesQuote[]>([])
   const [salesInvoices, setSalesInvoices] = useState<SalesInvoice[]>([])
   const [salesPayments, setSalesPayments] = useState<SalesPayment[]>([])
+  const [salesTaxRatePercent, setSalesTaxRatePercent] = useState<number>(0)
+  const [stripePaidCentsByInvoiceId, setStripePaidCentsByInvoiceId] = useState<Record<string, number>>({})
 
   const [extraProjectTitles, setExtraProjectTitles] = useState<Record<string, string>>({})
 
@@ -169,13 +171,15 @@ export default function ClientDetailPage() {
     async function run() {
       try {
         setSalesLoading(true)
-        const [quotes, invoices, payments] = await Promise.all([
+        const [settings, quotes, invoices, payments] = await Promise.all([
+          fetchSalesSettings(),
           listSalesQuotes({ clientId, limit: 500 }),
           listSalesInvoices({ clientId, limit: 500 }),
           listSalesPayments({ clientId, limit: 500 }),
         ])
 
         if (cancelled) return
+        setSalesTaxRatePercent(settings.taxRatePercent)
         setSalesQuotes(quotes as any)
         setSalesInvoices(invoices as any)
         setSalesPayments(payments)
@@ -189,6 +193,44 @@ export default function ClientDetailPage() {
       cancelled = true
     }
   }, [clientId, salesTick])
+
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      const ids = salesInvoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
+      if (!ids.length) {
+        if (!cancelled) setStripePaidCentsByInvoiceId({})
+        return
+      }
+
+      try {
+        const res = await apiFetch(`/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+        const json = (await res.json().catch(() => null)) as { payments?: unknown[] } | null
+        const list = Array.isArray(json?.payments) ? json!.payments! : []
+
+        const next: Record<string, number> = {}
+        for (const p of list as any[]) {
+          const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
+          const invoiceAmountCents = Number(p?.invoiceAmountCents)
+          if (!invoiceDocId || !Number.isFinite(invoiceAmountCents)) continue
+          const normalized = Math.max(0, Math.trunc(invoiceAmountCents))
+          next[invoiceDocId] = (next[invoiceDocId] ?? 0) + normalized
+        }
+
+        if (!cancelled) setStripePaidCentsByInvoiceId(next)
+      } catch {
+        // ignore
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [salesInvoices])
 
   const loadClient = useCallback(async () => {
     setLoading(true)
@@ -377,6 +419,32 @@ export default function ClientDetailPage() {
       invoiceNumberById,
     }
   }, [salesInvoices, salesPayments, salesQuotes])
+
+  const invoicePaidCents = useCallback(
+    (inv: SalesInvoice): number => {
+      const localPaid = sales.payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const stripePaid = stripePaidCentsByInvoiceId[inv.id] ?? 0
+      return localPaid + stripePaid
+    },
+    [sales.payments, stripePaidCentsByInvoiceId]
+  )
+
+  const invoiceEffectiveStatus = useCallback(
+    (inv: SalesInvoice): InvoiceStatus => {
+      const baseStatus: InvoiceStatus = inv.status === 'OPEN' || inv.status === 'SENT'
+        ? (inv.sentAt ? 'SENT' : 'OPEN')
+        : inv.status
+
+      const totalCents = sumLineItemsTotal(inv.items, salesTaxRatePercent)
+      const paidCents = invoicePaidCents(inv)
+      const balanceCents = Math.max(0, totalCents - paidCents)
+
+      if (balanceCents <= 0) return 'PAID'
+      if (paidCents > 0) return 'PARTIALLY_PAID'
+      return baseStatus
+    },
+    [invoicePaidCents, salesTaxRatePercent]
+  )
 
   useEffect(() => {
     const idsToFetch = new Set<string>()
@@ -882,7 +950,9 @@ export default function ClientDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sales.invoices.slice(0, 10).map((inv) => (
+                        {sales.invoices.slice(0, 10).map((inv) => {
+                          const effectiveStatus = invoiceEffectiveStatus(inv)
+                          return (
                           <tr key={inv.id} className="border-b border-border/60 last:border-b-0">
                             <td className="px-3 py-2 font-medium">
                               <Link href={`/admin/sales/invoices/${inv.id}`} className="hover:underline">
@@ -904,14 +974,15 @@ export default function ClientDetailPage() {
                               <span
                                 className={cn(
                                   'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap',
-                                  invoiceStatusBadgeClass(inv.status)
+                                  invoiceStatusBadgeClass(effectiveStatus)
                                 )}
                               >
-                                {invoiceStatusLabel(inv.status)}
+                                {invoiceStatusLabel(effectiveStatus)}
                               </span>
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>

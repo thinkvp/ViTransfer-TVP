@@ -217,6 +217,7 @@ export async function POST(request: NextRequest) {
         customerQboId,
         clientId,
         customerName: typeof e?.CustomerRef?.name === 'string' ? e.CustomerRef.name.trim() : null,
+        customerMemo: typeof e?.CustomerMemo?.value === 'string' ? e.CustomerMemo.value.trim() : null,
         privateNote: typeof e?.PrivateNote === 'string' ? e.PrivateNote.trim() : null,
         lines: normalizeEstimateLines(e),
       }

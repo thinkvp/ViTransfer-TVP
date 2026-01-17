@@ -60,7 +60,7 @@ export function ProjectEmailUpload({
   onUploadComplete,
   maxConcurrent = 3,
   title = 'Communication',
-  description = 'Drag & drop .eml files from email clients',
+  description = '',
   layout = 'stacked',
 }: ProjectEmailUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -428,7 +428,7 @@ export function ProjectEmailUpload({
   )
 
   return (
-    <div className={layout === 'headerRow' ? 'flex items-start justify-between gap-4' : 'space-y-3'}>
+    <div className={layout === 'headerRow' ? 'flex items-center justify-between gap-4' : 'space-y-3'}>
       {layout === 'headerRow' && header}
 
       <div className={layout === 'headerRow' ? 'w-full max-w-xl space-y-3' : 'space-y-3'}>

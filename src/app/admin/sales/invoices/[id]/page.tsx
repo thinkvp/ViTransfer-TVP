@@ -33,6 +33,7 @@ import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesViewsAndTrackingSection'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
+import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 
 const TAX_RATE_OPTIONS = [0, 10]
 
@@ -142,6 +143,7 @@ export default function InvoiceDetailPage() {
   const [shareToken, setShareToken] = useState<string | null | undefined>(undefined)
   const [trackingRefreshKey, setTrackingRefreshKey] = useState(0)
   const [sendOpen, setSendOpen] = useState(false)
+  const [overdueInvoiceRemindersEnabled, setOverdueInvoiceRemindersEnabled] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [allProjects, setAllProjects] = useState<ProjectOption[]>([])
@@ -235,6 +237,27 @@ export default function InvoiceDetailPage() {
     const onFocus = () => setNowIso(new Date().toISOString())
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadReminders = async () => {
+      try {
+        const res = await apiFetch('/api/admin/sales/reminder-settings', { method: 'GET' })
+        const json = await res.json().catch(() => null)
+        if (!res.ok) return
+        if (cancelled) return
+        setOverdueInvoiceRemindersEnabled(Boolean((json as any)?.overdueInvoiceRemindersEnabled))
+      } catch {
+        // ignore
+      }
+    }
+
+    void loadReminders()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -593,39 +616,31 @@ export default function InvoiceDetailPage() {
           <p className="text-sm text-muted-foreground">View and edit invoice details.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button
-            type="button"
-            variant="outline"
-            title={((invoice as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
-            aria-label={((invoice as any)?.remindersEnabled !== false) ? 'Sales reminders enabled' : 'Sales reminders disabled'}
-            className={
-              ((invoice as any)?.remindersEnabled !== false)
-                ? 'text-success hover:text-success hover:bg-success-visible'
-                : 'text-destructive hover:text-destructive hover:bg-destructive-visible'
-            }
-            onClick={() => {
-              const enabled = (invoice as any)?.remindersEnabled !== false
-              ;(async () => {
-                try {
-                  const next = await patchSalesInvoice(invoice.id, {
-                    version: invoice.version,
-                    remindersEnabled: !enabled,
-                  })
-                  setInvoice(next)
-                } catch (e) {
-                  const msg = e instanceof Error ? e.message : 'Failed to update invoice'
-                  if (msg === 'Conflict') {
-                    alert('This invoice was updated in another session. Reloading.')
-                    window.location.reload()
-                    return
+          {overdueInvoiceRemindersEnabled ? (
+            <SalesRemindersBellButton
+              enabled={(invoice as any)?.remindersEnabled !== false}
+              onToggle={() => {
+                const enabled = (invoice as any)?.remindersEnabled !== false
+                ;(async () => {
+                  try {
+                    const next = await patchSalesInvoice(invoice.id, {
+                      version: invoice.version,
+                      remindersEnabled: !enabled,
+                    })
+                    setInvoice(next)
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : 'Failed to update invoice'
+                    if (msg === 'Conflict') {
+                      alert('This invoice was updated in another session. Reloading.')
+                      window.location.reload()
+                      return
+                    }
+                    alert(msg)
                   }
-                  alert(msg)
-                }
-              })()
-            }}
-          >
-            {((invoice as any)?.remindersEnabled !== false) ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-          </Button>
+                })()
+              }}
+            />
+          ) : null}
           <Button variant="outline" onClick={() => void onViewPublic()}>
             View Invoice
           </Button>

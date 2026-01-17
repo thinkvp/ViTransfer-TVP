@@ -48,6 +48,12 @@ function buildLineItems(input: unknown, opts: { idPrefix: string; taxRatePercent
   }))
 }
 
+function coerceNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const s = value.trim()
+  return s ? s : null
+}
+
 async function getSalesSettings(tx: typeof prisma): Promise<SalesSettings> {
   const row = await (tx as any).salesSettings.upsert({
     where: { id: 'default' },
@@ -82,6 +88,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
       const docNumber = ensurePrefix(rawDocNumber, 'EST-')
 
       const itemsJson = buildLineItems(q?.lines, { idPrefix: `qbo-${qboId}`, taxRatePercent: (settings as any).taxRatePercent })
+      const terms = coerceNonEmptyString(q?.customerMemo) ?? (settings as any).defaultTerms
 
       const existing = await (tx as any).salesQuote.findUnique({ where: { qboId } })
       if (!existing) {
@@ -95,7 +102,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
             issueDate,
             validUntil: validUntil || null,
             notes: typeof q?.privateNote === 'string' ? q.privateNote : '',
-            terms: (settings as any).defaultTerms,
+            terms,
             itemsJson,
             sentAt: null,
             remindersEnabled: true,
@@ -118,31 +125,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
         continue
       }
 
-      const nextVersion = Number(existing.version ?? 1) + 1
-      const updated = await (tx as any).salesQuote.update({
-        where: { id: existing.id },
-        data: {
-          quoteNumber: docNumber,
-          clientId,
-          issueDate,
-          validUntil: validUntil || null,
-          notes: typeof q?.privateNote === 'string' ? q.privateNote : existing.notes,
-          terms: (settings as any).defaultTerms,
-          itemsJson,
-          version: nextVersion,
-        },
-      })
-
-      await (tx as any).salesQuoteRevision.create({
-        data: {
-          quoteId: updated.id,
-          version: updated.version,
-          docJson: salesQuoteFromDb(updated as any),
-          createdByUserId: null,
-        },
-      })
-
-      ingested += 1
+      continue
     }
   })
 
@@ -174,6 +157,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
       const docNumber = ensurePrefix(rawDocNumber, 'INV-')
 
       const itemsJson = buildLineItems(inv?.lines, { idPrefix: `qbo-inv-${qboId}`, taxRatePercent: (settings as any).taxRatePercent })
+      const terms = coerceNonEmptyString(inv?.customerMemo) ?? (settings as any).defaultTerms
 
       const existing = await (tx as any).salesInvoice.findUnique({ where: { qboId } })
       if (!existing) {
@@ -186,7 +170,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
             issueDate,
             dueDate: dueDate || null,
             notes: typeof inv?.privateNote === 'string' ? inv.privateNote : '',
-            terms: (settings as any).defaultTerms,
+            terms,
             itemsJson,
             sentAt: null,
             remindersEnabled: true,
@@ -209,31 +193,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
         continue
       }
 
-      const nextVersion = Number(existing.version ?? 1) + 1
-      const updated = await (tx as any).salesInvoice.update({
-        where: { id: existing.id },
-        data: {
-          invoiceNumber: docNumber,
-          clientId,
-          issueDate,
-          dueDate: dueDate || null,
-          notes: typeof inv?.privateNote === 'string' ? inv.privateNote : existing.notes,
-          terms: (settings as any).defaultTerms,
-          itemsJson,
-          version: nextVersion,
-        },
-      })
-
-      await (tx as any).salesInvoiceRevision.create({
-        data: {
-          invoiceId: updated.id,
-          version: updated.version,
-          docJson: salesInvoiceFromDb(updated as any),
-          createdByUserId: null,
-        },
-      })
-
-      ingested += 1
+      continue
     }
   })
 

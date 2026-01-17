@@ -265,11 +265,21 @@ model UserKeyDate {
   title String
   notes String?
 
+  // Optional reminder (internal email) for this personal key date
+  reminderAt            DateTime?
+  reminderTargets       Json?
+  reminderSentAt        DateTime?
+  reminderLastAttemptAt DateTime?
+  reminderAttemptCount  Int      @default(0)
+  reminderLastError     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([userId, date])
+  @@index([reminderAt])
+  @@index([reminderSentAt])
 }
 
 enum ProjectEmailStatus {

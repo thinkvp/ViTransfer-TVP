@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2 } from 'lucide-react'
-import { apiDelete, apiJson, apiPost } from '@/lib/api-client'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2, Pencil, Bell } from 'lucide-react'
+import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
@@ -43,6 +43,8 @@ type PersonalKeyDateRow = {
   finishTime: string | null
   title: string
   notes: string | null
+  reminderAt?: string | null
+  reminderTargets?: any | null
 }
 
 type KeyDatesResponse = {
@@ -127,17 +129,81 @@ export default function ProjectsDashboardKeyDates() {
   const [data, setData] = useState<KeyDatesResponse | null>(null)
   const [showAllUpcoming, setShowAllUpcoming] = useState(false)
 
+  const [personalReminderOptions, setPersonalReminderOptions] = useState<{
+    users: Array<{ id: string; name: string; email: string }>
+  } | null>(null)
+
+  const ensurePersonalReminderOptions = async (): Promise<{
+    users: Array<{ id: string; name: string; email: string }>
+  }> => {
+    if (personalReminderOptions) return personalReminderOptions
+    try {
+      const result = await apiJson<{ users?: Array<{ id: string; name: string; email: string }> }>(
+        '/api/users/me/key-dates/reminder-options'
+      )
+      const next = { users: Array.isArray(result?.users) ? result.users : [] }
+      setPersonalReminderOptions(next)
+      return next
+    } catch {
+      const next = { users: [] }
+      setPersonalReminderOptions(next)
+      return next
+    }
+  }
+
+  const splitIsoToLocalDateTime = (iso: string | null | undefined): { date: string; time: string } => {
+    if (!iso) return { date: '', time: '' }
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return { date: '', time: '' }
+
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    return { date: `${y}-${m}-${day}`, time: `${hh}:${mm}` }
+  }
+
+  const toIsoFromLocalDateTime = (date: string, time: string): string | null => {
+    if (!date.trim() || !time.trim()) return null
+    const [y, m, d] = date.split('-').map((n) => Number(n))
+    const [hh, mm] = time.split(':').map((n) => Number(n))
+    const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0)
+    if (isNaN(dt.getTime())) return null
+    return dt.toISOString()
+  }
+
+  const toggleId = (arr: string[], id: string) => {
+    if (arr.includes(id)) return arr.filter((x) => x !== id)
+    return [...arr, id]
+  }
+
   const [personalOpen, setPersonalOpen] = useState(false)
   const [personalSaving, setPersonalSaving] = useState(false)
   const [personalError, setPersonalError] = useState<string | null>(null)
   const [personalDraft, setPersonalDraft] = useState<{
+    id: string | null
     date: string
     allDay: boolean
     startTime: string
     finishTime: string
     title: string
     notes: string
-  }>({ date: '', allDay: false, startTime: '', finishTime: '', title: '', notes: '' })
+    reminderDate: string
+    reminderTime: string
+    reminderUserIds: string[]
+  }>({
+    id: null,
+    date: '',
+    allDay: false,
+    startTime: '',
+    finishTime: '',
+    title: '',
+    notes: '',
+    reminderDate: '',
+    reminderTime: '',
+    reminderUserIds: [],
+  })
 
   const [calendarFeedOpen, setCalendarFeedOpen] = useState(false)
   const [calendarFeedUrl, setCalendarFeedUrl] = useState<string | null>(null)
@@ -295,15 +361,44 @@ export default function ProjectsDashboardKeyDates() {
     return map
   }, [data?.keyDates, data?.personalKeyDates])
 
-  const openPersonalDialog = () => {
+  const openPersonalDialog = async () => {
     setPersonalError(null)
+    await ensurePersonalReminderOptions()
+
     setPersonalDraft({
+      id: null,
       date: today,
       allDay: false,
       startTime: '',
       finishTime: '',
       title: '',
       notes: '',
+      reminderDate: '',
+      reminderTime: '',
+      reminderUserIds: [],
+    })
+    setPersonalOpen(true)
+  }
+
+  const openEditPersonalDialog = async (row: PersonalKeyDateRow) => {
+    setPersonalError(null)
+    await ensurePersonalReminderOptions()
+
+    const reminder = splitIsoToLocalDateTime(row.reminderAt)
+    const targets = (row.reminderTargets || null) as any
+    const userIds = Array.isArray(targets?.userIds) ? targets.userIds.map(String) : []
+
+    setPersonalDraft({
+      id: row.id,
+      date: row.date,
+      allDay: row.allDay,
+      startTime: row.startTime || '',
+      finishTime: row.finishTime || '',
+      title: row.title,
+      notes: row.notes || '',
+      reminderDate: reminder.date,
+      reminderTime: reminder.time,
+      reminderUserIds: userIds,
     })
     setPersonalOpen(true)
   }
@@ -330,16 +425,58 @@ export default function ProjectsDashboardKeyDates() {
       }
     }
 
+    if (!isValidTime24h(personalDraft.reminderTime)) {
+      setPersonalError('Reminder time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+      return
+    }
+
+    const reminderAnyTargets = (personalDraft.reminderUserIds?.length || 0) > 0
+    const reminderAnyDateTime = Boolean(personalDraft.reminderDate?.trim()) || Boolean(personalDraft.reminderTime?.trim())
+    const reminderAnyFields = reminderAnyTargets || reminderAnyDateTime
+
+    if (reminderAnyFields) {
+      if (!personalDraft.reminderDate?.trim() || !personalDraft.reminderTime?.trim()) {
+        setPersonalError('Reminder date and time are required')
+        return
+      }
+      if (!reminderAnyTargets) {
+        setPersonalError('Select at least one user for the reminder')
+        return
+      }
+    }
+
     setPersonalSaving(true)
     try {
-      await apiPost('/api/users/me/key-dates', {
+      const reminderAt = toIsoFromLocalDateTime(personalDraft.reminderDate, personalDraft.reminderTime)
+
+      if (reminderAnyFields) {
+        if (!reminderAt) {
+          setPersonalError('Reminder date and time are required')
+          return
+        }
+        const reminderAtMs = new Date(reminderAt).getTime()
+        if (!Number.isFinite(reminderAtMs) || reminderAtMs <= Date.now()) {
+          setPersonalError('Reminder must be set to a future date and time')
+          return
+        }
+      }
+
+      const payload = {
         date: personalDraft.date,
         allDay: personalDraft.allDay,
         startTime: personalDraft.allDay ? '' : personalDraft.startTime,
         finishTime: personalDraft.allDay ? '' : personalDraft.finishTime,
         title: personalDraft.title,
         notes: personalDraft.notes,
-      })
+        reminderAt: reminderAt || '',
+        reminderTargets: { userIds: personalDraft.reminderUserIds },
+      }
+
+      if (personalDraft.id) {
+        await apiPatch(`/api/users/me/key-dates/${personalDraft.id}`, payload)
+      } else {
+        await apiPost('/api/users/me/key-dates', payload)
+      }
 
       setPersonalOpen(false)
       await reload()
@@ -359,6 +496,86 @@ export default function ProjectsDashboardKeyDates() {
       setError(e?.message || 'Failed to delete key date')
     }
   }
+
+  const calendarActions = (
+    <>
+      <Dialog
+        open={calendarFeedOpen}
+        onOpenChange={(open) => {
+          setCalendarFeedOpen(open)
+          if (open) void ensureCalendarFeedUrl()
+        }}
+      >
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm">
+            Subscribe
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Subscribe in Google Calendar</DialogTitle>
+            <DialogDescription>
+              Add this URL as an “iCal from URL” subscription in Google Calendar. Treat it like a password.
+            </DialogDescription>
+          </DialogHeader>
+
+          {calendarFeedLoading ? (
+            <div className="text-sm text-muted-foreground">Loading…</div>
+          ) : calendarFeedError ? (
+            <div className="text-sm text-destructive">{calendarFeedError}</div>
+          ) : calendarFeedUrl ? (
+            <ShareLink shareUrl={calendarFeedUrl} label="Calendar feed URL" />
+          ) : (
+            <div className="text-sm text-muted-foreground">No calendar link yet.</div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void rotateCalendarFeedUrl()}
+              disabled={calendarFeedLoading}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Regenerate link
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={openPersonalDialog}
+        aria-label="Add key date"
+        title="Add key date"
+      >
+        <Plus className="w-4 h-4" />
+      </Button>
+    </>
+  )
+
+  const monthNavigation = (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => setMonthCursor((d) => addMonths(d, -1))}
+        aria-label="Previous month"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </Button>
+      <div className="text-sm font-medium tabular-nums w-[10.5rem] text-center">{monthLabel}</div>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => setMonthCursor((d) => addMonths(d, 1))}
+        aria-label="Next month"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </Button>
+    </>
+  )
 
   return (
     <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -394,6 +611,7 @@ export default function ProjectsDashboardKeyDates() {
                           {k.kind === 'project' ? typeLabel(k.type) : 'Personal'}
                         </span>
                         <span className="text-sm font-medium tabular-nums">{formatHumanDate(k.date)}</span>
+                        {k.kind === 'personal' && k.reminderAt ? <Bell className="w-4 h-4 text-muted-foreground" /> : null}
                         <span className="text-xs text-muted-foreground">
                           {k.allDay
                             ? 'All day'
@@ -422,14 +640,24 @@ export default function ProjectsDashboardKeyDates() {
                           <Button variant="secondary" size="sm">Open</Button>
                         </Link>
                       ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void deletePersonalKeyDate(k.id)}
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4 text-destructive" />
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void openEditPersonalDialog(k)}
+                            title="Edit"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void deletePersonalKeyDate(k.id)}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                          </Button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -449,84 +677,21 @@ export default function ProjectsDashboardKeyDates() {
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <CalendarIcon className="w-4 h-4 text-muted-foreground" />
-            <CardTitle className="text-base">Calendar</CardTitle>
+        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="w-4 h-4 text-muted-foreground" />
+              <CardTitle className="text-base">Calendar</CardTitle>
+            </div>
+
+            <div className="flex items-center gap-2 sm:hidden">{calendarActions}</div>
           </div>
-          <div className="flex items-center gap-1">
-            <Dialog
-              open={calendarFeedOpen}
-              onOpenChange={(open) => {
-                setCalendarFeedOpen(open)
-                if (open) void ensureCalendarFeedUrl()
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="mr-2">
-                  Subscribe
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Subscribe in Google Calendar</DialogTitle>
-                  <DialogDescription>
-                    Add this URL as an “iCal from URL” subscription in Google Calendar. Treat it like a password.
-                  </DialogDescription>
-                </DialogHeader>
 
-                {calendarFeedLoading ? (
-                  <div className="text-sm text-muted-foreground">Loading…</div>
-                ) : calendarFeedError ? (
-                  <div className="text-sm text-destructive">{calendarFeedError}</div>
-                ) : calendarFeedUrl ? (
-                  <ShareLink shareUrl={calendarFeedUrl} label="Calendar feed URL" />
-                ) : (
-                  <div className="text-sm text-muted-foreground">No calendar link yet.</div>
-                )}
+          <div className="flex items-center justify-center gap-1 sm:hidden">{monthNavigation}</div>
 
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void rotateCalendarFeedUrl()}
-                    disabled={calendarFeedLoading}
-                  >
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Regenerate link
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            <Button
-              variant="outline"
-              size="icon"
-              className="mr-2"
-              onClick={openPersonalDialog}
-              aria-label="Add key date"
-              title="Add key date"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setMonthCursor((d) => addMonths(d, -1))}
-              aria-label="Previous month"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <div className="text-sm font-medium tabular-nums w-[10.5rem] text-center">{monthLabel}</div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setMonthCursor((d) => addMonths(d, 1))}
-              aria-label="Next month"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
+          <div className="hidden sm:flex items-center gap-2">
+            {calendarActions}
+            <div className="flex items-center gap-1">{monthNavigation}</div>
           </div>
         </CardHeader>
         <CardContent className="p-3 sm:p-4">
@@ -581,16 +746,18 @@ export default function ProjectsDashboardKeyDates() {
                             }
 
                             return (
-                              <span
+                              <button
                                 key={k.id}
+                                type="button"
                                 className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
                                 title={k.notes ? `${k.title} — ${k.notes}` : k.title}
+                                onClick={() => void openEditPersonalDialog(k)}
                               >
                                 <span className="inline-block w-2 h-2 rounded-full bg-foreground/40" />
                                 <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
                                   {k.title}
                                 </span>
-                              </span>
+                              </button>
                             )
                           })}
                           {dayKeyDates.length > 6 ? (
@@ -632,7 +799,7 @@ export default function ProjectsDashboardKeyDates() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Key Date</DialogTitle>
+            <DialogTitle>{personalDraft.id ? 'Edit Key Date' : 'Add Key Date'}</DialogTitle>
             <DialogDescription>This key date is not associated with a project.</DialogDescription>
           </DialogHeader>
 
@@ -729,6 +896,83 @@ export default function ProjectsDashboardKeyDates() {
                 placeholder="Notes"
                 maxLength={500}
               />
+            </div>
+
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-medium">Reminder</div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setPersonalDraft((p) => ({
+                      ...p,
+                      reminderDate: '',
+                      reminderTime: '',
+                      reminderUserIds: [],
+                    }))
+                  }
+                >
+                  Clear
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <div className="text-sm">Reminder date</div>
+                  <Input
+                    type="date"
+                    value={personalDraft.reminderDate}
+                    onChange={(e) => setPersonalDraft((p) => ({ ...p, reminderDate: e.target.value }))}
+                    className="h-10"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm">Reminder time</div>
+                  <Input
+                    type="text"
+                    value={personalDraft.reminderTime}
+                    placeholder="HH:MM"
+                    inputMode="numeric"
+                    onChange={(e) => setPersonalDraft((p) => ({ ...p, reminderTime: e.target.value }))}
+                    className="h-10"
+                    list="personal-key-date-reminder-times"
+                  />
+                  <datalist id="personal-key-date-reminder-times">
+                    {Array.from({ length: 24 * 4 }).map((_, i) => {
+                      const minutes = i * 15
+                      const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+                      const mm = String(minutes % 60).padStart(2, '0')
+                      const t = `${hh}:${mm}`
+                      return <option key={t} value={t} />
+                    })}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Send to users</div>
+                <div className="max-h-40 overflow-auto rounded-md border border-border p-2 space-y-2">
+                  {(personalReminderOptions?.users || []).length === 0 ? (
+                    <div className="text-xs text-muted-foreground">No users available.</div>
+                  ) : (
+                    (personalReminderOptions?.users || []).map((u) => (
+                      <label key={u.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={personalDraft.reminderUserIds.includes(u.id)}
+                          onChange={() =>
+                            setPersonalDraft((p) => ({ ...p, reminderUserIds: toggleId(p.reminderUserIds, u.id) }))
+                          }
+                        />
+                        <span className="truncate">{u.name}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 

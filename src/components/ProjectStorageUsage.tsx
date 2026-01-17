@@ -100,8 +100,7 @@ export function ProjectStorageUsage({ projectId }: { projectId: string }) {
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <CardTitle className="text-base">Storage Usage</CardTitle>
-            <CardDescription>Total used by this project</CardDescription>
+            <CardTitle className="text-base">Project Data</CardTitle>
           </div>
 
           <div className="flex items-center gap-3 flex-shrink-0">

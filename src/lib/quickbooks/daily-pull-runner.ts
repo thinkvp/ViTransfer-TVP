@@ -484,6 +484,7 @@ async function pullQuotes(lookbackDays: number, auth: Awaited<ReturnType<typeof 
         customerQboId,
         clientId,
         customerName: typeof e?.CustomerRef?.name === 'string' ? e.CustomerRef.name.trim() : null,
+        customerMemo: typeof e?.CustomerMemo?.value === 'string' ? e.CustomerMemo.value.trim() : null,
         privateNote: typeof e?.PrivateNote === 'string' ? e.PrivateNote.trim() : null,
         lines: normalizeEstimateLines(e),
       }
@@ -593,6 +594,7 @@ async function pullInvoices(lookbackDays: number, auth: Awaited<ReturnType<typeo
         customerQboId,
         clientId,
         customerName: typeof inv?.CustomerRef?.name === 'string' ? inv.CustomerRef.name.trim() : null,
+        customerMemo: typeof inv?.CustomerMemo?.value === 'string' ? inv.CustomerMemo.value.trim() : null,
         privateNote: typeof inv?.PrivateNote === 'string' ? inv.PrivateNote.trim() : null,
         lines: normalizeInvoiceLines(inv),
       }

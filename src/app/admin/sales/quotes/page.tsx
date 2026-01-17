@@ -22,6 +22,8 @@ import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Send, Trash2 } f
 import { cn } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
+import { apiFetch } from '@/lib/api-client'
+import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 
 type QuoteRow = {
   quote: SalesQuoteWithVersion
@@ -106,6 +108,7 @@ export default function SalesQuotesPage() {
   const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
   const [tablePage, setTablePage] = useState(1)
+  const [quoteExpiryRemindersEnabled, setQuoteExpiryRemindersEnabled] = useState<boolean | null>(null)
 
   useEffect(() => {
     const onFocus = () => {
@@ -122,10 +125,18 @@ export default function SalesQuotesPage() {
 
     ;(async () => {
       try {
-        const [s, q] = await Promise.all([fetchSalesSettings(), listSalesQuotes()])
+        const reminderResPromise = apiFetch('/api/admin/sales/reminder-settings', { method: 'GET' }).catch(() => null)
+        const [s, q, reminderRes] = await Promise.all([fetchSalesSettings(), listSalesQuotes(), reminderResPromise])
         if (cancelled) return
         setSettings(s)
         setQuotes(q)
+
+        if (reminderRes && 'ok' in reminderRes) {
+          const json = await (reminderRes as Response).json().catch(() => null)
+          setQuoteExpiryRemindersEnabled((reminderRes as Response).ok ? Boolean((json as any)?.quoteExpiryRemindersEnabled) : false)
+        } else {
+          setQuoteExpiryRemindersEnabled(false)
+        }
       } catch {
         // ignore
       } finally {
@@ -137,6 +148,28 @@ export default function SalesQuotesPage() {
       cancelled = true
     }
   }, [tick])
+
+  const onToggleReminders = useCallback(
+    async (q: SalesQuoteWithVersion) => {
+      const enabled = (q as any)?.remindersEnabled !== false
+      try {
+        const next = await patchSalesQuote(q.id, {
+          version: q.version,
+          remindersEnabled: !enabled,
+        })
+        setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to update quote'
+        if (msg === 'Conflict') {
+          alert('This quote was updated in another session. Reloading.')
+          setTick((v) => v + 1)
+          return
+        }
+        alert(msg)
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -495,6 +528,12 @@ export default function SalesQuotesPage() {
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex justify-end gap-2">
+                              {quoteExpiryRemindersEnabled ? (
+                                <SalesRemindersBellButton
+                                  enabled={(row.quote as any)?.remindersEnabled !== false}
+                                  onToggle={() => void onToggleReminders(row.quote)}
+                                />
+                              ) : null}
                               <Button
                                 type="button"
                                 size="icon"

@@ -325,11 +325,11 @@ export default function ClientsPage() {
                           </button>
                         </th>
 
-                        <th scope="col" className="px-3 py-2 text-center text-xs font-medium text-muted-foreground w-[92px]">
+                        <th scope="col" className="px-2 sm:px-3 py-2 text-center text-xs font-medium text-muted-foreground w-[76px] sm:w-[84px]">
                           Active
                         </th>
 
-                        <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-[124px] sm:w-[140px]">
+                        <th scope="col" className="px-2 sm:px-3 py-2 text-center text-xs font-medium text-muted-foreground w-[64px] sm:w-[72px]">
                           Actions
                         </th>
                       </tr>
@@ -364,7 +364,7 @@ export default function ClientsPage() {
                           <td className="px-3 py-3 text-muted-foreground hidden md:table-cell truncate">
                             {client.primaryEmail || '—'}
                           </td>
-                          <td className="px-3 py-3 text-center">
+                          <td className="px-2 sm:px-3 py-3 text-center">
                             <div
                               className="inline-flex items-center justify-center"
                               onPointerDown={(e) => e.stopPropagation()}
@@ -380,8 +380,8 @@ export default function ClientsPage() {
                               />
                             </div>
                           </td>
-                          <td className="px-3 py-3 whitespace-nowrap">
-                            <div className="inline-flex items-center justify-end gap-3 w-full">
+                          <td className="px-2 sm:px-3 py-3 whitespace-nowrap text-center">
+                            <div className="inline-flex items-center gap-2">
                               <Button
                                 type="button"
                                 variant="outline"

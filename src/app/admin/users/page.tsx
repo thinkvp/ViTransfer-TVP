@@ -290,8 +290,8 @@ export default function UsersPage() {
               </div>
             ) : (
               <div className="rounded-md border border-border bg-card overflow-hidden">
-                <div className="w-full overflow-auto">
-                  <table className="w-full text-sm">
+                <div className="w-full overflow-x-auto">
+                  <table className="min-w-[360px] md:min-w-[520px] w-full text-sm">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[180px]">User</th>
@@ -299,7 +299,7 @@ export default function UsersPage() {
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[220px] hidden md:table-cell">Email</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Role</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[130px] hidden md:table-cell">Colour</th>
-                        <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-[96px] sm:w-[140px]">Actions</th>
+                        <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[64px] whitespace-nowrap">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -319,7 +319,6 @@ export default function UsersPage() {
                         >
                           <td className="px-3 py-2">
                             <div className="font-medium">{user.name || user.username || user.email}</div>
-                            <div className="text-xs text-muted-foreground md:hidden">{user.email}</div>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
                             {user.username ? `@${user.username}` : '—'}
@@ -345,7 +344,7 @@ export default function UsersPage() {
                               />
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-right">
+                          <td className="px-2 py-2 text-right">
                             <div className="inline-flex items-center gap-2">
                               <Button
                                 type="button"
@@ -390,13 +389,13 @@ export default function UsersPage() {
                 <div className="py-8 text-center text-muted-foreground">No roles found.</div>
               ) : (
                 <div className="rounded-md border border-border bg-card overflow-hidden">
-                  <div className="w-full overflow-auto">
-                    <table className="w-full text-sm">
+                  <div className="w-full overflow-x-auto">
+                    <table className="min-w-[300px] sm:min-w-[420px] w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
                           <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Role</th>
-                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[100px]">Users</th>
-                          <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-[160px]">Actions</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[100px] hidden sm:table-cell">Users</th>
+                          <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[64px] whitespace-nowrap">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -440,8 +439,8 @@ export default function UsersPage() {
                                   )}
                                 </div>
                               </td>
-                              <td className="px-3 py-2 text-muted-foreground">{role.userCount}</td>
-                              <td className="px-3 py-2 text-right">
+                              <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{role.userCount}</td>
+                              <td className="px-2 py-2 text-right">
                                 <div className="inline-flex items-center gap-2">
                                   <Button
                                     type="button"
@@ -591,11 +590,11 @@ export default function UsersPage() {
               </div>
             </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setRoleDialogOpen(false)} disabled={rolesLoading}>
+            <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <Button className="w-full sm:w-auto" variant="outline" onClick={() => setRoleDialogOpen(false)} disabled={rolesLoading}>
                 Cancel
               </Button>
-              <Button variant="default" onClick={() => void saveRole()} disabled={rolesLoading}>
+              <Button className="w-full sm:w-auto" variant="default" onClick={() => void saveRole()} disabled={rolesLoading}>
                 {rolesLoading ? 'Saving...' : 'Save Role'}
               </Button>
             </DialogFooter>
