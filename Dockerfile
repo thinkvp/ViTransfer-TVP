@@ -133,17 +133,17 @@ COPY --chown=app:app --from=builder /app/prisma ./prisma
 # Standalone server expects `public/` and `.next/static` relative to `.next/standalone`
 # Next will try to write runtime cache (notably image optimizer) under `.next/cache`.
 # Ensure these paths exist and are writable by the runtime user.
-RUN mkdir -p /app/.next/standalone/.next/cache && \
+RUN mkdir -p /app/.next/standalone/.next/cache/images && \
     if [ ! -e /app/.next/standalone/.next/static ]; then ln -s /app/.next/static /app/.next/standalone/.next/static; fi && \
     if [ ! -e /app/.next/standalone/public ]; then ln -s /app/public /app/.next/standalone/public; fi
 
-RUN chown -R app:app /app/.next/standalone && \
-    chmod -R u+rwX,go+rX /app/.next/standalone/.next/cache
+RUN chown -R app:app /app/.next/standalone
 
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod -R a+rX /app/.next /app/node_modules /app/public /app/prisma
+RUN chmod -R a+rX /app/.next /app/node_modules /app/public /app/prisma && \
+    chmod -R a+rwX /app/.next/standalone/.next/cache
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:4321/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
