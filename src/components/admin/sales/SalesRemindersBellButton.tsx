@@ -22,9 +22,13 @@ export function SalesRemindersBellButton(props: {
       aria-pressed={enabled}
       title={enabled ? 'Sales reminders enabled' : 'Sales reminders disabled'}
       aria-label={enabled ? 'Sales reminders enabled' : 'Sales reminders disabled'}
-      className={cn(!enabled && 'text-muted-foreground', props.className)}
+      className={cn(props.className)}
     >
-      {enabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+      {enabled ? (
+        <Bell className="h-4 w-4 text-green-600" />
+      ) : (
+        <BellOff className="h-4 w-4 text-muted-foreground" />
+      )}
     </Button>
   )
 }

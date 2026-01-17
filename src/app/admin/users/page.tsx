@@ -289,15 +289,17 @@ export default function UsersPage() {
                 No users found. Create your first user to get started.
               </div>
             ) : (
-              <div className="rounded-md border border-border bg-card overflow-hidden">
-                <div className="w-full overflow-x-auto">
-                  <table className="min-w-[360px] md:min-w-[520px] w-full text-sm">
+              <div
+                className="rounded-md border border-border bg-card overflow-x-auto overscroll-x-contain touch-pan-x"
+                style={{ WebkitOverflowScrolling: 'touch' }}
+              >
+                  <table className="w-full table-fixed text-sm min-w-[340px] md:min-w-[520px]">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[180px]">User</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[55%]">User</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px] hidden md:table-cell">Username</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[220px] hidden md:table-cell">Email</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Role</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[35%]">Role</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[130px] hidden md:table-cell">Colour</th>
                         <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[64px] whitespace-nowrap">Actions</th>
                       </tr>
@@ -318,7 +320,7 @@ export default function UsersPage() {
                           }}
                         >
                           <td className="px-3 py-2">
-                            <div className="font-medium">{user.name || user.username || user.email}</div>
+                            <div className="font-medium truncate">{user.name || user.username || user.email}</div>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
                             {user.username ? `@${user.username}` : '—'}
@@ -332,7 +334,7 @@ export default function UsersPage() {
                                 : 'bg-muted text-muted-foreground border border-border'
                             )}>
                               {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                              {user.appRole?.name || '—'}
+                              <span className="truncate">{user.appRole?.name || '—'}</span>
                             </span>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell">
@@ -369,7 +371,6 @@ export default function UsersPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
               </div>
             )}
           </CardContent>
@@ -388,12 +389,14 @@ export default function UsersPage() {
               {roles.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground">No roles found.</div>
               ) : (
-                <div className="rounded-md border border-border bg-card overflow-hidden">
-                  <div className="w-full overflow-x-auto">
-                    <table className="min-w-[300px] sm:min-w-[420px] w-full text-sm">
+                <div
+                  className="rounded-md border border-border bg-card overflow-x-auto overscroll-x-contain touch-pan-x"
+                  style={{ WebkitOverflowScrolling: 'touch' }}
+                >
+                    <table className="w-full table-fixed text-sm min-w-[280px] sm:min-w-[420px]">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
-                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Role</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[70%]">Role</th>
                           <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[100px] hidden sm:table-cell">Users</th>
                           <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[64px] whitespace-nowrap">Actions</th>
                         </tr>
@@ -432,7 +435,7 @@ export default function UsersPage() {
                                       : 'bg-muted text-muted-foreground border border-border'
                                   )}>
                                     {role.isSystemAdmin ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                                    {role.name}
+                                    <span className="truncate">{role.name}</span>
                                   </span>
                                   {!canEdit && (
                                     <span className="text-xs text-muted-foreground">Protected</span>
@@ -467,7 +470,6 @@ export default function UsersPage() {
                         })}
                       </tbody>
                     </table>
-                  </div>
                 </div>
               )}
             </CardContent>
