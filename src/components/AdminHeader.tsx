@@ -89,7 +89,7 @@ export default function AdminHeader() {
               variant="outline"
               size="default"
               onClick={logout}
-              className="flex items-center gap-2"
+              className="flex items-center justify-center gap-0 sm:gap-2 w-9 px-0 sm:w-auto sm:px-4"
             >
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Sign Out</span>

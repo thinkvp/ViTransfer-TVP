@@ -236,13 +236,17 @@ function createEmptyDraft(): Draft {
 export function ProjectKeyDates({
   projectId,
   canEdit,
+  initialEditKeyDateId,
 }: {
   projectId: string
   canEdit: boolean
+  initialEditKeyDateId?: string | null
 }) {
   const [items, setItems] = useState<ProjectKeyDate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const [hasAutoOpened, setHasAutoOpened] = useState(false)
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -309,6 +313,25 @@ export function ProjectKeyDates({
     setDraft(toDraft(item))
     setDialogOpen(true)
   }
+
+  useEffect(() => {
+    if (!canEdit) return
+    const id = typeof initialEditKeyDateId === 'string' ? initialEditKeyDateId.trim() : ''
+    if (!id) return
+    if (hasAutoOpened) return
+    if (dialogOpen) return
+    if (loading) return
+
+    const found = items.find((x) => x.id === id)
+    if (!found) {
+      setHasAutoOpened(true)
+      return
+    }
+
+    setHasAutoOpened(true)
+    startEdit(found)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, dialogOpen, hasAutoOpened, initialEditKeyDateId, items, loading])
 
   const cancelDraft = () => {
     setDraft(null)

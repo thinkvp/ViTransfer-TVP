@@ -382,8 +382,8 @@ export function RecipientsEditor({
                       variant="outline"
                       size="sm"
                       onClick={() => toggleSalesReminders(idx)}
-                      title="Toggle sales reminders"
-                      aria-label="Toggle sales reminders"
+                      title={recipient.receiveSalesReminders !== false ? 'Sales Reminders Enabled' : 'Sales Reminders Disabled'}
+                      aria-label={recipient.receiveSalesReminders !== false ? 'Sales Reminders Enabled' : 'Sales Reminders Disabled'}
                       className={
                         recipient.receiveSalesReminders !== false
                           ? `${actionButtonClassName} text-success hover:text-success hover:bg-success-visible`

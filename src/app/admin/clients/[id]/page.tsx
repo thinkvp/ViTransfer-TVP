@@ -531,6 +531,7 @@ export default function ClientDetailPage() {
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: Boolean(r.receiveNotifications),
+          receiveSalesReminders: (r as any)?.receiveSalesReminders !== false,
         })),
       })
 

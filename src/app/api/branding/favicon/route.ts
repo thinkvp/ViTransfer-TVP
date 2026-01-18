@@ -127,10 +127,11 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   try {
-    const settings = await prisma.settings.findUnique({
+    const settings = (await prisma.settings.findUnique({
       where: { id: 'default' },
-      select: { companyFaviconPath: true, companyFaviconMode: true, companyFaviconUrl: true },
-    })
+      // NOTE: keep types happy if Prisma Client isn't regenerated yet.
+      select: { companyFaviconPath: true, companyFaviconMode: true, companyFaviconUrl: true } as any,
+    } as any)) as any
 
     const faviconPath = settings?.companyFaviconPath
     const mode = settings?.companyFaviconMode

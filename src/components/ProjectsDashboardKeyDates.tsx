@@ -706,8 +706,8 @@ export default function ProjectsDashboardKeyDates() {
 
                     <div className="flex-shrink-0 flex items-center gap-2">
                       {k.kind === 'project' ? (
-                        <Link href={`/admin/projects/${k.projectId}`} className="flex-shrink-0">
-                          <Button variant="outline" size="icon" aria-label="Edit project" title="Edit">
+                        <Link href={`/admin/projects/${k.projectId}?editKeyDate=${encodeURIComponent(k.id)}`} className="flex-shrink-0">
+                          <Button variant="outline" size="icon" aria-label="Edit key date" title="Edit key date">
                             <Pencil className="w-4 h-4" />
                           </Button>
                         </Link>
@@ -789,7 +789,7 @@ export default function ProjectsDashboardKeyDates() {
                   return (
                     <div
                       key={`${idx}-${cell.ymd || 'empty'}`}
-                      className={`min-h-[64px] rounded-md border border-border p-1.5 ${
+                      className={`min-h-[64px] rounded-md border border-border p-1.5 overflow-hidden min-w-0 ${
                         isToday ? 'bg-primary/5 border-primary/30' : 'bg-background'
                       }`}
                     >
@@ -798,7 +798,7 @@ export default function ProjectsDashboardKeyDates() {
                       </div>
 
                       {dayKeyDates.length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
+                        <div className="mt-1 flex flex-col gap-1 min-w-0">
                           {dayKeyDates.slice(0, 6).map((k) => {
                             if (k.kind === 'project') {
                               const colors = typeColorClasses(k.type)
@@ -806,11 +806,10 @@ export default function ProjectsDashboardKeyDates() {
                                 <Link
                                   key={k.id}
                                   href={`/admin/projects/${k.projectId}`}
-                                  className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
+                                  className={`flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white min-w-0 max-w-full w-full ${colors.dot} hover:opacity-90`}
                                   title={`${typeLabel(k.type)} — ${k.project.companyName || k.project.title}`}
                                 >
-                                  <span className={`inline-block w-2 h-2 rounded-full ${colors.dot}`} />
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
+                                  <span className="truncate">
                                     {k.project.companyName || k.project.title}
                                   </span>
                                 </Link>
@@ -831,11 +830,10 @@ export default function ProjectsDashboardKeyDates() {
                                 <Link
                                   key={`${k.docType}:${k.docId}`}
                                   href={href}
-                                  className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
+                                  className={`flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white min-w-0 max-w-full w-full ${colors.dot} hover:opacity-90`}
                                   title={titleBits.join(' | ')}
                                 >
-                                  <span className={`inline-block w-2 h-2 rounded-full ${colors.dot}`} />
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
+                                  <span className="truncate">
                                     {k.docType === 'quote' ? 'Quote' : 'Invoice'} {k.docNumber}
                                   </span>
                                 </Link>
@@ -846,12 +844,11 @@ export default function ProjectsDashboardKeyDates() {
                               <button
                                 key={k.id}
                                 type="button"
-                                className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
+                                className="flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white min-w-0 max-w-full w-full bg-neutral-600 hover:opacity-90"
                                 title={k.notes ? `${k.title} — ${k.notes}` : k.title}
                                 onClick={() => void openEditPersonalDialog(k)}
                               >
-                                <span className="inline-block w-2 h-2 rounded-full bg-foreground/40" />
-                                <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
+                                <span className="truncate">
                                   {k.title}
                                 </span>
                               </button>

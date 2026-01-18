@@ -275,7 +275,7 @@ export default function UsersPage() {
         </div>
       )}
 
-        <Card>
+      <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle>Users</CardTitle>
             <Button variant="default" size="default" onClick={() => router.push('/admin/users/new')}>
@@ -289,10 +289,8 @@ export default function UsersPage() {
                 No users found. Create your first user to get started.
               </div>
             ) : (
-              <div
-                className="rounded-md border border-border bg-card overflow-x-auto overscroll-x-contain touch-pan-x"
-                style={{ WebkitOverflowScrolling: 'touch' }}
-              >
+              <div className="rounded-md border border-border bg-card overflow-hidden">
+                <div className="w-full overflow-auto">
                   <table className="w-full table-fixed text-sm min-w-[340px] md:min-w-[520px]">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
@@ -371,10 +369,11 @@ export default function UsersPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
               </div>
             )}
           </CardContent>
-        </Card>
+      </Card>
 
       <div className="mt-8">
           <Card>
@@ -389,10 +388,8 @@ export default function UsersPage() {
               {roles.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground">No roles found.</div>
               ) : (
-                <div
-                  className="rounded-md border border-border bg-card overflow-x-auto overscroll-x-contain touch-pan-x"
-                  style={{ WebkitOverflowScrolling: 'touch' }}
-                >
+                <div className="rounded-md border border-border bg-card overflow-hidden">
+                  <div className="w-full overflow-auto">
                     <table className="w-full table-fixed text-sm min-w-[280px] sm:min-w-[420px]">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
@@ -470,6 +467,7 @@ export default function UsersPage() {
                         })}
                       </tbody>
                     </table>
+                  </div>
                 </div>
               )}
             </CardContent>

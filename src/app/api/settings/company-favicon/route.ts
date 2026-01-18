@@ -73,10 +73,11 @@ export async function POST(request: NextRequest) {
 
     const storagePath = 'branding/company-favicon.png'
 
-    const existing = await prisma.settings.findUnique({
+    const existing = (await prisma.settings.findUnique({
       where: { id: 'default' },
-      select: { companyFaviconPath: true },
-    })
+      // NOTE: keep types happy if Prisma Client isn't regenerated yet.
+      select: { companyFaviconPath: true } as any,
+    } as any)) as any
 
     await uploadFile(storagePath, buffer, buffer.length, 'image/png')
 
@@ -88,13 +89,13 @@ export async function POST(request: NextRequest) {
       companyFaviconMode: 'UPLOAD',
       companyFaviconPath: storagePath,
       companyFaviconUrl: null,
-    }
+    } as any
     const createData: Prisma.SettingsCreateInput = {
       id: 'default',
       companyFaviconMode: 'UPLOAD',
       companyFaviconPath: storagePath,
       companyFaviconUrl: null,
-    }
+    } as any
 
     await prisma.settings.upsert({
       where: { id: 'default' },

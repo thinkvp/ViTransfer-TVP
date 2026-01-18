@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
@@ -32,7 +32,10 @@ export const dynamic = 'force-dynamic'
 export default function ProjectPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const id = params?.id as string
+
+  const editKeyDateId = searchParams?.get('editKeyDate')
 
   const [project, setProject] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -772,7 +775,7 @@ export default function ProjectPage() {
             )}
 
             {canAccessProjectSettings && (
-              <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} />
+              <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />
             )}
 
             {canAccessProjectSettings && (
