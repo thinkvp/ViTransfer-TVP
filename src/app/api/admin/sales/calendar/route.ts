@@ -1,0 +1,132 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { requireApiAuth } from '@/lib/auth'
+import { rateLimit } from '@/lib/rate-limit'
+import { requireMenuAccess } from '@/lib/rbac-api'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+function monthKeyFromDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}`
+}
+
+function parseMonthKey(month: string): { year: number; monthIndex: number } | null {
+  const m = String(month || '').trim()
+  const match = /^([0-9]{4})-([0-9]{2})$/.exec(m)
+  if (!match) return null
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return null
+  if (monthIndex < 0 || monthIndex > 11) return null
+  return { year, monthIndex }
+}
+
+function ymd(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+// GET /api/admin/sales/calendar?month=YYYY-MM - sales calendar items (internal)
+export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbidden = requireMenuAccess(authResult, 'sales')
+  if (forbidden) return forbidden
+
+  const rateLimitResult = await rateLimit(
+    request,
+    { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many requests. Please slow down.' },
+    'admin-sales-calendar'
+  )
+  if (rateLimitResult) return rateLimitResult
+
+  const url = new URL(request.url)
+  const monthParam = url.searchParams.get('month')
+  const monthInfo = monthParam ? parseMonthKey(monthParam) : null
+
+  const base = monthInfo
+    ? new Date(monthInfo.year, monthInfo.monthIndex, 1)
+    : new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+
+  const monthKey = monthKeyFromDate(base)
+  const start = new Date(base.getFullYear(), base.getMonth(), 1)
+  const end = new Date(base.getFullYear(), base.getMonth() + 1, 0)
+
+  const startYmd = ymd(start)
+  const endYmd = ymd(end)
+
+  const [quotes, invoices] = await Promise.all([
+    prisma.salesQuote.findMany({
+      where: {
+        validUntil: { not: null, gte: startYmd, lte: endYmd },
+      },
+      select: {
+        id: true,
+        quoteNumber: true,
+        status: true,
+        validUntil: true,
+        client: { select: { name: true } },
+        project: { select: { id: true, title: true } },
+      },
+      orderBy: [{ validUntil: 'asc' }, { quoteNumber: 'asc' }],
+    }),
+    prisma.salesInvoice.findMany({
+      where: {
+        dueDate: { not: null, gte: startYmd, lte: endYmd },
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        status: true,
+        dueDate: true,
+        client: { select: { name: true } },
+        project: { select: { id: true, title: true } },
+      },
+      orderBy: [{ dueDate: 'asc' }, { invoiceNumber: 'asc' }],
+    }),
+  ])
+
+  const items = [
+    ...quotes
+      .filter((q) => Boolean(q.validUntil))
+      .map((q) => ({
+        kind: 'sales' as const,
+        docType: 'quote' as const,
+        docId: q.id,
+        docNumber: q.quoteNumber,
+        status: q.status,
+        date: q.validUntil as string,
+        clientName: q.client?.name ?? null,
+        projectId: q.project?.id ?? null,
+        projectTitle: q.project?.title ?? null,
+      })),
+    ...invoices
+      .filter((inv) => Boolean(inv.dueDate))
+      .map((inv) => ({
+        kind: 'sales' as const,
+        docType: 'invoice' as const,
+        docId: inv.id,
+        docNumber: inv.invoiceNumber,
+        status: inv.status,
+        date: inv.dueDate as string,
+        clientName: inv.client?.name ?? null,
+        projectId: inv.project?.id ?? null,
+        projectTitle: inv.project?.title ?? null,
+      })),
+  ].sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date)
+    if (a.docType !== b.docType) return a.docType.localeCompare(b.docType)
+    return a.docNumber.localeCompare(b.docNumber)
+  })
+
+  const response = NextResponse.json({ month: monthKey, start: startYmd, end: endYmd, items })
+  response.headers.set('Cache-Control', 'no-store')
+  response.headers.set('Pragma', 'no-cache')
+  return response
+}

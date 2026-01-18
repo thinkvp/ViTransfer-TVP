@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2, Pencil, Bell } from 'lucide-react'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
+import { useAuth } from '@/components/AuthProvider'
+import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
@@ -53,9 +55,24 @@ type KeyDatesResponse = {
   personalKeyDates?: PersonalKeyDateRow[]
 }
 
+type SalesCalendarItemRow = {
+  kind: 'sales'
+  docType: 'quote' | 'invoice'
+  docId: string
+  docNumber: string
+  status: string
+  date: string // YYYY-MM-DD
+  clientName: string | null
+  projectId: string | null
+  projectTitle: string | null
+}
+
 type CalendarItem =
   | ({ kind: 'project' } & ProjectKeyDateRow)
   | ({ kind: 'personal' } & PersonalKeyDateRow)
+  | SalesCalendarItemRow
+
+type UpcomingItem = ({ kind: 'project' } & ProjectKeyDateRow) | ({ kind: 'personal' } & PersonalKeyDateRow)
 
 function parseYmdToDateLocal(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map((n) => Number(n))
@@ -96,6 +113,11 @@ function typeColorClasses(type: string): { pill: string; dot: string } {
         pill: 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20',
         dot: 'bg-purple-500',
       }
+    case 'SALES':
+      return {
+        pill: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20',
+        dot: 'bg-emerald-500',
+      }
     default:
       return {
         pill: 'bg-foreground/5 text-foreground/80 border border-foreground/10',
@@ -123,7 +145,14 @@ function ymdForDateLocal(date: Date): string {
   return `${y}-${m}-${d}`
 }
 
+function ymForDateLocal(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}`
+}
+
 export default function ProjectsDashboardKeyDates() {
+  const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<KeyDatesResponse | null>(null)
@@ -212,10 +241,18 @@ export default function ProjectsDashboardKeyDates() {
 
   const today = data?.today || ymdForDateLocal(new Date())
 
+  const canSeeSales = useMemo(() => {
+    if (user?.isSystemAdmin) return true
+    const permissions = normalizeRolePermissions((user as any)?.permissions)
+    return canSeeMenu(permissions, 'sales')
+  }, [user?.isSystemAdmin, (user as any)?.permissions])
+
   const [monthCursor, setMonthCursor] = useState<Date>(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
+
+  const [salesByMonth, setSalesByMonth] = useState<Record<string, SalesCalendarItemRow[]>>({})
 
   useEffect(() => {
     const load = async () => {
@@ -239,6 +276,26 @@ export default function ProjectsDashboardKeyDates() {
 
     load()
   }, [])
+
+  const monthKey = useMemo(() => ymForDateLocal(monthCursor), [monthCursor])
+
+  useEffect(() => {
+    if (!canSeeSales) return
+    if (salesByMonth[monthKey]) return
+
+    const load = async () => {
+      try {
+        const result = await apiJson<{ items?: SalesCalendarItemRow[] }>(`/api/admin/sales/calendar?month=${monthKey}`)
+        const items = Array.isArray(result?.items) ? result.items : []
+        setSalesByMonth((prev) => ({ ...prev, [monthKey]: items }))
+      } catch {
+        // No sales access or temporarily unavailable; treat as no sales calendar entries.
+        setSalesByMonth((prev) => ({ ...prev, [monthKey]: [] }))
+      }
+    }
+
+    void load()
+  }, [canSeeSales, monthKey, salesByMonth])
 
   const reload = async () => {
     try {
@@ -280,10 +337,10 @@ export default function ProjectsDashboardKeyDates() {
     }
   }
 
-  const upcoming = useMemo(() => {
+  const upcoming = useMemo<UpcomingItem[]>(() => {
     const project = (data?.keyDates || []).map((k) => ({ ...k, kind: 'project' as const }))
     const personal = (data?.personalKeyDates || []).map((k) => ({ ...k, kind: 'personal' as const }))
-    const all: CalendarItem[] = [...project, ...personal]
+    const all: UpcomingItem[] = [...project, ...personal]
 
     return all
       .filter((k) => k.date >= today)
@@ -348,18 +405,28 @@ export default function ProjectsDashboardKeyDates() {
       map.set(k.date, list)
     }
 
+    if (canSeeSales) {
+      for (const s of salesByMonth[monthKey] || []) {
+        const list = map.get(s.date) || []
+        list.push(s)
+        map.set(s.date, list)
+      }
+    }
+
     for (const [ymd, list] of map.entries()) {
       list.sort((a, b) => {
-        const aStart = (a.startTime || '').toString()
-        const bStart = (b.startTime || '').toString()
+        const aStart = (a.kind === 'project' || a.kind === 'personal' ? (a.startTime || '') : '').toString()
+        const bStart = (b.kind === 'project' || b.kind === 'personal' ? (b.startTime || '') : '').toString()
         if (aStart !== bStart) return aStart.localeCompare(bStart)
-        return a.id.localeCompare(b.id)
+        const aId = a.kind === 'sales' ? `${a.docType}:${a.docId}` : a.id
+        const bId = b.kind === 'sales' ? `${b.docType}:${b.docId}` : b.id
+        return aId.localeCompare(bId)
       })
       map.set(ymd, list)
     }
 
     return map
-  }, [data?.keyDates, data?.personalKeyDates])
+  }, [canSeeSales, data?.keyDates, data?.personalKeyDates, monthKey, salesByMonth])
 
   const openPersonalDialog = async () => {
     setPersonalError(null)
@@ -637,7 +704,9 @@ export default function ProjectsDashboardKeyDates() {
                     <div className="flex-shrink-0 flex items-center gap-2">
                       {k.kind === 'project' ? (
                         <Link href={`/admin/projects/${k.projectId}`} className="flex-shrink-0">
-                          <Button variant="secondary" size="sm">Open</Button>
+                          <Button variant="outline" size="icon" aria-label="Edit project" title="Edit">
+                            <Pencil className="w-4 h-4" />
+                          </Button>
                         </Link>
                       ) : (
                         <>
@@ -745,6 +814,31 @@ export default function ProjectsDashboardKeyDates() {
                               )
                             }
 
+                            if (k.kind === 'sales') {
+                              const colors = typeColorClasses('SALES')
+                              const href = k.docType === 'quote' ? `/admin/sales/quotes/${k.docId}` : `/admin/sales/invoices/${k.docId}`
+                              const titlePrefix = k.docType === 'quote' ? 'Quote valid until' : 'Invoice due'
+                              const titleBits = [
+                                `${titlePrefix} — ${k.docNumber}`,
+                                k.clientName ? `Client: ${k.clientName}` : null,
+                                k.projectTitle ? `Project: ${k.projectTitle}` : null,
+                              ].filter(Boolean)
+
+                              return (
+                                <Link
+                                  key={`${k.docType}:${k.docId}`}
+                                  href={href}
+                                  className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-1.5 py-0.5"
+                                  title={titleBits.join(' | ')}
+                                >
+                                  <span className={`inline-block w-2 h-2 rounded-full ${colors.dot}`} />
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[7.5rem]">
+                                    {k.docType === 'quote' ? 'Quote' : 'Invoice'} {k.docNumber}
+                                  </span>
+                                </Link>
+                              )
+                            }
+
                             return (
                               <button
                                 key={k.id}
@@ -780,6 +874,12 @@ export default function ProjectsDashboardKeyDates() {
                     </div>
                   )
                 })}
+                {canSeeSales ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${typeColorClasses('SALES').dot}`} />
+                    <span>Sales</span>
+                  </div>
+                ) : null}
                 <div className="flex items-center gap-1.5">
                   <span className="inline-block w-2.5 h-2.5 rounded-full bg-foreground/40" />
                   <span>Personal</span>
