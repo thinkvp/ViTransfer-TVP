@@ -132,17 +132,8 @@ function LoginForm() {
     <div className="flex-1 min-h-0 bg-background flex flex-col">
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-primary rounded-full mb-4">
-            <Video className="w-8 h-8 text-primary-foreground" />
-          </div>
-          <h1 className="text-3xl font-bold text-foreground">
-            ViTransfer
-          </h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            Professional Video Review & Share Platform
-          </p>
-        </div>
+
+        <div className="text-center mb-8" />
 
         <Card>
           <CardHeader>
@@ -244,9 +235,7 @@ export default function LoginPage() {
     <Suspense fallback={
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-primary rounded-full mb-4">
-            <Video className="w-8 h-8 text-primary-foreground animate-pulse" />
-          </div>
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-primary rounded-full mb-4" />
         </div>
       </div>
     }>
