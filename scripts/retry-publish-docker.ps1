@@ -1,7 +1,7 @@
 param(
   [int]$MaxAttempts = 4,
   [int]$SleepSeconds = 8,
-  [string]$Version = $(if (Test-Path -LiteralPath "VERSION") { (Get-Content -LiteralPath "VERSION" -Raw).Trim() } else { "latest" }),
+  [string]$Version = $(if (Test-Path -LiteralPath "VERSION") { ((Get-Content -LiteralPath "VERSION" | Select-Object -First 1) -as [string]).Trim() } else { "latest" }),
   [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' })
 )
 

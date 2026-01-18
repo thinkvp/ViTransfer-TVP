@@ -1,6 +1,6 @@
 param(
   [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' }),
-  [string]$Version = $(if ($env:VERSION) { $env:VERSION } elseif (Test-Path -LiteralPath "VERSION") { (Get-Content -LiteralPath "VERSION" -Raw).Trim() } else { 'latest' }),
+  [string]$Version = $(if ($env:VERSION) { $env:VERSION } elseif (Test-Path -LiteralPath "VERSION") { ((Get-Content -LiteralPath "VERSION" | Select-Object -First 1) -as [string]).Trim() } else { 'latest' }),
   [switch]$Dev,
   [switch]$NoLatest,
   [switch]$NoCache,
