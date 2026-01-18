@@ -19,6 +19,9 @@ interface Settings {
   companyLogoMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
   companyLogoPath?: string | null
   companyLogoUrl?: string | null
+  companyFaviconMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
+  companyFaviconPath?: string | null
+  companyFaviconUrl?: string | null
   smtpServer: string | null
   smtpPort: number | null
   smtpUsername: string | null
@@ -116,6 +119,9 @@ export default function GlobalSettingsPage() {
   const [companyLogoVersion, setCompanyLogoVersion] = useState(0)
   const [companyLogoMode, setCompanyLogoMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
   const [companyLogoUrl, setCompanyLogoUrl] = useState('')
+  const [companyFaviconVersion, setCompanyFaviconVersion] = useState(0)
+  const [companyFaviconMode, setCompanyFaviconMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
+  const [companyFaviconUrl, setCompanyFaviconUrl] = useState('')
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
@@ -230,6 +236,12 @@ export default function GlobalSettingsPage() {
           setCompanyLogoMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
         }
         setCompanyLogoUrl(data.companyLogoUrl || '')
+        setCompanyFaviconVersion(Date.now())
+        {
+          const value = data.companyFaviconMode
+          setCompanyFaviconMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
+        }
+        setCompanyFaviconUrl(data.companyFaviconUrl || '')
         setSmtpServer(data.smtpServer || '')
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
@@ -440,6 +452,8 @@ export default function GlobalSettingsPage() {
         companyName: companyName || null,
         companyLogoMode: companyLogoMode || 'NONE',
         companyLogoUrl: companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null,
+        companyFaviconMode: companyFaviconMode || 'NONE',
+        companyFaviconUrl: companyFaviconMode === 'LINK' ? (companyFaviconUrl || null) : null,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
@@ -525,6 +539,8 @@ export default function GlobalSettingsPage() {
         setCompanyName(refreshedData.companyName || '')
         setCompanyLogoMode((refreshedData.companyLogoMode as any) || 'NONE')
         setCompanyLogoUrl(refreshedData.companyLogoUrl || '')
+        setCompanyFaviconMode((refreshedData.companyFaviconMode as any) || 'NONE')
+        setCompanyFaviconUrl(refreshedData.companyFaviconUrl || '')
         setSmtpServer(refreshedData.smtpServer || '')
         setSmtpPort(refreshedData.smtpPort?.toString() || '587')
         setSmtpUsername(refreshedData.smtpUsername || '')
@@ -693,8 +709,19 @@ export default function GlobalSettingsPage() {
                 ? (settings?.companyLogoPath ? `/api/branding/logo?v=${companyLogoVersion}` : null)
                 : (companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null)
             }
+            companyFaviconMode={companyFaviconMode}
+            setCompanyFaviconMode={setCompanyFaviconMode}
+            companyFaviconLinkUrl={companyFaviconUrl}
+            setCompanyFaviconLinkUrl={setCompanyFaviconUrl}
+            companyFaviconConfigured={companyFaviconMode === 'UPLOAD' && !!settings?.companyFaviconPath}
+            companyFaviconUrl={
+              companyFaviconMode === 'UPLOAD'
+                ? (settings?.companyFaviconPath ? `/api/branding/favicon?v=${companyFaviconVersion}` : null)
+                : (companyFaviconMode === 'LINK' ? (companyFaviconUrl || null) : null)
+            }
             onCompanyLogoUploaded={() => {
               setCompanyLogoVersion(Date.now())
+              setCompanyFaviconVersion(Date.now())
               // Force settings refresh so other parts relying on settings stay accurate
               apiFetch('/api/settings')
                 .then((r) => r.ok ? r.json() : null)
@@ -703,6 +730,21 @@ export default function GlobalSettingsPage() {
                   setSettings(d)
                   setCompanyLogoMode((d.companyLogoMode as any) || 'NONE')
                   setCompanyLogoUrl(d.companyLogoUrl || '')
+                  setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
+                  setCompanyFaviconUrl(d.companyFaviconUrl || '')
+                })
+                .catch(() => {})
+            }}
+            onCompanyFaviconUploaded={() => {
+              setCompanyFaviconVersion(Date.now())
+              // Force settings refresh so other parts relying on settings stay accurate
+              apiFetch('/api/settings')
+                .then((r) => r.ok ? r.json() : null)
+                .then((d) => {
+                  if (!d) return
+                  setSettings(d)
+                  setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
+                  setCompanyFaviconUrl(d.companyFaviconUrl || '')
                 })
                 .catch(() => {})
             }}

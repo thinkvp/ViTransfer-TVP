@@ -105,6 +105,8 @@ export async function PATCH(request: NextRequest) {
       companyName,
       companyLogoMode,
       companyLogoUrl,
+      companyFaviconMode,
+      companyFaviconUrl,
       smtpServer,
       smtpPort,
       smtpUsername,
@@ -156,6 +158,17 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    // SECURITY: Validate companyFaviconMode
+    if (companyFaviconMode !== undefined && companyFaviconMode !== null) {
+      const validModes = ['NONE', 'UPLOAD', 'LINK']
+      if (!validModes.includes(companyFaviconMode)) {
+        return NextResponse.json(
+          { error: 'Invalid companyFaviconMode. Must be NONE, UPLOAD, or LINK.' },
+          { status: 400 }
+        )
+      }
+    }
+
     // SECURITY: Validate companyLogoUrl when using LINK mode
     if (companyLogoMode === 'LINK') {
       const url = typeof companyLogoUrl === 'string' ? companyLogoUrl.trim() : ''
@@ -177,6 +190,32 @@ export async function PATCH(request: NextRequest) {
       } catch {
         return NextResponse.json(
           { error: 'Invalid companyLogoUrl. Please enter a valid URL.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // SECURITY: Validate companyFaviconUrl when using LINK mode
+    if (companyFaviconMode === 'LINK') {
+      const url = typeof companyFaviconUrl === 'string' ? companyFaviconUrl.trim() : ''
+      if (!url) {
+        return NextResponse.json(
+          { error: 'companyFaviconUrl is required when companyFaviconMode is LINK.' },
+          { status: 400 }
+        )
+      }
+
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return NextResponse.json(
+            { error: 'companyFaviconUrl must start with http:// or https://.' },
+            { status: 400 }
+          )
+        }
+      } catch {
+        return NextResponse.json(
+          { error: 'Invalid companyFaviconUrl. Please enter a valid URL.' },
           { status: 400 }
         )
       }
@@ -308,6 +347,11 @@ export async function PATCH(request: NextRequest) {
         companyLogoMode === 'LINK'
           ? (typeof companyLogoUrl === 'string' ? companyLogoUrl.trim() : null)
           : (companyLogoMode !== undefined ? null : undefined),
+      companyFaviconMode,
+      companyFaviconUrl:
+        companyFaviconMode === 'LINK'
+          ? (typeof companyFaviconUrl === 'string' ? companyFaviconUrl.trim() : null)
+          : (companyFaviconMode !== undefined ? null : undefined),
       smtpServer,
       smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,
       smtpUsername,
@@ -346,6 +390,11 @@ export async function PATCH(request: NextRequest) {
         companyLogoUrl:
           companyLogoMode === 'LINK'
             ? (typeof companyLogoUrl === 'string' ? companyLogoUrl.trim() : null)
+            : null,
+        companyFaviconMode: companyFaviconMode || 'NONE',
+        companyFaviconUrl:
+          companyFaviconMode === 'LINK'
+            ? (typeof companyFaviconUrl === 'string' ? companyFaviconUrl.trim() : null)
             : null,
         smtpServer,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,

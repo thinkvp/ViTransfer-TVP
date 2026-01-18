@@ -16,12 +16,22 @@ interface CompanyBrandingSectionProps {
   companyLogoConfigured: boolean
   companyLogoUrl: string | null
   onCompanyLogoUploaded: () => void
+  companyFaviconMode: 'NONE' | 'UPLOAD' | 'LINK'
+  setCompanyFaviconMode: (value: 'NONE' | 'UPLOAD' | 'LINK') => void
+  companyFaviconLinkUrl: string
+  setCompanyFaviconLinkUrl: (value: string) => void
+  companyFaviconConfigured: boolean
+  companyFaviconUrl: string | null
+  onCompanyFaviconUploaded: () => void
   show: boolean
   setShow: (value: boolean) => void
 }
 
 const COMPANY_LOGO_MAX_WIDTH = 300
 const COMPANY_LOGO_MAX_HEIGHT = 300
+
+const FAVICON_MAX_WIDTH = 512
+const FAVICON_MAX_HEIGHT = 512
 
 export function CompanyBrandingSection({
   companyName,
@@ -33,12 +43,23 @@ export function CompanyBrandingSection({
   companyLogoConfigured,
   companyLogoUrl,
   onCompanyLogoUploaded,
+  companyFaviconMode,
+  setCompanyFaviconMode,
+  companyFaviconLinkUrl,
+  setCompanyFaviconLinkUrl,
+  companyFaviconConfigured,
+  companyFaviconUrl,
+  onCompanyFaviconUploaded,
   show,
   setShow,
 }: CompanyBrandingSectionProps) {
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
   const [logoSuccess, setLogoSuccess] = useState<string | null>(null)
+
+  const [faviconUploading, setFaviconUploading] = useState(false)
+  const [faviconError, setFaviconError] = useState<string | null>(null)
+  const [faviconSuccess, setFaviconSuccess] = useState<string | null>(null)
 
   const logoHelpText = useMemo(() => {
     return `This logo will be displayed on email communications. You can test it using “Send Test Email” in the SMTP settings section.`
@@ -50,6 +71,18 @@ export function CompanyBrandingSection({
 
   const linkHelpText = useMemo(() => {
     return `Link directly to a PNG or JPG image (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px, <= 1MB). Use an https:// URL that is publicly accessible.`
+  }, [])
+
+  const faviconHelpText = useMemo(() => {
+    return `This favicon will be used by browsers for the tab icon.`
+  }, [])
+
+  const faviconUploadHelpText = useMemo(() => {
+    return `Upload a PNG favicon (max: ${FAVICON_MAX_WIDTH}x${FAVICON_MAX_HEIGHT}px).`
+  }, [])
+
+  const faviconLinkHelpText = useMemo(() => {
+    return `Link directly to a PNG favicon (max: ${FAVICON_MAX_WIDTH}x${FAVICON_MAX_HEIGHT}px, <= 512KB). Use an https:// URL that is publicly accessible.`
   }, [])
 
   async function validateDimensions(file: File): Promise<{ ok: boolean; error?: string }> {
@@ -114,6 +147,71 @@ export function CompanyBrandingSection({
       setLogoError('Failed to upload logo')
     } finally {
       setLogoUploading(false)
+    }
+  }
+
+  async function validateFaviconDimensions(file: File): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const objectUrl = URL.createObjectURL(file)
+      try {
+        const img = new Image()
+        const loaded = await new Promise<boolean>((resolve) => {
+          img.onload = () => resolve(true)
+          img.onerror = () => resolve(false)
+          img.src = objectUrl
+        })
+        if (!loaded) return { ok: false, error: 'Unable to read image. Please upload a valid PNG.' }
+        if (img.naturalWidth > FAVICON_MAX_WIDTH || img.naturalHeight > FAVICON_MAX_HEIGHT) {
+          return { ok: false, error: `Invalid favicon resolution. Max allowed: ${FAVICON_MAX_WIDTH}x${FAVICON_MAX_HEIGHT}px.` }
+        }
+        return { ok: true }
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+    } catch {
+      return { ok: false, error: 'Unable to validate image. Please try again.' }
+    }
+  }
+
+  async function handleFaviconSelected(file: File | null) {
+    setFaviconError(null)
+    setFaviconSuccess(null)
+    if (!file) return
+
+    const type = (file.type || '').toLowerCase()
+    if (type !== 'image/png') {
+      setFaviconError('Invalid file type. Please upload a PNG.')
+      return
+    }
+
+    const dimCheck = await validateFaviconDimensions(file)
+    if (!dimCheck.ok) {
+      setFaviconError(dimCheck.error || 'Invalid image dimensions.')
+      return
+    }
+
+    try {
+      setFaviconUploading(true)
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await apiFetch('/api/settings/company-favicon', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setFaviconError(data?.error || 'Failed to upload favicon')
+        return
+      }
+
+      setFaviconSuccess('Favicon uploaded successfully.')
+      onCompanyFaviconUploaded()
+    } catch {
+      setFaviconError('Failed to upload favicon')
+    } finally {
+      setFaviconUploading(false)
     }
   }
 
@@ -220,6 +318,78 @@ export function CompanyBrandingSection({
                     Refresh Preview
                   </Button>
                   {logoUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="pt-3 border-t space-y-2">
+              <Label htmlFor="companyFavicon">Favicon</Label>
+              <select
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={companyFaviconMode}
+                onChange={(e) => {
+                  setFaviconError(null)
+                  setFaviconSuccess(null)
+                  const value = e.target.value
+                  if (value === 'NONE' || value === 'UPLOAD' || value === 'LINK') {
+                    setCompanyFaviconMode(value)
+                  }
+                }}
+              >
+                <option value="NONE">None</option>
+                <option value="UPLOAD">Upload</option>
+                <option value="LINK">Link</option>
+              </select>
+              <p className="text-xs text-muted-foreground">{faviconHelpText}</p>
+
+              {companyFaviconMode === 'UPLOAD' ? (
+                <div className="space-y-2">
+                  <Input
+                    id="companyFavicon"
+                    type="file"
+                    accept="image/png"
+                    disabled={faviconUploading}
+                    onChange={(e) => handleFaviconSelected(e.target.files?.[0] || null)}
+                  />
+                  <p className="text-xs text-muted-foreground">{faviconUploadHelpText}</p>
+                </div>
+              ) : null}
+
+              {companyFaviconMode === 'LINK' ? (
+                <div className="space-y-2">
+                  <Input
+                    id="companyFaviconLink"
+                    type="url"
+                    value={companyFaviconLinkUrl}
+                    onChange={(e) => setCompanyFaviconLinkUrl(e.target.value)}
+                    placeholder="https://example.com/favicon.png"
+                  />
+                  <p className="text-xs text-muted-foreground">{faviconLinkHelpText}</p>
+                </div>
+              ) : null}
+
+              {companyFaviconMode !== 'NONE' && companyFaviconUrl ? (
+                <div className="mt-2 rounded-md border bg-background p-3">
+                  <p className="text-xs text-muted-foreground mb-2">Current favicon preview</p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={companyFaviconUrl} alt="Favicon" style={{ width: 32, height: 32 }} />
+                  {!companyFaviconConfigured ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Linked favicons must be publicly accessible.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {faviconError ? <p className="text-xs text-destructive">{faviconError}</p> : null}
+              {faviconSuccess ? <p className="text-xs text-success">{faviconSuccess}</p> : null}
+
+              {companyFaviconMode !== 'NONE' ? (
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="secondary" disabled={faviconUploading} onClick={() => onCompanyFaviconUploaded()}>
+                    Refresh Preview
+                  </Button>
+                  {faviconUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
                 </div>
               ) : null}
             </div>

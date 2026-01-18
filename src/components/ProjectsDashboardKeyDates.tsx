@@ -241,11 +241,14 @@ export default function ProjectsDashboardKeyDates() {
 
   const today = data?.today || ymdForDateLocal(new Date())
 
+  const isSystemAdmin = !!user?.isSystemAdmin
+  const rolePermissionsJson = (user as any)?.permissions
+
   const canSeeSales = useMemo(() => {
-    if (user?.isSystemAdmin) return true
-    const permissions = normalizeRolePermissions((user as any)?.permissions)
+    if (isSystemAdmin) return true
+    const permissions = normalizeRolePermissions(rolePermissionsJson)
     return canSeeMenu(permissions, 'sales')
-  }, [user?.isSystemAdmin, (user as any)?.permissions])
+  }, [isSystemAdmin, rolePermissionsJson])
 
   const [monthCursor, setMonthCursor] = useState<Date>(() => {
     const now = new Date()

@@ -682,6 +682,11 @@ model Settings {
   companyLogoPath String? // Stored logo for email communications (storage path)
   companyLogoUrl  String? // Direct URL to a hosted logo (PNG/JPG)
 
+  // Browser Branding
+  companyFaviconMode CompanyLogoMode @default(NONE)
+  companyFaviconPath String? // Stored favicon (storage path)
+  companyFaviconUrl  String? // Direct URL to a hosted favicon (PNG)
+
   // SMTP Email Configuration
   smtpServer      String?
   smtpPort        Int?    @default(587)

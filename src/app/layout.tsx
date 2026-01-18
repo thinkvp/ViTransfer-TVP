@@ -1,17 +1,48 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata } from 'next'
+import './globals.css'
+import { prisma } from '@/lib/db'
+import { unstable_noStore as noStore } from 'next/cache'
 
 // Force Node.js runtime across the app to allow use of Node APIs (e.g., crypto).
-export const runtime = 'nodejs';
+export const runtime = 'nodejs'
 
-export const metadata: Metadata = {
-  title: "ViTransfer",
-  description: "Professional video review and approval platform",
-  icons: {
-    icon: [
-      { url: '/icon.svg', type: 'image/svg+xml' },
-    ],
-  },
+export async function generateMetadata(): Promise<Metadata> {
+  noStore()
+
+  const settings = await prisma.settings
+    .findUnique({
+      where: { id: 'default' },
+      select: {
+        companyName: true,
+        companyFaviconMode: true,
+        companyFaviconPath: true,
+        companyFaviconUrl: true,
+        updatedAt: true,
+      },
+    })
+    .catch(() => null)
+
+  const companyName = typeof settings?.companyName === 'string' ? settings.companyName.trim() : ''
+  const siteName = companyName || 'Portal'
+
+  const faviconConfigured =
+    (settings?.companyFaviconMode === 'UPLOAD' && !!settings.companyFaviconPath) ||
+    (settings?.companyFaviconMode === 'LINK' && typeof settings.companyFaviconUrl === 'string' && !!settings.companyFaviconUrl.trim())
+
+  const faviconUrl = faviconConfigured
+    ? `/api/branding/favicon?v=${settings?.updatedAt ? new Date(settings.updatedAt).getTime() : 0}`
+    : '/icon.svg'
+
+  return {
+    title: {
+      default: siteName,
+      template: `%s | ${siteName}`,
+    },
+    description: 'Secure portal',
+    icons: {
+      icon: [{ url: faviconUrl }],
+    },
+  }
 }
 
 export const viewport = {
@@ -23,7 +54,7 @@ export const viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
@@ -54,5 +85,5 @@ export default function RootLayout({
         <main className="flex-1 min-h-0 flex flex-col">{children}</main>
       </body>
     </html>
-  );
+  )
 }
