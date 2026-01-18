@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
-import { requireApiAuth } from '@/lib/auth'
+import { requireApiAdmin } from '@/lib/auth'
+import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
@@ -46,8 +47,11 @@ const patchBodySchema = z
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ keyDateId: string }> }) {
   const { keyDateId } = await params
 
-  const authResult = await requireApiAuth(request)
+  const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) return authResult
+
+  const forbidden = requireMenuAccess(authResult, 'projects')
+  if (forbidden) return forbidden
 
   const rateLimitResult = await rateLimit(
     request,
@@ -140,8 +144,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ keyDateId: string }> }) {
   const { keyDateId } = await params
 
-  const authResult = await requireApiAuth(request)
+  const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) return authResult
+
+  const forbidden = requireMenuAccess(authResult, 'projects')
+  if (forbidden) return forbidden
 
   const rateLimitResult = await rateLimit(
     request,

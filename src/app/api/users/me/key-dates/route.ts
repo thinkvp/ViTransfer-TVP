@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
-import { requireApiAuth } from '@/lib/auth'
+import { requireApiAdmin } from '@/lib/auth'
+import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
@@ -65,8 +66,11 @@ function normalize(input: z.infer<typeof bodySchema>) {
 
 // GET /api/users/me/key-dates - list personal key dates
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAuth(request)
+  const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) return authResult
+
+  const forbidden = requireMenuAccess(authResult, 'projects')
+  if (forbidden) return forbidden
 
   const rateLimitResult = await rateLimit(
     request,
@@ -88,8 +92,11 @@ export async function GET(request: NextRequest) {
 
 // POST /api/users/me/key-dates - create personal key date
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAuth(request)
+  const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) return authResult
+
+  const forbidden = requireMenuAccess(authResult, 'projects')
+  if (forbidden) return forbidden
 
   const rateLimitResult = await rateLimit(
     request,
