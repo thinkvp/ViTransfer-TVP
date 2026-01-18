@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 import { requireApiAdmin } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { getRedis } from '@/lib/redis'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+const OAUTH_STATE_TTL_SECONDS = 10 * 60
+
+type QboOauthStatePayload = {
+  type: 'qbo_oauth_state'
+  userId: string
+  nonce: string
+}
+
+function getQboOauthStateSecret(): string {
+  const secret = process.env.JWT_SECRET?.trim()
+  if (secret) return secret
+  // This should never happen in real deployments because auth.ts enforces it,
+  // but keep a clear error message if env validation is skipped.
+  throw new Error('Missing JWT_SECRET (required to sign QBO OAuth state)')
+}
 
 function computeRedirectUri(request: NextRequest): string {
   const override = process.env.QBO_REDIRECT_URI?.trim()
@@ -29,7 +46,16 @@ export async function GET(request: NextRequest) {
 
   const redirectUri = computeRedirectUri(request)
 
-  const state = crypto.randomBytes(16).toString('hex')
+  const nonce = crypto.randomBytes(16).toString('hex')
+  const state = jwt.sign(
+    {
+      type: 'qbo_oauth_state',
+      userId: authResult.id,
+      nonce,
+    } satisfies QboOauthStatePayload,
+    getQboOauthStateSecret(),
+    { expiresIn: OAUTH_STATE_TTL_SECONDS, algorithm: 'HS256' }
+  )
   const scopes = ['com.intuit.quickbooks.accounting'].join(' ')
 
   // Store OAuth state server-side (cookie-free) for callback validation.
@@ -37,7 +63,8 @@ export async function GET(request: NextRequest) {
   if (redis.status !== 'ready') {
     await redis.connect()
   }
-  await redis.setex(`qbo:oauth_state:${state}`, 10 * 60, '1')
+  // One-time nonce to prevent replay; bound to initiating admin user.
+  await redis.setex(`qbo:oauth_state:${nonce}`, OAUTH_STATE_TTL_SECONDS, authResult.id)
 
   const authorizeUrl = new URL('https://appcenter.intuit.com/connect/oauth2')
   authorizeUrl.searchParams.set('client_id', clientId)

@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
+import jwt from 'jsonwebtoken'
 import { storeQuickBooksRefreshToken } from '@/lib/quickbooks/token-store'
 import { getRedis } from '@/lib/redis'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+type QboOauthStatePayload = {
+  type: 'qbo_oauth_state'
+  userId: string
+  nonce: string
+}
+
+function getQboOauthStateSecret(): string {
+  const secret = process.env.JWT_SECRET?.trim()
+  if (secret) return secret
+  throw new Error('Missing JWT_SECRET (required to verify QBO OAuth state)')
+}
 
 function computeRedirectUri(request: NextRequest): string {
   const override = process.env.QBO_REDIRECT_URI?.trim()
@@ -27,13 +40,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(doneUrl.toString())
   }
 
+  let parsed: QboOauthStatePayload | null = null
+  try {
+    parsed = jwt.verify(state, getQboOauthStateSecret(), { algorithms: ['HS256'] }) as QboOauthStatePayload
+  } catch {
+    parsed = null
+  }
+
+  if (!parsed || parsed.type !== 'qbo_oauth_state' || !parsed.userId || !parsed.nonce) {
+    doneUrl.searchParams.set('qbo', 'error')
+    doneUrl.searchParams.set('reason', 'invalid_state')
+    return NextResponse.redirect(doneUrl.toString())
+  }
+
   const redis = getRedis()
   if (redis.status !== 'ready') {
     await redis.connect()
   }
-  const stateKey = `qbo:oauth_state:${state}`
-  const stateExists = await redis.get(stateKey)
-  if (!stateExists) {
+  const stateKey = `qbo:oauth_state:${parsed.nonce}`
+  const storedUserId = await redis.get(stateKey)
+  if (!storedUserId || storedUserId !== parsed.userId) {
     doneUrl.searchParams.set('qbo', 'error')
     doneUrl.searchParams.set('reason', 'invalid_state')
     return NextResponse.redirect(doneUrl.toString())
