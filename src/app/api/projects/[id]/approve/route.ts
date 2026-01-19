@@ -78,6 +78,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'Selected video not found' }, { status: 404 })
     }
 
+    if ((selectedVideo as any).allowApproval === false) {
+      return NextResponse.json({ error: 'Approval is disabled for this video version' }, { status: 403 })
+    }
+
     // IMPORTANT: When approving a video, unapprove all other versions of the SAME video
     // This ensures only ONE version per video name can be approved at a time
     await prisma.video.updateMany({

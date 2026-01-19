@@ -198,7 +198,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel, videoNotes } = body
+    const { approved, name, versionLabel, videoNotes, allowApproval } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
@@ -229,6 +229,13 @@ export async function PATCH(
       )
     }
 
+    if (allowApproval !== undefined && typeof allowApproval !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid request: allowApproval must be a boolean' },
+        { status: 400 }
+      )
+    }
+
     if (typeof videoNotes === 'string' && videoNotes.trim().length > 500) {
       return NextResponse.json(
         { error: 'Invalid request: videoNotes must be 500 characters or fewer' },
@@ -237,7 +244,7 @@ export async function PATCH(
     }
 
     // At least one field must be provided
-    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined) {
+    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined) {
       return NextResponse.json(
         { error: 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -273,7 +280,7 @@ export async function PATCH(
       if (forbidden) return forbidden
     }
 
-    if (name !== undefined || versionLabel !== undefined || videoNotes !== undefined) {
+    if (name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined) {
       const forbidden = requireActionAccess(authResult, 'changeProjectSettings')
       if (forbidden) return forbidden
     }
@@ -312,6 +319,10 @@ export async function PATCH(
     if (videoNotes !== undefined) {
       const trimmed = videoNotes.trim()
       updateData.videoNotes = trimmed ? trimmed : null
+    }
+
+    if (allowApproval !== undefined) {
+      updateData.allowApproval = allowApproval
     }
 
     // Update video

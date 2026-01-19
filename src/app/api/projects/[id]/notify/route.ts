@@ -419,12 +419,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     if (successCount > 0) {
-      // If this is the first time we notify clients, move NOT_STARTED → IN_REVIEW
+      // If this is the first time we notify clients, move NOT_STARTED/IN_PROGRESS → IN_REVIEW
       // (Display-only state; does not block auto-approval.)
-      if (project.status === 'NOT_STARTED') {
+      if (project.status === 'NOT_STARTED' || project.status === 'IN_PROGRESS') {
         const permissions = getUserPermissions(authResult)
         if (permissions.actions.changeProjectStatuses) {
           try {
+            const previousStatus = project.status
             await prisma.project.update({
               where: { id: projectId },
               data: { status: 'IN_REVIEW' },
@@ -433,7 +434,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             await prisma.projectStatusChange.create({
               data: {
                 projectId,
-                previousStatus: 'NOT_STARTED',
+                previousStatus: previousStatus as any,
                 currentStatus: 'IN_REVIEW',
                 source: 'SYSTEM',
                 changedById: null,

@@ -553,7 +553,7 @@ export default function UsersPage() {
                 <div className="space-y-2">
                   {(
                     [
-                      ['NOT_STARTED', 'IN_REVIEW', 'ON_HOLD'],
+                      ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD'],
                       ['SHARE_ONLY', 'APPROVED', 'CLOSED'],
                     ] as ProjectStatus[][]
                   ).map((row) => (

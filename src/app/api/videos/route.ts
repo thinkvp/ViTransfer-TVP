@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes } = body
+    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval } = body
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -51,6 +51,10 @@ export async function POST(request: NextRequest) {
         { error: 'Version notes must be 500 characters or fewer' },
         { status: 400 }
       )
+    }
+
+    if (allowApproval !== undefined && typeof allowApproval !== 'boolean') {
+      return NextResponse.json({ error: 'allowApproval must be a boolean' }, { status: 400 })
     }
 
     // Validate uploaded file
@@ -119,6 +123,7 @@ export async function POST(request: NextRequest) {
         version: nextVersion,
         versionLabel: versionLabel || `v${nextVersion}`,
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
+        allowApproval: allowApproval === true,
         originalFileName,
         originalFileSize: BigInt(originalFileSize),
         originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,

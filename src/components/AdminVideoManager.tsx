@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { Switch } from './ui/switch'
 import { Textarea } from './ui/textarea'
 import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil } from 'lucide-react'
 import VideoUpload from './VideoUpload'
@@ -64,6 +65,7 @@ export default function AdminVideoManager({
   const [showNewVideoForm, setShowNewVideoForm] = useState(!hasVideos) // Auto-show if no videos
   const [newVideoName, setNewVideoName] = useState('')
   const [newVideoNotes, setNewVideoNotes] = useState('')
+  const [newVideoAllowApproval, setNewVideoAllowApproval] = useState(false)
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
   const [editGroupValue, setEditGroupValue] = useState('')
   const [savingGroupName, setSavingGroupName] = useState<string | null>(null)
@@ -102,6 +104,7 @@ export default function AdminVideoManager({
     setShowNewVideoForm(false)
     setNewVideoName('')
     setNewVideoNotes('')
+    setNewVideoAllowApproval(false)
     // Refresh the project data to show the new video
     onRefresh?.()
   }
@@ -310,6 +313,20 @@ export default function AdminVideoManager({
                   </p>
                 </div>
 
+                <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
+                    <div className="text-xs text-muted-foreground">
+                      When disabled, clients won’t see the Approve Video button for this version.
+                    </div>
+                  </div>
+                  <Switch
+                    checked={newVideoAllowApproval}
+                    onCheckedChange={(v) => setNewVideoAllowApproval(Boolean(v))}
+                    aria-label="Allow approval of version"
+                  />
+                </div>
+
                 <div>
                   <Label htmlFor="videoNotes">
                     Version Notes <span className="text-muted-foreground">(Optional)</span>
@@ -332,6 +349,8 @@ export default function AdminVideoManager({
                     videoName={newVideoName.trim()}
                     videoNotes={newVideoNotes}
                     showVideoNotesField={false}
+                    allowApproval={newVideoAllowApproval}
+                    showAllowApprovalField={false}
                     onUploadComplete={handleUploadComplete}
                   />
                 ) : (
@@ -348,6 +367,7 @@ export default function AdminVideoManager({
                       setShowNewVideoForm(false)
                       setNewVideoName('')
                       setNewVideoNotes('')
+                      setNewVideoAllowApproval(false)
                     }}
                   >
                     Cancel

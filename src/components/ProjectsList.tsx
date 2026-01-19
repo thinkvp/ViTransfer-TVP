@@ -198,11 +198,12 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   const getStatusRank = (status: string) => {
     switch (status) {
       case 'NOT_STARTED': return 0
-      case 'IN_REVIEW': return 1
-      case 'ON_HOLD': return 2
-      case 'SHARE_ONLY': return 3
-      case 'APPROVED': return 4
-      case 'CLOSED': return 5
+      case 'IN_PROGRESS': return 1
+      case 'IN_REVIEW': return 2
+      case 'ON_HOLD': return 3
+      case 'SHARE_ONLY': return 4
+      case 'APPROVED': return 5
+      case 'CLOSED': return 6
       default: return 999
     }
   }

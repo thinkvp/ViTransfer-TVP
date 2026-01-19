@@ -1,5 +1,6 @@
 export type ProjectStatus =
   | 'NOT_STARTED'
+  | 'IN_PROGRESS'
   | 'IN_REVIEW'
   | 'ON_HOLD'
   | 'SHARE_ONLY'
@@ -8,6 +9,7 @@ export type ProjectStatus =
 
 export const PROJECT_STATUS_OPTIONS: Array<{ value: ProjectStatus; label: string }> = [
   { value: 'NOT_STARTED', label: 'Not Started' },
+  { value: 'IN_PROGRESS', label: 'In Progress' },
   { value: 'IN_REVIEW', label: 'In Review' },
   { value: 'ON_HOLD', label: 'On Hold' },
   { value: 'SHARE_ONLY', label: 'Share Only' },
@@ -30,6 +32,8 @@ export function projectStatusBadgeClass(status: string): string {
       return 'bg-warning text-warning-visible border-2 border-warning-visible dark:bg-warning/20 dark:text-warning dark:border-warning/40'
     case 'IN_REVIEW':
       return 'bg-primary text-primary-visible border-2 border-primary-visible dark:bg-primary/20 dark:text-primary dark:border-primary/40'
+    case 'IN_PROGRESS':
+      return 'bg-violet-800 text-violet-100 border-2 border-violet-200 dark:bg-violet-500/20 dark:text-violet-300 dark:border-violet-400/40'
     case 'NOT_STARTED':
       return 'bg-pending text-pending-visible border-2 border-pending-visible dark:bg-pending/20 dark:text-pending dark:border-pending/40'
     case 'CLOSED':
@@ -49,6 +53,8 @@ export function projectStatusDotClass(status: string): string {
       return 'text-warning'
     case 'IN_REVIEW':
       return 'text-primary'
+    case 'IN_PROGRESS':
+      return 'text-violet-600 dark:text-violet-400'
     case 'NOT_STARTED':
       return 'text-pending-visible dark:text-pending'
     case 'CLOSED':
@@ -62,15 +68,17 @@ export function projectStatusSortPriority(status: string): number {
   switch (status) {
     case 'NOT_STARTED':
       return 0
+    case 'IN_PROGRESS':
+      return 1
     case 'IN_REVIEW':
     case 'ON_HOLD':
-      return 1
-    case 'SHARE_ONLY':
       return 2
-    case 'APPROVED':
+    case 'SHARE_ONLY':
       return 3
-    case 'CLOSED':
+    case 'APPROVED':
       return 4
+    case 'CLOSED':
+      return 5
     default:
       return 99
   }

@@ -21,7 +21,7 @@ const updateProjectSchema = z.object({
   slug: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
   clientId: z.string().regex(/^c[a-z0-9]{24}$/).optional(),
-  status: z.enum(['NOT_STARTED', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']).optional(),
+  status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']).optional(),
   enableRevisions: z.boolean().optional(),
   maxRevisions: z.number().int().min(0).max(50).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),

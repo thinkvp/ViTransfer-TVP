@@ -595,6 +595,7 @@ export function CommentSectionView({
   const latestSelectableVideo = sortedVideoVersions[0] || null
   const headerVideo = currentVideo || latestSelectableVideo
   const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
+  const approvalEnabledForHeaderVideo = Boolean((headerVideo as any)?.allowApproval)
 
   const handleSelectVideoVersion = (videoId: string) => {
     // Update comments immediately
@@ -683,6 +684,10 @@ export function CommentSectionView({
   const handleApproveSelected = async () => {
     const video = headerVideo
     if (!video) return
+    if (!approvalEnabledForHeaderVideo) {
+      alert('Approval is disabled for this version.')
+      return
+    }
     if (approving) return
 
     setApproving(true)
@@ -1005,7 +1010,7 @@ export function CommentSectionView({
 
               {showVideoActions && (
                 <>
-                  {showApproveButton && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup ? (
+                  {showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup ? (
                     <Button
                       variant="success"
                       size="sm"
@@ -1055,7 +1060,7 @@ export function CommentSectionView({
             </div>
           </div>
 
-          {showVideoActions && showApproveButton && showApproveConfirm && (
+          {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && showApproveConfirm && (
             <div className="mt-2 border border-border rounded-lg p-3 bg-accent/30">
               <div className="text-sm text-foreground font-semibold">Approve this video?</div>
               <div className="text-xs text-muted-foreground mt-1">

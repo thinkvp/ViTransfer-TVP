@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { Switch } from './ui/switch'
 import { Textarea } from './ui/textarea'
 import { useRouter } from 'next/navigation'
 import { Upload, Pause, Play, X } from 'lucide-react'
@@ -29,6 +30,11 @@ interface VideoUploadProps {
   // If showVideoNotesField is false, this value is used but no input is rendered.
   videoNotes?: string
   showVideoNotesField?: boolean
+
+  // Per-version client approval toggle.
+  // Default should be disabled for new uploads.
+  allowApproval?: boolean
+  showAllowApprovalField?: boolean
 }
 
 export default function VideoUpload({
@@ -37,6 +43,8 @@ export default function VideoUpload({
   onUploadComplete,
   videoNotes: videoNotesProp,
   showVideoNotesField = true,
+  allowApproval: allowApprovalProp,
+  showAllowApprovalField = true,
 }: VideoUploadProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -50,6 +58,7 @@ export default function VideoUpload({
   const [uploadSpeed, setUploadSpeed] = useState(0)
   const [versionLabel, setVersionLabel] = useState('')
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
+  const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? false)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -58,6 +67,12 @@ export default function VideoUpload({
       setVideoNotes(videoNotesProp)
     }
   }, [videoNotesProp])
+
+  useEffect(() => {
+    if (allowApprovalProp !== undefined) {
+      setAllowApproval(allowApprovalProp)
+    }
+  }, [allowApprovalProp])
 
   // Warn before leaving page if upload is in progress
   useEffect(() => {
@@ -190,6 +205,7 @@ export default function VideoUpload({
           projectId,
           versionLabel: trimmedVersionLabel,
           videoNotes: trimmedVideoNotes,
+          allowApproval: allowApproval === true,
           originalFileName: file.name,
           originalFileSize: file.size,
           name: trimmedVideoName, // Include video name for multi-video support
@@ -275,6 +291,7 @@ export default function VideoUpload({
           setFile(null)
           setVersionLabel('')
           setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
+          setAllowApproval(allowApprovalProp ?? false)
           uploadRef.current = null
           videoIdRef.current = null
           router.refresh()
@@ -454,6 +471,23 @@ export default function VideoUpload({
           disabled={uploading}
         />
       </div>
+
+      {showAllowApprovalField && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
+            <div className="text-xs text-muted-foreground">
+              When disabled, clients won’t see the Approve Video button for this version.
+            </div>
+          </div>
+          <Switch
+            checked={allowApproval}
+            onCheckedChange={(v) => setAllowApproval(Boolean(v))}
+            disabled={uploading}
+            aria-label="Allow approval of version"
+          />
+        </div>
+      )}
 
       {/* Version Notes */}
       {showVideoNotesField && (

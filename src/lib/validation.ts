@@ -211,7 +211,7 @@ export const updateProjectSchema = z.object({
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
-  status: z.enum(['NOT_STARTED', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']).optional(),
+  status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']).optional(),
   previewResolution: z.enum(['720p', '1080p']).optional(),
   watermarkText: safeStringSchema(0, 100).optional(),
   enableVideos: z.boolean().optional(),

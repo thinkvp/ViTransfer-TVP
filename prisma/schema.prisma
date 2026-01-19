@@ -469,6 +469,7 @@ enum ProjectStatus {
   APPROVED
   SHARE_ONLY
   NOT_STARTED
+  IN_PROGRESS
   CLOSED
 }
 
@@ -530,6 +531,7 @@ model Video {
   // Per-video approval
   approved   Boolean   @default(false)
   approvedAt DateTime?
+  allowApproval Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

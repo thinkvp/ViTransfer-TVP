@@ -5,6 +5,7 @@ import { Video } from '@prisma/client'
 import { formatDuration, formatFileSize } from '@/lib/utils'
 import { Progress } from './ui/progress'
 import { Button } from './ui/button'
+import { Switch } from './ui/switch'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
@@ -33,6 +34,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null)
   const [notesEditValue, setNotesEditValue] = useState('')
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
+  const [savingAllowApprovalId, setSavingAllowApprovalId] = useState<string | null>(null)
   const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
 
@@ -108,6 +110,31 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
       .finally(() => {
         setApprovingId(null)
       })
+  }
+
+  const handleToggleAllowApproval = async (videoId: string, nextAllowApproval: boolean) => {
+    if (savingAllowApprovalId) return
+
+    const previous = (videos.find(v => v.id === videoId) as any)?.allowApproval
+    setSavingAllowApprovalId(videoId)
+
+    // Optimistically update UI
+    setVideos(prev => prev.map(v =>
+      v.id === videoId ? ({ ...(v as any), allowApproval: nextAllowApproval } as any) : v
+    ))
+
+    try {
+      await apiPatch(`/api/videos/${videoId}`, { allowApproval: nextAllowApproval })
+      onRefresh?.()
+    } catch (error) {
+      // Revert optimistic update
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? ({ ...(v as any), allowApproval: previous } as any) : v
+      ))
+      alert('Failed to update approval setting')
+    } finally {
+      setSavingAllowApprovalId(null)
+    }
   }
 
   const handleStartEdit = (videoId: string, currentLabel: string) => {
@@ -423,6 +450,23 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
           {/* Version Notes */}
           {video.status === 'READY' && (
             <div className="pt-3">
+              {isAdmin && editingId !== video.id && (
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
+                    <div className="text-xs text-muted-foreground">
+                      When disabled, clients won’t see the Approve Video button for this version.
+                    </div>
+                  </div>
+                  <Switch
+                    checked={Boolean((video as any).allowApproval)}
+                    onCheckedChange={(v) => handleToggleAllowApproval(video.id, Boolean(v))}
+                    disabled={savingAllowApprovalId === video.id}
+                    aria-label="Allow approval of version"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <p className="text-muted-foreground text-xs sm:text-sm">Version Notes</p>
                 {isAdmin && editingId !== video.id && (
