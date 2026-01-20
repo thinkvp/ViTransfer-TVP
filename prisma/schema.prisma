@@ -1215,6 +1215,10 @@ model PushNotificationSettings {
   notifySalesInvoiceViewed Boolean @default(true)
   notifySalesInvoicePaid   Boolean @default(true)
 
+  // Password Reset Events
+  notifyPasswordResetRequested Boolean @default(true)
+  notifyPasswordResetSuccess   Boolean @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

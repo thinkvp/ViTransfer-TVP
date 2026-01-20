@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
         notifySalesQuoteAccepted: true,
         notifySalesInvoiceViewed: true,
         notifySalesInvoicePaid: true,
+        notifyPasswordResetRequested: true,
+        notifyPasswordResetSuccess: true,
       },
     })
 
@@ -120,6 +122,8 @@ export async function PATCH(request: NextRequest) {
         notifySalesQuoteAccepted: body.notifySalesQuoteAccepted ?? true,
         notifySalesInvoiceViewed: body.notifySalesInvoiceViewed ?? true,
         notifySalesInvoicePaid: body.notifySalesInvoicePaid ?? true,
+        notifyPasswordResetRequested: body.notifyPasswordResetRequested ?? true,
+        notifyPasswordResetSuccess: body.notifyPasswordResetSuccess ?? true,
       },
       create: {
         id: 'default',
@@ -138,6 +142,8 @@ export async function PATCH(request: NextRequest) {
         notifySalesQuoteAccepted: body.notifySalesQuoteAccepted ?? true,
         notifySalesInvoiceViewed: body.notifySalesInvoiceViewed ?? true,
         notifySalesInvoicePaid: body.notifySalesInvoicePaid ?? true,
+        notifyPasswordResetRequested: body.notifyPasswordResetRequested ?? true,
+        notifyPasswordResetSuccess: body.notifyPasswordResetSuccess ?? true,
       },
     })
 

@@ -97,6 +97,8 @@ interface PushNotificationSettings {
   notifySalesQuoteAccepted: boolean
   notifySalesInvoiceViewed: boolean
   notifySalesInvoicePaid: boolean
+  notifyPasswordResetRequested: boolean
+  notifyPasswordResetSuccess: boolean
 }
 
 export default function GlobalSettingsPage() {
@@ -209,6 +211,8 @@ export default function GlobalSettingsPage() {
   const [pushNotifySalesQuoteAccepted, setPushNotifySalesQuoteAccepted] = useState(true)
   const [pushNotifySalesInvoiceViewed, setPushNotifySalesInvoiceViewed] = useState(true)
   const [pushNotifySalesInvoicePaid, setPushNotifySalesInvoicePaid] = useState(true)
+  const [pushNotifyPasswordResetRequested, setPushNotifyPasswordResetRequested] = useState(true)
+  const [pushNotifyPasswordResetSuccess, setPushNotifyPasswordResetSuccess] = useState(true)
 
   // Collapsible section state (all collapsed by default)
   const [showCompanyBranding, setShowCompanyBranding] = useState(false)
@@ -319,6 +323,8 @@ export default function GlobalSettingsPage() {
           setPushNotifySalesQuoteAccepted(pushData.notifySalesQuoteAccepted ?? true)
           setPushNotifySalesInvoiceViewed(pushData.notifySalesInvoiceViewed ?? true)
           setPushNotifySalesInvoicePaid(pushData.notifySalesInvoicePaid ?? true)
+          setPushNotifyPasswordResetRequested(pushData.notifyPasswordResetRequested ?? true)
+          setPushNotifyPasswordResetSuccess(pushData.notifyPasswordResetSuccess ?? true)
         }
       } catch (err) {
         setError('Failed to load settings')
@@ -523,6 +529,8 @@ export default function GlobalSettingsPage() {
         notifySalesQuoteAccepted: pushNotifySalesQuoteAccepted,
         notifySalesInvoiceViewed: pushNotifySalesInvoiceViewed,
         notifySalesInvoicePaid: pushNotifySalesInvoicePaid,
+        notifyPasswordResetRequested: pushNotifyPasswordResetRequested,
+        notifyPasswordResetSuccess: pushNotifyPasswordResetSuccess,
       }
 
       await apiPatch('/api/settings/push-notifications', pushUpdates)
@@ -850,6 +858,10 @@ export default function GlobalSettingsPage() {
             setNotifySalesInvoiceViewed={setPushNotifySalesInvoiceViewed}
             notifySalesInvoicePaid={pushNotifySalesInvoicePaid}
             setNotifySalesInvoicePaid={setPushNotifySalesInvoicePaid}
+            notifyPasswordResetRequested={pushNotifyPasswordResetRequested}
+            setNotifyPasswordResetRequested={setPushNotifyPasswordResetRequested}
+            notifyPasswordResetSuccess={pushNotifyPasswordResetSuccess}
+            setNotifyPasswordResetSuccess={setPushNotifyPasswordResetSuccess}
             show={showPushNotifications}
             setShow={setShowPushNotifications}
           />

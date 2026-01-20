@@ -37,6 +37,10 @@ interface PushNotificationsSectionProps {
   setNotifySalesInvoiceViewed: (value: boolean) => void
   notifySalesInvoicePaid: boolean
   setNotifySalesInvoicePaid: (value: boolean) => void
+  notifyPasswordResetRequested: boolean
+  setNotifyPasswordResetRequested: (value: boolean) => void
+  notifyPasswordResetSuccess: boolean
+  setNotifyPasswordResetSuccess: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -72,6 +76,10 @@ export function PushNotificationsSection({
   setNotifySalesInvoiceViewed,
   notifySalesInvoicePaid,
   setNotifySalesInvoicePaid,
+  notifyPasswordResetRequested,
+  setNotifyPasswordResetRequested,
+  notifyPasswordResetSuccess,
+  setNotifyPasswordResetSuccess,
   show,
   setShow,
 }: PushNotificationsSectionProps) {
@@ -361,6 +369,40 @@ export function PushNotificationsSection({
                           id="notifySalesInvoicePaid"
                           checked={notifySalesInvoicePaid}
                           onCheckedChange={setNotifySalesInvoicePaid}
+                        />
+                      </div>
+
+                      {/* Password Reset Requested */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifyPasswordResetRequested" className="text-sm font-normal">
+                            Password Reset Requested
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When someone requests a password reset link
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifyPasswordResetRequested"
+                          checked={notifyPasswordResetRequested}
+                          onCheckedChange={setNotifyPasswordResetRequested}
+                        />
+                      </div>
+
+                      {/* Password Reset Success */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifyPasswordResetSuccess" className="text-sm font-normal">
+                            Password Changed
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When a user successfully resets their password
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifyPasswordResetSuccess"
+                          checked={notifyPasswordResetSuccess}
+                          onCheckedChange={setNotifyPasswordResetSuccess}
                         />
                       </div>
                     </div>

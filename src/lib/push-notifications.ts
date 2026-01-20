@@ -13,6 +13,8 @@ export interface PushNotificationPayload {
     | 'SALES_QUOTE_ACCEPTED'
     | 'SALES_INVOICE_VIEWED'
     | 'SALES_INVOICE_PAID'
+    | 'PASSWORD_RESET_REQUESTED'
+    | 'PASSWORD_RESET_SUCCESS'
   projectId?: string
   projectName?: string
   title: string
@@ -48,6 +50,8 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'SALES_QUOTE_ACCEPTED': 'notifySalesQuoteAccepted',
       'SALES_INVOICE_VIEWED': 'notifySalesInvoiceViewed',
       'SALES_INVOICE_PAID': 'notifySalesInvoicePaid',
+      'PASSWORD_RESET_REQUESTED': 'notifyPasswordResetRequested',
+      'PASSWORD_RESET_SUCCESS': 'notifyPasswordResetSuccess',
     }
 
     const toggleKey = eventToggleMap[payload.type]
@@ -164,6 +168,10 @@ function getPriorityForType(type: string): number {
       return 8 // High
     case 'VIDEO_APPROVAL':
       return 7 // High
+    case 'PASSWORD_RESET_SUCCESS':
+      return 8 // High - security-relevant password change
+    case 'PASSWORD_RESET_REQUESTED':
+      return 5 // Medium - informational
     case 'CLIENT_COMMENT':
       return 5 // Medium
     case 'SUCCESSFUL_ADMIN_LOGIN':

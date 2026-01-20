@@ -11,6 +11,13 @@ export type SecurityEventType =
   | 'ADMIN_PASSWORD_LOGIN_FAILED'
   | 'ADMIN_LOGIN_RATE_LIMIT_HIT'
 
+  // Password Reset Events
+  | 'PASSWORD_RESET_REQUESTED'
+  | 'PASSWORD_RESET_RATE_LIMIT_HIT'
+  | 'PASSWORD_RESET_TOKEN_INVALID'
+  | 'PASSWORD_RESET_SUCCESS'
+  | 'PASSWORD_RESET_ERROR'
+
   // Passkey Events
   | 'PASSKEY_REGISTERED'
   | 'PASSKEY_REGISTRATION_FAILED'
@@ -70,6 +77,38 @@ export const SECURITY_EVENT_METADATA: Record<SecurityEventType, SecurityEventMet
   ADMIN_LOGIN_RATE_LIMIT_HIT: {
     label: 'Admin Login Rate Limited',
     description: 'Too many failed admin login attempts - account temporarily locked for security.',
+    category: 'Admin Auth',
+    severity: 'WARNING',
+  },
+
+  // Password Reset Events
+  PASSWORD_RESET_REQUESTED: {
+    label: 'Password Reset Requested',
+    description: 'Password reset link requested for admin account.',
+    category: 'Admin Auth',
+    severity: 'INFO',
+  },
+  PASSWORD_RESET_RATE_LIMIT_HIT: {
+    label: 'Password Reset Rate Limited',
+    description: 'Too many password reset requests for this email - temporarily blocked.',
+    category: 'Admin Auth',
+    severity: 'WARNING',
+  },
+  PASSWORD_RESET_TOKEN_INVALID: {
+    label: 'Password Reset Token Invalid',
+    description: 'Invalid or expired password reset token used.',
+    category: 'Admin Auth',
+    severity: 'WARNING',
+  },
+  PASSWORD_RESET_SUCCESS: {
+    label: 'Password Reset Success',
+    description: 'Admin password successfully reset using reset link.',
+    category: 'Admin Auth',
+    severity: 'INFO',
+  },
+  PASSWORD_RESET_ERROR: {
+    label: 'Password Reset Error',
+    description: 'Error occurred during password reset process.',
     category: 'Admin Auth',
     severity: 'WARNING',
   },
