@@ -122,7 +122,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0">
 
       {shareToken === undefined && (
         <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
@@ -147,8 +147,8 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
       )}
 
       {shareToken && data && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-md border p-3">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+          <div className="min-w-0 rounded-md border p-3">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-medium">Public link views</h3>
               <span className="text-xs text-gray-500">Token: {data.share.token.slice(0, 8)}…</span>
@@ -157,7 +157,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
             {views.length === 0 ? (
               <div className="text-sm text-gray-600">No views recorded yet.</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="max-w-full overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
@@ -208,7 +208,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
             )}
           </div>
 
-          <div className="rounded-md border p-3">
+          <div className="min-w-0 rounded-md border p-3">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-medium">Emails</h3>
               <span className="text-xs text-gray-500">Opens require tracking pixels</span>
@@ -217,7 +217,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
             {emails.length === 0 ? (
               <div className="text-sm text-gray-600">No emails recorded yet.</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="max-w-full overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">

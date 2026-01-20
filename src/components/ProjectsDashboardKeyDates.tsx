@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2, Pencil, Bell } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2, Pencil, Bell, Check, X } from 'lucide-react'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { useAuth } from '@/components/AuthProvider'
 import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
@@ -53,6 +53,11 @@ type KeyDatesResponse = {
   today: string // YYYY-MM-DD
   keyDates: ProjectKeyDateRow[]
   personalKeyDates?: PersonalKeyDateRow[]
+}
+
+type ProjectReminderOptions = {
+  users: Array<{ id: string; name: string; email: string }>
+  recipients: Array<{ id: string; name: string; email: string }>
 }
 
 type SalesCalendarItemRow = {
@@ -162,6 +167,10 @@ export default function ProjectsDashboardKeyDates() {
     users: Array<{ id: string; name: string; email: string }>
   } | null>(null)
 
+  const [projectReminderOptionsByProjectId, setProjectReminderOptionsByProjectId] = useState<
+    Record<string, ProjectReminderOptions>
+  >({})
+
   const ensurePersonalReminderOptions = async (): Promise<{
     users: Array<{ id: string; name: string; email: string }>
   }> => {
@@ -176,6 +185,25 @@ export default function ProjectsDashboardKeyDates() {
     } catch {
       const next = { users: [] }
       setPersonalReminderOptions(next)
+      return next
+    }
+  }
+
+  const ensureProjectReminderOptions = async (projectId: string): Promise<ProjectReminderOptions> => {
+    const cached = projectReminderOptionsByProjectId[projectId]
+    if (cached) return cached
+
+    try {
+      const result = await apiJson<ProjectReminderOptions>(`/api/projects/${projectId}/key-dates/reminder-options`)
+      const next: ProjectReminderOptions = {
+        users: Array.isArray(result?.users) ? result.users : [],
+        recipients: Array.isArray(result?.recipients) ? result.recipients : [],
+      }
+      setProjectReminderOptionsByProjectId((prev) => ({ ...prev, [projectId]: next }))
+      return next
+    } catch {
+      const next: ProjectReminderOptions = { users: [], recipients: [] }
+      setProjectReminderOptionsByProjectId((prev) => ({ ...prev, [projectId]: next }))
       return next
     }
   }
@@ -238,6 +266,25 @@ export default function ProjectsDashboardKeyDates() {
   const [calendarFeedUrl, setCalendarFeedUrl] = useState<string | null>(null)
   const [calendarFeedLoading, setCalendarFeedLoading] = useState(false)
   const [calendarFeedError, setCalendarFeedError] = useState<string | null>(null)
+
+  const [projectOpen, setProjectOpen] = useState(false)
+  const [projectSaving, setProjectSaving] = useState(false)
+  const [projectError, setProjectError] = useState<string | null>(null)
+  const [projectDraft, setProjectDraft] = useState<{
+    id: string | null
+    projectId: string
+    projectLabel: string
+    date: string
+    allDay: boolean
+    startTime: string
+    finishTime: string
+    type: string
+    notes: string
+    reminderDate: string
+    reminderTime: string
+    reminderUserIds: string[]
+    reminderRecipientIds: string[]
+  } | null>(null)
 
   const today = data?.today || ymdForDateLocal(new Date())
 
@@ -567,6 +614,128 @@ export default function ProjectsDashboardKeyDates() {
     }
   }
 
+  const openEditProjectDialog = async (row: ProjectKeyDateRow) => {
+    setProjectError(null)
+    setProjectDraft(null)
+    setProjectOpen(true)
+    void ensureProjectReminderOptions(row.projectId)
+
+    try {
+      const result = await apiJson<{ keyDates?: any[] }>(`/api/projects/${row.projectId}/key-dates`)
+      const list = Array.isArray(result?.keyDates) ? result.keyDates : []
+      const found = list.find((x) => x && String(x.id) === row.id)
+      const reminder = splitIsoToLocalDateTime(found?.reminderAt)
+      const targets = (found?.reminderTargets || null) as any
+      const userIds = Array.isArray(targets?.userIds) ? targets.userIds.map(String).filter(Boolean) : []
+      const recipientIds = Array.isArray(targets?.recipientIds) ? targets.recipientIds.map(String).filter(Boolean) : []
+
+      setProjectDraft({
+        id: row.id,
+        projectId: row.projectId,
+        projectLabel: row.project.companyName || row.project.title,
+        date: found?.date || row.date,
+        allDay: Boolean(found?.allDay ?? row.allDay),
+        startTime: (found?.startTime ?? row.startTime ?? '') || '',
+        finishTime: (found?.finishTime ?? row.finishTime ?? '') || '',
+        type: String(found?.type || row.type),
+        notes: String(found?.notes || row.notes || ''),
+        reminderDate: reminder.date,
+        reminderTime: reminder.time,
+        reminderUserIds: userIds,
+        reminderRecipientIds: recipientIds,
+      })
+    } catch (e: any) {
+      setProjectError(e?.message || 'Failed to load key date')
+    }
+  }
+
+  const saveProjectKeyDate = async () => {
+    if (!projectDraft) return
+    setProjectError(null)
+
+    if (!projectDraft.id) {
+      setProjectError('Missing key date id')
+      return
+    }
+    if (!projectDraft.date.trim()) {
+      setProjectError('Date is required')
+      return
+    }
+
+    if (!projectDraft.allDay) {
+      if (!isValidTime24h(projectDraft.startTime)) {
+        setProjectError('Start time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+        return
+      }
+      if (!isValidTime24h(projectDraft.finishTime)) {
+        setProjectError('Finish time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+        return
+      }
+    }
+
+    if (!isValidTime24h(projectDraft.reminderTime)) {
+      setProjectError('Reminder time must be 24-hour HH:MM (e.g. 09:30, 18:05)')
+      return
+    }
+
+    const reminderAnyTargets =
+      (projectDraft.reminderUserIds?.length || 0) + (projectDraft.reminderRecipientIds?.length || 0) > 0
+    const reminderAnyDateTime = Boolean(projectDraft.reminderDate?.trim()) || Boolean(projectDraft.reminderTime?.trim())
+    const reminderAnyFields = reminderAnyTargets || reminderAnyDateTime
+
+    if (reminderAnyFields) {
+      if (!projectDraft.reminderDate?.trim() || !projectDraft.reminderTime?.trim()) {
+        setProjectError('Reminder date and time are required')
+        return
+      }
+      if (!reminderAnyTargets) {
+        setProjectError('Select at least one user or recipient for the reminder')
+        return
+      }
+    }
+
+    setProjectSaving(true)
+    try {
+      const reminderAt = toIsoFromLocalDateTime(projectDraft.reminderDate, projectDraft.reminderTime)
+
+      if (reminderAnyFields) {
+        if (!reminderAt) {
+          setProjectError('Reminder date and time are required')
+          return
+        }
+        const reminderAtMs = new Date(reminderAt).getTime()
+        if (!Number.isFinite(reminderAtMs) || reminderAtMs <= Date.now()) {
+          setProjectError('Reminder must be set to a future date and time')
+          return
+        }
+      }
+
+      const payload = {
+        date: projectDraft.date,
+        allDay: projectDraft.allDay,
+        startTime: projectDraft.allDay ? '' : projectDraft.startTime,
+        finishTime: projectDraft.allDay ? '' : projectDraft.finishTime,
+        type: projectDraft.type,
+        notes: projectDraft.notes,
+        reminderAt: reminderAt || '',
+        reminderTargets: {
+          userIds: projectDraft.reminderUserIds,
+          recipientIds: projectDraft.reminderRecipientIds,
+        },
+      }
+
+      await apiPatch(`/api/projects/${projectDraft.projectId}/key-dates/${projectDraft.id}`, payload)
+
+      setProjectOpen(false)
+      setProjectDraft(null)
+      await reload()
+    } catch (e: any) {
+      setProjectError(e?.message || 'Failed to save key date')
+    } finally {
+      setProjectSaving(false)
+    }
+  }
+
   const calendarActions = (
     <>
       <Dialog
@@ -581,7 +750,7 @@ export default function ProjectsDashboardKeyDates() {
             Subscribe
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Subscribe in Google Calendar</DialogTitle>
             <DialogDescription>
@@ -589,15 +758,17 @@ export default function ProjectsDashboardKeyDates() {
             </DialogDescription>
           </DialogHeader>
 
-          {calendarFeedLoading ? (
-            <div className="text-sm text-muted-foreground">Loading…</div>
-          ) : calendarFeedError ? (
-            <div className="text-sm text-destructive">{calendarFeedError}</div>
-          ) : calendarFeedUrl ? (
-            <ShareLink shareUrl={calendarFeedUrl} label="Calendar feed URL" />
-          ) : (
-            <div className="text-sm text-muted-foreground">No calendar link yet.</div>
-          )}
+          <div className="flex-1 overflow-y-auto pr-1">
+            {calendarFeedLoading ? (
+              <div className="text-sm text-muted-foreground">Loading…</div>
+            ) : calendarFeedError ? (
+              <div className="text-sm text-destructive">{calendarFeedError}</div>
+            ) : calendarFeedUrl ? (
+              <ShareLink shareUrl={calendarFeedUrl} label="Calendar feed URL" />
+            ) : (
+              <div className="text-sm text-muted-foreground">No calendar link yet.</div>
+            )}
+          </div>
 
           <DialogFooter>
             <Button
@@ -706,11 +877,16 @@ export default function ProjectsDashboardKeyDates() {
 
                     <div className="flex-shrink-0 flex items-center gap-2">
                       {k.kind === 'project' ? (
-                        <Link href={`/admin/projects/${k.projectId}?editKeyDate=${encodeURIComponent(k.id)}`} className="flex-shrink-0">
-                          <Button variant="outline" size="icon" aria-label="Edit key date" title="Edit key date">
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </Link>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label="Edit key date"
+                          title="Edit key date"
+                          onClick={() => void openEditProjectDialog(k)}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
                       ) : (
                         <>
                           <Button
@@ -891,13 +1067,271 @@ export default function ProjectsDashboardKeyDates() {
       </Card>
 
       <Dialog
+        open={projectOpen}
+        onOpenChange={(open) => {
+          setProjectOpen(open)
+          if (!open) {
+            setProjectError(null)
+            setProjectDraft(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{projectDraft?.id ? 'Edit Key Date' : 'Edit Key Date'}</DialogTitle>
+            {projectDraft?.projectLabel ? (
+              <DialogDescription>Project: {projectDraft.projectLabel}</DialogDescription>
+            ) : (
+              <DialogDescription>Edit this key date.</DialogDescription>
+            )}
+          </DialogHeader>
+
+          {projectError ? (
+            <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded">
+              {projectError}
+            </div>
+          ) : null}
+
+          <div className="flex-1 overflow-y-auto pr-1">
+            {projectDraft ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Date</div>
+                  <Input
+                    type="date"
+                    value={projectDraft.date}
+                    onChange={(e) => setProjectDraft((p) => (p ? { ...p, date: e.target.value } : p))}
+                    className="h-10"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={projectDraft.allDay}
+                    onCheckedChange={(v) =>
+                      setProjectDraft((p) => (p ? { ...p, allDay: Boolean(v), startTime: '', finishTime: '' } : p))
+                    }
+                  />
+                  <div className="text-sm">All day</div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Start</div>
+                    <Input
+                      type="text"
+                      value={projectDraft.startTime}
+                      disabled={projectDraft.allDay}
+                      placeholder="HH:MM"
+                      inputMode="numeric"
+                      onChange={(e) => setProjectDraft((p) => (p ? { ...p, startTime: e.target.value } : p))}
+                      className="h-10"
+                      list="dashboard-project-key-date-start-times"
+                    />
+                    <datalist id="dashboard-project-key-date-start-times">
+                      {Array.from({ length: 24 * 4 }).map((_, i) => {
+                        const minutes = i * 15
+                        const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+                        const mm = String(minutes % 60).padStart(2, '0')
+                        const t = `${hh}:${mm}`
+                        return <option key={t} value={t} />
+                      })}
+                    </datalist>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Finish</div>
+                    <Input
+                      type="text"
+                      value={projectDraft.finishTime}
+                      disabled={projectDraft.allDay}
+                      placeholder="HH:MM"
+                      inputMode="numeric"
+                      onChange={(e) => setProjectDraft((p) => (p ? { ...p, finishTime: e.target.value } : p))}
+                      className="h-10"
+                      list="dashboard-project-key-date-finish-times"
+                    />
+                    <datalist id="dashboard-project-key-date-finish-times">
+                      {Array.from({ length: 24 * 4 }).map((_, i) => {
+                        const minutes = i * 15
+                        const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+                        const mm = String(minutes % 60).padStart(2, '0')
+                        const t = `${hh}:${mm}`
+                        return <option key={t} value={t} />
+                      })}
+                    </datalist>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Type</div>
+                  <select
+                    value={projectDraft.type}
+                    onChange={(e) => setProjectDraft((p) => (p ? { ...p, type: e.target.value } : p))}
+                    className="w-full px-3 h-10 bg-card border border-border rounded-md"
+                  >
+                    {(['PRE_PRODUCTION', 'SHOOTING', 'DUE_DATE', 'OTHER'] as const).map((t) => (
+                      <option key={t} value={t}>
+                        {typeLabel(t)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Notes</div>
+                  <Textarea
+                    value={projectDraft.notes}
+                    onChange={(e) => setProjectDraft((p) => (p ? { ...p, notes: e.target.value } : p))}
+                    className="min-h-[90px] resize-y whitespace-pre-wrap"
+                    placeholder="Notes"
+                    maxLength={500}
+                  />
+                </div>
+
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium">Reminder</div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setProjectDraft((p) =>
+                          p
+                            ? {
+                                ...p,
+                                reminderDate: '',
+                                reminderTime: '',
+                                reminderUserIds: [],
+                                reminderRecipientIds: [],
+                              }
+                            : p
+                        )
+                      }
+                    >
+                      Clear
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <div className="text-sm">Reminder date</div>
+                      <Input
+                        type="date"
+                        value={projectDraft.reminderDate}
+                        onChange={(e) => setProjectDraft((p) => (p ? { ...p, reminderDate: e.target.value } : p))}
+                        className="h-10"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm">Reminder time</div>
+                      <Input
+                        type="text"
+                        value={projectDraft.reminderTime}
+                        placeholder="HH:MM"
+                        inputMode="numeric"
+                        onChange={(e) => setProjectDraft((p) => (p ? { ...p, reminderTime: e.target.value } : p))}
+                        className="h-10"
+                        list="dashboard-project-key-date-reminder-times"
+                      />
+                      <datalist id="dashboard-project-key-date-reminder-times">
+                        {Array.from({ length: 24 * 4 }).map((_, i) => {
+                          const minutes = i * 15
+                          const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+                          const mm = String(minutes % 60).padStart(2, '0')
+                          const t = `${hh}:${mm}`
+                          return <option key={t} value={t} />
+                        })}
+                      </datalist>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Send to users</div>
+                      <div className="max-h-40 overflow-auto rounded-md border border-border p-2 space-y-2">
+                        {(projectReminderOptionsByProjectId[projectDraft.projectId]?.users || []).length === 0 ? (
+                          <div className="text-xs text-muted-foreground">No users assigned to this project.</div>
+                        ) : (
+                          (projectReminderOptionsByProjectId[projectDraft.projectId]?.users || []).map((u) => (
+                            <label key={u.id} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={projectDraft.reminderUserIds.includes(u.id)}
+                                onChange={() =>
+                                  setProjectDraft((p) =>
+                                    p
+                                      ? { ...p, reminderUserIds: toggleId(p.reminderUserIds, u.id) }
+                                      : p
+                                  )
+                                }
+                              />
+                              <span className="truncate">{u.name}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Send to recipients</div>
+                      <div className="max-h-40 overflow-auto rounded-md border border-border p-2 space-y-2">
+                        {(projectReminderOptionsByProjectId[projectDraft.projectId]?.recipients || []).length === 0 ? (
+                          <div className="text-xs text-muted-foreground">No recipients on this project.</div>
+                        ) : (
+                          (projectReminderOptionsByProjectId[projectDraft.projectId]?.recipients || []).map((r) => (
+                            <label key={r.id} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={projectDraft.reminderRecipientIds.includes(r.id)}
+                                onChange={() =>
+                                  setProjectDraft((p) =>
+                                    p
+                                      ? {
+                                          ...p,
+                                          reminderRecipientIds: toggleId(p.reminderRecipientIds, r.id),
+                                        }
+                                      : p
+                                  )
+                                }
+                              />
+                              <span className="truncate">{r.name}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">Loading…</div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setProjectOpen(false)} disabled={projectSaving}>
+              <X className="w-4 h-4 mr-2" />
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void saveProjectKeyDate()} disabled={projectSaving}>
+              <Check className="w-4 h-4 mr-2" />
+              {projectSaving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={personalOpen}
         onOpenChange={(open) => {
           setPersonalOpen(open)
           if (!open) setPersonalError(null)
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>{personalDraft.id ? 'Edit Key Date' : 'Add Key Date'}</DialogTitle>
             <DialogDescription>This key date is not associated with a project.</DialogDescription>
@@ -909,7 +1343,8 @@ export default function ProjectsDashboardKeyDates() {
             </div>
           ) : null}
 
-          <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto pr-1">
+            <div className="space-y-4">
             <div className="space-y-2">
               <div className="text-sm font-medium">Date</div>
               <Input
@@ -1073,6 +1508,7 @@ export default function ProjectsDashboardKeyDates() {
                   )}
                 </div>
               </div>
+            </div>
             </div>
           </div>
 

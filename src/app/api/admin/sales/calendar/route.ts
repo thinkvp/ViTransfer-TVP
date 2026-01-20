@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
     prisma.salesQuote.findMany({
       where: {
         validUntil: { not: null, gte: startYmd, lte: endYmd },
+        status: { notIn: ['ACCEPTED', 'CLOSED'] },
       },
       select: {
         id: true,
@@ -79,6 +80,7 @@ export async function GET(request: NextRequest) {
     prisma.salesInvoice.findMany({
       where: {
         dueDate: { not: null, gte: startYmd, lte: endYmd },
+        status: { not: 'PAID' },
       },
       select: {
         id: true,

@@ -217,6 +217,33 @@ export async function processSalesReminders() {
     stripePaidByInvoiceId[id] = { paidCents: base.paidCents + paidCents, latestYmd }
   }
 
+  const salesPayments = invoiceIds.length
+    ? await prisma.salesPayment.findMany({
+        where: { invoiceId: { in: invoiceIds } },
+        select: { invoiceId: true, amountCents: true, paymentDate: true },
+        take: 10000,
+      }).catch(() => [])
+    : []
+
+  const manualPaidByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
+  for (const p of salesPayments) {
+    const id = (p as any)?.invoiceId
+    const amount = Number((p as any)?.amountCents)
+    if (typeof id !== 'string' || !id.trim() || !Number.isFinite(amount)) continue
+    const paidCents = Math.max(0, Math.trunc(amount))
+    const ymd = typeof (p as any)?.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test((p as any).paymentDate)
+      ? (p as any).paymentDate
+      : null
+
+    const base = manualPaidByInvoiceId[id] ?? { paidCents: 0, latestYmd: null }
+    const latestYmd = [base.latestYmd, ymd]
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .sort()
+      .at(-1)
+      ?? null
+    manualPaidByInvoiceId[id] = { paidCents: base.paidCents + paidCents, latestYmd }
+  }
+
   void today
 
   async function getRecipientEmailsForClient(clientId: string): Promise<string[]> {
@@ -302,6 +329,10 @@ export async function processSalesReminders() {
       const enabled = inv?.remindersEnabled !== false
       if (!enabled) continue
 
+      // Only send reminders for invoices that have been sent and are not paid.
+      const invoiceStatus = typeof inv?.status === 'string' ? inv.status.trim().toUpperCase() : ''
+      if (!['SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(invoiceStatus)) continue
+
       const dueYmd = typeof inv?.dueDate === 'string' ? inv.dueDate : null
       if (!dueYmd) continue
 
@@ -310,6 +341,13 @@ export async function processSalesReminders() {
 
       // Must be overdue now
       if (now.getTime() <= endOfDayLocal(dueDate).getTime()) continue
+
+      const totalCents = invoiceTotalCents(inv as SalesInvoice, settings)
+      const paidStripe = stripePaidByInvoiceId[String(inv.id)]?.paidCents ?? 0
+      const paidManual = manualPaidByInvoiceId[String(inv.id)]?.paidCents ?? 0
+      const paidCents = Math.max(0, Math.trunc(paidStripe + paidManual))
+      const outstandingCents = Math.max(0, Math.trunc(totalCents - paidCents))
+      if (outstandingCents <= 0) continue
 
       const triggerYmd = addBusinessDaysYmd(dueYmd, overdueDays)
       if (!triggerYmd || triggerYmd !== today) continue
@@ -341,8 +379,6 @@ export async function processSalesReminders() {
         clientAddress: client?.address ? String(client.address).trim() : null,
       })
       if (!share?.url) continue
-
-      const totalCents = invoiceTotalCents(inv as SalesInvoice, settings)
 
       const pdfInfo: PdfPartyInfo = {
         clientName: client?.name ?? undefined,
@@ -406,21 +442,87 @@ export async function processSalesReminders() {
         `,
       })
 
-      const sendResult = await sendEmail({
-        to: fromAddress,
-        bcc: recipientEmails,
-        subject: `Invoice ${String(inv.invoiceNumber || '')} is overdue`,
-        html,
-        attachments: [
-          {
-            filename: `${String(inv.invoiceNumber || 'invoice')}.pdf`,
-            content: Buffer.from(pdfBytes),
-            contentType: 'application/pdf',
-          },
-        ],
-      })
+      const attachment = {
+        filename: `${String(inv.invoiceNumber || 'invoice')}.pdf`,
+        content: Buffer.from(pdfBytes),
+        contentType: 'application/pdf',
+      }
 
-      if (!sendResult.success) continue
+      let sentAny = false
+
+      // Send individually so we can track each recipient in SalesEmailTracking.
+      for (const toEmail of recipientEmails) {
+        const trackingToken = randomToken()
+        const htmlTracked = renderEmailShell({
+          companyName,
+          companyLogoUrl,
+          headerGradient: EMAIL_THEME.headerBackground,
+          title: 'Invoice overdue',
+          subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
+          trackingPixelsEnabled,
+          trackingToken,
+          trackingPixelPath: '/api/track/sales-email',
+          appDomain: emailSettings.appDomain || appBaseUrl,
+          bodyContent: `
+            <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
+              Hi,
+            </p>
+
+            <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+              Just a friendly reminder that <strong>Invoice ${escapeHtml(String(inv.invoiceNumber || ''))}</strong> is overdue.
+            </p>
+
+            <div style="${cardStyle}">
+              <div style="font-size: 15px; color: #111827; padding: 4px 0;">
+                <strong>Invoice ${escapeHtml(String(inv.invoiceNumber || ''))}</strong>
+              </div>
+              ${project?.title ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(project.title)}</div>` : ''}
+              <div style="font-size: 14px; color: #374151; padding: 2px 0;">Due date: ${escapeHtml(String(dueYmd))}</div>
+            </div>
+
+            <div style="text-align: center; margin: 28px 0;">
+              <a href="${escapeHtml(share.url)}" style="${primaryButtonStyle}">View Invoice</a>
+            </div>
+
+            <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
+              If the button doesn’t work, copy and paste this link into your browser:<br />
+              <a href="${escapeHtml(share.url)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(share.url)}</a>
+            </p>
+          `,
+        })
+
+        const sendResult = await sendEmail({
+          to: toEmail,
+          subject: `Invoice ${String(inv.invoiceNumber || '')} is overdue`,
+          html: htmlTracked,
+          attachments: [attachment],
+        })
+
+        if (!sendResult.success) continue
+
+        sentAny = true
+
+        // Record the email for tracking in the DB after successful send.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await prisma.salesEmailTracking.create({
+              data: {
+                token: attempt === 0 ? trackingToken : randomToken(),
+                shareToken: share.token,
+                type: 'INVOICE',
+                docId: String(inv.id),
+                recipientEmail: toEmail,
+              },
+            })
+            break
+          } catch (e: any) {
+            if (e?.code === 'P2002') continue
+            break
+          }
+        }
+      }
+
+      if (!sentAny) continue
 
       try {
         await prisma.salesInvoice.update({
@@ -441,7 +543,9 @@ export async function processSalesReminders() {
       const enabled = q?.remindersEnabled !== false
       if (!enabled) continue
 
-      if (q?.status === 'ACCEPTED' || q?.status === 'CLOSED') continue
+      // Only send reminders for active quotes (not accepted/closed).
+      const quoteStatus = typeof q?.status === 'string' ? q.status.trim().toUpperCase() : ''
+      if (!['OPEN', 'SENT'].includes(quoteStatus)) continue
 
       const validUntil = typeof q?.validUntil === 'string' ? q.validUntil : null
       if (!validUntil) continue
@@ -502,58 +606,85 @@ export async function processSalesReminders() {
 
       const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
       const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+      const attachment = {
+        filename: `${String(q.quoteNumber || 'quote')}.pdf`,
+        content: Buffer.from(pdfBytes),
+        contentType: 'application/pdf',
+      }
 
-      const html = renderEmailShell({
-        companyName,
-        companyLogoUrl,
-        headerGradient: EMAIL_THEME.headerBackground,
-        title: 'Quote expiring soon',
-        subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
-        trackingPixelsEnabled,
-        appDomain: emailSettings.appDomain || appBaseUrl,
-        bodyContent: `
-          <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
-            Hi,
-          </p>
+      let sentAny = false
 
-          <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-            Just a friendly reminder that <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong> expires on <strong>${escapeHtml(String(validUntil))}</strong>.
-          </p>
+      for (const toEmail of recipientEmails) {
+        const trackingToken = randomToken()
+        const htmlTracked = renderEmailShell({
+          companyName,
+          companyLogoUrl,
+          headerGradient: EMAIL_THEME.headerBackground,
+          title: 'Quote expiring soon',
+          subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
+          trackingPixelsEnabled,
+          trackingToken,
+          trackingPixelPath: '/api/track/sales-email',
+          appDomain: emailSettings.appDomain || appBaseUrl,
+          bodyContent: `
+            <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
+              Hi,
+            </p>
 
-          <div style="${cardStyle}">
-            <div style="font-size: 15px; color: #111827; padding: 4px 0;">
-              <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong>
+            <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+              Just a friendly reminder that <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong> expires on <strong>${escapeHtml(String(validUntil))}</strong>.
+            </p>
+
+            <div style="${cardStyle}">
+              <div style="font-size: 15px; color: #111827; padding: 4px 0;">
+                <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong>
+              </div>
+              ${project?.title ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(project.title)}</div>` : ''}
+              <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(String(validUntil))}</div>
             </div>
-            ${project?.title ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(project.title)}</div>` : ''}
-            <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(String(validUntil))}</div>
-          </div>
 
-          <div style="text-align: center; margin: 28px 0;">
-            <a href="${escapeHtml(share.url)}" style="${primaryButtonStyle}">View Quote</a>
-          </div>
+            <div style="text-align: center; margin: 28px 0;">
+              <a href="${escapeHtml(share.url)}" style="${primaryButtonStyle}">View Quote</a>
+            </div>
 
-          <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-            If the button doesn’t work, copy and paste this link into your browser:<br />
-            <a href="${escapeHtml(share.url)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(share.url)}</a>
-          </p>
-        `,
-      })
+            <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
+              If the button doesn’t work, copy and paste this link into your browser:<br />
+              <a href="${escapeHtml(share.url)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(share.url)}</a>
+            </p>
+          `,
+        })
 
-      const sendResult = await sendEmail({
-        to: fromAddress,
-        bcc: recipientEmails,
-        subject: `Quote ${String(q.quoteNumber || '')} expiring soon`,
-        html,
-        attachments: [
-          {
-            filename: `${String(q.quoteNumber || 'quote')}.pdf`,
-            content: Buffer.from(pdfBytes),
-            contentType: 'application/pdf',
-          },
-        ],
-      })
+        const sendResult = await sendEmail({
+          to: toEmail,
+          subject: `Quote ${String(q.quoteNumber || '')} expires on ${String(validUntil)}`,
+          html: htmlTracked,
+          attachments: [attachment],
+        })
 
-      if (!sendResult.success) continue
+        if (!sendResult.success) continue
+
+        sentAny = true
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await prisma.salesEmailTracking.create({
+              data: {
+                token: attempt === 0 ? trackingToken : randomToken(),
+                shareToken: share.token,
+                type: 'QUOTE',
+                docId: String(q.id),
+                recipientEmail: toEmail,
+              },
+            })
+            break
+          } catch (e: any) {
+            if (e?.code === 'P2002') continue
+            break
+          }
+        }
+      }
+
+      if (!sentAny) continue
 
       try {
         await prisma.salesQuote.update({
@@ -564,6 +695,8 @@ export async function processSalesReminders() {
       } catch {
         // Best-effort. If we fail to mark it, the next run may resend.
       }
+
     }
   }
+
 }

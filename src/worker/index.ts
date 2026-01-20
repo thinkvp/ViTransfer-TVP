@@ -21,6 +21,7 @@ import { processAutoCloseApprovedProjects } from './auto-close-projects'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
 import { processUserKeyDateReminders } from './user-key-date-reminders'
 import { processSalesReminders } from './sales-reminders'
+import { processAutoStartProjectsOnShootingKeyDate } from './auto-start-projects-on-shooting'
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 
@@ -294,6 +295,7 @@ async function main() {
       if (job.name === 'process-notifications') return true
       if (job.name === 'project-key-date-reminders') return true
       if (job.name === 'user-key-date-reminders') return true
+      if (job.name === 'auto-start-projects-on-shooting-key-date') return true
       return false
     })
 
@@ -350,6 +352,20 @@ async function main() {
         pattern: '*/15 * * * *',
       },
       jobId: 'user-key-date-reminders',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
+  // Auto-start projects when a SHOOTING key date begins.
+  await notificationQueue.add(
+    'auto-start-projects-on-shooting-key-date',
+    {},
+    {
+      repeat: {
+        pattern: '*/15 * * * *',
+      },
+      jobId: 'auto-start-projects-on-shooting-key-date',
       removeOnComplete: true,
       removeOnFail: true,
     }
@@ -511,6 +527,18 @@ async function main() {
 
       if (job.name === 'user-key-date-reminders') {
         await processUserKeyDateReminders()
+        return
+      }
+
+      if (job.name === 'auto-start-projects-on-shooting-key-date') {
+        try {
+          const result = await processAutoStartProjectsOnShootingKeyDate()
+          if (result.startedCount > 0) {
+            console.log(`[AUTO-START] Completed (started=${result.startedCount})`)
+          }
+        } catch (e) {
+          console.warn('[AUTO-START] Failed (continuing):', e instanceof Error ? e.message : e)
+        }
         return
       }
 

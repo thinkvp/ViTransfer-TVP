@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Pencil, Trash2, X } from 'lucide-react'
+import { Check, Download, Eye, Mail, Pencil, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -615,7 +615,7 @@ export default function InvoiceDetailPage() {
           </div>
           <p className="text-sm text-muted-foreground">View and edit invoice details.</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap w-full justify-end sm:w-auto">
           {overdueInvoiceRemindersEnabled ? (
             <SalesRemindersBellButton
               enabled={(invoice as any)?.remindersEnabled !== false}
@@ -641,17 +641,41 @@ export default function InvoiceDetailPage() {
               }}
             />
           ) : null}
-          <Button variant="outline" onClick={() => void onViewPublic()}>
-            View Invoice
+          <Button
+            variant="outline"
+            onClick={() => void onViewPublic()}
+            aria-label="View Invoice"
+            title="View Invoice"
+          >
+            <Eye className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">View Invoice</span>
           </Button>
-          <Button variant="outline" onClick={onSendEmail}>
-            Send Email
+          <Button
+            variant="outline"
+            onClick={onSendEmail}
+            aria-label="Send Email"
+            title="Send Email"
+          >
+            <Mail className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Send Email</span>
           </Button>
           <Button
             variant="outline"
             onClick={() => void onDownloadPdf()}
+            aria-label="Download PDF"
+            title="Download PDF"
           >
-            Download PDF
+            <Download className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Download PDF</span>
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={onDelete}
+            aria-label="Delete invoice"
+            title="Delete invoice"
+          >
+            <Trash2 className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Delete</span>
           </Button>
           <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
         </div>
@@ -980,9 +1004,6 @@ export default function InvoiceDetailPage() {
         }}
       />
 
-      <div className="flex justify-end">
-        <Button variant="destructive" onClick={onDelete}>Delete invoice</Button>
-      </div>
     </div>
   )
 }

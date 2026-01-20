@@ -546,7 +546,7 @@ export function ProjectKeyDates({
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>{draft?.id ? 'Edit Key Date' : 'Add Key Date'}</DialogTitle>
           </DialogHeader>
@@ -557,8 +557,9 @@ export function ProjectKeyDates({
             </div>
           ) : null}
 
-          {draft ? (
-            <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto pr-1">
+            {draft ? (
+              <div className="space-y-4">
               <div className="space-y-2">
                 <div className="text-sm font-medium">Date</div>
                 <PickerOnlyInput
@@ -725,8 +726,9 @@ export function ProjectKeyDates({
                   </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+              </div>
+            ) : null}
+          </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={cancelDraft}>

@@ -582,20 +582,21 @@ export default function EditUserPage() {
               )}
             </div>
 
-            <div className="flex gap-3 pt-4">
-              <Button type="submit" variant="default" size="lg" disabled={loading}>
-                <Save className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">{loading ? 'Saving...' : 'Save Changes'}</span>
-              </Button>
+            <div className="flex gap-3 pt-4 w-full sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
                 size="lg"
+                className="flex-1 sm:flex-none"
                 onClick={() => router.push('/admin/users')}
                 disabled={loading}
               >
-                <X className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Cancel</span>
+                <X className="w-4 h-4 mr-2" />
+                <span>Cancel</span>
+              </Button>
+              <Button type="submit" variant="default" size="lg" className="flex-1 sm:flex-none" disabled={loading}>
+                <Save className="w-4 h-4 mr-2" />
+                <span>{loading ? 'Saving...' : 'Save Changes'}</span>
               </Button>
             </div>
           </form>

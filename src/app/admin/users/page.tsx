@@ -291,13 +291,13 @@ export default function UsersPage() {
             ) : (
               <div className="rounded-md border border-border bg-card overflow-hidden">
                 <div className="w-full overflow-auto">
-                  <table className="w-full table-fixed text-sm min-w-[340px] md:min-w-[520px]">
+                  <table className="w-full table-auto text-sm min-w-[420px] md:min-w-[860px]">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[55%]">User</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px] hidden md:table-cell">Username</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[220px] hidden md:table-cell">Email</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[35%]">Role</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[160px]">User</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[160px] hidden md:table-cell">Username</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[260px] hidden md:table-cell">Email</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Role</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[130px] hidden md:table-cell">Colour</th>
                         <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[64px] whitespace-nowrap">Actions</th>
                       </tr>
@@ -321,10 +321,12 @@ export default function UsersPage() {
                             <div className="font-medium truncate">{user.name || user.username || user.email}</div>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
-                            {user.username ? `@${user.username}` : '—'}
+                            <div className="truncate max-w-[220px]">{user.username ? `@${user.username}` : '—'}</div>
                           </td>
-                          <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">{user.email}</td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
+                            <div className="truncate max-w-[320px]">{user.email}</div>
+                          </td>
+                          <td className="px-3 py-2 min-w-0">
                             <span className={cn(
                               'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border',
                               user.appRole?.isSystemAdmin
@@ -332,7 +334,7 @@ export default function UsersPage() {
                                 : 'bg-muted text-muted-foreground border border-border'
                             )}>
                               {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                              <span className="truncate">{user.appRole?.name || '—'}</span>
+                              <span className="truncate max-w-[220px]">{user.appRole?.name || '—'}</span>
                             </span>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell">
