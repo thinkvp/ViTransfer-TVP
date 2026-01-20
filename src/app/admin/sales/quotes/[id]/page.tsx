@@ -31,6 +31,19 @@ import { SalesRemindersBellButton } from '@/components/admin/sales/SalesReminder
 
 const TAX_RATE_OPTIONS = [0, 10]
 
+function quoteStatusLabel(status: QuoteStatus): string {
+  switch (status) {
+    case 'OPEN':
+      return 'Open'
+    case 'SENT':
+      return 'Sent'
+    case 'ACCEPTED':
+      return 'Accepted'
+    case 'CLOSED':
+      return 'Closed'
+  }
+}
+
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
   const candidate = Number.isFinite(n) ? n : defaultRate
@@ -47,13 +60,6 @@ function newLineItem(defaultTaxRatePercent: number): SalesLineItem {
     taxRatePercent: normalizeTaxRatePercent(defaultTaxRatePercent, defaultTaxRatePercent),
   }
 }
-
-const QUOTE_STATUSES: { value: QuoteStatus; label: string }[] = [
-  { value: 'OPEN', label: 'Open' },
-  { value: 'SENT', label: 'Sent' },
-  { value: 'ACCEPTED', label: 'Accepted' },
-  { value: 'CLOSED', label: 'Closed' },
-]
 
 export default function QuoteDetailPage() {
   const params = useParams()
@@ -541,14 +547,7 @@ export default function QuoteDetailPage() {
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as QuoteStatus)}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {QUOTE_STATUSES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input value={quoteStatusLabel(status)} readOnly className="h-9" />
             </div>
           </div>
         </CardContent>

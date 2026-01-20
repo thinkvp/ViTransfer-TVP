@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireMenuAccess } from '@/lib/rbac-api'
+import type { SalesLineItem } from '@/lib/sales/types'
+import { sumLineItemsTotal } from '@/lib/sales/money'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,6 +31,25 @@ function ymd(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+function parseLineItems(itemsJson: unknown): SalesLineItem[] {
+  if (!Array.isArray(itemsJson)) return []
+  return itemsJson.map((raw, idx) => {
+    const it: any = raw ?? {}
+    const quantity = Number(it.quantity)
+    const unitPriceCents = Number(it.unitPriceCents)
+    const taxRatePercent = Number(it.taxRatePercent)
+
+    return {
+      id: typeof it.id === 'string' ? it.id : `li-${idx}`,
+      description: typeof it.description === 'string' ? it.description : '',
+      details: typeof it.details === 'string' ? it.details : undefined,
+      quantity: Number.isFinite(quantity) ? quantity : 0,
+      unitPriceCents: Number.isFinite(unitPriceCents) ? unitPriceCents : 0,
+      taxRatePercent: Number.isFinite(taxRatePercent) ? taxRatePercent : NaN,
+    }
+  })
 }
 
 // GET /api/admin/sales/calendar?month=YYYY-MM - sales calendar items (internal)
@@ -61,6 +82,13 @@ export async function GET(request: NextRequest) {
   const startYmd = ymd(start)
   const endYmd = ymd(end)
 
+  const settings = await prisma.salesSettings.findUnique({
+    where: { id: 'default' },
+    select: { taxRatePercent: true },
+  })
+  const defaultTaxRatePercent = Number(settings?.taxRatePercent)
+  const taxRatePercent = Number.isFinite(defaultTaxRatePercent) ? defaultTaxRatePercent : 0
+
   const [quotes, invoices] = await Promise.all([
     prisma.salesQuote.findMany({
       where: {
@@ -87,12 +115,50 @@ export async function GET(request: NextRequest) {
         invoiceNumber: true,
         status: true,
         dueDate: true,
+        itemsJson: true,
+        payments: { select: { amountCents: true } },
         client: { select: { name: true } },
         project: { select: { id: true, title: true } },
       },
       orderBy: [{ dueDate: 'asc' }, { invoiceNumber: 'asc' }],
     }),
   ])
+
+  const invoiceIds = invoices.map((inv) => inv.id)
+  const stripePayments = invoiceIds.length
+    ? await prisma.salesInvoiceStripePayment.findMany({
+        where: { invoiceDocId: { in: invoiceIds } },
+        select: { invoiceDocId: true, invoiceAmountCents: true },
+      })
+    : []
+
+  const stripePaidByInvoiceId = stripePayments.reduce<Record<string, number>>((acc, p) => {
+    const id = typeof p.invoiceDocId === 'string' ? p.invoiceDocId : ''
+    const cents = Number(p.invoiceAmountCents)
+    if (!id || !Number.isFinite(cents) || cents <= 0) return acc
+    acc[id] = (acc[id] ?? 0) + cents
+    return acc
+  }, {})
+
+  const visibleInvoices = invoices.filter((inv) => {
+    if (inv.status === 'PAID') return false
+
+    const items = parseLineItems((inv as any).itemsJson)
+    const totalCents = sumLineItemsTotal(items, taxRatePercent)
+    if (!(Number.isFinite(totalCents) && totalCents > 0)) return true
+
+    const manualPaidCents = Array.isArray((inv as any).payments)
+      ? (inv as any).payments.reduce((acc: number, p: any) => {
+          const cents = Number(p?.amountCents)
+          return Number.isFinite(cents) ? acc + cents : acc
+        }, 0)
+      : 0
+
+    const stripePaidCents = stripePaidByInvoiceId[inv.id] ?? 0
+    const paidCents = manualPaidCents + stripePaidCents
+
+    return paidCents < totalCents
+  })
 
   const items = [
     ...quotes
@@ -108,7 +174,7 @@ export async function GET(request: NextRequest) {
         projectId: q.project?.id ?? null,
         projectTitle: q.project?.title ?? null,
       })),
-    ...invoices
+    ...visibleInvoices
       .filter((inv) => Boolean(inv.dueDate))
       .map((inv) => ({
         kind: 'sales' as const,

@@ -103,14 +103,6 @@ function newLineItem(defaultTaxRatePercent: number): SalesLineItem {
   }
 }
 
-const INVOICE_STATUSES: { value: InvoiceStatus; label: string }[] = [
-  { value: 'OPEN', label: 'Open' },
-  { value: 'SENT', label: 'Sent' },
-  { value: 'OVERDUE', label: 'Overdue' },
-  { value: 'PARTIALLY_PAID', label: 'Partially Paid (auto)' },
-  { value: 'PAID', label: 'Paid' },
-]
-
 export default function InvoiceDetailPage() {
   const params = useParams()
   const id = useMemo(() => {
@@ -440,6 +432,39 @@ export default function InvoiceDetailPage() {
 
     return baseStatus
   }, [balanceCents, dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
+
+  const invoiceStatusDisplay = useMemo((): string => {
+    if (effectiveStatus !== 'PAID') return statusLabel(effectiveStatus)
+
+    const entries: Array<{ ymd: string; amountCents: number }> = []
+
+    for (const p of payments) {
+      if (!Number.isFinite(p.amountCents) || p.amountCents <= 0) continue
+      const ymd = typeof p.paymentDate === 'string' ? p.paymentDate : ''
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) continue
+      entries.push({ ymd, amountCents: p.amountCents })
+    }
+
+    for (const p of stripePayments) {
+      if (!Number.isFinite(p.invoiceAmountCents) || p.invoiceAmountCents <= 0) continue
+      const ymd = typeof p.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : ''
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) continue
+      entries.push({ ymd, amountCents: p.invoiceAmountCents })
+    }
+
+    entries.sort((a, b) => a.ymd.localeCompare(b.ymd))
+
+    if (entries.length === 0) {
+      if (paidOnDisplay) return `Paid: $${centsToDollars(paidCents)} on ${paidOnDisplay}`
+      return 'Paid'
+    }
+
+    const details = entries
+      .map((e) => `$${centsToDollars(e.amountCents)} on ${e.ymd.replaceAll('-', '/')}`)
+      .join(', ')
+
+    return `Paid: ${details}`
+  }, [effectiveStatus, paidCents, paidOnDisplay, payments, stripePayments])
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const projectTitleById = useMemo(
@@ -784,53 +809,8 @@ export default function InvoiceDetailPage() {
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as InvoiceStatus)}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {INVOICE_STATUSES.map((s) => (
-                    <SelectItem key={s.value} value={s.value} disabled={s.value === 'PARTIALLY_PAID'}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {effectiveStatus !== status ? (
-                <div className="text-xs text-muted-foreground">
-                  Effective status is {statusLabel(effectiveStatus)} (based on payments / due date).
-                </div>
-              ) : null}
+              <Input value={invoiceStatusDisplay} readOnly className="h-9" />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Payments</Label>
-            <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-between text-sm">
-              <span>
-                Paid: ${centsToDollars(paidCents)}{paidOnDisplay ? <span> on {paidOnDisplay}</span> : null}
-                {stripePaidCents > 0 ? <span className="text-muted-foreground"> (Stripe: ${centsToDollars(stripePaidCents)})</span> : null}
-              </span>
-              <span>Balance: ${centsToDollars(balanceCents)}</span>
-            </div>
-
-            {stripePayments.length > 0 && (
-              <div className="rounded-md border border-border bg-background p-3 text-sm">
-                <div className="font-medium mb-2">Stripe payments</div>
-                <div className="space-y-1 text-muted-foreground">
-                  {stripePayments.slice(0, 5).map((p) => (
-                    <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                      <div className="min-w-[220px]">
-                        {/^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : '—'}
-                        {p.stripePaymentIntentId ? <span> · {p.stripePaymentIntentId}</span> : p.stripeCheckoutSessionId ? <span> · {p.stripeCheckoutSessionId}</span> : null}
-                      </div>
-                      <div className="tabular-nums">
-                        Applied to invoice: ${centsToDollars(p.invoiceAmountCents)}
-                        {p.feeAmountCents > 0 ? <span> (Fee: ${centsToDollars(p.feeAmountCents)})</span> : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>
