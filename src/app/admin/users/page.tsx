@@ -256,7 +256,7 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
@@ -275,7 +275,7 @@ export default function UsersPage() {
         </div>
       )}
 
-      <Card>
+      <Card className="w-full min-w-0 overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle>Users</CardTitle>
             <Button variant="default" size="default" onClick={() => router.push('/admin/users/new')}>
@@ -290,16 +290,16 @@ export default function UsersPage() {
               </div>
             ) : (
               <div className="rounded-md border border-border bg-card overflow-hidden">
-                <div className="w-full overflow-auto">
-                  <table className="w-full table-auto text-sm min-w-[420px] md:min-w-[860px]">
+                <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
+                  <table className="w-full table-auto text-sm min-w-[320px] sm:min-w-[420px] md:min-w-[700px]">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[160px]">User</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[160px] hidden md:table-cell">Username</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[260px] hidden md:table-cell">Email</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Role</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[130px] hidden md:table-cell">Colour</th>
-                        <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[64px] whitespace-nowrap">Actions</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px] sm:min-w-[160px]">User</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px] hidden md:table-cell">Username</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[180px] hidden md:table-cell">Email</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[100px] sm:min-w-[140px]">Role</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[80px] hidden md:table-cell">Colour</th>
+                        <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[50px] sm:w-[64px] whitespace-nowrap">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -328,13 +328,13 @@ export default function UsersPage() {
                           </td>
                           <td className="px-3 py-2 min-w-0">
                             <span className={cn(
-                              'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border',
+                              'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border max-w-full',
                               user.appRole?.isSystemAdmin
                                 ? 'bg-info-visible text-info border-2 border-info-visible'
                                 : 'bg-muted text-muted-foreground border border-border'
                             )}>
-                              {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                              <span className="truncate max-w-[220px]">{user.appRole?.name || '—'}</span>
+                              {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3 flex-shrink-0" /> : <ShieldOff className="h-3 w-3 flex-shrink-0" />}
+                              <span className="truncate max-w-[80px] sm:max-w-[120px] md:max-w-[180px]">{user.appRole?.name || '—'}</span>
                             </span>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell">
@@ -378,7 +378,7 @@ export default function UsersPage() {
       </Card>
 
       <div className="mt-8">
-          <Card>
+          <Card className="w-full min-w-0 overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <CardTitle>Roles</CardTitle>
               <Button variant="default" onClick={openCreateRole}>
@@ -391,8 +391,8 @@ export default function UsersPage() {
                 <div className="py-8 text-center text-muted-foreground">No roles found.</div>
               ) : (
                 <div className="rounded-md border border-border bg-card overflow-hidden">
-                  <div className="w-full overflow-auto">
-                    <table className="w-full table-fixed text-sm min-w-[280px] sm:min-w-[420px]">
+                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
+                    <table className="w-full table-fixed text-sm min-w-[280px] sm:min-w-[380px]">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
                           <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[70%]">Role</th>

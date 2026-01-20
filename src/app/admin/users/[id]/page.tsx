@@ -279,14 +279,14 @@ export default function EditUserPage() {
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-      <div className="max-w-2xl mx-auto">
+    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 overflow-hidden">
+      <div className="max-w-2xl mx-auto w-full min-w-0">
         <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
         </div>
 
-        <Card>
+        <Card className="w-full min-w-0 overflow-hidden">
           <CardHeader>
             <CardTitle>User Details</CardTitle>
           </CardHeader>
@@ -377,8 +377,8 @@ export default function EditUserPage() {
             </div>
 
             <div className="border-t pt-4 mt-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-medium">Change Password (optional)</h3>
                   <p className="text-xs text-muted-foreground mt-1">
                     {sessionUser?.id === userId
@@ -393,9 +393,10 @@ export default function EditUserPage() {
                   variant="outline"
                   size="sm"
                   onClick={generateRandomPassword}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto"
                 >
                   <RefreshCw className="w-4 h-4" />
+                  <span className="sm:hidden">Generate</span>
                   <span className="hidden sm:inline">Generate Password</span>
                 </Button>
               </div>
@@ -533,8 +534,8 @@ export default function EditUserPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between bg-muted p-3 rounded">
-                    <div className="text-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-muted p-3 rounded">
+                    <div className="text-sm min-w-0 flex-1">
                       <p className="font-medium">
                         {passkeys.length === 0 ? 'No passkeys registered' : `${passkeys.length} passkey(s)`}
                       </p>
@@ -546,6 +547,7 @@ export default function EditUserPage() {
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="w-full sm:w-auto flex-shrink-0"
                       onClick={handleRegisterPasskey}
                       disabled={passkeyLoading}
                     >
