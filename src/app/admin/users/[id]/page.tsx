@@ -279,18 +279,18 @@ export default function EditUserPage() {
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 overflow-hidden">
-      <div className="max-w-2xl mx-auto w-full min-w-0">
-        <div className="mb-6">
+    <div className="w-full min-w-0 max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="w-full min-w-0 mx-auto md:max-w-2xl">
+        <div className="mb-4 sm:mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
         </div>
 
-        <Card className="w-full min-w-0 overflow-hidden">
-          <CardHeader>
-            <CardTitle>User Details</CardTitle>
+        <Card className="w-full min-w-0">
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-xl sm:text-2xl">User Details</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-4 sm:p-6 pt-0">
             <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded">

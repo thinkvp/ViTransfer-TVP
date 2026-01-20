@@ -469,7 +469,7 @@ export function ProjectEmailUpload({
             <div className={compact ? 'min-w-0' : ''}>
               <p className={compact ? 'text-sm font-medium' : 'font-medium mb-1'}>
                 <span className="hidden sm:inline">Drag & drop .eml files here</span>
-                <span className="sm:hidden">Tap to select .eml</span>
+                <span className="hidden">Tap to select .eml</span>
               </p>
               {!compact && <p className="hidden sm:block text-xs text-muted-foreground mb-3">or click to select</p>}
               {compact && selectedFiles.length > 0 && (

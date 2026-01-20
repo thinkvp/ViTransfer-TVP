@@ -362,9 +362,22 @@ export default function SharePage() {
     if (activeAlbumId) return
     if (project?.enableVideos === false) return
     if (project?.videosByName) {
-      const videoNames = Object.keys(project.videosByName).sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: 'base' })
-      )
+      // Sort video names: prioritize In Review (unapproved) videos, then alphabetically
+      const videoNames = Object.keys(project.videosByName).sort((a, b) => {
+        const aVideos = project.videosByName[a]
+        const bVideos = project.videosByName[b]
+        
+        // Check if any version of each video is unapproved (In Review)
+        const aHasUnapproved = aVideos.some((v: any) => !v.approved)
+        const bHasUnapproved = bVideos.some((v: any) => !v.approved)
+        
+        // Prioritize videos with unapproved versions
+        if (aHasUnapproved && !bHasUnapproved) return -1
+        if (!aHasUnapproved && bHasUnapproved) return 1
+        
+        // If both have same approval state, sort alphabetically
+        return a.localeCompare(b, undefined, { sensitivity: 'base' })
+      })
       if (videoNames.length === 0) return
 
       // Determine which video group should be active

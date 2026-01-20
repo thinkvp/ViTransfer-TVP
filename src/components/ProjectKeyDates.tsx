@@ -483,7 +483,7 @@ export function ProjectKeyDates({
                 <th className="px-3 py-2 whitespace-nowrap">Start</th>
                 <th className="px-3 py-2 whitespace-nowrap">Finish</th>
                 <th className="px-3 py-2 whitespace-nowrap">Type</th>
-                <th className="px-3 py-2">Notes</th>
+                <th className="px-3 py-2 min-w-[120px]">Notes</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
@@ -501,7 +501,7 @@ export function ProjectKeyDates({
                     <td className="px-3 py-2 whitespace-nowrap">{item.allDay ? '-' : (item.startTime || '-')}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{item.allDay ? '-' : (item.finishTime || '-')}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{formatTypeLabel(item.type)}</td>
-                    <td className="px-3 py-2 whitespace-normal break-words">
+                    <td className="px-3 py-2 min-w-[120px] whitespace-normal break-words">
                       <span title={item.notes || ''}>{truncateNotes(item.notes, 120)}</span>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -730,12 +730,12 @@ export function ProjectKeyDates({
             ) : null}
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={cancelDraft}>
+          <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:justify-end sm:space-x-2">
+            <Button type="button" variant="outline" onClick={cancelDraft} className="w-full sm:w-auto">
               <X className="w-4 h-4 mr-2" />
               Cancel
             </Button>
-            <Button type="button" onClick={() => void saveDraft()} disabled={!draft?.date.trim()}>
+            <Button type="button" onClick={() => void saveDraft()} disabled={!draft?.date.trim()} className="w-full sm:w-auto">
               <Check className="w-4 h-4 mr-2" />
               Save
             </Button>

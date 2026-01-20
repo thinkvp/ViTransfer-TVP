@@ -64,6 +64,7 @@ export async function GET(request: NextRequest) {
         select: {
           title: true,
           companyName: true,
+          clientId: true,
         },
       },
     },

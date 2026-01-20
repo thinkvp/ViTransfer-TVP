@@ -34,6 +34,7 @@ type ProjectKeyDateRow = {
   project: {
     title: string
     companyName: string | null
+    clientId: string | null
   }
 }
 
@@ -632,7 +633,7 @@ export default function ProjectsDashboardKeyDates() {
       setProjectDraft({
         id: row.id,
         projectId: row.projectId,
-        projectLabel: row.project.companyName || row.project.title,
+        projectLabel: row.project.title,
         date: found?.date || row.date,
         allDay: Boolean(found?.allDay ?? row.allDay),
         startTime: (found?.startTime ?? row.startTime ?? '') || '',
@@ -836,17 +837,13 @@ export default function ProjectsDashboardKeyDates() {
             <div className="space-y-2">
               {upcomingVisible.map((k) => {
                 const colors = k.kind === 'project' ? typeColorClasses(k.type) : typeColorClasses('')
-                const label =
-                  k.kind === 'project'
-                    ? (k.project.companyName || k.project.title)
-                    : k.title
 
                 return (
                   <div
                     key={k.id}
                     className="flex items-start justify-between gap-3 rounded-md border border-border p-2"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className={`text-[11px] px-2 py-0.5 rounded-full ${colors.pill}`}>
                           {k.kind === 'project' ? typeLabel(k.type) : 'Personal'}
@@ -863,16 +860,33 @@ export default function ProjectsDashboardKeyDates() {
                                 : ''}
                         </span>
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        {k.kind === 'project' ? (
-                          <Link href={`/admin/projects/${k.projectId}`} className="text-sm underline underline-offset-2">
-                            {label}
-                          </Link>
-                        ) : (
-                          <span className="text-sm font-medium">{label}</span>
-                        )}
-                        {k.notes ? <span className="text-xs text-muted-foreground truncate">— {k.notes}</span> : null}
-                      </div>
+                      {k.kind === 'project' ? (
+                        <div className="mt-0.5 space-y-1">
+                          <div className="flex flex-wrap items-center gap-x-1">
+                            {k.project.clientId ? (
+                              <Link href={`/admin/clients/${k.project.clientId}`} className="text-sm underline underline-offset-2">
+                                {k.project.companyName || 'Unnamed Client'}
+                              </Link>
+                            ) : (
+                              <span className="text-sm">{k.project.companyName || 'No Client'}</span>
+                            )}
+                            <span className="text-sm text-muted-foreground">—</span>
+                            <Link href={`/admin/projects/${k.projectId}`} className="text-sm underline underline-offset-2">
+                              {k.project.title}
+                            </Link>
+                          </div>
+                          {k.notes ? (
+                            <div className="text-xs text-muted-foreground line-clamp-2">{k.notes}</div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 space-y-1">
+                          <div className="text-sm font-medium">{k.title}</div>
+                          {k.notes ? (
+                            <div className="text-xs text-muted-foreground line-clamp-2">{k.notes}</div>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-shrink-0 flex items-center gap-2">
@@ -1311,12 +1325,12 @@ export default function ProjectsDashboardKeyDates() {
             )}
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setProjectOpen(false)} disabled={projectSaving}>
+          <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:justify-end sm:space-x-2">
+            <Button type="button" variant="outline" onClick={() => setProjectOpen(false)} disabled={projectSaving} className="w-full sm:w-auto">
               <X className="w-4 h-4 mr-2" />
               Cancel
             </Button>
-            <Button type="button" onClick={() => void saveProjectKeyDate()} disabled={projectSaving}>
+            <Button type="button" onClick={() => void saveProjectKeyDate()} disabled={projectSaving} className="w-full sm:w-auto">
               <Check className="w-4 h-4 mr-2" />
               {projectSaving ? 'Saving…' : 'Save'}
             </Button>
@@ -1512,11 +1526,11 @@ export default function ProjectsDashboardKeyDates() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPersonalOpen(false)} disabled={personalSaving}>
+          <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:justify-end sm:space-x-2">
+            <Button type="button" variant="outline" onClick={() => setPersonalOpen(false)} disabled={personalSaving} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="button" onClick={() => void savePersonalKeyDate()} disabled={personalSaving}>
+            <Button type="button" onClick={() => void savePersonalKeyDate()} disabled={personalSaving} className="w-full sm:w-auto">
               {personalSaving ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
