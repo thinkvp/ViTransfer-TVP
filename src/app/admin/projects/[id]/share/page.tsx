@@ -294,8 +294,12 @@ export default function AdminSharePage() {
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
+    if (activeAlbumId) return
+    if (project?.enableVideos === false) return
     if (project?.videosByName) {
-      const videoNames = Object.keys(project.videosByName)
+      const videoNames = Object.keys(project.videosByName).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' })
+      )
       if (videoNames.length === 0) return
 
       if (!activeVideoName) {
@@ -314,16 +318,7 @@ export default function AdminSharePage() {
         }
 
         if (!videoNameToUse) {
-          const sortedVideoNames = videoNames.sort((nameA, nameB) => {
-            const hasApprovedA = project.videosByName[nameA].some((v: any) => v.approved)
-            const hasApprovedB = project.videosByName[nameB].some((v: any) => v.approved)
-
-            if (hasApprovedA !== hasApprovedB) {
-              return hasApprovedA ? 1 : -1
-            }
-            return 0
-          })
-          videoNameToUse = sortedVideoNames[0]
+          videoNameToUse = videoNames[0]
         }
 
         setActiveVideoName(videoNameToUse)
@@ -348,7 +343,7 @@ export default function AdminSharePage() {
         }
       }
     }
-  }, [project, activeVideoName, urlVideoName, urlVersion, urlTimestamp])
+  }, [project?.videosByName, project?.enableVideos, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
 
   // Tokenize active videos lazily
   useEffect(() => {

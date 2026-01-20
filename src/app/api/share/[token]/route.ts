@@ -187,17 +187,11 @@ export async function GET(
     })
 
     const sortedVideosByName: Record<string, any[]> = {}
-    const sortedKeys = Object.keys(videosByName).sort((nameA, nameB) => {
-      const hasApprovedA = videosByName[nameA].some((v: any) => v.approved)
-      const hasApprovedB = videosByName[nameB].some((v: any) => v.approved)
+    const sortedKeys = Object.keys(videosByName).sort((nameA, nameB) =>
+      nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
+    )
 
-      if (hasApprovedA !== hasApprovedB) {
-        return hasApprovedA ? 1 : -1
-      }
-      return 0
-    })
-
-    sortedKeys.forEach(key => {
+    sortedKeys.forEach((key) => {
       sortedVideosByName[key] = videosByName[key]
     })
 

@@ -39,7 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const albums = await prisma.album.findMany({
     where: { projectId: projectMeta.id },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
     include: { _count: { select: { photos: true } } },
   })
 

@@ -246,7 +246,11 @@ export default function SharePage() {
       })
       if (response.ok) {
         const data = await response.json()
-        setAlbums(Array.isArray(data?.albums) ? data.albums : [])
+        const albumsRaw = Array.isArray(data?.albums) ? data.albums : []
+        const albumsSorted = [...albumsRaw].sort((a: any, b: any) =>
+          String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' })
+        )
+        setAlbums(albumsSorted)
       }
     } catch {
       // ignore
@@ -358,7 +362,9 @@ export default function SharePage() {
     if (activeAlbumId) return
     if (project?.enableVideos === false) return
     if (project?.videosByName) {
-      const videoNames = Object.keys(project.videosByName)
+      const videoNames = Object.keys(project.videosByName).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' })
+      )
       if (videoNames.length === 0) return
 
       // Determine which video group should be active
@@ -411,6 +417,25 @@ export default function SharePage() {
       }
     }
   }, [project?.videosByName, project?.enableVideos, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
+
+  // If there are no videos, auto-select the first album (alphabetically).
+  useEffect(() => {
+    if (activeAlbumId) return
+    if (project?.enablePhotos === false) return
+
+    const hasVideos =
+      project?.enableVideos !== false &&
+      project?.videosByName &&
+      Object.keys(project.videosByName).length > 0
+
+    if (hasVideos) return
+    if (!Array.isArray(albums) || albums.length === 0) return
+
+    const firstAlbumId = String(albums[0]?.id || '')
+    if (!firstAlbumId) return
+
+    setActiveAlbumId(firstAlbumId)
+  }, [activeAlbumId, albums, project?.enableVideos, project?.enablePhotos, project?.videosByName])
 
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
