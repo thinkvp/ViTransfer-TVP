@@ -15,6 +15,7 @@ type Project = {
   id: string
   title: string
   companyName: string | null
+  clientId: string | null
   status: string
   createdAt: string | Date
   updatedAt: string | Date
