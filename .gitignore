@@ -69,3 +69,6 @@ about.html
 
 # Local email preview output
 .email-previews/
+
+# Local DB dumps
+backup.sql
