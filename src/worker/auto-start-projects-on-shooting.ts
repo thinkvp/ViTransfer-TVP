@@ -1,3 +1,5 @@
+import { ProjectStatus, ProjectStatusChangeSource } from '@prisma/client'
+
 import { prisma } from '../lib/db'
 
 function isoDateTodayLocal(): string {
@@ -25,7 +27,7 @@ export async function processAutoStartProjectsOnShootingKeyDate(): Promise<{ sta
   // Uses server/container local time (see TZ env var) to match other key-date logic.
   const due = await prisma.project.findMany({
     where: {
-      status: 'NOT_STARTED',
+      status: ProjectStatus.NOT_STARTED,
       keyDates: {
         some: {
           type: 'SHOOTING',
@@ -46,15 +48,15 @@ export async function processAutoStartProjectsOnShootingKeyDate(): Promise<{ sta
 
   await prisma.$transaction([
     prisma.project.updateMany({
-      where: { id: { in: ids }, status: 'NOT_STARTED' },
-      data: { status: 'IN_PROGRESS' },
+      where: { id: { in: ids }, status: ProjectStatus.NOT_STARTED },
+      data: { status: ProjectStatus.IN_PROGRESS },
     }),
     prisma.projectStatusChange.createMany({
       data: due.map((p) => ({
         projectId: p.id,
-        previousStatus: 'NOT_STARTED' as any,
-        currentStatus: 'IN_PROGRESS' as any,
-        source: 'SYSTEM' as any,
+        previousStatus: p.status,
+        currentStatus: ProjectStatus.IN_PROGRESS,
+        source: ProjectStatusChangeSource.SYSTEM,
         changedById: null,
       })),
     }),

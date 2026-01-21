@@ -334,6 +334,7 @@ export default function EditUserPage() {
             <div className="space-y-2">
               <Label>Role</Label>
               <Select
+                key={rolesLoading ? 'roles-loading' : 'roles-loaded'}
                 value={formData.appRoleId}
                 onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
                 disabled={rolesLoading}
