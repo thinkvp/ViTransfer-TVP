@@ -25,6 +25,7 @@ interface ProjectUsersEditorProps {
   disabled?: boolean
   addButtonLabel?: string
   addButtonIconOnly?: boolean
+  addButtonHideLabelOnMobile?: boolean
   addButtonSize?: ButtonProps['size']
   addButtonVariant?: ButtonProps['variant']
   addButtonClassName?: string
@@ -38,6 +39,7 @@ export function ProjectUsersEditor({
   disabled = false,
   addButtonLabel = 'Add User',
   addButtonIconOnly = false,
+  addButtonHideLabelOnMobile = false,
   addButtonSize = 'sm',
   addButtonVariant = 'default',
   addButtonClassName,
@@ -140,31 +142,61 @@ export function ProjectUsersEditor({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="text-base font-medium">{label}</div>
-          {String(description || '').trim().length > 0 && (
-            <p className="text-xs text-muted-foreground mt-1">{description}</p>
-          )}
+      {addButtonHideLabelOnMobile ? (
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-base font-medium">{label}</div>
+            {String(description || '').trim().length > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">{description}</p>
+            )}
+          </div>
+          <div className="flex justify-end shrink-0">
+            <Button
+              type="button"
+              variant={addButtonVariant}
+              size={addButtonSize}
+              onClick={() => {
+                if (disabled) return
+                setShowAddForm(true)
+                void loadSuggestions('', { allowEmpty: true })
+              }}
+              disabled={disabled || showAddForm}
+              className={addButtonClassName}
+            >
+              <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 sm:mr-2'} />
+              {!addButtonIconOnly && (
+                <span className="hidden sm:inline">{addButtonLabel}</span>
+              )}
+            </Button>
+          </div>
         </div>
-        <div className="w-full sm:w-64">
-          <Button
-            type="button"
-            variant={addButtonVariant}
-            size={addButtonSize}
-            onClick={() => {
-              if (disabled) return
-              setShowAddForm(true)
-              void loadSuggestions('', { allowEmpty: true })
-            }}
-            disabled={disabled || showAddForm}
-            className={addButtonClassName || 'w-full'}
-          >
-            <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 mr-2'} />
-            {!addButtonIconOnly && <span>{addButtonLabel}</span>}
-          </Button>
+      ) : (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-base font-medium">{label}</div>
+            {String(description || '').trim().length > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">{description}</p>
+            )}
+          </div>
+          <div className="w-full sm:w-64 flex justify-end">
+            <Button
+              type="button"
+              variant={addButtonVariant}
+              size={addButtonSize}
+              onClick={() => {
+                if (disabled) return
+                setShowAddForm(true)
+                void loadSuggestions('', { allowEmpty: true })
+              }}
+              disabled={disabled || showAddForm}
+              className={addButtonClassName || 'w-full'}
+            >
+              <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 mr-2'} />
+              {!addButtonIconOnly && <span>{addButtonLabel}</span>}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {selected.length === 0 && !showAddForm ? (
         <div className="text-sm text-muted-foreground py-4 text-center border border-dashed rounded-lg">

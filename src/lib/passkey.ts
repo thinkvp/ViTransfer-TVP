@@ -446,6 +446,7 @@ export async function verifyPasskeyAuthentication(
       details: {
         userId: credential.user.id,
         email: credential.user.email,
+        role: credential.user.role,
         credentialId: credential.id,
         deviceType: credential.deviceType,
       },

@@ -202,14 +202,14 @@ export function PushNotificationsSection({
                         />
                       </div>
 
-                        {/* Successful Admin Login */}
+                        {/* Successful Login */}
                         <div className="flex items-center justify-between pt-3 border-t">
                           <div className="space-y-0.5">
                             <Label htmlFor="notifySuccessfulAdminLogin" className="text-sm font-normal">
-                              Successful Admin Login
+                              Successful Login
                             </Label>
                             <p className="text-xs text-muted-foreground">
-                              When an administrator logs in successfully
+                              When someone logs in successfully (includes role)
                             </p>
                           </div>
                           <Switch

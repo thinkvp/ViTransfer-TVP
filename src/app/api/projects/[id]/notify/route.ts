@@ -47,7 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { id: projectId } = await params
     const body = await request.json()
-    const { videoId, albumId, notifyEntireProject, sendPasswordSeparately, notes, notificationType, internalUserIds, projectFileIds } = body
+    const { videoId, albumId, notifyEntireProject, sendPasswordSeparately, notes, notificationType, internalUserIds, projectFileIds, recipientIds } = body
 
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : ''
 
@@ -238,6 +238,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'No recipients configured for this project' }, { status: 400 })
     }
 
+    // Optional filtering: if recipientIds are provided, only email those recipients
+    const requestedRecipientIds: string[] = Array.isArray(recipientIds) ? recipientIds.map((x: any) => String(x)) : []
+    const uniqueRecipientIds = Array.from(new Set(requestedRecipientIds)).filter(Boolean)
+
+    let filteredRecipients = recipients
+    if (uniqueRecipientIds.length > 0) {
+      const availableIds = new Set(recipients.map((r) => String(r.id || '')))
+      const invalidIds = uniqueRecipientIds.filter((id) => !availableIds.has(id))
+      if (invalidIds.length > 0) {
+        return NextResponse.json({ error: 'One or more selected recipients are not part of this project' }, { status: 400 })
+      }
+
+      filteredRecipients = recipients.filter((r) => r.id && uniqueRecipientIds.includes(String(r.id)))
+    }
+
+    const filteredRecipientsWithEmail = filteredRecipients.filter((r) => r.email)
+    if (filteredRecipientsWithEmail.length === 0) {
+      return NextResponse.json({ error: 'No selected recipients have an email address' }, { status: 400 })
+    }
+
     // Generate share URL
     const shareUrl = await generateShareUrl(project.slug)
     const isPasswordProtected = !!project.sharePassword
@@ -313,8 +333,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       : 'SPECIFIC_VIDEO_VERSION'
 
     // Send emails to all recipients with email addresses
-    const emailPromises = recipients
-      .filter(recipient => recipient.email)
+    const emailPromises = filteredRecipientsWithEmail
       .map(async (recipient) => {
         // Generate unique tracking token for this email/recipient
         const trackingToken = await prisma.emailTracking.create({
@@ -367,7 +386,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       })
 
     const results = await Promise.allSettled(emailPromises)
-    const recipientsWithEmails = recipients.filter(r => r.email)
+    const recipientsWithEmails = filteredRecipientsWithEmail
 
     const isSendEmailSuccess = (value: unknown): value is { success: true } => {
       if (!value || typeof value !== 'object') return false
@@ -394,9 +413,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         const decryptedPassword = decrypt(project.sharePassword)
 
-        const passwordPromises = recipients
-          .filter(recipient => recipient.email)
-          .map(recipient =>
+        const passwordPromises = filteredRecipientsWithEmail.map(recipient =>
             sendPasswordEmail({
               clientEmail: recipient.email!,
               clientName: recipient.name || 'Client',

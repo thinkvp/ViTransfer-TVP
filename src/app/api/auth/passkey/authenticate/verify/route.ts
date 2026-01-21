@@ -87,12 +87,15 @@ export async function POST(request: NextRequest) {
     const fingerprint = crypto.createHash('sha256').update(request.headers.get('user-agent') || 'unknown').digest('base64url')
     const tokens = await issueAdminTokens(result.user, fingerprint)
 
+    const roleTitle = (result.user.role || 'Admin').trim() || 'Admin'
+
     await sendPushNotification({
       type: 'SUCCESSFUL_ADMIN_LOGIN',
-      title: 'Successful Admin Login',
-      message: 'Administrator logged in successfully (passkey)',
+      title: `Successful ${roleTitle} Login`,
+      message: `${roleTitle} logged in successfully (passkey)`,
       details: {
         'Email': result.user.email,
+        'Role': roleTitle,
         'IP Address': ipAddress,
       },
     })

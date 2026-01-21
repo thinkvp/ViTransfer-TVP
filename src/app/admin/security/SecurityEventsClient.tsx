@@ -8,7 +8,9 @@ import { formatDateTime } from '@/lib/utils'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import {
   formatSecurityEventType,
+  formatSecurityEventTypeWithDetails,
   getSecurityEventDescription,
+  getSecurityEventDescriptionWithDetails,
   getSecurityEventCategory,
   formatIpAddress,
   formatSessionId,
@@ -424,7 +426,7 @@ export default function SecurityEventsClient() {
                             </span>
                           </div>
                           <h3 className="text-base font-semibold text-foreground">
-                            {formatSecurityEventType(event.type)}
+                            {formatSecurityEventTypeWithDetails(event.type, event.details)}
                           </h3>
                         </div>
                         <div className="text-xs text-muted-foreground text-right whitespace-nowrap shrink-0">
@@ -434,7 +436,7 @@ export default function SecurityEventsClient() {
 
                       {/* Description */}
                       <div className="text-sm text-foreground bg-muted/50 rounded border-l-2 border-primary p-2">
-                        {getSecurityEventDescription(event.type)}
+                        {getSecurityEventDescriptionWithDetails(event.type, event.details)}
                       </div>
 
                       {/* Event Details */}

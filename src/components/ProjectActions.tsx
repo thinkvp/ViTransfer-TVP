@@ -66,6 +66,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [entireProjectNotes, setEntireProjectNotes] = useState<string>('')
   const [internalInviteNotes, setInternalInviteNotes] = useState<string>('')
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([])
   const [selectedInternalUserIds, setSelectedInternalUserIds] = useState<string[]>([])
   const [projectFiles, setProjectFiles] = useState<Array<{ id: string; fileName: string; fileSize: string }>>([])
   const [projectFilesLoading, setProjectFilesLoading] = useState(false)
@@ -82,6 +83,24 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Check if at least one recipient has an email address
   const hasRecipientWithEmail = (project as any).recipients?.some((r: any) => r.email && r.email.trim() !== '') || false
+
+  const projectRecipients = useMemo(() => {
+    const list = Array.isArray((project as any)?.recipients) ? ((project as any).recipients as any[]) : []
+    return list
+      .map((r) => ({
+        id: String(r?.id || ''),
+        name: typeof r?.name === 'string' ? r.name : (r?.name ?? null),
+        email: typeof r?.email === 'string' ? r.email : (r?.email ?? null),
+        isPrimary: Boolean(r?.isPrimary),
+        receiveNotifications: r?.receiveNotifications !== false,
+      }))
+      .filter((r) => r.id)
+  }, [project])
+
+  const projectRecipientsWithEmail = useMemo(
+    () => projectRecipients.filter((r) => typeof r.email === 'string' && r.email.trim().length > 0),
+    [projectRecipients]
+  )
 
   // Check if project is password protected
   const isPasswordProtected = (project as any).sharePassword !== null &&
@@ -147,6 +166,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setSelectedAlbumId('')
     setEntireProjectNotes('')
     setInternalInviteNotes('')
+    setSelectedRecipientIds([])
     setSelectedInternalUserIds([])
     setSelectedProjectFileIds([])
   }
@@ -232,6 +252,14 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setSelectedInternalUserIds(assignedUsersWithEmail.map((u) => String(u.id)))
   }, [assignedUsersWithEmail, notificationType, showNotificationModal])
 
+  useEffect(() => {
+    if (!showNotificationModal) return
+    if (notificationType === 'internal-invite') return
+
+    // Default: select all project recipients with email
+    setSelectedRecipientIds(projectRecipientsWithEmail.map((r) => String(r.id)))
+  }, [notificationType, projectRecipientsWithEmail, showNotificationModal])
+
   const selectedAttachmentsMeta = projectFiles
     .filter((f) => selectedProjectFileIds.includes(f.id))
     .map((f) => {
@@ -255,6 +283,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     // Validation
     if (notificationType !== 'internal-invite' && !hasRecipientWithEmail) {
       setMessage({ type: 'error', text: 'Add at least one recipient with an email address in Settings before sending client notifications.' })
+      return
+    }
+
+    if (notificationType !== 'internal-invite' && selectedRecipientIds.length === 0) {
+      setMessage({ type: 'error', text: 'Please select at least one recipient' })
       return
     }
 
@@ -299,6 +332,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           : notificationType === 'internal-invite'
           ? internalInviteNotes
           : null,
+      recipientIds: notificationType !== 'internal-invite' ? selectedRecipientIds : undefined,
       internalUserIds: notificationType === 'internal-invite' ? selectedInternalUserIds : undefined,
       projectFileIds: notificationType === 'internal-invite' ? selectedProjectFileIds : undefined,
       sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately,
@@ -310,6 +344,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         setSelectedAlbumId('')
         setEntireProjectNotes('')
         setInternalInviteNotes('')
+        setSelectedRecipientIds([])
         setSelectedInternalUserIds([])
         setSelectedProjectFileIds([])
         setSendPasswordSeparately(false)
@@ -594,6 +629,47 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </Select>
             </div>
 
+            {notificationType !== 'internal-invite' && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select Recipients</label>
+                <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                  {projectRecipientsWithEmail.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">No recipients with email addresses.</div>
+                  ) : (
+                    projectRecipientsWithEmail.map((r) => {
+                      const checked = selectedRecipientIds.includes(String(r.id))
+                      const label = (r.name || r.email) as string
+                      return (
+                        <label key={String(r.id)} className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 mt-0.5"
+                            checked={checked}
+                            onChange={(e) => {
+                              const id = String(r.id)
+                              setSelectedRecipientIds((prev) =>
+                                e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id)
+                              )
+                            }}
+                            disabled={loading}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium truncate">{label}</span>
+                            <span className="block text-xs text-muted-foreground truncate">{r.email}</span>
+                          </span>
+                          {!r.receiveNotifications && (
+                            <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border flex-shrink-0">
+                              notifications off
+                            </span>
+                          )}
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Notes (only for entire project notification) */}
             {notificationType === 'entire-project' && (
               <div>
@@ -602,9 +678,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                     There is nothing ready yet. Add a ready video (or an album) to enable this email.
                   </p>
                 )}
-                <label className="text-sm font-medium mb-2 block">
-                  Notes
-                </label>
+                <label className="text-sm font-medium mb-2 block">Notes</label>
                 <Textarea
                   value={entireProjectNotes}
                   onChange={(e) => setEntireProjectNotes(e.target.value)}
@@ -787,6 +861,8 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </>
             )}
 
+            {/* Select Recipients is rendered above for client notifications */}
+
             {/* Password checkbox - only show if project is password protected */}
             {isPasswordProtected && (
               <div className="flex items-center space-x-2 p-3 bg-muted rounded-md">
@@ -817,6 +893,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               disabled={
                 loading ||
                 (notificationType !== 'internal-invite' && !hasRecipientWithEmail) ||
+                (notificationType !== 'internal-invite' && selectedRecipientIds.length === 0) ||
                 (notificationType === 'entire-project' && !hasAnyReadyForEntireProject) ||
                 (notificationType === 'specific-video' && !selectedVideoId) ||
                 (notificationType === 'specific-album' && !selectedAlbumId) ||
@@ -851,12 +928,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
             <p className="text-xs text-muted-foreground">
               {notificationType === 'entire-project'
-                ? 'This will send an email to the client with access to all ready videos in this project.'
+                ? 'This will send an email to the selected recipients with access to all ready videos in this project.'
                 : notificationType === 'specific-album'
-                ? 'This will send an email to the client with a link to view the selected album.'
+                ? 'This will send an email to the selected recipients with a link to view the selected album.'
                 : notificationType === 'internal-invite'
                 ? 'This will send an email to the selected internal users with a link to access this project.'
-                : 'This will send an email to the client with a link to view the selected video version.'}
+                : 'This will send an email to the selected recipients with a link to view the selected video version.'}
             </p>
           </div>
         </DialogContent>

@@ -258,6 +258,26 @@ export const SECURITY_EVENT_METADATA: Record<SecurityEventType, SecurityEventMet
  * Format security event type for display
  */
 export function formatSecurityEventType(type: string): string {
+  return formatSecurityEventTypeWithDetails(type)
+}
+
+function extractRoleTitle(details: unknown): string | null {
+  if (!details || typeof details !== 'object') return null
+  const d = details as Record<string, unknown>
+  const candidates = [d.roleTitle, d.role, d.appRoleName, d.appRole]
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim().length > 0) return c.trim()
+  }
+  return null
+}
+
+export function formatSecurityEventTypeWithDetails(type: string, details?: unknown): string {
+  const roleTitle = extractRoleTitle(details)
+
+  if ((type === 'ADMIN_PASSWORD_LOGIN_SUCCESS' || type === 'PASSKEY_LOGIN_SUCCESS') && roleTitle) {
+    return `Successful ${roleTitle} Login`
+  }
+
   const metadata = SECURITY_EVENT_METADATA[type as SecurityEventType]
   return metadata?.label || type.split('_').map(word =>
     word.charAt(0) + word.slice(1).toLowerCase()
@@ -268,6 +288,20 @@ export function formatSecurityEventType(type: string): string {
  * Get security event description
  */
 export function getSecurityEventDescription(type: string): string {
+  return getSecurityEventDescriptionWithDetails(type)
+}
+
+export function getSecurityEventDescriptionWithDetails(type: string, details?: unknown): string {
+  const roleTitle = extractRoleTitle(details)
+
+  if (type === 'ADMIN_PASSWORD_LOGIN_SUCCESS' && roleTitle) {
+    return `${roleTitle} successfully logged in using username/email and password.`
+  }
+
+  if (type === 'PASSKEY_LOGIN_SUCCESS' && roleTitle) {
+    return `${roleTitle} successfully authenticated using passkey (biometric or security key).`
+  }
+
   const metadata = SECURITY_EVENT_METADATA[type as SecurityEventType]
   return metadata?.description || 'No description available.'
 }

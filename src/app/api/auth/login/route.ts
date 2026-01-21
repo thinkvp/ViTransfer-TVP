@@ -131,16 +131,20 @@ export async function POST(request: NextRequest) {
       details: {
         userId: user.id,
         email: user.email,
+        role: user.appRoleName || 'Admin',
       },
       wasBlocked: false,
     })
 
+    const roleTitle = (user.appRoleName || 'Admin').trim() || 'Admin'
+
     await sendPushNotification({
       type: 'SUCCESSFUL_ADMIN_LOGIN',
-      title: 'Successful Admin Login',
-      message: 'Administrator logged in successfully',
+      title: `Successful ${roleTitle} Login`,
+      message: `${roleTitle} logged in successfully`,
       details: {
         'Email': user.email,
+        'Role': roleTitle,
         'IP Address': ipAddress,
       },
     })
