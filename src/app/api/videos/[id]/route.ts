@@ -274,14 +274,9 @@ export async function PATCH(
       }
     }
 
-    // RBAC: split permissions by intent.
-    if (approved !== undefined) {
-      const forbidden = requireActionAccess(authResult, 'changeProjectStatuses')
-      if (forbidden) return forbidden
-    }
-
-    if (name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined) {
-      const forbidden = requireActionAccess(authResult, 'changeProjectSettings')
+    // RBAC: conservative - any admin-side mutation requires Projects Full Control.
+    if (approved !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined) {
+      const forbidden = requireActionAccess(authResult, 'projectsFullControl')
       if (forbidden) return forbidden
     }
 
@@ -365,7 +360,7 @@ export async function DELETE(
   if (forbiddenMenu) return forbiddenMenu
 
   // Conservative: video deletion is a destructive project content operation.
-  const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
+  const forbiddenAction = requireActionAccess(authResult, 'projectsFullControl')
   if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(request, {

@@ -6,6 +6,8 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
+import { getCurrentUserFromRequest } from '@/lib/auth'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { readdir, rmdir, unlink } from 'fs/promises'
 import { dirname, join } from 'path'
 export const runtime = 'nodejs'
@@ -64,6 +66,7 @@ export async function PATCH(
     const existingComment = await prisma.comment.findUnique({
       where: { id },
       select: {
+        isInternal: true,
         projectId: true,
         project: {
           select: {
@@ -125,6 +128,24 @@ export async function PATCH(
     }
 
     const { isAdmin, isAuthenticated } = accessCheck
+
+    if (isAdmin) {
+      const currentUser = await getCurrentUserFromRequest(request)
+      if (!currentUser) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
+      if (currentUser.appRoleIsSystemAdmin !== true) {
+        const permissions = normalizeRolePermissions(currentUser?.permissions)
+        const requiredPermission = existingComment.isInternal
+          ? 'makeCommentsOnProjects'
+          : 'manageSharePageComments'
+
+        if (!canDoAction(permissions, requiredPermission)) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      }
+    }
 
     // Prepare update data
     const updateData: any = {
@@ -277,6 +298,23 @@ export async function DELETE(
         { error: 'Comments are disabled for guest users' },
         { status: 403 }
       )
+    }
+
+    if (accessCheck.isAdmin) {
+      const currentUser = await getCurrentUserFromRequest(request)
+      if (!currentUser) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
+      if (currentUser.appRoleIsSystemAdmin !== true) {
+        const permissions = normalizeRolePermissions(currentUser?.permissions)
+        const requiredPermission = existingComment.isInternal
+          ? 'makeCommentsOnProjects'
+          : 'manageSharePageComments'
+        if (!canDoAction(permissions, requiredPermission)) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      }
     }
 
     // SECURITY: If feedback is hidden, block client deletion attempts

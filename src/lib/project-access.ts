@@ -53,6 +53,7 @@ export async function verifyProjectAccess(
     }
 
     const forbiddenAction = requireAnyActionAccess(currentUser, [
+      'accessSharePage',
       'accessProjectSettings',
       'uploadVideosOnProjects',
       'changeProjectSettings',

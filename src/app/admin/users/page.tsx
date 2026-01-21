@@ -45,24 +45,21 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     key: 'projects',
     label: 'Projects',
     actions: [
-      { key: 'accessProjectSettings', label: 'Access project settings' },
-      { key: 'changeProjectSettings', label: 'Change project settings' },
-      { key: 'uploadFilesToProjectInternal', label: 'Upload internal project files' },
-      { key: 'uploadVideosOnProjects', label: 'Upload videos' },
-      { key: 'manageProjectAlbums', label: 'Manage albums' },
-      { key: 'sendNotificationsToRecipients', label: 'Send notifications to recipients' },
-      { key: 'makeCommentsOnProjects', label: 'Make internal comments' },
-      { key: 'changeProjectStatuses', label: 'Change project statuses' },
-      { key: 'deleteProjects', label: 'Delete projects' },
+      { key: 'projectsPhotoVideoUploads', label: 'Photo & Video Uploads' },
+      { key: 'projectsFullControl', label: 'Full Control' },
+    ],
+  },
+  {
+    key: 'sharePage',
+    label: 'Share Page',
+    actions: [
+      { key: 'manageSharePageComments', label: 'Make and delete comments' },
     ],
   },
   {
     key: 'clients',
     label: 'Clients',
-    actions: [
-      { key: 'manageClients', label: 'Create/edit/delete clients' },
-      { key: 'manageClientFiles', label: 'Manage client files' },
-    ],
+    actions: [],
   },
   {
     key: 'sales',
@@ -72,37 +69,22 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     key: 'settings',
     label: 'Settings',
-    actions: [
-      { key: 'changeSettings', label: 'Change global settings' },
-      { key: 'sendTestEmail', label: 'Send test email' },
-    ],
+    actions: [],
   },
   {
     key: 'users',
     label: 'Users',
-    actions: [
-      { key: 'manageUsers', label: 'Create/edit/delete users' },
-      { key: 'manageRoles', label: 'Create/edit/delete roles' },
-    ],
+    actions: [],
   },
   {
     key: 'security',
     label: 'Security',
-    actions: [
-      { key: 'viewSecurityEvents', label: 'View security events' },
-      { key: 'manageSecurityEvents', label: 'Delete/purge security events' },
-      { key: 'viewSecurityBlocklists', label: 'View blocklists' },
-      { key: 'manageSecurityBlocklists', label: 'Manage blocklists' },
-      { key: 'viewSecurityRateLimits', label: 'View rate limits' },
-      { key: 'manageSecurityRateLimits', label: 'Clear rate limits' },
-    ],
+    actions: [],
   },
   {
     key: 'analytics',
     label: 'Analytics',
-    actions: [
-      { key: 'viewAnalytics', label: 'View analytics' },
-    ],
+    actions: [],
   },
 ]
 
@@ -522,25 +504,53 @@ export default function UsersPage() {
                         {group.actions.length > 0 && (
                           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {group.actions.map((item) => (
+                              (() => {
+                                const isProjectsGroup = group.key === 'projects'
+                                const isSharePageGroup = group.key === 'sharePage'
+                                const fullControlEnabled = rolePermissions.actions.projectsFullControl === true
+                                const isLockedPhotoVideo =
+                                  isProjectsGroup && item.key === 'projectsPhotoVideoUploads' && fullControlEnabled
+
+                                const isDisabled = !areaEnabled || isLockedPhotoVideo
+
+                                const handleCheckedChange = (checked: boolean) => {
+                                  setRolePermissions((prev) => {
+                                    const next = {
+                                      ...prev,
+                                      actions: { ...prev.actions, [item.key]: checked === true },
+                                    }
+
+                                    // Projects: Full Control implies Photo & Video Uploads.
+                                    if (isProjectsGroup && item.key === 'projectsFullControl' && checked === true) {
+                                      next.actions.projectsPhotoVideoUploads = true
+                                    }
+
+                                    // Share Page: disabling the main area clears child actions.
+                                    if (isSharePageGroup && prev.menuVisibility.sharePage !== true) {
+                                      // no-op; the area gate already disables the checkbox
+                                    }
+
+                                    return next
+                                  })
+                                }
+
+                                return (
                               <label
                                 key={item.key}
                                 className={cn(
                                   'flex items-center gap-2 text-sm',
-                                  !areaEnabled && 'opacity-60'
+                                  (!areaEnabled || isLockedPhotoVideo) && 'opacity-60'
                                 )}
                               >
                                 <Checkbox
                                   checked={rolePermissions.actions[item.key]}
-                                  disabled={!areaEnabled}
-                                  onCheckedChange={(checked) =>
-                                    setRolePermissions((prev) => ({
-                                      ...prev,
-                                      actions: { ...prev.actions, [item.key]: checked === true },
-                                    }))
-                                  }
+                                  disabled={isDisabled}
+                                  onCheckedChange={(checked) => handleCheckedChange(checked === true)}
                                 />
                                 <span>{item.label}</span>
                               </label>
+                                )
+                              })()
                             ))}
                           </div>
                         )}

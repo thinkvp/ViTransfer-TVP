@@ -47,6 +47,7 @@ interface CommentSectionProps {
   useFullTimecode?: boolean
   videos?: Video[]
   isAdminView?: boolean
+  canAdminDeleteComments?: boolean
   companyName?: string // Studio company name
   clientCompanyName?: string | null // Client company name
   smtpConfigured?: boolean
@@ -77,6 +78,7 @@ export function CommentSectionView({
   useFullTimecode = false,
   videos = [],
   isAdminView = false,
+  canAdminDeleteComments = true,
   companyName = 'Studio',
   clientCompanyName = null,
   smtpConfigured = false,
@@ -197,6 +199,7 @@ export function CommentSectionView({
   const pendingScrollAttemptsRef = useRef(0)
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
+  const canAdminDelete = isAdminView && canAdminDeleteComments
 
   const handleDownloadCommentFile = async (commentId: string, fileId: string, fileName: string) => {
     try {
@@ -1097,9 +1100,9 @@ export function CommentSectionView({
                 const isViewerMessage = isAdminView ? comment.isInternal : !comment.isInternal
                 const hasReplies = comment.replies && comment.replies.length > 0
                 const repliesExpanded = expandedReplies[comment.id] ?? true // Default to expanded
-                const canDeleteParent = isAdminView || (canClientDelete && !comment.isInternal)
-                const allowAnyReplyDelete = isAdminView || canClientDelete
-                const canDeleteReply = (reply: Comment) => isAdminView || (canClientDelete && !reply.isInternal)
+                const canDeleteParent = canAdminDelete || (canClientDelete && !comment.isInternal)
+                const allowAnyReplyDelete = canAdminDelete || canClientDelete
+                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && !reply.isInternal)
 
                 return (
                   <div key={comment.id}>

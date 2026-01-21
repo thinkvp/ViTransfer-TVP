@@ -3,7 +3,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
-import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { isVisibleProjectStatusForUser, requireAnyActionAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,10 +21,7 @@ export async function GET(request: NextRequest) {
     return authResult
   }
 
-  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
-  if (forbiddenMenu) return forbiddenMenu
-
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  const forbiddenAction = requireAnyActionAccess(authResult, ['accessSharePage', 'uploadVideosOnProjects', 'manageProjectAlbums', 'accessProjectSettings'])
   if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: Allow generous limit for token generation

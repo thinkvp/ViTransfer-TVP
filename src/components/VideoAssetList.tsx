@@ -35,11 +35,20 @@ interface VideoAssetListProps {
   videoName: string
   versionLabel: string
   projectId: string
+  canManage?: boolean
   onAssetDeleted?: () => void
   refreshTrigger?: number // Used to trigger refetch from parent
 }
 
-export function VideoAssetList({ videoId, videoName, versionLabel, projectId, onAssetDeleted, refreshTrigger }: VideoAssetListProps) {
+export function VideoAssetList({
+  videoId,
+  videoName,
+  versionLabel,
+  projectId,
+  canManage = true,
+  onAssetDeleted,
+  refreshTrigger,
+}: VideoAssetListProps) {
   const [assets, setAssets] = useState<VideoAsset[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -74,6 +83,7 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
   }, [fetchAssets, refreshTrigger])
 
   const handleDelete = async (assetId: string, fileName: string) => {
+    if (!canManage) return
     if (!confirm(`Are you sure you want to delete "${fileName}"? This action cannot be undone.`)) {
       return
     }
@@ -196,6 +206,7 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
   }
 
   const handleSetThumbnail = async (assetId: string, fileName: string) => {
+    if (!canManage) return
     // Find the asset to check if it's currently active
     const asset = assets.find(a => a.id === assetId)
     const isCurrent = asset ? isCurrentThumbnail(asset) : false
@@ -270,7 +281,7 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
           <div className="text-sm font-medium text-muted-foreground">
             Uploaded Assets ({assets.length})
           </div>
-          {assets.length > 0 && (
+          {canManage && assets.length > 0 && (
             <Button
               type="button"
               variant="outline"
@@ -298,7 +309,7 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
-                {canSetAsThumbnail(asset) && (
+                {canManage && canSetAsThumbnail(asset) && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -323,20 +334,22 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
                 >
                   <Download className="h-4 w-4 text-primary" />
                 </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(asset.id, asset.fileName)}
-                  disabled={deletingId === asset.id}
-                  title="Delete asset"
-                >
-                  {deletingId === asset.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  )}
-                </Button>
+                {canManage && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDelete(asset.id, asset.fileName)}
+                    disabled={deletingId === asset.id}
+                    title="Delete asset"
+                  >
+                    {deletingId === asset.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           ))}

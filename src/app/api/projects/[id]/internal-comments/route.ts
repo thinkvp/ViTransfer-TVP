@@ -69,9 +69,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
-  if (forbiddenAction) return forbiddenAction
-
   const rateLimitResult = await rateLimit(
     request,
     { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many requests. Please slow down.' },

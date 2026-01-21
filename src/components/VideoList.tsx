@@ -18,9 +18,23 @@ interface VideoListProps {
   videos: Video[]
   isAdmin?: boolean
   onRefresh?: () => void
+  canDelete?: boolean
+  canApprove?: boolean
+  canManageAllowApproval?: boolean
 }
 
-export default function VideoList({ videos: initialVideos, isAdmin = true, onRefresh }: VideoListProps) {
+export default function VideoList({
+  videos: initialVideos,
+  isAdmin = true,
+  onRefresh,
+  canDelete,
+  canApprove,
+  canManageAllowApproval,
+}: VideoListProps) {
+  const effectiveCanDelete = canDelete ?? isAdmin
+  const effectiveCanApprove = canApprove ?? isAdmin
+  const effectiveCanManageAllowApproval = canManageAllowApproval ?? isAdmin
+
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -47,6 +61,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   }, [initialVideos])
 
   const handleDelete = async (videoId: string) => {
+    if (!effectiveCanDelete) return
     // Prevent double-clicks during deletion
     if (deletingId) return
 
@@ -76,6 +91,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   }
 
   const handleToggleApproval = async (videoId: string, currentlyApproved: boolean) => {
+    if (!effectiveCanApprove) return
     // Prevent double-clicks during approval toggle
     if (approvingId) return
 
@@ -113,6 +129,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
   }
 
   const handleToggleAllowApproval = async (videoId: string, nextAllowApproval: boolean) => {
+    if (!effectiveCanManageAllowApproval) return
     if (savingAllowApprovalId) return
 
     const previous = (videos.find(v => v.id === videoId) as any)?.allowApproval
@@ -330,7 +347,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                     {video.status}
                   </span>
                 )}
-                {isAdmin && video.status === 'READY' && (
+                  {isAdmin && effectiveCanApprove && video.status === 'READY' && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -372,7 +389,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                     <Download className="w-4 h-4" />
                   </Button>
                 )}
-                {isAdmin && (
+                {isAdmin && effectiveCanDelete && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -450,7 +467,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
           {/* Version Notes */}
           {video.status === 'READY' && (
             <div className="pt-3">
-              {isAdmin && editingId !== video.id && (
+              {isAdmin && effectiveCanManageAllowApproval && editingId !== video.id && (
                 <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
@@ -557,6 +574,7 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                 videoName={video.name}
                 versionLabel={video.versionLabel}
                 projectId={video.projectId}
+                canManage={effectiveCanManageAllowApproval}
                 onAssetDeleted={() => {
                   setAssetRefreshTrigger(prev => prev + 1)
                   onRefresh?.()

@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const forbiddenMenu = requireMenuAccess(auth, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(auth, 'accessProjectSettings')
+  const forbiddenAction = requireActionAccess(auth, 'manageProjectAlbums')
   if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(

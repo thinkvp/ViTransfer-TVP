@@ -193,9 +193,10 @@ export async function validateCommentPermissions(params: {
 
   const isAuthenticatedInternalUser = !!currentUser
 
-  if (isAuthenticatedInternalUser) {
+  if (isAuthenticatedInternalUser && currentUser?.appRoleIsSystemAdmin !== true) {
     const permissions = normalizeRolePermissions(currentUser?.permissions)
-    if (!canDoAction(permissions, 'makeCommentsOnProjects')) {
+    const requiredPermission = isInternal ? 'makeCommentsOnProjects' : 'manageSharePageComments'
+    if (!canDoAction(permissions, requiredPermission)) {
       return { valid: false, error: 'Forbidden', errorStatus: 403 }
     }
   }

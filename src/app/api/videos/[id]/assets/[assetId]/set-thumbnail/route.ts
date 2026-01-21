@@ -22,7 +22,7 @@ export async function POST(
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  const forbiddenAction = requireActionAccess(authResult, 'projectsFullControl')
   if (forbiddenAction) return forbiddenAction
 
   // 3. RATE LIMITING

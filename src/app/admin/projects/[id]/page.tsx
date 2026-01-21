@@ -100,6 +100,9 @@ export default function ProjectPage() {
   const canChangeProjectSettings = canDoAction(permissions, 'changeProjectSettings')
   const canUploadFilesToProjectInternal = canDoAction(permissions, 'uploadFilesToProjectInternal')
   const canMakeProjectComments = canDoAction(permissions, 'makeCommentsOnProjects')
+  const canAccessSharePage = canDoAction(permissions, 'accessSharePage')
+  const canAccessPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
+  const canDeleteInternalFiles = canDoAction(permissions, 'projectsFullControl')
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -436,6 +439,7 @@ export default function ProjectPage() {
   // Fetch share URL
   useEffect(() => {
     async function fetchShareUrl() {
+      if (!canAccessSharePage) return
       if (!project?.slug) return
       try {
         const response = await apiFetch(`/api/share/url?slug=${project.slug}`)
@@ -449,7 +453,7 @@ export default function ProjectPage() {
     }
 
     fetchShareUrl()
-  }, [project?.slug])
+  }, [project?.slug, canAccessSharePage])
 
   // Fetch client recipients (for picker) when client changes
   useEffect(() => {
@@ -659,28 +663,31 @@ export default function ProjectPage() {
                     </div>
                   )}
 
-                  <ShareLink
-                    shareUrl={shareUrl}
-                    disabled={project.status === 'CLOSED'}
-                    label={project.status === 'CLOSED' ? 'Share Link - Inaccessible (Project is Closed)' : 'Share Link'}
-                  />
-
-                  {/* Recipients: full row */}
-                  <div className="border rounded-lg p-4 bg-card">
-                    <RecipientsEditor
-                      label="Recipients"
-                      description=""
-                      value={editableRecipients}
-                      onChange={(next) => void persistRecipients(next)}
-                      addButtonLabel="Add Recipient"
-                      showNotificationsToggle={true}
-                      showDisplayColor={true}
-                      showAlsoAddToClient={Boolean(project?.clientId)}
-                      addMode="dialog"
-                      clientRecipients={clientRecipients}
-                      clientName={projectClientName || undefined}
+                  {canAccessSharePage && (
+                    <ShareLink
+                      shareUrl={shareUrl}
+                      disabled={project.status === 'CLOSED'}
+                      label={project.status === 'CLOSED' ? 'Share Link - Inaccessible (Project is Closed)' : 'Share Link'}
                     />
-                  </div>
+                  )}
+
+                  {canDeleteInternalFiles && (
+                    <div className="border rounded-lg p-4 bg-card">
+                      <RecipientsEditor
+                        label="Recipients"
+                        description=""
+                        value={editableRecipients}
+                        onChange={(next) => void persistRecipients(next)}
+                        addButtonLabel="Add Recipient"
+                        showNotificationsToggle={true}
+                        showDisplayColor={true}
+                        showAlsoAddToClient={Boolean(project?.clientId)}
+                        addMode="dialog"
+                        clientRecipients={clientRecipients}
+                        clientName={projectClientName || undefined}
+                      />
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -774,11 +781,9 @@ export default function ProjectPage() {
               </Card>
             )}
 
-            {canAccessProjectSettings && (
-              <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />
-            )}
+            <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />
 
-            {canAccessProjectSettings && (
+            {canDeleteInternalFiles && (
               <div className="border rounded-lg p-4 bg-card space-y-4">
                 {canUploadFilesToProjectInternal ? (
                   <ProjectEmailUpload
@@ -806,7 +811,7 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {project.enableVideos !== false && (
+            {canAccessPhotoVideo && project.enableVideos !== false && (
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -835,6 +840,7 @@ export default function ProjectPage() {
                   comments={project.comments}
                   restrictToLatestVersion={project.restrictCommentsToLatestVersion}
                   companyName={companyName}
+                  canFullControl={canDeleteInternalFiles}
                   onVideoSelect={handleVideoSelect}
                   onRefresh={fetchProject}
                   sortMode={sortMode}
@@ -844,7 +850,7 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {project.enablePhotos !== false && (
+            {canAccessPhotoVideo && project.enablePhotos !== false && (
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -854,7 +860,7 @@ export default function ProjectPage() {
                     Photos
                   </h2>
                 </div>
-                <AdminAlbumManager projectId={project.id} projectStatus={project.status} />
+                <AdminAlbumManager projectId={project.id} projectStatus={project.status} canDelete={canDeleteInternalFiles} />
               </div>
             )}
           </div>
@@ -869,23 +875,25 @@ export default function ProjectPage() {
               canDeleteAll={adminUser?.appRoleIsSystemAdmin === true}
             />
 
-            <Card>
-              <CardContent className="pt-6">
-                <ProjectUsersEditor
-                  label="Users"
-                  description=""
-                  value={assignedUsers}
-                  onChange={(next) => {
-                    setAssignedUsers(next)
-                    void persistAssignedUsers(next)
-                  }}
-                  disabled={!canChangeProjectSettings}
-                  addButtonLabel="Add Users"
-                  addButtonSize="default"
-                  addButtonVariant="outline"
-                />
-              </CardContent>
-            </Card>
+            {canDeleteInternalFiles && (
+              <Card>
+                <CardContent className="pt-6">
+                  <ProjectUsersEditor
+                    label="Users"
+                    description=""
+                    value={assignedUsers}
+                    onChange={(next) => {
+                      setAssignedUsers(next)
+                      void persistAssignedUsers(next)
+                    }}
+                    disabled={!canChangeProjectSettings}
+                    addButtonLabel="Add Users"
+                    addButtonSize="default"
+                    addButtonVariant="outline"
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             <div className="border rounded-lg p-4 bg-card space-y-4">
               {canUploadFilesToProjectInternal ? (
@@ -906,11 +914,13 @@ export default function ProjectPage() {
               <ProjectFileList
                 projectId={project.id}
                 refreshTrigger={projectFilesRefresh}
-                canDelete={canUploadFilesToProjectInternal}
+                canDelete={canDeleteInternalFiles}
               />
             </div>
 
-            <ProjectStorageUsage projectId={project.id} />
+            {canDeleteInternalFiles && (
+              <ProjectStorageUsage projectId={project.id} />
+            )}
           </div>
         </div>
       </div>

@@ -9,7 +9,8 @@ import { getProjectRecipients } from '@/lib/recipients'
 import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
-import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { canDoAction } from '@/lib/rbac'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -65,9 +66,6 @@ export async function GET(
 
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
-
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
-  if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
@@ -220,6 +218,32 @@ export async function GET(
             receiveNotifications: pu.receiveNotifications !== false,
           }))
           .filter((u: any) => u?.id) || [],
+    }
+
+    // Enforce simplified project/share permissions by stripping restricted sections.
+    // (UI also hides these, but API should not leak them.)
+    const permissions = getUserPermissions(authResult)
+    const canFullControl = canDoAction(permissions, 'projectsFullControl')
+    const canPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
+    const canAccessSharePage = canDoAction(permissions, 'accessSharePage')
+
+    if (!canAccessSharePage && !canPhotoVideo && !canFullControl) {
+      ;(projectData as any).videos = []
+      if ((projectData as any)?._count) {
+        ;(projectData as any)._count = { ...(projectData as any)._count, videos: 0, albums: 0 }
+      }
+    }
+
+    if (!canFullControl) {
+      ;(projectData as any).sharePassword = null
+      ;(projectData as any).recipients = []
+      ;(projectData as any).assignedUsers = []
+    }
+
+    // External/share comments are only visible when the user can access the Share Page
+    // (or has Photo & Video Uploads / Full Control).
+    if (!canAccessSharePage && !canPhotoVideo && !canFullControl) {
+      ;(projectData as any).comments = []
     }
 
     return NextResponse.json(projectData)

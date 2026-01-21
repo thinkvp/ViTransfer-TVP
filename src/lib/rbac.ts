@@ -1,8 +1,12 @@
 import type { ProjectStatus } from '@/lib/project-status'
 
-export type MenuKey = 'projects' | 'clients' | 'sales' | 'settings' | 'users' | 'security' | 'analytics'
+export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'settings' | 'users' | 'security' | 'analytics'
 
 export type ActionKey =
+  | 'projectsPhotoVideoUploads'
+  | 'projectsFullControl'
+  | 'accessSharePage'
+  | 'manageSharePageComments'
   | 'manageClients'
   | 'manageClientFiles'
   | 'changeSettings'
@@ -34,8 +38,12 @@ export interface RolePermissions {
   actions: Record<ActionKey, boolean>
 }
 
-const ALL_MENUS: MenuKey[] = ['projects', 'clients', 'sales', 'settings', 'users', 'security', 'analytics']
+const ALL_MENUS: MenuKey[] = ['projects', 'sharePage', 'clients', 'sales', 'settings', 'users', 'security', 'analytics']
 const ALL_ACTIONS: ActionKey[] = [
+  'projectsPhotoVideoUploads',
+  'projectsFullControl',
+  'accessSharePage',
+  'manageSharePageComments',
   'manageClients',
   'manageClientFiles',
   'changeSettings',
@@ -64,7 +72,10 @@ const ALL_ACTIONS: ActionKey[] = [
 // When migrating to more granular per-area actions, default a subset of actions to true
 // when the corresponding menu is enabled *unless* the action is explicitly present in stored JSON.
 const FALLBACK_ACTIONS_BY_MENU: Record<MenuKey, ActionKey[]> = {
+  // Note: the app now treats most areas as all-or-nothing via menu access.
+  // These fallbacks are retained for backwards-compatibility with legacy stored JSON.
   projects: ['manageProjectAlbums'],
+  sharePage: [],
   clients: ['manageClients', 'manageClientFiles'],
   sales: [],
   settings: ['changeSettings', 'sendTestEmail'],
@@ -132,7 +143,83 @@ export function canSeeMenu(permissions: RolePermissions, menu: MenuKey): boolean
 }
 
 export function canDoAction(permissions: RolePermissions, action: ActionKey): boolean {
-  return permissions.actions[action] === true
+  const projectsEnabled = permissions.menuVisibility.projects === true
+  const sharePageEnabled = permissions.menuVisibility.sharePage === true
+
+  const legacyFullControl =
+    permissions.actions.accessProjectSettings === true ||
+    permissions.actions.changeProjectSettings === true ||
+    permissions.actions.sendNotificationsToRecipients === true ||
+    permissions.actions.changeProjectStatuses === true ||
+    permissions.actions.deleteProjects === true
+
+  const projectsFullControl =
+    projectsEnabled && (permissions.actions.projectsFullControl === true || legacyFullControl)
+
+  const legacyPhotoVideo =
+    permissions.actions.uploadVideosOnProjects === true ||
+    permissions.actions.manageProjectAlbums === true
+
+  const projectsPhotoVideo =
+    projectsEnabled &&
+    (projectsFullControl || permissions.actions.projectsPhotoVideoUploads === true || legacyPhotoVideo)
+
+  switch (action) {
+    // Share Page (new)
+    case 'accessSharePage':
+      return sharePageEnabled
+    case 'manageSharePageComments':
+      return sharePageEnabled && permissions.actions.manageSharePageComments === true
+
+    // Projects: simplified policy
+    case 'projectsFullControl':
+      return projectsFullControl
+    case 'projectsPhotoVideoUploads':
+      return projectsPhotoVideo
+
+    case 'uploadFilesToProjectInternal':
+    case 'makeCommentsOnProjects':
+      // Base Projects access
+      return projectsEnabled
+
+    case 'uploadVideosOnProjects':
+    case 'manageProjectAlbums':
+      return projectsPhotoVideo
+
+    case 'accessProjectSettings':
+    case 'changeProjectSettings':
+    case 'sendNotificationsToRecipients':
+    case 'changeProjectStatuses':
+    case 'deleteProjects':
+      return projectsFullControl
+
+    // All-or-nothing areas
+    case 'manageClients':
+    case 'manageClientFiles':
+      return permissions.menuVisibility.clients === true
+
+    case 'changeSettings':
+    case 'sendTestEmail':
+      return permissions.menuVisibility.settings === true
+
+    case 'manageUsers':
+    case 'manageRoles':
+      return permissions.menuVisibility.users === true
+
+    case 'viewSecurityEvents':
+    case 'manageSecurityEvents':
+    case 'viewSecurityBlocklists':
+    case 'manageSecurityBlocklists':
+    case 'viewSecurityRateLimits':
+    case 'manageSecurityRateLimits':
+      return permissions.menuVisibility.security === true
+
+    case 'viewAnalytics':
+      return permissions.menuVisibility.analytics === true
+
+    default:
+      return permissions.actions[action] === true
+  }
 }
 
 export function adminAllPermissions(): RolePermissions {

@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { getCurrentUserFromRequest, requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getUserPermissions } from '@/lib/rbac-api'
+import { canDoAction } from '@/lib/rbac'
 import { validateAssetFile } from '@/lib/file-validation'
 import { getSafeguardLimits } from '@/lib/settings'
 import { z } from 'zod'
@@ -58,8 +60,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
-  if (forbiddenAction) return forbiddenAction
+  const permissions = getUserPermissions(authResult)
+  const canDeleteInternalFiles = canDoAction(permissions, 'projectsFullControl')
 
   const rateLimitResult = await rateLimit(
     request,
@@ -90,7 +92,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     fileSize: f.fileSize.toString(),
     sourceType: 'projectFile' as const,
     downloadUrl: `/api/projects/${projectId}/files/${f.id}`,
-    deleteUrl: `/api/projects/${projectId}/files/${f.id}`,
+    deleteUrl: canDeleteInternalFiles ? `/api/projects/${projectId}/files/${f.id}` : null,
   }))
 
   if (!includeEmailAttachments) {

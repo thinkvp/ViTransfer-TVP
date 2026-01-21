@@ -72,7 +72,7 @@ export async function GET(
       const forbiddenMenu = requireMenuAccess(adminUser, 'projects')
       if (forbiddenMenu) return forbiddenMenu
 
-      const forbiddenAction = requireActionAccess(adminUser, 'accessProjectSettings')
+      const forbiddenAction = requireActionAccess(adminUser, 'uploadVideosOnProjects')
       if (forbiddenAction) return forbiddenAction
 
       if (adminUser.appRoleIsSystemAdmin !== true) {

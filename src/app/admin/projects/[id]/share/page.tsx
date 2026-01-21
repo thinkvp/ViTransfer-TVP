@@ -234,6 +234,9 @@ export default function AdminSharePage() {
     }
   }, [id, fetchComments])
 
+  const permissions = normalizeRolePermissions(adminUser?.permissions)
+  const canManageShareComments = canDoAction(permissions, 'manageSharePageComments')
+
   const fetchAlbums = useCallback(async (shareSlug: string) => {
     if (!shareSlug) return
     if (project?.enablePhotos === false) {
@@ -788,6 +791,9 @@ function AdminShareFeedbackGrid({
     }
   }, [fetchComments])
 
+  const permissions = normalizeRolePermissions(adminUser?.permissions)
+  const canManageShareComments = canDoAction(permissions, 'manageSharePageComments')
+
   const management = useCommentManagement({
     projectId: String(project.id),
     initialComments: serverComments as any,
@@ -800,6 +806,8 @@ function AdminShareFeedbackGrid({
     restrictToLatestVersion: Boolean(project.restrictCommentsToLatestVersion),
     shareToken: null,
     useAdminAuth: true,
+    isInternalOverride: false,
+    canAdminManageComments: canManageShareComments,
     companyName,
     allowClientDeleteComments: Boolean(project.allowClientDeleteComments),
     allowClientUploadFiles: false,
@@ -814,9 +822,7 @@ function AdminShareFeedbackGrid({
   const selectedVideo = readyVideos.find((v: any) => v.id === management.selectedVideoId)
   const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
   const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
-  const permissions = normalizeRolePermissions(adminUser?.permissions)
-  const canMakeComments = canDoAction(permissions, 'makeCommentsOnProjects')
-  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved || !canMakeComments)
+  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved || !canManageShareComments)
 
   // Desktop-only: default placement based on selected video aspect ratio.
   // - Between 16:9 and 1:1 (inclusive of 1:1): keep under video player (left column)
@@ -968,6 +974,7 @@ function AdminShareFeedbackGrid({
               useFullTimecode={Boolean(project?.useFullTimecode)}
               videos={readyVideos as any}
               isAdminView={true}
+              canAdminDeleteComments={canManageShareComments}
               companyName={companyName}
               clientCompanyName={project.companyName}
               smtpConfigured={project.smtpConfigured}

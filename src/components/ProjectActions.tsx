@@ -133,6 +133,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const canViewAnalytics = canDoAction(permissions, 'viewAnalytics')
   const canDeleteProjects = canDoAction(permissions, 'deleteProjects')
   const canChangeStatuses = canDoAction(permissions, 'changeProjectStatuses')
+  const canViewSharePage = canDoAction(permissions, 'accessSharePage')
 
   // Group videos by name
   const videosByName = readyVideos.reduce((acc, video) => {
@@ -482,6 +483,17 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   return (
     <>
+      {(() => {
+        const hasAnyActions =
+          canSendNotifications ||
+          canViewSharePage ||
+          canViewAnalytics ||
+          canChangeStatuses ||
+          canDeleteProjects
+
+        if (!hasAnyActions) return null
+
+        return (
       <Card>
         <CardContent className="pt-6 space-y-3">
           {canSendNotifications && (
@@ -514,15 +526,17 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             </div>
           )}
 
-          <Button
-            variant="outline"
-            size="default"
-            className="w-full"
-            onClick={handleViewSharePage}
-          >
-            <ExternalLink className="w-4 h-4 mr-2" />
-            View Share Page
-          </Button>
+          {canViewSharePage && (
+            <Button
+              variant="outline"
+              size="default"
+              className="w-full"
+              onClick={handleViewSharePage}
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              View Share Page
+            </Button>
+          )}
 
           {canViewAnalytics && (
             <Button
@@ -585,6 +599,9 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           )}
         </CardContent>
       </Card>
+
+        )
+      })()}
 
       {/* Notification Modal */}
       {canSendNotifications && (

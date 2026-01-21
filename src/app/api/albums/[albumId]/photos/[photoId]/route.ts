@@ -20,7 +20,7 @@ export async function DELETE(
   const forbiddenMenu = requireMenuAccess(auth, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(auth, 'manageProjectAlbums')
+  const forbiddenAction = requireActionAccess(auth, 'projectsFullControl')
   if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(

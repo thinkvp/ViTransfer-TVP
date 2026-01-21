@@ -24,6 +24,8 @@ interface UseCommentManagementProps {
   restrictToLatestVersion: boolean
   shareToken?: string | null
   useAdminAuth?: boolean
+  isInternalOverride?: boolean
+  canAdminManageComments?: boolean
   companyName?: string
   allowClientDeleteComments?: boolean
   allowClientUploadFiles?: boolean
@@ -41,6 +43,8 @@ export function useCommentManagement({
   restrictToLatestVersion,
   shareToken = null,
   useAdminAuth = false,
+  isInternalOverride,
+  canAdminManageComments,
   companyName = 'Studio',
   allowClientDeleteComments = false,
   allowClientUploadFiles = false,
@@ -372,7 +376,13 @@ export function useCommentManagement({
     setUploadStatusText(attachedFiles.length > 0 ? 'Uploading...' : 'Sending...')
 
     // OPTIMISTIC UPDATE
-    const isInternalComment = useAdminAuth || !!adminUser
+    const isAdminContext = useAdminAuth || !!adminUser
+    const isInternalComment = typeof isInternalOverride === 'boolean' ? isInternalOverride : isAdminContext
+
+    if (isAdminContext && canAdminManageComments === false) {
+      alert('You do not have permission to make or delete comments on the Share Page.')
+      return
+    }
     // Convert seconds to timecode for API and storage
     const selectedVideo = videos.find(v => v.id === validatedVideoId)
     const fps = selectedVideo?.fps || 24 // Default to 24fps if not available
@@ -385,12 +395,12 @@ export function useCommentManagement({
       videoVersion: videos.find(v => v.id === validatedVideoId)?.version || null,
       timecode,
       content: newComment,
-      authorName: isInternalComment
+      authorName: isAdminContext
         ? (adminUser!.name || 'Admin')
         : (isPasswordProtected ? authorName : 'Client'),
-      authorEmail: isInternalComment ? null : (clientEmail || null),
+      authorEmail: isAdminContext ? null : (clientEmail || null),
       isInternal: isInternalComment,
-      recipientId: isInternalComment ? null : (recipientId || null),
+      recipientId: isAdminContext ? null : (recipientId || null),
       displayColorSnapshot: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -424,7 +434,7 @@ export function useCommentManagement({
       }
 
       // Add optional fields only if they have values
-      if (isInternalComment) {
+      if (isAdminContext) {
         requestBody.authorName = adminUser!.name || 'Admin'
       } else {
         if (authorName) requestBody.authorName = authorName
@@ -576,6 +586,10 @@ export function useCommentManagement({
 
   const handleDeleteComment = async (commentId: string) => {
     const isAdminContext = useAdminAuth || !!adminUser
+    if (isAdminContext && canAdminManageComments === false) {
+      alert('You do not have permission to make or delete comments on the Share Page.')
+      return
+    }
     const targetComment = findCommentById(commentId)
 
     if (!isAdminContext) {

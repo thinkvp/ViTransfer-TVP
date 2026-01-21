@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  const forbiddenAction = requireActionAccess(authResult, 'accessSharePage')
   if (forbiddenAction) return forbiddenAction
 
   // Rate limiting: 60 requests per minute

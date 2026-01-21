@@ -516,7 +516,7 @@ export default function NewProjectPage() {
                   addButtonLabel="Add Users"
                   addButtonSize="sm"
                   addButtonHideLabelOnMobile
-                  addButtonClassName="h-10 w-10 p-0 rounded-full sm:h-9 sm:w-auto sm:px-3"
+                  addButtonClassName="sm:min-w-[140px] sm:justify-center"
                 />
               </div>
 

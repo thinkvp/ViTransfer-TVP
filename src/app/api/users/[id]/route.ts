@@ -67,7 +67,10 @@ export async function GET(
       )
     }
 
-    return NextResponse.json({ user })
+    const response = NextResponse.json({ user })
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Pragma', 'no-cache')
+    return response
   } catch (error) {
     console.error('Error fetching user:', error)
     // SECURITY: Generic message

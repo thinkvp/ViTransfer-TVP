@@ -51,9 +51,6 @@ export async function GET(
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
-  if (forbiddenAction) return forbiddenAction
-
   const rateLimitResult = await rateLimit(
     request,
     { windowMs: 60 * 1000, maxRequests: 30, message: 'Too many download requests. Please slow down.' },

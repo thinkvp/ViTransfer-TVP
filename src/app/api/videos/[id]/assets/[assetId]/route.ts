@@ -74,7 +74,7 @@ export async function GET(
       const forbiddenMenu = requireMenuAccess(adminUser, 'projects')
       if (forbiddenMenu) return forbiddenMenu
 
-      const forbiddenAction = requireActionAccess(adminUser, 'accessProjectSettings')
+      const forbiddenAction = requireActionAccess(adminUser, 'uploadVideosOnProjects')
       if (forbiddenAction) return forbiddenAction
 
       if (adminUser.appRoleIsSystemAdmin !== true) {
@@ -160,7 +160,7 @@ export async function DELETE(
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'uploadVideosOnProjects')
+  const forbiddenAction = requireActionAccess(authResult, 'projectsFullControl')
   if (forbiddenAction) return forbiddenAction
 
   // Rate limiting

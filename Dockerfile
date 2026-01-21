@@ -5,7 +5,7 @@
 # ========================================
 # Common base (no ffmpeg)
 # ========================================
-FROM node:24.11.1-alpine3.23 AS base-common
+FROM node:24.13.0-alpine3.23 AS base-common
 
 RUN npm install -g npm@latest
 

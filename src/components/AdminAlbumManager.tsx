@@ -47,11 +47,12 @@ type AlbumZipStatus = {
 interface AdminAlbumManagerProps {
   projectId: string
   projectStatus: string
+  canDelete?: boolean
 }
 
 type PhotoSortMode = 'alphabetical' | 'upload-date'
 
-export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlbumManagerProps) {
+export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true }: AdminAlbumManagerProps) {
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -216,6 +217,7 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
   }, [fetchZipStatus])
 
   const handleDeleteAlbum = async (albumId: string, albumName: string) => {
+    if (!canDelete) return
     if (!confirm(`Delete album "${albumName}" and all photos?`)) return
 
     try {
@@ -249,6 +251,7 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
   }
 
   const handleDeletePhoto = async (albumId: string, photoId: string, fileName: string) => {
+    if (!canDelete) return
     if (!confirm(`Delete photo "${fileName}"?`)) return
 
     try {
@@ -430,19 +433,21 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
                         <p className="text-xs text-muted-foreground mt-1">Upload up to 300 photos at a time.</p>
                       </div>
 
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          void handleDeleteAlbum(album.id, album.name)
-                        }}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2 text-destructive" />
-                        Delete album
-                      </Button>
+                      {canDelete && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            void handleDeleteAlbum(album.id, album.name)
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2 text-destructive" />
+                          Delete album
+                        </Button>
+                      )}
                     </div>
                     <AlbumPhotoUploadQueue
                       albumId={album.id}
@@ -459,7 +464,7 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-medium">Photos</h4>
                     <div className="flex items-center gap-2">
-                      {projectStatus === 'APPROVED' && (
+                      {canDelete && projectStatus === 'APPROVED' && (
                         <Button
                           type="button"
                           variant="outline"
@@ -511,18 +516,20 @@ export default function AdminAlbumManager({ projectId, projectStatus }: AdminAlb
                             </p>
                           </div>
 
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              void handleDeletePhoto(album.id, p.id, p.fileName)
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4 text-destructive" />
-                          </Button>
+                          {canDelete && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                void handleDeletePhoto(album.id, p.id, p.fileName)
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                          )}
                         </div>
                       ))}
                     </div>
