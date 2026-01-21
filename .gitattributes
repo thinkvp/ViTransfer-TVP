@@ -1,0 +1,2 @@
+# Ensure shell scripts remain runnable on Linux
+*.sh text eol=lf

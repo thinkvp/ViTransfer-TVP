@@ -57,8 +57,10 @@ nano upgrade-postgres17-redis8.sh
 
 Check these variables at the top:
 ```bash
-DATA_ROOT="/mnt/tank/apps/vitransfer"      # Your data location
-BACKUP_ROOT="/mnt/tank/backups/vitransfer"  # Where to store backups
+DATA_ROOT="/mnt/ssd1/configs/vitransfer"      # Your data location
+POSTGRES_DATA_DIR="${DATA_ROOT}/postgres-data" # Must match your compose bind mount
+REDIS_DATA_DIR="${DATA_ROOT}/redis-data"       # Must match your compose bind mount
+BACKUP_ROOT="${DATA_ROOT}/backups"            # Where to store backups
 POSTGRES_USER="vitransfer"                  # Your PG username
 CONTAINER_PREFIX="vitransfer"               # Container name prefix
 ```
@@ -140,14 +142,14 @@ Check Dockge logs for the postgres container. Common issues:
 
 ### Want to see what changed during restore
 ```bash
-cat /mnt/tank/backups/vitransfer/[TIMESTAMP]/restore.log
+cat /mnt/ssd1/configs/vitransfer/backups/[TIMESTAMP]/restore.log
 ```
 
 ## Backup Locations
 
 All backups are stored in timestamped directories:
 ```
-/mnt/tank/backups/vitransfer/
+/mnt/ssd1/configs/vitransfer/backups/
   └── 20260121-143052/
       ├── postgres-data.tar.gz  (Full PG 16 data)
       ├── redis-data.tar.gz     (Full Redis 7 data)
@@ -170,7 +172,7 @@ For maximum safety, create a TrueNAS snapshot before running:
 
 1. Open TrueNAS Scale web UI
 2. Go to **Datasets**
-3. Find your `apps/vitransfer` dataset
+3. Find the dataset that stores your ViTransfer data (e.g. `configs/vitransfer`)
 4. Click **Create Snapshot**
 5. Name it: `before-postgres17-upgrade`
 
@@ -188,6 +190,6 @@ This gives you a ZFS-level rollback option independent of the scripts.
 2. ✅ Keep backups for 1+ week
 3. ✅ Remove old backups:
    ```bash
-   rm -rf /mnt/tank/backups/vitransfer/TIMESTAMP
+   rm -rf /mnt/ssd1/configs/vitransfer/backups/TIMESTAMP
    ```
 4. ✅ Optional: Remove these scripts if no longer needed

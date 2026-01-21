@@ -8,7 +8,9 @@
 #        Example: sudo bash rollback-postgres17-redis8.sh 20260121-143052
 #
 
-set -e  # Exit on error
+set -euo pipefail  # Exit on error / unset vars / pipeline failures
+
+IFS=$'\n\t'
 
 # Colors for output
 RED='\033[0;31m'
@@ -18,8 +20,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration - MUST MATCH upgrade script
-DATA_ROOT="/mnt/tank/apps/vitransfer"
-BACKUP_ROOT="/mnt/tank/backups/vitransfer"
+DATA_ROOT="/mnt/ssd1/configs/vitransfer"
+POSTGRES_DATA_DIR="${DATA_ROOT}/postgres-data"
+REDIS_DATA_DIR="${DATA_ROOT}/redis-data"
+
+BACKUP_ROOT="${DATA_ROOT}/backups"
+POSTGRES_USER="vitransfer"
 CONTAINER_PREFIX="vitransfer"
 
 # Functions
@@ -40,14 +46,39 @@ log_error() {
 }
 
 confirm() {
-    read -p "$(echo -e ${YELLOW}$1${NC}) [y/N] " -n 1 -r
+    read -p "$(echo -e "${YELLOW}${1}${NC}") [y/N] " -n 1 -r
     echo
     [[ $REPLY =~ ^[Yy]$ ]]
 }
 
 press_enter() {
     echo ""
-    read -p "$(echo -e ${BLUE}Press Enter to continue...${NC})"
+    read -p "$(echo -e "${BLUE}Press Enter to continue...${NC}")"
+}
+
+require_cmd() {
+    command -v "$1" > /dev/null 2>&1 || {
+        log_error "Required command not found: $1"
+        exit 1
+    }
+}
+
+wipe_dir_contents() {
+    local target_dir="$1"
+
+    if [ -z "${target_dir}" ] || [ "${target_dir}" = "/" ]; then
+        log_error "Refusing to wipe unsafe path: '${target_dir}'"
+        exit 1
+    fi
+
+    if [ ! -d "${target_dir}" ]; then
+        log_error "Directory not found: ${target_dir}"
+        exit 1
+    fi
+
+    shopt -s nullglob dotglob
+    rm -rf "${target_dir}"/*
+    shopt -u nullglob dotglob
 }
 
 # Header
@@ -59,6 +90,19 @@ echo ""
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     log_error "This script must be run as root (use sudo)"
+    exit 1
+fi
+
+# Required tools
+require_cmd docker
+require_cmd tar
+require_cmd grep
+require_cmd wc
+require_cmd du
+
+# Check Docker access
+if ! docker info > /dev/null 2>&1; then
+    log_error "Docker is not available (daemon not running or permission denied)"
     exit 1
 fi
 
@@ -97,6 +141,8 @@ fi
 log_info "Rollback configuration:"
 echo "  Backup Dir:    ${BACKUP_DIR}"
 echo "  Data Root:     ${DATA_ROOT}"
+echo "  PG Data Dir:   ${POSTGRES_DATA_DIR}"
+echo "  Redis Data:    ${REDIS_DATA_DIR}"
 echo ""
 echo "Backup contents:"
 ls -lh "${BACKUP_DIR}"
@@ -151,8 +197,8 @@ log_info "Step 1: Removing current PostgreSQL 17 and Redis 8 data..."
 echo ""
 
 log_warn "About to delete:"
-echo "  ${DATA_ROOT}/postgres/*"
-echo "  ${DATA_ROOT}/redis/*"
+echo "  ${POSTGRES_DATA_DIR}/*"
+echo "  ${REDIS_DATA_DIR}/*"
 echo ""
 
 if ! confirm "Proceed with deletion?"; then
@@ -160,10 +206,10 @@ if ! confirm "Proceed with deletion?"; then
     exit 0
 fi
 
-rm -rf "${DATA_ROOT}/postgres/"*
+wipe_dir_contents "${POSTGRES_DATA_DIR}"
 log_success "PostgreSQL data removed"
 
-rm -rf "${DATA_ROOT}/redis/"*
+wipe_dir_contents "${REDIS_DATA_DIR}"
 log_success "Redis data removed"
 
 echo ""
@@ -174,17 +220,27 @@ log_info "Step 2: Restoring data from backup..."
 echo ""
 
 log_info "Restoring PostgreSQL 16 data..."
-tar -xzf "${BACKUP_DIR}/postgres-data.tar.gz" -C "${DATA_ROOT}/"
+tar -xzf "${BACKUP_DIR}/postgres-data.tar.gz" -C "$(dirname "${POSTGRES_DATA_DIR}")"
 log_success "PostgreSQL data restored"
 
 log_info "Restoring Redis 7 data..."
-tar -xzf "${BACKUP_DIR}/redis-data.tar.gz" -C "${DATA_ROOT}/"
+tar -xzf "${BACKUP_DIR}/redis-data.tar.gz" -C "$(dirname "${REDIS_DATA_DIR}")"
 log_success "Redis data restored"
 
 # Verify restoration
-if [ ! -d "${DATA_ROOT}/postgres/base" ]; then
+if [ ! -d "${POSTGRES_DATA_DIR}/base" ]; then
     log_error "PostgreSQL restoration failed - data directory is invalid"
     exit 1
+fi
+
+if [ -f "${POSTGRES_DATA_DIR}/PG_VERSION" ]; then
+    RESTORED_PG_VERSION=$(cat "${POSTGRES_DATA_DIR}/PG_VERSION" | tr -d ' \t\r\n')
+    log_info "Restored Postgres data directory version: ${RESTORED_PG_VERSION}"
+    if [ "${RESTORED_PG_VERSION}" != "16" ]; then
+        log_warn "Expected restored PG_VERSION=16 but found '${RESTORED_PG_VERSION}'."
+    fi
+else
+    log_warn "Could not find ${POSTGRES_DATA_DIR}/PG_VERSION after restore"
 fi
 
 log_success "Data restored successfully"
@@ -233,7 +289,7 @@ done
 # Wait for PostgreSQL to be ready
 log_info "Waiting for PostgreSQL to be ready..."
 for i in {1..30}; do
-    if docker exec ${CONTAINER_PREFIX}-postgres pg_isready -U vitransfer > /dev/null 2>&1; then
+    if docker exec "${CONTAINER_PREFIX}-postgres" pg_isready -U "${POSTGRES_USER}" > /dev/null 2>&1; then
         log_success "PostgreSQL is ready"
         break
     fi
@@ -247,7 +303,7 @@ done
 echo ""
 
 # Check PostgreSQL version
-PG_VERSION=$(docker exec ${CONTAINER_PREFIX}-postgres psql -U vitransfer -t -c "SELECT version();" | head -1)
+PG_VERSION=$(docker exec "${CONTAINER_PREFIX}-postgres" psql -U "${POSTGRES_USER}" -t -c "SELECT version();" | head -1)
 log_info "PostgreSQL version: ${PG_VERSION}"
 
 if echo "$PG_VERSION" | grep -q "PostgreSQL 16"; then
@@ -258,7 +314,7 @@ fi
 
 # Check Redis version
 if docker ps --filter "name=${CONTAINER_PREFIX}-redis" --filter "status=running" | grep -q redis; then
-    REDIS_VERSION=$(docker exec ${CONTAINER_PREFIX}-redis redis-cli --version)
+    REDIS_VERSION=$(docker exec "${CONTAINER_PREFIX}-redis" redis-cli --version)
     log_info "Redis version: ${REDIS_VERSION}"
     
     if echo "$REDIS_VERSION" | grep -q "redis-cli 7"; then
