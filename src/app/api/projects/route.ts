@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
         guestMode: true,
         previewResolution: true,
         companyName: true,
+        clientId: true,
         maxRevisions: true,
         enableRevisions: true,
         videos: {

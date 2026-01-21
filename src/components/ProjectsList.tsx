@@ -21,6 +21,7 @@ interface Project {
   id: string
   title: string
   companyName: string | null
+  clientId: string | null
   status: string
   createdAt: string | Date
   updatedAt: string | Date
@@ -637,7 +638,20 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                             </td>
 
                             <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">
-                              {clientName}
+                              {project.clientId ? (
+                                <button
+                                  type="button"
+                                  className="text-left hover:underline hover:text-foreground transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    router.push(`/admin/clients/${project.clientId}`)
+                                  }}
+                                >
+                                  {clientName}
+                                </button>
+                              ) : (
+                                <span>{clientName}</span>
+                              )}
                             </td>
 
                             <td className="px-3 py-2">

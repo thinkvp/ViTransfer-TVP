@@ -425,6 +425,11 @@ async function pullQuotes(lookbackDays: number, auth: Awaited<ReturnType<typeof 
       select: { id: true },
     })
 
+    if (existing) {
+      skipped += 1
+      continue
+    }
+
     const data = {
       qboId,
       docNumber: typeof e?.DocNumber === 'string' ? e.DocNumber.trim() : null,
@@ -437,14 +442,8 @@ async function pullQuotes(lookbackDays: number, auth: Awaited<ReturnType<typeof 
       raw: e,
     }
 
-    await (prisma as any).quickBooksEstimateImport.upsert({
-      where: { qboId },
-      create: data,
-      update: data,
-    })
-
-    if (existing) updated += 1
-    else created += 1
+    await (prisma as any).quickBooksEstimateImport.create({ data })
+    created += 1
   }
 
   const customerQboIds = Array.from(
@@ -533,6 +532,11 @@ async function pullInvoices(lookbackDays: number, auth: Awaited<ReturnType<typeo
       select: { id: true },
     })
 
+    if (existing) {
+      skipped += 1
+      continue
+    }
+
     const data = {
       qboId,
       docNumber: typeof inv?.DocNumber === 'string' ? inv.DocNumber.trim() : null,
@@ -547,14 +551,8 @@ async function pullInvoices(lookbackDays: number, auth: Awaited<ReturnType<typeo
       raw: inv,
     }
 
-    await (prisma as any).quickBooksInvoiceImport.upsert({
-      where: { qboId },
-      create: data,
-      update: data,
-    })
-
-    if (existing) updated += 1
-    else created += 1
+    await (prisma as any).quickBooksInvoiceImport.create({ data })
+    created += 1
   }
 
   const customerQboIds = Array.from(
@@ -733,6 +731,11 @@ async function pullPayments(lookbackDays: number, auth: Awaited<ReturnType<typeo
       select: { id: true },
     })
 
+    if (existing) {
+      skipped += 1
+      continue
+    }
+
     const data = {
       qboId,
       txnDate: parseQboDate(p?.TxnDate),
@@ -745,19 +748,12 @@ async function pullPayments(lookbackDays: number, auth: Awaited<ReturnType<typeo
       raw: p,
     }
 
-    const saved = await (prisma as any).quickBooksPaymentImport.upsert({
-      where: { qboId },
-      create: data,
-      update: data,
+    const saved = await (prisma as any).quickBooksPaymentImport.create({
+      data,
       select: { id: true },
     })
 
-    if (existing) updated += 1
-    else created += 1
-
-    await (prisma as any).quickBooksPaymentAppliedInvoice.deleteMany({
-      where: { paymentImportId: saved.id },
-    })
+    created += 1
 
     for (const row of appliedMatched) {
       const invoiceImportId = invoiceImportIdByQboId.get(row.invoiceQboId) ?? null

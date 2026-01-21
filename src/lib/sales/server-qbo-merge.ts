@@ -265,6 +265,10 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
       const clientId = typeof p?.clientId === 'string' && p.clientId ? p.clientId : inv.clientId
 
       const existing = await (tx as any).salesPayment.findUnique({ where: { qboId }, select: { id: true } })
+      if (existing) {
+        continue
+      }
+
       const data = {
         source: 'QUICKBOOKS',
         paymentDate,
@@ -276,12 +280,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
         qboId,
       }
 
-      if (existing) {
-        await (tx as any).salesPayment.update({ where: { id: existing.id }, data })
-      } else {
-        await (tx as any).salesPayment.create({ data })
-      }
-
+      await (tx as any).salesPayment.create({ data })
       ingested += 1
     }
   })
