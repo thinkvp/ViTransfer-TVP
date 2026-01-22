@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 
@@ -157,6 +158,8 @@ export async function DELETE(
   } catch {
     // Ignore storage delete errors; DB is source of truth.
   }
+
+  await recalculateAndStoreProjectTotalBytes(projectId)
 
   return NextResponse.json({ ok: true })
 }

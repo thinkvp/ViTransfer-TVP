@@ -48,11 +48,12 @@ interface AdminAlbumManagerProps {
   projectId: string
   projectStatus: string
   canDelete?: boolean
+  onProjectDataChanged?: () => void
 }
 
 type PhotoSortMode = 'alphabetical' | 'upload-date'
 
-export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true }: AdminAlbumManagerProps) {
+export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true, onProjectDataChanged }: AdminAlbumManagerProps) {
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -118,6 +119,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   const scheduleRefreshAfterUpload = useCallback(
     (albumId: string) => {
+      onProjectDataChanged?.()
+
       // Debounce photos refresh per-album
       const prevPhotoTimer = refreshPhotosTimersRef.current.get(albumId)
       if (prevPhotoTimer) clearTimeout(prevPhotoTimer)
@@ -211,10 +214,11 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       await apiPost(`/api/albums/${albumId}/zip-regenerate`, {})
       // Refresh status quickly after clicking regenerate
       void fetchZipStatus(albumId)
+      onProjectDataChanged?.()
     } catch (e: any) {
       alert(e?.message || 'Failed to regenerate ZIPs')
     }
-  }, [fetchZipStatus])
+  }, [fetchZipStatus, onProjectDataChanged])
 
   const handleDeleteAlbum = async (albumId: string, albumName: string) => {
     if (!canDelete) return
@@ -222,6 +226,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
     try {
       await apiDelete(`/api/albums/${albumId}`)
+
+      onProjectDataChanged?.()
 
       setAlbums((prev) => {
         const next = prev.filter((a) => a.id !== albumId)
@@ -256,6 +262,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
     try {
       await apiDelete(`/api/albums/${albumId}/photos/${photoId}`)
+
+      onProjectDataChanged?.()
 
       setPhotosByAlbumId((prev) => ({
         ...prev,

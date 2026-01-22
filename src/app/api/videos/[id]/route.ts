@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteFile } from '@/lib/storage'
 import { requireApiAdmin } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
@@ -454,6 +455,9 @@ export async function DELETE(
     await prisma.video.delete({
       where: { id: id },
     })
+
+    // Update the stored project data total
+    await recalculateAndStoreProjectTotalBytes(projectId)
 
     return NextResponse.json({
       success: true,

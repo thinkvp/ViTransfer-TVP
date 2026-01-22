@@ -222,6 +222,9 @@ export default function GlobalSettingsPage() {
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
 
+  const [recalcProjectDataLoading, setRecalcProjectDataLoading] = useState(false)
+  const [recalcProjectDataResult, setRecalcProjectDataResult] = useState<string | null>(null)
+
   useEffect(() => {
     async function loadSettings() {
       try {
@@ -652,6 +655,27 @@ export default function GlobalSettingsPage() {
     }
   }
 
+  async function handleRecalculateProjectDataTotals() {
+    setRecalcProjectDataLoading(true)
+    setRecalcProjectDataResult(null)
+
+    try {
+      const res = await apiPost('/api/settings/reconcile-project-data', {})
+
+      if (res?.ranInline) {
+        setRecalcProjectDataResult('Recalculation completed.')
+      } else if (res?.alreadyQueued) {
+        setRecalcProjectDataResult('Already queued. Check back shortly.')
+      } else {
+        setRecalcProjectDataResult('Queued. Worker will update totals shortly.')
+      }
+    } catch (e: any) {
+      setRecalcProjectDataResult(e?.message || 'Failed to start recalculation')
+    } finally {
+      setRecalcProjectDataLoading(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
@@ -823,6 +847,9 @@ export default function GlobalSettingsPage() {
             setAutoCloseApprovedProjectsEnabled={setAutoCloseApprovedProjectsEnabled}
             autoCloseApprovedProjectsAfterDays={autoCloseApprovedProjectsAfterDays}
             setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
+            onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
+            recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
+            recalculateProjectDataTotalsResult={recalcProjectDataResult}
             show={showProjectBehavior}
             setShow={setShowProjectBehavior}
           />

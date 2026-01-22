@@ -158,6 +158,10 @@ model Project {
   approvedAt      DateTime?
   approvedVideoId String? // ID of the video that was approved (null if not approved)
 
+  // Precomputed storage total (bytes) for dashboard display.
+  // Updated incrementally when related files are added/removed, and reconciled daily by the worker.
+  totalBytes BigInt @default(0)
+
   // Comment restrictions
   restrictCommentsToLatestVersion Boolean @default(false)
   hideFeedback                    Boolean @default(false)
@@ -359,6 +363,11 @@ model Album {
   name  String
   notes String? @db.VarChar(500)
 
+  // Cached ZIP artifacts (bytes). Updated by the album ZIP worker.
+  // These represent storage usage of generated download zips.
+  fullZipFileSize   BigInt @default(0)
+  socialZipFileSize BigInt @default(0)
+
   photos AlbumPhoto[]
 
   createdAt DateTime @default(now())
@@ -384,6 +393,7 @@ model AlbumPhoto {
   socialStatus      AlbumPhotoSocialStatus @default(PENDING)
   socialError       String?
   socialGeneratedAt DateTime?
+  socialFileSize    BigInt                 @default(0)
 
   uploadedBy     String?
   uploadedByName String?
@@ -470,6 +480,7 @@ enum ProjectStatus {
   SHARE_ONLY
   NOT_STARTED
   IN_PROGRESS
+  REVIEWED
   CLOSED
 }
 

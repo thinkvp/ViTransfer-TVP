@@ -4,6 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -33,7 +34,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       where: { id: albumId },
       include: {
         photos: {
-          select: { id: true, storagePath: true, socialStoragePath: true },
+          select: { id: true, fileSize: true, socialFileSize: true, storagePath: true, socialStoragePath: true },
         },
       },
     })
@@ -81,6 +82,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     // Delete DB records (in case cascade isn't configured)
     await prisma.albumPhoto.deleteMany({ where: { albumId } })
     await prisma.album.delete({ where: { id: albumId } })
+
+    const photosDelta = album.photos.reduce((acc, p) => acc + p.fileSize + p.socialFileSize, BigInt(0))
+    const zipDelta = (album.fullZipFileSize ?? BigInt(0)) + (album.socialZipFileSize ?? BigInt(0))
+    await adjustProjectTotalBytes(album.projectId, (photosDelta + zipDelta) * BigInt(-1))
 
     // Best-effort: delete album directory (if empty or still present)
     try {

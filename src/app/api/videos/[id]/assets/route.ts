@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -226,6 +227,8 @@ export async function POST(
         uploadedByName: currentUser.name || currentUser.email,
       },
     })
+
+    await recalculateAndStoreProjectTotalBytes(video.projectId)
 
     // Return assetId for TUS upload
     return NextResponse.json({

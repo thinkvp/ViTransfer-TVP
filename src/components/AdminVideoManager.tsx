@@ -67,7 +67,7 @@ export default function AdminVideoManager({
   const [showNewVideoForm, setShowNewVideoForm] = useState(!hasVideos) // Auto-show if no videos
   const [newVideoName, setNewVideoName] = useState('')
   const [newVideoNotes, setNewVideoNotes] = useState('')
-  const [newVideoAllowApproval, setNewVideoAllowApproval] = useState(false)
+  const [newVideoAllowApproval, setNewVideoAllowApproval] = useState(true)
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
   const [editGroupValue, setEditGroupValue] = useState('')
   const [savingGroupName, setSavingGroupName] = useState<string | null>(null)
@@ -112,7 +112,7 @@ export default function AdminVideoManager({
     setShowNewVideoForm(false)
     setNewVideoName('')
     setNewVideoNotes('')
-    setNewVideoAllowApproval(false)
+    setNewVideoAllowApproval(true)
     // Refresh the project data to show the new video
     onRefresh?.()
   }
@@ -182,6 +182,7 @@ export default function AdminVideoManager({
         const latestVideo = groupVideos.sort((a, b) => b.version - a.version)[0]
         const approvedCount = groupVideos.filter(v => v.approved).length
         const hasApprovedVideos = approvedCount > 0
+        const hasProcessing = groupVideos.some((v) => v?.status === 'PROCESSING')
 
         return (
           <Card key={groupName} className="overflow-hidden">
@@ -240,11 +241,19 @@ export default function AdminVideoManager({
                   )}
                 </div>
                 {editingGroupName !== groupName && (
-                  isExpanded ? (
-                    <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                  ) : (
-                    <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                  )
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {hasProcessing && (
+                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-primary-visible text-primary border-2 border-primary-visible">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                        PROCESSING
+                      </span>
+                    )}
+                    {isExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    )}
+                  </div>
                 )}
               </div>
             </CardHeader>
@@ -380,7 +389,7 @@ export default function AdminVideoManager({
                       setShowNewVideoForm(false)
                       setNewVideoName('')
                       setNewVideoNotes('')
-                      setNewVideoAllowApproval(false)
+                      setNewVideoAllowApproval(true)
                     }}
                   >
                     Cancel

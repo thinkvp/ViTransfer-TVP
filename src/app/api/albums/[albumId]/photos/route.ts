@@ -4,6 +4,7 @@ import { requireApiAdmin, getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateAlbumPhotoFile } from '@/lib/photo-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -56,9 +57,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  const photos = await prisma.albumPhoto.findMany({ where: { albumId }, orderBy: { createdAt: 'desc' } })
-  const serialized = photos.map((p) => ({ ...p, fileSize: p.fileSize.toString() }))
-  return NextResponse.json({ photos: serialized })
+  const photos = await prisma.albumPhoto.findMany({
+    where: { albumId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      albumId: true,
+      fileName: true,
+      fileSize: true,
+      fileType: true,
+      storagePath: true,
+      status: true,
+      error: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+
+  return NextResponse.json({
+    photos: photos.map((p) => ({
+      ...p,
+      fileSize: p.fileSize.toString(),
+    })),
+  })
 }
 
 // POST /api/albums/[albumId]/photos - create photo record for TUS upload (admin)
@@ -135,6 +156,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       uploadedByName: currentUser.name || currentUser.email,
     },
   })
+
+  await adjustProjectTotalBytes(album.projectId, BigInt(fileSize))
 
   return NextResponse.json({ photoId: photo.id }, { status: 201 })
 }

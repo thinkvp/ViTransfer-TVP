@@ -6,6 +6,7 @@ import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip
 import fs from 'fs'
 import path from 'path'
 import archiver from 'archiver'
+import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 
 const ZIP_RETRY_DELAY_MS = 30_000
 
@@ -66,6 +67,8 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       id: true,
       projectId: true,
       name: true,
+      fullZipFileSize: true,
+      socialZipFileSize: true,
     },
   })
 
@@ -115,6 +118,21 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     // Nothing to zip; ensure any old zip is removed.
     const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant })
     await fs.promises.unlink(getFilePath(zipStoragePath)).catch(() => {})
+
+    const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
+    if (prevSize > BigInt(0)) {
+      try {
+        await prisma.album.update({
+          where: { id: album.id },
+          data: {
+            ...(variant === 'social' ? { socialZipFileSize: BigInt(0) } : { fullZipFileSize: BigInt(0) }),
+          },
+        })
+        await adjustProjectTotalBytes(album.projectId, prevSize * BigInt(-1))
+      } catch {
+        // Best-effort: daily reconciliation will restore correctness.
+      }
+    }
     return
   }
 
@@ -153,6 +171,25 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     outputStoragePath: zipStoragePath,
     entries,
   })
+
+  // Persist ZIP size and adjust project totals by the delta.
+  try {
+    const zipFullPath = getFilePath(zipStoragePath)
+    const zipStats = await fs.promises.stat(zipFullPath)
+    const newSize = BigInt(zipStats.size)
+    const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
+
+    await prisma.album.update({
+      where: { id: album.id },
+      data: {
+        ...(variant === 'social' ? { socialZipFileSize: newSize } : { fullZipFileSize: newSize }),
+      },
+    })
+
+    await adjustProjectTotalBytes(album.projectId, newSize - prevSize)
+  } catch {
+    // Best-effort: if this fails, totals may be stale until daily reconciliation.
+  }
 
   console.log(`[WORKER] Generated ${variant} album ZIP: ${albumId}`)
 }

@@ -48,30 +48,50 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const storageRoot = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
-    // Only count persisted objects that have a size column; this reflects what the project is storing in your backend.
+    // Use stored project totalBytes for consistency with the dashboard.
+    // Breakdown is computed from DB fields for UI display.
     const [
+      project,
       videoAgg,
       assetAgg,
       commentFileAgg,
       projectFileAgg,
+      projectEmailAgg,
       projectEmailAttachmentAgg,
       albumPhotoAgg,
+      albumAgg,
     ] = await Promise.all([
+      prisma.project.findUnique({ where: { id: projectId }, select: { totalBytes: true } }),
       prisma.video.aggregate({ where: { projectId }, _sum: { originalFileSize: true } }),
       prisma.videoAsset.aggregate({ where: { video: { projectId } }, _sum: { fileSize: true } }),
       prisma.commentFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
       prisma.projectFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
+      prisma.projectEmail.aggregate({ where: { projectId }, _sum: { rawFileSize: true } }),
       prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
-      prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true } }),
+      prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true } }),
+      prisma.album.aggregate({ where: { projectId }, _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
     ])
 
     const videosBytes = asNumberBigInt(videoAgg._sum.originalFileSize)
     const videoAssetsBytes = asNumberBigInt(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumberBigInt(commentFileAgg._sum.fileSize)
-    const projectFilesBytes = asNumberBigInt(projectFileAgg._sum.fileSize) + asNumberBigInt(projectEmailAttachmentAgg._sum.fileSize)
-    const photosBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
 
-    const totalBytes = videosBytes + videoAssetsBytes + commentAttachmentsBytes + photosBytes + projectFilesBytes
+    const projectFilesBytesRaw = asNumberBigInt(projectFileAgg._sum.fileSize)
+    const communicationsBytes =
+      asNumberBigInt(projectEmailAgg._sum.rawFileSize) +
+      asNumberBigInt(projectEmailAttachmentAgg._sum.fileSize)
+
+    const photosOriginalBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
+    const socialPhotosBytes = asNumberBigInt(albumPhotoAgg._sum.socialFileSize)
+
+    const albumZipFullBytes = asNumberBigInt(albumAgg._sum.fullZipFileSize)
+    const albumZipSocialBytes = asNumberBigInt(albumAgg._sum.socialZipFileSize)
+
+    // Fold sub-categories into the existing breakdown rows used by the UI.
+    const photosBytes = photosOriginalBytes + socialPhotosBytes + albumZipFullBytes + albumZipSocialBytes
+    const projectFilesBytes = projectFilesBytesRaw + communicationsBytes
+
+    const totalBytes = asNumberBigInt(project?.totalBytes)
 
     // Available/capacity reflect the host filesystem where STORAGE_ROOT is mounted.
     // In Docker this is typically the volume backing your uploads directory.

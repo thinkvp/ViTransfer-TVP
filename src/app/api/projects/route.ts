@@ -14,6 +14,19 @@ export const runtime = 'nodejs'
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
 
+function asNumberBigInt(v: unknown): number {
+  if (typeof v === 'bigint') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
 // GET /api/projects - List all projects
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAuth(request)
@@ -59,6 +72,7 @@ export async function GET(request: NextRequest) {
         description: true,
         createdAt: true,
         updatedAt: true,
+        totalBytes: true,
         watermarkEnabled: true,
         sharePassword: true,
         authMode: true,
@@ -132,6 +146,7 @@ export async function GET(request: NextRequest) {
     const projectsWithPhotoCounts = projects.map((p) => ({
       ...p,
       photoCount: photoCountByProjectId.get(p.id) ?? 0,
+      totalBytes: asNumberBigInt((p as any).totalBytes),
       assignedUsers:
         (p as any).assignedUsers
           ?.map((pu: any) => ({
@@ -506,7 +521,10 @@ export async function POST(request: NextRequest) {
       return newProject
     })
 
-    const response = NextResponse.json(project)
+    const response = NextResponse.json({
+      ...project,
+      totalBytes: asNumberBigInt((project as any).totalBytes),
+    })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

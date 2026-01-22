@@ -51,6 +51,7 @@ export default function ProjectPage() {
   const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
   const [projectFilesRefresh, setProjectFilesRefresh] = useState(0)
   const [projectEmailsRefresh, setProjectEmailsRefresh] = useState(0)
+  const [projectStorageRefresh, setProjectStorageRefresh] = useState(0)
 
   const [salesTick, setSalesTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
@@ -88,6 +89,10 @@ export default function ProjectPage() {
   const canAccessSharePage = canDoAction(permissions, 'accessSharePage')
   const canAccessPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
   const canDeleteInternalFiles = canDoAction(permissions, 'projectsFullControl')
+
+  const bumpProjectStorageRefresh = useCallback(() => {
+    setProjectStorageRefresh((v) => v + 1)
+  }, [])
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
@@ -666,7 +671,7 @@ export default function ProjectPage() {
               </CardContent>
             </Card>
 
-            {(salesLoading || projectQuotes.length > 0 || projectInvoices.length > 0) && (
+            {(projectQuotes.length > 0 || projectInvoices.length > 0) && (
               <Card>
                 <CardContent className="pt-6 space-y-4">
                   {salesLoading && projectQuotes.length === 0 && projectInvoices.length === 0 ? (
@@ -783,6 +788,7 @@ export default function ProjectPage() {
                     onUploadComplete={() => {
                       setProjectEmailsRefresh((v) => v + 1)
                       setProjectFilesRefresh((v) => v + 1)
+                      bumpProjectStorageRefresh()
                     }}
                   />
                 ) : (
@@ -795,7 +801,10 @@ export default function ProjectPage() {
                   projectId={project.id}
                   refreshTrigger={projectEmailsRefresh}
                   canDelete={canUploadFilesToProjectInternal}
-                  onExternalFilesChanged={() => setProjectFilesRefresh((v) => v + 1)}
+                    onExternalFilesChanged={() => {
+                      setProjectFilesRefresh((v) => v + 1)
+                      bumpProjectStorageRefresh()
+                    }}
                 />
               </div>
             )}
@@ -831,7 +840,10 @@ export default function ProjectPage() {
                   companyName={companyName}
                   canFullControl={canDeleteInternalFiles}
                   onVideoSelect={handleVideoSelect}
-                  onRefresh={fetchProject}
+                  onRefresh={() => {
+                    bumpProjectStorageRefresh()
+                    fetchProject()
+                  }}
                   sortMode={sortMode}
                   maxRevisions={project.maxRevisions}
                   enableRevisions={project.enableRevisions}
@@ -849,13 +861,25 @@ export default function ProjectPage() {
                     Photos
                   </h2>
                 </div>
-                <AdminAlbumManager projectId={project.id} projectStatus={project.status} canDelete={canDeleteInternalFiles} />
+                <AdminAlbumManager
+                  projectId={project.id}
+                  projectStatus={project.status}
+                  canDelete={canDeleteInternalFiles}
+                  onProjectDataChanged={bumpProjectStorageRefresh}
+                />
               </div>
             )}
           </div>
 
           <div className="space-y-6 min-w-0">
-            <ProjectActions project={project} videos={project.videos} onRefresh={fetchProject} />
+            <ProjectActions
+              project={project}
+              videos={project.videos}
+              onRefresh={() => {
+                bumpProjectStorageRefresh()
+                fetchProject()
+              }}
+            />
 
             <ProjectInternalComments
               projectId={project.id}
@@ -892,7 +916,10 @@ export default function ProjectPage() {
                   layout="headerRow"
                   projectId={project.id}
                   maxConcurrent={3}
-                  onUploadComplete={() => setProjectFilesRefresh((v) => v + 1)}
+                  onUploadComplete={() => {
+                    setProjectFilesRefresh((v) => v + 1)
+                    bumpProjectStorageRefresh()
+                  }}
                 />
               ) : (
                 <div>
@@ -904,11 +931,12 @@ export default function ProjectPage() {
                 projectId={project.id}
                 refreshTrigger={projectFilesRefresh}
                 canDelete={canDeleteInternalFiles}
+                onFilesChanged={bumpProjectStorageRefresh}
               />
             </div>
 
             {canDeleteInternalFiles && (
-              <ProjectStorageUsage projectId={project.id} />
+              <ProjectStorageUsage projectId={project.id} refreshTrigger={projectStorageRefresh} />
             )}
           </div>
         </div>

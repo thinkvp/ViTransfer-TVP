@@ -15,6 +15,7 @@ import {
   handleProcessingError,
   debugLog
 } from './video-processor-helpers'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 /**
  * Main video processing orchestrator
@@ -115,6 +116,8 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
         },
       })
     }
+
+    await recalculateAndStoreProjectTotalBytes(projectId)
 
     // Success!
     const totalTime = Date.now() - processingStart

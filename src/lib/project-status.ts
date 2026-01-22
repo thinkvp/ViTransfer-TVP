@@ -2,6 +2,7 @@ export type ProjectStatus =
   | 'NOT_STARTED'
   | 'IN_PROGRESS'
   | 'IN_REVIEW'
+  | 'REVIEWED'
   | 'ON_HOLD'
   | 'SHARE_ONLY'
   | 'APPROVED'
@@ -11,8 +12,9 @@ export const PROJECT_STATUS_OPTIONS: Array<{ value: ProjectStatus; label: string
   { value: 'NOT_STARTED', label: 'Not Started' },
   { value: 'IN_PROGRESS', label: 'In Progress' },
   { value: 'IN_REVIEW', label: 'In Review' },
-  { value: 'ON_HOLD', label: 'On Hold' },
+  { value: 'REVIEWED', label: 'Reviewed' },
   { value: 'SHARE_ONLY', label: 'Share Only' },
+  { value: 'ON_HOLD', label: 'On Hold' },
   { value: 'APPROVED', label: 'Approved' },
   { value: 'CLOSED', label: 'Closed' },
 ]
@@ -24,6 +26,8 @@ export function projectStatusLabel(status: string): string {
 
 export function projectStatusBadgeClass(status: string): string {
   switch (status) {
+    case 'REVIEWED':
+      return 'bg-emerald-200 text-emerald-800 border-2 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-400/40'
     case 'APPROVED':
       return 'bg-success text-success-visible border-2 border-success-visible dark:bg-success/20 dark:text-success dark:border-success/40'
     case 'SHARE_ONLY':
@@ -45,6 +49,8 @@ export function projectStatusBadgeClass(status: string): string {
 
 export function projectStatusDotClass(status: string): string {
   switch (status) {
+    case 'REVIEWED':
+      return 'text-emerald-700 dark:text-emerald-300'
     case 'APPROVED':
       return 'text-success'
     case 'SHARE_ONLY':
@@ -71,14 +77,17 @@ export function projectStatusSortPriority(status: string): number {
     case 'IN_PROGRESS':
       return 1
     case 'IN_REVIEW':
-    case 'ON_HOLD':
       return 2
-    case 'SHARE_ONLY':
+    case 'REVIEWED':
       return 3
-    case 'APPROVED':
+    case 'SHARE_ONLY':
       return 4
-    case 'CLOSED':
+    case 'ON_HOLD':
       return 5
+    case 'APPROVED':
+      return 6
+    case 'CLOSED':
+      return 7
     default:
       return 99
   }

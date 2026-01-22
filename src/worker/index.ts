@@ -24,6 +24,7 @@ import { processSalesReminders } from './sales-reminders'
 import { processAutoStartProjectsOnShootingKeyDate } from './auto-start-projects-on-shooting'
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
+import { reconcileAllProjectsTotalBytes } from '@/lib/project-total-bytes'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -397,6 +398,20 @@ async function main() {
     }
   )
 
+  // Reconcile derived Project.totalBytes (daily @ 04:30 server/container time)
+  await notificationQueue.add(
+    'reconcile-project-total-bytes',
+    {},
+    {
+      repeat: {
+        pattern: '30 4 * * *',
+      },
+      jobId: 'reconcile-project-total-bytes',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Add repeatable daily job to refresh QuickBooks token (if configured)
   // Runs at 03:15 server/container time (see TZ env var)
   await notificationQueue.add(
@@ -453,6 +468,13 @@ async function main() {
         console.log('Running scheduled auto-close check...')
         const result = await processAutoCloseApprovedProjects()
         console.log(`Auto-close check completed (closed=${result.closedCount})`)
+        return
+      }
+
+      if (job.name === 'reconcile-project-total-bytes') {
+        console.log('[TOTALS] Running scheduled project totalBytes reconciliation...')
+        const result = await reconcileAllProjectsTotalBytes()
+        console.log('[TOTALS] Reconciliation completed', result)
         return
       }
 

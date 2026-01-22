@@ -32,7 +32,7 @@ interface VideoUploadProps {
   showVideoNotesField?: boolean
 
   // Per-version client approval toggle.
-  // Default should be disabled for new uploads.
+  // Default should be enabled for new uploads.
   allowApproval?: boolean
   showAllowApprovalField?: boolean
 }
@@ -58,7 +58,7 @@ export default function VideoUpload({
   const [uploadSpeed, setUploadSpeed] = useState(0)
   const [versionLabel, setVersionLabel] = useState('')
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
-  const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? false)
+  const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? true)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -70,7 +70,7 @@ export default function VideoUpload({
 
   useEffect(() => {
     if (allowApprovalProp !== undefined) {
-      setAllowApproval(allowApprovalProp)
+      setAllowApproval(allowApprovalProp ?? true)
     }
   }, [allowApprovalProp])
 
@@ -291,7 +291,7 @@ export default function VideoUpload({
           setFile(null)
           setVersionLabel('')
           setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
-          setAllowApproval(allowApprovalProp ?? false)
+          setAllowApproval(allowApprovalProp ?? true)
           uploadRef.current = null
           videoIdRef.current = null
           router.refresh()

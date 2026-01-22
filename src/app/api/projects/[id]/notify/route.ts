@@ -436,9 +436,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     if (successCount > 0) {
-      // If this is the first time we notify clients, move NOT_STARTED/IN_PROGRESS → IN_REVIEW
+      // If we notify clients, move NOT_STARTED/IN_PROGRESS/REVIEWED → IN_REVIEW
       // (Display-only state; does not block auto-approval.)
-      if (project.status === 'NOT_STARTED' || project.status === 'IN_PROGRESS') {
+      if ((project.status === 'NOT_STARTED' || project.status === 'IN_PROGRESS') || (!isInternalInvite && project.status === 'REVIEWED')) {
         const permissions = getUserPermissions(authResult)
         if (permissions.actions.changeProjectStatuses) {
           try {

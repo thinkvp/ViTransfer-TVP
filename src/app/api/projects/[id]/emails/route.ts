@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getSafeguardLimits } from '@/lib/settings'
 import { validateEmlFilename } from '@/lib/eml-validation'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -224,6 +225,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     },
     select: { id: true },
   })
+
+  await recalculateAndStoreProjectTotalBytes(projectId)
 
   return NextResponse.json({ projectEmailId: record.id })
 }

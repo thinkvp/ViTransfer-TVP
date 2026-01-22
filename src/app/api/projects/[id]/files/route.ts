@@ -7,6 +7,7 @@ import { getUserPermissions } from '@/lib/rbac-api'
 import { canDoAction } from '@/lib/rbac'
 import { validateAssetFile } from '@/lib/file-validation'
 import { getSafeguardLimits } from '@/lib/settings'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -205,6 +206,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     },
     select: { id: true },
   })
+
+  await recalculateAndStoreProjectTotalBytes(projectId)
 
   return NextResponse.json({ projectFileId: record.id })
 }

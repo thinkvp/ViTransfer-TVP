@@ -14,6 +14,19 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
+function asNumberBigInt(v: unknown): number {
+  if (typeof v === 'bigint') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
 
 
 
@@ -22,7 +35,7 @@ const updateProjectSchema = z.object({
   slug: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
   clientId: z.string().regex(/^c[a-z0-9]{24}$/).optional(),
-  status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']).optional(),
+  status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
   enableRevisions: z.boolean().optional(),
   maxRevisions: z.number().int().min(0).max(50).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
@@ -206,6 +219,7 @@ export async function GET(
     // Convert BigInt fields to strings for JSON serialization
     const projectData = {
       ...project,
+      totalBytes: asNumberBigInt((project as any).totalBytes),
       videos: project.videos.map((video: any) => ({
         ...video,
         originalFileSize: video.originalFileSize.toString(),
@@ -855,7 +869,10 @@ export async function PATCH(
 
     }
 
-    return NextResponse.json(project)
+    return NextResponse.json({
+      ...project,
+      totalBytes: asNumberBigInt((project as any).totalBytes),
+    })
   } catch (error) {
     return NextResponse.json(
       { error: 'Operation failed' },

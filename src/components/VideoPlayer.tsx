@@ -5,7 +5,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import Image from 'next/image'
 // Avoid importing Prisma runtime types in client components.
 type Video = any
-type ProjectStatus = 'NOT_STARTED' | 'IN_REVIEW' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
+type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'

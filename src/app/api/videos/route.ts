@@ -4,6 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateUploadedFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 export const runtime = 'nodejs'
 
 
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
         version: nextVersion,
         versionLabel: versionLabel || `v${nextVersion}`,
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
-        allowApproval: allowApproval === true,
+        allowApproval: allowApproval ?? true,
         originalFileName,
         originalFileSize: BigInt(originalFileSize),
         originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,
@@ -133,6 +134,8 @@ export async function POST(request: NextRequest) {
         height: 0,
       },
     })
+
+    await recalculateAndStoreProjectTotalBytes(projectId)
 
     // Return videoId - TUS will handle upload directly
     const response = NextResponse.json({

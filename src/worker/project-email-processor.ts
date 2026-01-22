@@ -4,6 +4,7 @@ import { downloadFile, deleteFile, initStorage, uploadFile } from '../lib/storag
 import { sanitizeFilename } from '../lib/file-validation'
 import { simpleParser, type SimpleParserOptions } from 'mailparser'
 import type { ProjectEmailProcessingJob } from '../lib/queue'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -180,6 +181,8 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
         errorMessage: null,
       },
     })
+
+    await recalculateAndStoreProjectTotalBytes(projectId)
   } catch (err: any) {
     console.error('[WORKER] Project email processing error:', err)
 

@@ -6,6 +6,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { readdir, rmdir, unlink } from 'fs/promises'
@@ -367,6 +368,8 @@ export async function DELETE(
     await prisma.commentFile.deleteMany({
       where: { commentId: { in: commentIds } },
     })
+
+    await recalculateAndStoreProjectTotalBytes(existingComment.projectId)
 
     // Best-effort: remove files from disk
     const directoriesToCheck = new Set<string>()

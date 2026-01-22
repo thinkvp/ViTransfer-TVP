@@ -249,6 +249,7 @@ export async function POST(request: NextRequest) {
         id: true,
         sharePassword: true,
         authMode: true,
+        status: true,
       }
     })
 
@@ -419,6 +420,34 @@ export async function POST(request: NextRequest) {
         }
       }
     })
+
+    // Client recipient activity should mark the project as Reviewed.
+    // Only applies to client recipients (recipientId present) and not internal/admin users.
+    if (!isInternal && recipientId && !authContext.user?.id) {
+      const currentStatus = String((project as any)?.status || '')
+      if (currentStatus !== 'APPROVED' && currentStatus !== 'CLOSED' && currentStatus !== 'REVIEWED') {
+        try {
+          await prisma.$transaction([
+            prisma.project.update({
+              where: { id: projectId },
+              data: { status: 'REVIEWED' },
+            }),
+            prisma.projectStatusChange.create({
+              data: {
+                projectId,
+                previousStatus: currentStatus as any,
+                currentStatus: 'REVIEWED',
+                source: 'CLIENT',
+                changedById: null,
+              },
+            }),
+          ])
+        } catch (e) {
+          // Non-blocking: do not prevent comment creation
+          console.error('Failed to update project status to REVIEWED:', e)
+        }
+      }
+    }
 
     // Handle notifications asynchronously
     await handleCommentNotifications({

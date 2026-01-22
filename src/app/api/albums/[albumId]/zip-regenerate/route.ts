@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -57,6 +58,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   await deleteFile(fullZipPath).catch(() => {})
   await deleteFile(socialZipPath).catch(() => {})
+
+  // Keep DB totals consistent with storage after invalidation.
+  await syncAlbumZipSizes({ albumId: album.id, projectId: album.projectId }).catch(() => {})
 
   try {
     const { getAlbumPhotoZipQueue } = await import('@/lib/queue')

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -166,6 +167,8 @@ export async function POST(
       },
     })
 
+    await recalculateAndStoreProjectTotalBytes(comment.projectId)
+
     return NextResponse.json({
       success: true,
       file: {
@@ -254,6 +257,8 @@ export async function DELETE(
     await prisma.commentFile.deleteMany({
       where: { commentId },
     })
+
+    await recalculateAndStoreProjectTotalBytes(comment.projectId)
 
     return NextResponse.json({
       success: true,

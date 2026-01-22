@@ -565,8 +565,8 @@ export default function UsersPage() {
                 <div className="space-y-2">
                   {(
                     [
-                      ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD'],
-                      ['SHARE_ONLY', 'APPROVED', 'CLOSED'],
+                      ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED'],
+                      ['SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED'],
                     ] as ProjectStatus[][]
                   ).map((row) => (
                     <div key={row.join('|')} className="flex items-center justify-center gap-2">

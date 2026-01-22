@@ -5,6 +5,8 @@ import type { AlbumPhotoSocialJob } from '../lib/queue'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
 import fs from 'fs'
 import path from 'path'
+import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -27,6 +29,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       status: true,
       socialStoragePath: true,
       socialStatus: true,
+      socialFileSize: true,
     },
   })
 
@@ -86,6 +89,12 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       .withMetadata()
       .toFile(outputPath)
 
+    const outStats = await fs.promises.stat(outputPath)
+    const newSocialFileSize = BigInt(outStats.size)
+
+    // Update DB first so we have a stored baseline, then adjust Project.totalBytes by the delta.
+    const prevSocialFileSize = photo.socialFileSize
+
     await prisma.albumPhoto.update({
       where: { id: photoId },
       data: {
@@ -93,8 +102,26 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
         socialStatus: 'READY',
         socialError: null,
         socialGeneratedAt: new Date(),
+        socialFileSize: newSocialFileSize,
       },
     })
+
+    // Best-effort: include social derivatives in project totals.
+    // If something goes wrong, the daily reconciliation will restore correctness.
+    try {
+      const album = await prisma.album.findUnique({
+        where: { id: photo.albumId },
+        select: { projectId: true },
+      })
+
+      if (album) {
+        await adjustProjectTotalBytes(album.projectId, newSocialFileSize - prevSocialFileSize)
+      }
+    } catch (e) {
+      if (DEBUG) {
+        console.warn('[WORKER DEBUG] Failed to adjust project totalBytes for social derivative (continuing):', e)
+      }
+    }
 
     // Invalidate and (debounced) regenerate the social album ZIP.
     try {
@@ -106,6 +133,8 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       if (album) {
         const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: photo.albumId, variant: 'social' })
         await fs.promises.unlink(getFilePath(zipStoragePath)).catch(() => {})
+
+        await syncAlbumZipSizes({ albumId: photo.albumId, projectId: album.projectId }).catch(() => {})
 
         const { getAlbumPhotoZipQueue } = await import('../lib/queue')
         const q = getAlbumPhotoZipQueue()

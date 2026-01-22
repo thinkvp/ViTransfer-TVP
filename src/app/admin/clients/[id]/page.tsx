@@ -355,10 +355,11 @@ export default function ClientDetailPage() {
       case 'NOT_STARTED': return 0
       case 'IN_PROGRESS': return 1
       case 'IN_REVIEW': return 2
-      case 'ON_HOLD': return 3
+      case 'REVIEWED': return 3
       case 'SHARE_ONLY': return 4
-      case 'APPROVED': return 5
-      case 'CLOSED': return 6
+      case 'ON_HOLD': return 5
+      case 'APPROVED': return 6
+      case 'CLOSED': return 7
       default: return 999
     }
   }

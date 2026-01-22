@@ -1,13 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
-import { Plus, Video, MessageSquare, ArrowUp, ArrowDown, ChevronRight, Filter } from 'lucide-react'
-import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
+import { Plus, ArrowUp, ArrowDown, ChevronRight, Filter, Table2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiPatch } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
@@ -34,6 +33,7 @@ interface Project {
   status: string
   createdAt: string | Date
   updatedAt: string | Date
+  totalBytes?: number | null
   maxRevisions: number
   enableRevisions: boolean
   videos: any[]
@@ -41,6 +41,25 @@ interface Project {
   assignedUsers?: ProjectAssignedUser[]
   _count: { comments: number }
   photoCount?: number
+}
+
+type ToggleableColumnKey = 'users' | 'videos' | 'versions' | 'comments' | 'photos' | 'data' | 'createdAt' | 'updatedAt'
+
+function formatProjectData(bytes: number | null | undefined): string {
+  const n = typeof bytes === 'number' && Number.isFinite(bytes) ? Math.max(0, bytes) : null
+  if (n === null) return '—'
+  const gb = n / (1024 * 1024 * 1024)
+
+  if (gb >= 1000) return '999+ GB'
+  if (gb >= 100) return `${Math.round(gb)} GB`
+  if (gb >= 10) {
+    const v = Number(gb.toFixed(1))
+    if (v >= 100) return `${Math.round(v)} GB`
+    return `${v.toFixed(1)} GB`
+  }
+  const v = Number(gb.toFixed(2))
+  if (v >= 10) return `${Number(v.toFixed(1)).toFixed(1)} GB`
+  return `${v.toFixed(2)} GB`
 }
 
 interface ProjectsListProps {
@@ -53,23 +72,22 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   const { user } = useAuth()
 
   const TABLE_SORT_STORAGE_KEY = 'admin_projects_table_sort'
+  const TABLE_COLUMNS_STORAGE_KEY = 'admin_projects_table_columns'
   const [isMobile, setIsMobile] = useState(false)
   const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical' | 'created'>('alphabetical')
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({})
   const [statusToggleLoading, setStatusToggleLoading] = useState<Record<string, boolean>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<ProjectStatus>>(new Set())
   const [tableSortKey, setTableSortKey] = useState<
-    'title' | 'client' | 'status' | 'users' | 'videos' | 'versions' | 'comments' | 'photos' | 'createdAt' | 'updatedAt'
+    'title' | 'client' | 'status' | 'users' | 'videos' | 'versions' | 'comments' | 'photos' | 'data' | 'createdAt' | 'updatedAt'
   >('updatedAt')
   const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
   const [tablePage, setTablePage] = useState(1)
-  const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
-  const metricIconClassName = 'w-4 h-4 text-primary'
+  const [visibleColumns, setVisibleColumns] = useState<Set<ToggleableColumnKey>>(
+    new Set(['users', 'videos', 'versions', 'comments', 'photos', 'data', 'createdAt', 'updatedAt'])
+  )
 
   useEffect(() => {
     const stored = localStorage.getItem(TABLE_SORT_STORAGE_KEY)
@@ -88,6 +106,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
         'versions',
         'comments',
         'photos',
+        'data',
         'createdAt',
         'updatedAt',
       ])
@@ -105,6 +124,56 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       JSON.stringify({ key: tableSortKey, direction: tableSortDirection })
     )
   }, [tableSortKey, tableSortDirection])
+
+  useEffect(() => {
+    const stored = localStorage.getItem(TABLE_COLUMNS_STORAGE_KEY)
+    if (!stored) return
+    try {
+      const parsed = JSON.parse(stored)
+      let storedColumns: unknown = parsed
+      let storedVersion: number | undefined
+
+      if (Array.isArray(parsed)) {
+        // Back-compat: older versions stored a plain string[] without a version.
+        storedColumns = parsed
+        storedVersion = 1
+      } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).cols)) {
+        storedColumns = (parsed as any).cols
+        storedVersion = typeof (parsed as any).v === 'number' ? (parsed as any).v : undefined
+      } else {
+        return
+      }
+
+      if (!Array.isArray(storedColumns)) return
+      const allowed = new Set<ToggleableColumnKey>([
+        'users',
+        'videos',
+        'versions',
+        'comments',
+        'photos',
+        'data',
+        'createdAt',
+        'updatedAt',
+      ])
+      const next = new Set<ToggleableColumnKey>()
+      for (const v of storedColumns) {
+        if (typeof v !== 'string') continue
+        if (!allowed.has(v as ToggleableColumnKey)) continue
+        next.add(v as ToggleableColumnKey)
+      }
+
+      // In v1, Users was always shown and couldn't be toggled.
+      if (storedVersion === 1) next.add('users')
+
+      if (next.size > 0) setVisibleColumns(next)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(TABLE_COLUMNS_STORAGE_KEY, JSON.stringify({ v: 2, cols: Array.from(visibleColumns) }))
+  }, [visibleColumns])
 
   const permissions = useMemo(() => normalizeRolePermissions(user?.permissions), [user?.permissions])
   const canChangeProjectStatuses = canDoAction(permissions, 'changeProjectStatuses')
@@ -137,25 +206,6 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
     }
   }
 
-
-  useEffect(() => {
-    const storageKey = 'admin_projects_view'
-    const stored = localStorage.getItem(storageKey)
-
-    if (stored === 'grid' || stored === 'table') {
-      setViewMode(stored)
-      return
-    }
-
-    // Back-compat: list view was removed; map to grid.
-    if (stored === 'list') {
-      setViewMode('grid')
-      return
-    }
-
-    setViewMode('grid')
-  }, [])
-
   useEffect(() => {
     const stored = localStorage.getItem('admin_projects_status_filter')
     if (!stored) return
@@ -177,68 +227,25 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
     localStorage.setItem('admin_projects_status_filter', JSON.stringify([...statusFilterSelected]))
   }, [statusFilterSelected])
 
-  useEffect(() => {
-    const storedMode = localStorage.getItem('admin_projects_sort_mode')
-    if (storedMode === 'alphabetical' || storedMode === 'created' || storedMode === 'status') {
-      setSortMode(storedMode)
-    }
-    if (storedMode === 'activity') {
-      // Back-compat: activity sort was replaced by status sort
-      setSortMode('status')
-    }
-
-    const storedDirection = localStorage.getItem('admin_projects_sort_direction')
-    if (storedDirection === 'asc' || storedDirection === 'desc') {
-      setSortDirection(storedDirection)
-    }
-  }, [])
 
   useEffect(() => {
-    localStorage.setItem('admin_projects_view', viewMode)
-  }, [viewMode])
-
-  useEffect(() => {
-    // Reset paging when switching to table view or when the table settings change.
-    if (viewMode !== 'table') return
+    // Reset paging when the table settings change.
     setTablePage(1)
-  }, [recordsPerPage, searchQuery, tableSortDirection, tableSortKey, statusFilterSelected, viewMode])
-
-  useEffect(() => {
-    localStorage.setItem('admin_projects_sort_mode', sortMode)
-    localStorage.setItem('admin_projects_sort_direction', sortDirection)
-  }, [sortMode, sortDirection])
+  }, [recordsPerPage, searchQuery, tableSortDirection, tableSortKey, statusFilterSelected])
 
   const getStatusRank = (status: string) => {
     switch (status) {
       case 'NOT_STARTED': return 0
       case 'IN_PROGRESS': return 1
       case 'IN_REVIEW': return 2
-      case 'ON_HOLD': return 3
+      case 'REVIEWED': return 3
       case 'SHARE_ONLY': return 4
-      case 'APPROVED': return 5
-      case 'CLOSED': return 6
+      case 'ON_HOLD': return 5
+      case 'APPROVED': return 6
+      case 'CLOSED': return 7
       default: return 999
     }
   }
-
-  const compareProjects = useMemo(() => {
-    const directionMultiplier = sortDirection === 'asc' ? 1 : -1
-    return (a: Project, b: Project) => {
-      if (sortMode === 'alphabetical') {
-        return directionMultiplier * a.title.localeCompare(b.title)
-      }
-      if (sortMode === 'created') {
-        return directionMultiplier * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      }
-
-      // Status sorting: match the same ordering used by the table view header sort.
-      const aStatus = String(statusOverrides[a.id] ?? a.status)
-      const bStatus = String(statusOverrides[b.id] ?? b.status)
-      const delta = getStatusRank(aStatus) - getStatusRank(bStatus)
-      if (delta !== 0) return directionMultiplier * delta
-      return directionMultiplier * a.title.localeCompare(b.title)
-    }
-  }, [sortDirection, sortMode, statusOverrides])
 
   const filteredProjects = useMemo(() => {
     const byStatus = statusFilterSelected.size === 0
@@ -264,11 +271,6 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       return title.includes(q) || client.includes(q) || email.includes(q)
     })
   }, [projects, searchQuery, statusFilterSelected, statusOverrides])
-
-  const nonTableProjects = useMemo(() => {
-    if (viewMode === 'table') return [] as Project[]
-    return [...filteredProjects].sort(compareProjects)
-  }, [compareProjects, filteredProjects, viewMode])
 
   useEffect(() => {
     onFilteredProjectsChange?.(filteredProjects)
@@ -315,6 +317,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       if (tableSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (tableSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
       if (tableSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
+      if (tableSortKey === 'data') return dir * ((Number(a.totalBytes) || 0) - (Number(b.totalBytes) || 0))
       if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       if (tableSortKey === 'updatedAt') return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
       return 0
@@ -324,21 +327,18 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   }, [filteredProjects, statusOverrides, tableSortDirection, tableSortKey])
 
   const tableTotalPages = useMemo(() => {
-    if (viewMode !== 'table') return 1
     return Math.max(1, Math.ceil(tableProjects.length / recordsPerPage))
-  }, [recordsPerPage, tableProjects.length, viewMode])
+  }, [recordsPerPage, tableProjects.length])
 
   useEffect(() => {
-    if (viewMode !== 'table') return
     setTablePage((p) => Math.min(Math.max(1, p), tableTotalPages))
-  }, [tableTotalPages, viewMode])
+  }, [tableTotalPages])
 
   const visibleTableProjects = useMemo(() => {
-    if (viewMode !== 'table') return [] as Project[]
     const start = (tablePage - 1) * recordsPerPage
     const end = start + recordsPerPage
     return tableProjects.slice(start, end)
-  }, [recordsPerPage, tablePage, tableProjects, viewMode])
+  }, [recordsPerPage, tablePage, tableProjects])
 
   const toggleTableSort = (key: typeof tableSortKey) => {
     setTablePage(1)
@@ -352,42 +352,34 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
     })
   }
 
-  const sortModeLabel = sortMode === 'alphabetical' ? 'Alphabetical' : sortMode === 'status' ? 'Status' : 'Created'
-  const SortDirectionIcon = sortDirection === 'asc' ? ArrowUp : ArrowDown
+  const columnsConfig = useMemo(() => {
+    const visible = visibleColumns
+    const cols = [
+      { key: 'title', label: 'Project Name', className: 'min-w-[220px]', mobile: true },
+      { key: 'client', label: 'Client', className: 'min-w-[180px] hidden md:table-cell', mobile: false },
+      { key: 'status', label: 'Status', className: 'min-w-[120px]', mobile: true },
+      { key: 'users', label: 'Users', className: 'w-[105px] hidden md:table-cell px-2 pr-1', mobile: false, toggleKey: 'users' as const },
+      { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false, toggleKey: 'videos' as const },
+      { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false, toggleKey: 'versions' as const },
+      { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false, toggleKey: 'comments' as const },
+      { key: 'photos', label: 'Photos', className: 'w-[95px] text-right hidden md:table-cell', mobile: false, toggleKey: 'photos' as const },
+      { key: 'data', label: 'Data', className: 'w-[110px] text-right hidden md:table-cell', mobile: false, toggleKey: 'data' as const },
+      { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'createdAt' as const },
+      { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'updatedAt' as const },
+    ] as const
 
-  const cycleSort = () => {
-    if (sortMode === 'alphabetical' && sortDirection === 'asc') {
-      setSortDirection('desc')
-      return
+    const visibleCols = cols.filter((c: any) => !c.toggleKey || visible.has(c.toggleKey))
+    return {
+      visibleCols,
+      desktopColSpan: visibleCols.length,
     }
-    if (sortMode === 'alphabetical' && sortDirection === 'desc') {
-      setSortMode('status')
-      setSortDirection('asc')
-      return
-    }
-    if (sortMode === 'status' && sortDirection === 'asc') {
-      setSortDirection('desc')
-      return
-    }
-    if (sortMode === 'status' && sortDirection === 'desc') {
-      setSortMode('created')
-      setSortDirection('asc')
-      return
-    }
-    if (sortMode === 'created' && sortDirection === 'asc') {
-      setSortDirection('desc')
-      return
-    }
-
-    setSortMode('alphabetical')
-    setSortDirection('asc')
-  }
+  }, [visibleColumns])
 
   return (
     <>
       {projects.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div className="w-full sm:w-auto sm:flex-1 sm:max-w-sm">
+        <div className="flex flex-nowrap items-center justify-between gap-2 mb-3">
+          <div className="flex-1 min-w-0 sm:max-w-sm">
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -397,23 +389,99 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
             />
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-          {viewMode !== 'table' && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={cycleSort}
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-                title="Change sort"
-              >
-                <span>{sortModeLabel}</span>
-                <SortDirectionIcon className="w-4 h-4" />
-              </Button>
-            </>
-          )}
+          <div className="flex flex-nowrap items-center justify-end gap-2 flex-shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="hidden md:inline-flex text-muted-foreground hover:text-foreground"
+                  aria-label="Show columns"
+                  title="Show columns"
+                >
+                  <Table2 className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>Show columns</DropdownMenuLabel>
+                {(
+                  [
+                    { key: 'users', label: 'Users' },
+                    { key: 'videos', label: 'Videos' },
+                    { key: 'versions', label: 'Versions' },
+                    { key: 'comments', label: 'Comments' },
+                    { key: 'photos', label: 'Photos' },
+                    { key: 'data', label: 'Data' },
+                    { key: 'createdAt', label: 'Date Created' },
+                    { key: 'updatedAt', label: 'Last Activity' },
+                  ] as const
+                ).map((col) => {
+                  const checked = visibleColumns.has(col.key)
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={col.key}
+                      checked={checked}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={() => {
+                        setVisibleColumns((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(col.key)) next.delete(col.key)
+                          else next.add(col.key)
+                          return next
+                        })
+                      }}
+                    >
+                      {col.label}
+                    </DropdownMenuCheckboxItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          {viewMode === 'table' && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant={statusFilterSelected.size > 0 ? 'default' : 'ghost'}
+                  size="sm"
+                  className={cn(
+                    'inline-flex items-center',
+                    statusFilterSelected.size > 0
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  aria-label="Filter statuses"
+                  title="Filter statuses"
+                >
+                  <Filter className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
+                {PROJECT_STATUS_OPTIONS.map((s) => {
+                  const checked = statusFilterSelected.has(s.value)
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={s.value}
+                      checked={checked}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={() => {
+                        setStatusFilterSelected((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(s.value)) next.delete(s.value)
+                          else next.add(s.value)
+                          return next
+                        })
+                      }}
+                    >
+                      {s.label}
+                    </DropdownMenuCheckboxItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <div className="inline-flex items-center">
               <Select
                 value={String(recordsPerPage)}
@@ -434,52 +502,6 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                 </SelectContent>
               </Select>
             </div>
-          )}
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant={statusFilterSelected.size > 0 ? 'default' : 'ghost'}
-                size="sm"
-                className={cn(
-                  'inline-flex items-center',
-                  statusFilterSelected.size > 0
-                    ? 'text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                aria-label="Filter statuses"
-                title="Filter statuses"
-              >
-                <Filter className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
-              {PROJECT_STATUS_OPTIONS.map((s) => {
-                const checked = statusFilterSelected.has(s.value)
-                return (
-                  <DropdownMenuCheckboxItem
-                    key={s.value}
-                    checked={checked}
-                    onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => {
-                      setStatusFilterSelected((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(s.value)) next.delete(s.value)
-                        else next.add(s.value)
-                        return next
-                      })
-                    }}
-                  >
-                    {s.label}
-                  </DropdownMenuCheckboxItem>
-                )
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <ViewModeToggle value={viewMode} onChange={setViewMode} />
           </div>
         </div>
       )}
@@ -497,27 +519,14 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
               </Link>
             </CardContent>
           </Card>
-        ) : viewMode === 'table' ? (
+        ) : (
           <div className="rounded-md border border-border bg-card overflow-hidden">
             <div className="w-full overflow-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40">
                   <tr className="border-b border-border">
                     <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-muted-foreground w-8 md:hidden" aria-label="Expand" />
-                    {(
-                      [
-                        { key: 'title', label: 'Project Name', className: 'min-w-[220px]', mobile: true },
-                        { key: 'client', label: 'Client', className: 'min-w-[180px] hidden md:table-cell', mobile: false },
-                        { key: 'status', label: 'Status', className: 'min-w-[120px]', mobile: true },
-                        { key: 'users', label: 'Users', className: 'w-[105px] hidden md:table-cell px-2 pr-1', mobile: false },
-                        { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
-                        { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
-                        { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
-                        { key: 'photos', label: 'Photos', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
-                        { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false },
-                        { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px] hidden md:table-cell', mobile: false },
-                      ] as const
-                    ).map((col) => (
+                    {columnsConfig.visibleCols.map((col: any) => (
                       <th key={col.key} scope="col" className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground', col.className)}>
                         <button
                           type="button"
@@ -545,7 +554,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                         </td>
                       </tr>
                       <tr className="hidden md:table-row">
-                        <td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">
+                        <td colSpan={columnsConfig.desktopColSpan} className="px-3 py-10 text-center text-muted-foreground">
                           No projects found.
                         </td>
                       </tr>
@@ -581,6 +590,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                       const versionsCount = (project.videos || []).length
                       const commentsCount = project._count?.comments || 0
                       const photosCount = Number(project.photoCount) || 0
+                      const dataLabel = formatProjectData(project.totalBytes)
                       const clientName = (() => {
                         const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
                         return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
@@ -683,48 +693,65 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                               />
                             </td>
 
-                            <td className="px-2 pr-1 py-2 hidden md:table-cell">
-                              {Array.isArray(project.assignedUsers) && project.assignedUsers.length > 0 ? (
-                                <div className="flex items-center -space-x-1">
-                                  {project.assignedUsers.slice(0, 6).map((u, idx) => {
-                                    const initials = getUserInitials(u?.name, u?.email)
-                                    const bg = typeof u?.displayColor === 'string' && u.displayColor.trim() ? u.displayColor : '#64748b'
-                                    const label = String(u?.name || u?.email || '').trim()
-                                    return (
+                            {visibleColumns.has('users') && (
+                              <td className="px-2 pr-1 py-2 hidden md:table-cell">
+                                {Array.isArray(project.assignedUsers) && project.assignedUsers.length > 0 ? (
+                                  <div className="flex items-center -space-x-1">
+                                    {project.assignedUsers.slice(0, 6).map((u, idx) => {
+                                      const initials = getUserInitials(u?.name, u?.email)
+                                      const bg = typeof u?.displayColor === 'string' && u.displayColor.trim() ? u.displayColor : '#64748b'
+                                      const label = String(u?.name || u?.email || '').trim()
+                                      return (
+                                        <div
+                                          key={String(u?.id || idx)}
+                                          className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
+                                          style={{ backgroundColor: bg, color: '#fff' }}
+                                          title={label}
+                                          aria-label={label}
+                                        >
+                                          {initials}
+                                        </div>
+                                      )
+                                    })}
+
+                                    {project.assignedUsers.length > 6 && (
                                       <div
-                                        key={String(u?.id || idx)}
                                         className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
-                                        style={{ backgroundColor: bg, color: '#fff' }}
-                                        title={label}
-                                        aria-label={label}
+                                        style={{ backgroundColor: '#94a3b8', color: '#fff' }}
+                                        title={`${project.assignedUsers.length - 6} more`}
+                                        aria-label={`${project.assignedUsers.length - 6} more`}
                                       >
-                                        {initials}
+                                        +{project.assignedUsers.length - 6}
                                       </div>
-                                    )
-                                  })}
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                            )}
 
-                                  {project.assignedUsers.length > 6 && (
-                                    <div
-                                      className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
-                                      style={{ backgroundColor: '#94a3b8', color: '#fff' }}
-                                      title={`${project.assignedUsers.length - 6} more`}
-                                      aria-label={`${project.assignedUsers.length - 6} more`}
-                                    >
-                                      +{project.assignedUsers.length - 6}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </td>
-
-                            <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
-                            <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
-                            <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
-                            <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
-                            <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
-                            <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.updatedAt)}</td>
+                            {visibleColumns.has('videos') && (
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
+                            )}
+                            {visibleColumns.has('versions') && (
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
+                            )}
+                            {visibleColumns.has('comments') && (
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
+                            )}
+                            {visibleColumns.has('photos') && (
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
+                            )}
+                            {visibleColumns.has('data') && (
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{dataLabel}</td>
+                            )}
+                            {visibleColumns.has('createdAt') && (
+                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
+                            )}
+                            {visibleColumns.has('updatedAt') && (
+                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.updatedAt)}</td>
+                            )}
                           </tr>
 
                           {isMobile && isExpanded && (
@@ -796,130 +823,6 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                 </div>
               </div>
             )}
-          </div>
-        ) : (
-          <div className="rounded-md border border-border bg-card">
-            <div className="p-2 bg-foreground/5 dark:bg-foreground/10">
-              {nonTableProjects.length === 0 ? (
-                <div className="py-10 text-center text-muted-foreground">No projects found.</div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
-                  {nonTableProjects.map((project) => {
-                    const totalVideos = project.videos.length
-                    const status = statusOverrides[project.id] ?? project.status
-                    const isUpdatingStatus = Boolean(statusToggleLoading[project.id])
-
-                    const readyVideos = (project.videos || []).filter((v: any) => v?.status === 'READY')
-
-                    const videosByNameForApproval = readyVideos.reduce((acc: Record<string, any[]>, video: any) => {
-                      const name = String(video?.name || '')
-                      if (!name) return acc
-                      if (!acc[name]) acc[name] = []
-                      acc[name].push(video)
-                      return acc
-                    }, {})
-
-                    const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions: any[]) =>
-                      versions.some((v: any) => Boolean(v?.approved))
-                    )
-
-                    const canApproveProject = readyVideos.length > 0 && allVideosHaveApprovedVersion
-
-                    const setStatus = async (nextStatus: string) => {
-                      setStatusToggleLoading(prev => ({ ...prev, [project.id]: true }))
-                      try {
-                        await apiPatch(`/api/projects/${project.id}`, { status: nextStatus })
-                        setStatusOverrides(prev => ({ ...prev, [project.id]: nextStatus }))
-                      } catch (error) {
-                        alert('Failed to update project status')
-                      } finally {
-                        setStatusToggleLoading(prev => ({ ...prev, [project.id]: false }))
-                      }
-                    }
-
-                    return (
-                      <Link key={project.id} href={`/admin/projects/${project.id}`} className="block">
-                        <Card className="relative cursor-pointer transition-all duration-200 hover:border-primary/50 hover:shadow-elevation-lg sm:hover:-translate-y-1">
-                          <CardHeader className="p-2 sm:p-3">
-                            <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
-                              <div className="flex-1 min-w-0">
-                                <CardTitle className="font-semibold text-sm sm:text-base">
-                                  {project.title}
-                                </CardTitle>
-                                <CardDescription className="mt-1 break-words text-xs sm:text-sm">
-                                  {(() => {
-                                    const primaryRecipient = project.recipients?.find(r => r.isPrimary) || project.recipients?.[0]
-                                    const displayName = project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
-
-                                    return (
-                                      <>
-                                        Client: {displayName}
-                                        {!project.companyName && primaryRecipient?.name && primaryRecipient?.email && (
-                                          <>
-                                            <span className="hidden sm:inline"> ({primaryRecipient.email})</span>
-                                            <span className="block sm:hidden text-xs mt-1">{primaryRecipient.email}</span>
-                                          </>
-                                        )}
-                                      </>
-                                    )
-                                  })()}
-                                </CardDescription>
-                              </div>
-                              <div className="flex flex-row sm:flex-col items-start sm:items-end gap-2 w-full sm:w-auto">
-                                <ProjectStatusPicker
-                                  value={status}
-                                  disabled={isUpdatingStatus || !canChangeProjectStatuses}
-                                  canApprove={canApproveProject}
-                                  stopPropagation
-                                  className={isUpdatingStatus ? 'opacity-70' : undefined}
-                                  visibleStatuses={visibleStatuses}
-                                  onChange={(next) => setStatus(next)}
-                                />
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent
-                            className="p-2 pt-0 sm:p-3 sm:pt-0 pr-20 sm:pr-24"
-                          >
-                            <div className="flex flex-wrap gap-3 sm:gap-6 text-muted-foreground text-xs sm:text-sm">
-                              <div className="inline-flex items-center gap-2">
-                                <span className={metricIconWrapperClassName}>
-                                  <Video className={metricIconClassName} />
-                                </span>
-                                <span className="font-medium">{totalVideos}</span>
-                                <span>
-                                  video
-                                  {totalVideos !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                              <div className="inline-flex items-center gap-2">
-                                <span className={metricIconWrapperClassName}>
-                                  <MessageSquare className={metricIconClassName} />
-                                </span>
-                                <span className="font-medium">{project._count.comments}</span>
-                                <span>
-                                  comment
-                                  {project._count.comments !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div
-                              className="absolute bottom-2 right-2 text-right text-muted-foreground hidden sm:block text-[10px] sm:text-xs leading-tight"
-                            >
-                              <>
-                                <div>Project Created:</div>
-                                <div className="font-medium tabular-nums">{formatProjectDate(project.createdAt)}</div>
-                              </>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </Link>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>

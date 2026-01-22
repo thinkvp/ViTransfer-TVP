@@ -152,6 +152,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       // NOTE: Approval notifications are always sent immediately (see email sending code below)
       // They are NOT queued because approvals should notify clients right away
+    } else {
+      // Partial review/approval action by client: mark the project as Reviewed
+      if (!accessCheck.isAdmin && project.status !== 'REVIEWED') {
+        const previousStatus = project.status
+        await prisma.project.update({
+          where: { id: projectId },
+          data: { status: 'REVIEWED' },
+        })
+
+        await prisma.projectStatusChange.create({
+          data: {
+            projectId,
+            previousStatus,
+            currentStatus: 'REVIEWED',
+            source: 'CLIENT',
+            changedById: null,
+          },
+        })
+      }
     }
 
     console.log('[APPROVAL] Video approval complete, preparing notifications')

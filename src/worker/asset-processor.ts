@@ -6,6 +6,7 @@ import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -29,6 +30,17 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
   }
 
   let tempFilePath: string | undefined
+  const projectId = await (async () => {
+    try {
+      const asset = await prisma.videoAsset.findUnique({
+        where: { id: assetId },
+        select: { video: { select: { projectId: true } } },
+      })
+      return String((asset as any)?.video?.projectId || '')
+    } catch {
+      return ''
+    }
+  })()
 
   try {
     // Download asset to temp location
@@ -82,6 +94,8 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
           category: expectedCategory || 'other'
         }
       })
+
+      if (projectId) await recalculateAndStoreProjectTotalBytes(projectId)
 
       console.log(`[WORKER] Asset ${assetId} processed (no magic bytes detected)`)
       return
@@ -148,6 +162,8 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
         category: finalCategory
       }
     })
+
+    if (projectId) await recalculateAndStoreProjectTotalBytes(projectId)
 
     console.log(`[WORKER] Asset ${assetId} processed successfully`)
 

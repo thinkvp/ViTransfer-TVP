@@ -226,6 +226,6 @@ export function adminAllPermissions(): RolePermissions {
   const p = defaultRolePermissions()
   for (const key of ALL_MENUS) p.menuVisibility[key] = true
   for (const key of ALL_ACTIONS) p.actions[key] = true
-  p.projectVisibility.statuses = ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD', 'SHARE_ONLY', 'APPROVED', 'CLOSED']
+  p.projectVisibility.statuses = ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED']
   return p
 }

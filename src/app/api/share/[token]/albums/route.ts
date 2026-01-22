@@ -6,6 +6,19 @@ import { verifyProjectAccess } from '@/lib/project-access'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+function asNumberBigInt(v: unknown): number {
+  if (typeof v === 'bigint') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
 // GET /api/share/[token]/albums - list albums visible on share page
 export async function GET(request: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
@@ -40,8 +53,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const albums = await prisma.album.findMany({
     where: { projectId: projectMeta.id },
     orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
-    include: { _count: { select: { photos: true } } },
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      notes: true,
+      createdAt: true,
+      updatedAt: true,
+      fullZipFileSize: true,
+      socialZipFileSize: true,
+      _count: { select: { photos: true } },
+    },
   })
 
-  return NextResponse.json({ albums })
+  const albumsSafe = albums.map((a) => ({
+    ...a,
+    fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
+    socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
+  }))
+
+  return NextResponse.json({ albums: albumsSafe })
 }

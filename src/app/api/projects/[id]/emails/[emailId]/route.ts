@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile } from '@/lib/storage'
 import { sanitizeEmailHtml } from '@/lib/security/email-html-sanitization'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 export const runtime = 'nodejs'
 
@@ -192,6 +193,8 @@ export async function DELETE(
 
   // Delete DB first; storage is best-effort.
   await prisma.projectEmail.delete({ where: { id: email.id } })
+
+  await recalculateAndStoreProjectTotalBytes(projectId)
 
   // Best-effort storage cleanup
   try {

@@ -23,9 +23,10 @@ interface ProjectFileListProps {
   projectId: string
   refreshTrigger?: number
   canDelete?: boolean
+  onFilesChanged?: () => void
 }
 
-export function ProjectFileList({ projectId, refreshTrigger, canDelete = true }: ProjectFileListProps) {
+export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, onFilesChanged }: ProjectFileListProps) {
   const [files, setFiles] = useState<ProjectFile[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -87,6 +88,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true }:
     try {
       await apiDelete(file.deleteUrl)
       setFiles((prev) => prev.filter((f) => f.id !== file.id))
+      onFilesChanged?.()
     } catch (e: any) {
       alert(e?.message || 'Failed to delete file')
     } finally {

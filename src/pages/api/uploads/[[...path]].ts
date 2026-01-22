@@ -604,6 +604,7 @@ async function handleAlbumPhotoUploadFinish(
   try {
     const { deleteFile } = await import('@/lib/storage')
     const { getAlbumZipJobId, getAlbumZipStoragePath } = await import('@/lib/album-photo-zip')
+    const { syncAlbumZipSizes } = await import('@/lib/album-zip-size-sync')
     const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
 
     const fullZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId: photo.albumId, variant: 'full' })
@@ -611,6 +612,8 @@ async function handleAlbumPhotoUploadFinish(
 
     await deleteFile(fullZipPath).catch(() => {})
     await deleteFile(socialZipPath).catch(() => {})
+
+    await syncAlbumZipSizes({ albumId: photo.albumId, projectId: photo.album.projectId }).catch(() => {})
 
     const zipQueue = getAlbumPhotoZipQueue()
 

@@ -4,6 +4,8 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
+
 interface ProjectBehaviorSectionProps {
   autoApproveProject: boolean
   setAutoApproveProject: (value: boolean) => void
@@ -11,6 +13,9 @@ interface ProjectBehaviorSectionProps {
   setAutoCloseApprovedProjectsEnabled: (value: boolean) => void
   autoCloseApprovedProjectsAfterDays: number | ''
   setAutoCloseApprovedProjectsAfterDays: (value: number | '') => void
+  onRecalculateProjectDataTotals?: () => void
+  recalculateProjectDataTotalsLoading?: boolean
+  recalculateProjectDataTotalsResult?: string | null
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -22,6 +27,9 @@ export function ProjectBehaviorSection({
   setAutoCloseApprovedProjectsEnabled,
   autoCloseApprovedProjectsAfterDays,
   setAutoCloseApprovedProjectsAfterDays,
+  onRecalculateProjectDataTotals,
+  recalculateProjectDataTotalsLoading,
+  recalculateProjectDataTotalsResult,
   show,
   setShow,
 }: ProjectBehaviorSectionProps) {
@@ -109,6 +117,31 @@ export function ProjectBehaviorSection({
                 checked={autoCloseApprovedProjectsEnabled}
                 onCheckedChange={setAutoCloseApprovedProjectsEnabled}
               />
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Project Data totals</Label>
+                <p className="text-xs text-muted-foreground">
+                  Recalculate the stored “Data” value for every project (includes videos, photos, and ZIP artifacts).
+                  Use this after upgrades or if totals look incorrect.
+                </p>
+                {recalculateProjectDataTotalsResult ? (
+                  <p className="text-xs text-muted-foreground">{recalculateProjectDataTotalsResult}</p>
+                ) : null}
+              </div>
+
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-shrink-0"
+                disabled={!onRecalculateProjectDataTotals || recalculateProjectDataTotalsLoading}
+                onClick={() => onRecalculateProjectDataTotals?.()}
+              >
+                {recalculateProjectDataTotalsLoading ? 'Queuing…' : 'Recalculate now'}
+              </Button>
             </div>
           </div>
         </CardContent>

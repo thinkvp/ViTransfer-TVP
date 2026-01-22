@@ -5,6 +5,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,7 +37,14 @@ export async function DELETE(
 
     const photo = await prisma.albumPhoto.findFirst({
       where: { id: photoId, albumId },
-      select: { id: true, storagePath: true, socialStoragePath: true, album: { select: { projectId: true } } },
+      select: {
+        id: true,
+        fileSize: true,
+        socialFileSize: true,
+        storagePath: true,
+        socialStoragePath: true,
+        album: { select: { projectId: true } },
+      },
     })
 
     if (!photo) return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
@@ -57,6 +66,8 @@ export async function DELETE(
     }
 
     await prisma.albumPhoto.delete({ where: { id: photoId } })
+
+    await adjustProjectTotalBytes(photo.album.projectId, (photo.fileSize + photo.socialFileSize) * BigInt(-1))
 
     try {
       const sharedCount = await prisma.albumPhoto.count({
@@ -85,6 +96,8 @@ export async function DELETE(
 
       await deleteFile(fullZipPath).catch(() => {})
       await deleteFile(socialZipPath).catch(() => {})
+
+      await syncAlbumZipSizes({ albumId, projectId: photo.album.projectId }).catch(() => {})
 
       const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
       const q = getAlbumPhotoZipQueue()

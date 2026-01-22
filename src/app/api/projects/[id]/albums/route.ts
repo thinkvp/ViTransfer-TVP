@@ -8,6 +8,19 @@ import { z } from 'zod'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+function asNumberBigInt(v: unknown): number {
+  if (typeof v === 'bigint') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
 const createAlbumSchema = z.object({
   name: z.string().min(1).max(200),
   notes: z.string().max(500).nullable().optional(),
@@ -60,7 +73,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   })
 
-  return NextResponse.json({ albums })
+  const albumsSafe = albums.map((a) => ({
+    ...a,
+    fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
+    socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
+  }))
+
+  return NextResponse.json({ albums: albumsSafe })
 }
 
 // POST /api/projects/[id]/albums - create album (admin)
@@ -120,5 +139,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     },
   })
 
-  return NextResponse.json({ album }, { status: 201 })
+  return NextResponse.json(
+    {
+      album: {
+        ...album,
+        fullZipFileSize: asNumberBigInt((album as any).fullZipFileSize),
+        socialZipFileSize: asNumberBigInt((album as any).socialZipFileSize),
+      },
+    },
+    { status: 201 }
+  )
 }
