@@ -8,6 +8,7 @@ import { getRedis } from './redis'
 import { sendPushNotification } from './push-notifications'
 import { createHash } from 'crypto'
 import { redactEmailForLogs } from './log-sanitization'
+import { canDoAction, normalizeRolePermissions } from './rbac'
 
 interface NotificationContext {
   comment: Comment & {
@@ -48,12 +49,30 @@ export async function sendImmediateNotification(context: NotificationContext) {
   const allRecipients = await getProjectRecipients(comment.projectId)
   const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
 
-  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled
+  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled.
+  // IMPORTANT: users without Share Page access should not receive Share-related emails.
   const internalUsers = await prisma.projectUser.findMany({
     where: { projectId: comment.projectId, receiveNotifications: true },
-    select: { user: { select: { email: true, name: true } } },
+    select: {
+      user: {
+        select: {
+          email: true,
+          name: true,
+          appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
+        },
+      },
+    },
   })
-  const internalEmails = internalUsers.map((r) => r.user.email).filter(Boolean)
+  const internalEmails = internalUsers
+    .filter((r) => {
+      const role = r.user.appRole
+      const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+      if (isAdminRole) return true
+      const permissions = normalizeRolePermissions(role?.permissions)
+      return canDoAction(permissions, 'accessSharePage')
+    })
+    .map((r) => r.user.email)
+    .filter(Boolean)
 
   const shareUrl = await generateShareUrl(project.slug)
   const videoName = video?.name || 'Unknown Video'
@@ -282,12 +301,30 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   const allRecipients = await getProjectRecipients(project.id)
   const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
 
-  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled
+  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled.
+  // IMPORTANT: users without Share Page access should not receive Share-related emails.
   const internalUsers = await prisma.projectUser.findMany({
     where: { projectId: project.id, receiveNotifications: true },
-    select: { user: { select: { email: true, name: true } } },
+    select: {
+      user: {
+        select: {
+          email: true,
+          name: true,
+          appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
+        },
+      },
+    },
   })
-  const internalEmails = internalUsers.map((r) => r.user.email).filter(Boolean)
+  const internalEmails = internalUsers
+    .filter((r) => {
+      const role = r.user.appRole
+      const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+      if (isAdminRole) return true
+      const permissions = normalizeRolePermissions(role?.permissions)
+      return canDoAction(permissions, 'accessSharePage')
+    })
+    .map((r) => r.user.email)
+    .filter(Boolean)
 
   // Send to clients ONLY if complete project approval (all videos approved)
   // Don't send for partial approvals - client knows they just clicked approve

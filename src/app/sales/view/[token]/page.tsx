@@ -7,6 +7,10 @@ import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
 import { sendPushNotification } from '@/lib/push-notifications'
+import {
+  invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
+  quoteEffectiveStatus as computeQuoteEffectiveStatus,
+} from '@/lib/sales/status'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -206,6 +210,48 @@ export default async function SalesDocPublicViewPage(
     : (['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'].includes(rawStatus) ? (rawStatus as InvoiceStatus) : null)
   )
 
+  const nowMs = Date.now()
+
+  const effectiveStatus = (type === 'QUOTE'
+    ? (status
+      ? computeQuoteEffectiveStatus(
+          {
+            status: status as QuoteStatus,
+            validUntil: (typeof doc?.validUntil === 'string' ? doc.validUntil : null),
+          },
+          nowMs
+        )
+      : null)
+    : (status
+      ? (() => {
+          const invoiceStatus = status as InvoiceStatus
+          const totalCentsForStatus = Number.isFinite(totalCents) ? totalCents : 0
+
+          // We don't have payment records in the public snapshot; approximate paid state from status.
+          const paidCentsForStatus = invoiceStatus === 'PAID'
+            ? totalCentsForStatus
+            : invoiceStatus === 'PARTIALLY_PAID'
+              ? 1
+              : 0
+
+          const baseStatus: InvoiceStatus = invoiceStatus === 'OPEN' || invoiceStatus === 'SENT'
+            ? invoiceStatus
+            : (typeof doc?.sentAt === 'string' ? 'SENT' : 'OPEN')
+
+          return computeInvoiceEffectiveStatus(
+            {
+              status: baseStatus,
+              sentAt: (typeof doc?.sentAt === 'string' ? doc.sentAt : null),
+              dueDate: (typeof doc?.dueDate === 'string' ? doc.dueDate : null),
+              totalCents: totalCentsForStatus,
+              paidCents: paidCentsForStatus,
+            },
+            nowMs
+          )
+        })()
+      : null)
+  )
+
   const clientName = share.clientName || 'Client'
   const projectTitle = share.projectTitle
 
@@ -222,10 +268,10 @@ export default async function SalesDocPublicViewPage(
   }
   clientAddress = clientAddress.trim()
 
-  const canAcceptQuote = type === 'QUOTE' && status === 'OPEN'
+  const canAcceptQuote = type === 'QUOTE' && effectiveStatus === 'OPEN'
   const canPayInvoice = type === 'INVOICE'
     && Boolean(stripeGateway?.enabled)
-    && rawStatus !== 'PAID'
+    && effectiveStatus !== 'PAID'
 
   const displayCurrency = type === 'INVOICE'
     ? firstCurrencyFromCsv(stripeGateway?.currencies)
@@ -295,14 +341,14 @@ export default async function SalesDocPublicViewPage(
                       className={
                         `inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
                           type === 'QUOTE'
-                            ? quoteStatusBadgeClass(status as QuoteStatus)
-                            : invoiceStatusBadgeClass(status as InvoiceStatus)
+                            ? quoteStatusBadgeClass((effectiveStatus ?? status) as QuoteStatus)
+                            : invoiceStatusBadgeClass((effectiveStatus ?? status) as InvoiceStatus)
                         }`
                       }
                     >
                       {type === 'QUOTE'
-                        ? quoteStatusLabel(status as QuoteStatus)
-                        : invoiceStatusLabel(status as InvoiceStatus)}
+                        ? quoteStatusLabel((effectiveStatus ?? status) as QuoteStatus)
+                        : invoiceStatusLabel((effectiveStatus ?? status) as InvoiceStatus)}
                     </span>
                   </div>
                 )}

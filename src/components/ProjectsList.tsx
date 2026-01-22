@@ -16,6 +16,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import { getUserInitials } from '@/lib/user-initials'
+
+type ProjectAssignedUser = {
+  id: string
+  email?: string | null
+  name?: string | null
+  displayColor?: string | null
+  receiveNotifications?: boolean
+}
 
 interface Project {
   id: string
@@ -29,6 +38,7 @@ interface Project {
   enableRevisions: boolean
   videos: any[]
   recipients: any[]
+  assignedUsers?: ProjectAssignedUser[]
   _count: { comments: number }
   photoCount?: number
 }
@@ -53,7 +63,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   const [statusToggleLoading, setStatusToggleLoading] = useState<Record<string, boolean>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<ProjectStatus>>(new Set())
   const [tableSortKey, setTableSortKey] = useState<
-    'title' | 'client' | 'status' | 'videos' | 'versions' | 'comments' | 'photos' | 'createdAt' | 'updatedAt'
+    'title' | 'client' | 'status' | 'users' | 'videos' | 'versions' | 'comments' | 'photos' | 'createdAt' | 'updatedAt'
   >('updatedAt')
   const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
@@ -73,6 +83,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
         'title',
         'client',
         'status',
+        'users',
         'videos',
         'versions',
         'comments',
@@ -125,6 +136,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       return ''
     }
   }
+
 
   useEffect(() => {
     const storageKey = 'admin_projects_view'
@@ -282,6 +294,9 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
 
     const getPhotosCount = (project: Project) => Number(project.photoCount) || 0
 
+    const getAssignedUsersCount = (project: Project) =>
+      Array.isArray(project.assignedUsers) ? project.assignedUsers.length : 0
+
     const sorted = [...filteredProjects].sort((a, b) => {
       const dir = tableSortDirection === 'asc' ? 1 : -1
 
@@ -295,6 +310,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
         if (delta !== 0) return dir * delta
         return dir * a.title.localeCompare(b.title)
       }
+      if (tableSortKey === 'users') return dir * (getAssignedUsersCount(a) - getAssignedUsersCount(b))
       if (tableSortKey === 'videos') return dir * (getUniqueVideosCount(a) - getUniqueVideosCount(b))
       if (tableSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (tableSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
@@ -493,6 +509,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                         { key: 'title', label: 'Project Name', className: 'min-w-[220px]', mobile: true },
                         { key: 'client', label: 'Client', className: 'min-w-[180px] hidden md:table-cell', mobile: false },
                         { key: 'status', label: 'Status', className: 'min-w-[120px]', mobile: true },
+                        { key: 'users', label: 'Users', className: 'w-[105px] hidden md:table-cell px-2 pr-1', mobile: false },
                         { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
                         { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
                         { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
@@ -528,7 +545,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                         </td>
                       </tr>
                       <tr className="hidden md:table-row">
-                        <td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">
+                        <td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">
                           No projects found.
                         </td>
                       </tr>
@@ -664,6 +681,42 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                                 visibleStatuses={visibleStatuses}
                                 onChange={(next) => setStatus(next)}
                               />
+                            </td>
+
+                            <td className="px-2 pr-1 py-2 hidden md:table-cell">
+                              {Array.isArray(project.assignedUsers) && project.assignedUsers.length > 0 ? (
+                                <div className="flex items-center -space-x-1">
+                                  {project.assignedUsers.slice(0, 6).map((u, idx) => {
+                                    const initials = getUserInitials(u?.name, u?.email)
+                                    const bg = typeof u?.displayColor === 'string' && u.displayColor.trim() ? u.displayColor : '#64748b'
+                                    const label = String(u?.name || u?.email || '').trim()
+                                    return (
+                                      <div
+                                        key={String(u?.id || idx)}
+                                        className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
+                                        style={{ backgroundColor: bg, color: '#fff' }}
+                                        title={label}
+                                        aria-label={label}
+                                      >
+                                        {initials}
+                                      </div>
+                                    )
+                                  })}
+
+                                  {project.assignedUsers.length > 6 && (
+                                    <div
+                                      className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
+                                      style={{ backgroundColor: '#94a3b8', color: '#fff' }}
+                                      title={`${project.assignedUsers.length - 6} more`}
+                                      aria-label={`${project.assignedUsers.length - 6} more`}
+                                    >
+                                      +{project.assignedUsers.length - 6}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </td>
 
                             <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>

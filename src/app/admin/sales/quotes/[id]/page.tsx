@@ -28,6 +28,7 @@ import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesView
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
+import { quoteEffectiveStatus } from '@/lib/sales/status'
 
 const TAX_RATE_OPTIONS = [0, 10]
 
@@ -260,6 +261,11 @@ export default function QuoteDetailPage() {
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
   const totalCents = subtotalCents + taxCents
+
+  const effectiveStatus = useMemo(
+    () => quoteEffectiveStatus({ status, validUntil: validUntil || null }),
+    [status, validUntil]
+  )
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const projectTitleById = useMemo(
@@ -547,7 +553,7 @@ export default function QuoteDetailPage() {
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <Input value={quoteStatusLabel(status)} readOnly className="h-9" />
+              <Input value={quoteStatusLabel(effectiveStatus)} readOnly className="h-9" />
             </div>
           </div>
         </CardContent>

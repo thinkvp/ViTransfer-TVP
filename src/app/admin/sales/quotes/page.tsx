@@ -24,30 +24,12 @@ import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
+import { quoteEffectiveStatus } from '@/lib/sales/status'
 
 type QuoteRow = {
   quote: SalesQuoteWithVersion
   effectiveStatus: QuoteStatus
   totalCents: number
-}
-
-function parseDateOnlyLocal(value: string | null | undefined): Date | null {
-  if (!value) return null
-  const s = String(value).trim()
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-  if (m) {
-    const yyyy = Number(m[1])
-    const mm = Number(m[2])
-    const dd = Number(m[3])
-    if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null
-    return new Date(yyyy, mm - 1, dd)
-  }
-  const d = new Date(s)
-  return Number.isFinite(d.getTime()) ? d : null
-}
-
-function endOfDayLocal(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
 }
 
 function statusBadgeClass(status: QuoteStatus): string {
@@ -222,21 +204,17 @@ export default function SalesQuotesPage() {
     [settings.taxRatePercent]
   )
 
-  const quoteEffectiveStatus = useCallback((q: SalesQuoteWithVersion): QuoteStatus => {
-    if (q.status === 'ACCEPTED') return 'ACCEPTED'
-    if (q.status === 'CLOSED') return 'CLOSED'
-
-    const until = parseDateOnlyLocal(q.validUntil)
-    const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-    const isExpired = Boolean(until) && nowMs > endOfDayLocal(until as Date).getTime()
-    if (isExpired) return 'CLOSED'
-
-    return q.status
-  }, [nowIso])
+  const quoteEffectiveStatusForRow = useCallback(
+    (q: SalesQuoteWithVersion): QuoteStatus => {
+      const nowMs = nowIso ? new Date(nowIso).getTime() : 0
+      return quoteEffectiveStatus(q, nowMs)
+    },
+    [nowIso]
+  )
 
   const quoteRows = useMemo((): QuoteRow[] => {
-    return quotes.map((q) => ({ quote: q, effectiveStatus: quoteEffectiveStatus(q), totalCents: quoteTotalCents(q) }))
-  }, [quoteEffectiveStatus, quoteTotalCents, quotes])
+    return quotes.map((q) => ({ quote: q, effectiveStatus: quoteEffectiveStatusForRow(q), totalCents: quoteTotalCents(q) }))
+  }, [quoteEffectiveStatusForRow, quoteTotalCents, quotes])
 
   const filteredQuotes = useMemo(() => {
     if (statusFilterSelected.size === 0) return quoteRows

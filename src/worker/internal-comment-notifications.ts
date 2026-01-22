@@ -94,7 +94,6 @@ export async function processInternalCommentNotifications() {
     const assignedUsers = await prisma.projectUser.findMany({
       where: {
         projectId: { in: projectIds },
-        receiveNotifications: true,
       },
       select: {
         projectId: true,

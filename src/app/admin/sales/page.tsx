@@ -14,6 +14,7 @@ import type { SalesInvoiceWithVersion, SalesQuoteWithVersion } from '@/lib/sales
 import type { InvoiceStatus, QuoteStatus, SalesPayment, SalesSettings } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { endOfDayLocal, invoiceEffectiveStatus, parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
 
 function quoteStatusBadgeClass(status: QuoteStatus): string {
   switch (status) {
@@ -69,25 +70,6 @@ function invoiceStatusLabel(status: InvoiceStatus): string {
     case 'PAID':
       return 'Paid'
   }
-}
-
-function parseDateOnlyLocal(value: string | null | undefined): Date | null {
-  if (!value) return null
-  const s = String(value).trim()
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-  if (m) {
-    const yyyy = Number(m[1])
-    const mm = Number(m[2])
-    const dd = Number(m[3])
-    if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null
-    return new Date(yyyy, mm - 1, dd)
-  }
-  const d = new Date(s)
-  return Number.isFinite(d.getTime()) ? d : null
-}
-
-function endOfDayLocal(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
 }
 
 export default function SalesDashboardPage() {
@@ -168,20 +150,12 @@ export default function SalesDashboardPage() {
   const stats = useMemo(() => {
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
 
-    const quoteEffectiveStatus = (q: { status: QuoteStatus; validUntil: string | null }): QuoteStatus => {
-      if (q.status === 'CLOSED' || q.status === 'ACCEPTED') return q.status
-      const validUntil = parseDateOnlyLocal(q.validUntil)
-      const isExpired = Boolean(validUntil) && nowMs > endOfDayLocal(validUntil as Date).getTime()
-      if (isExpired) return 'CLOSED'
-      return q.status
-    }
-
     const openQuotes = quotes.filter((q) => {
-      const st = quoteEffectiveStatus(q)
+      const st = quoteEffectiveStatus(q, nowMs)
       return st === 'OPEN' || st === 'SENT'
     }).length
 
-    const openQuoteDrafts = quotes.filter((q) => quoteEffectiveStatus(q) === 'OPEN').length
+    const openQuoteDrafts = quotes.filter((q) => quoteEffectiveStatus(q, nowMs) === 'OPEN').length
 
     const invoiceTotals = invoices.map((inv) => {
       const subtotal = sumLineItemsSubtotal(inv.items)
@@ -192,19 +166,16 @@ export default function SalesDashboardPage() {
         .reduce((pAcc, p) => pAcc + p.amountCents, 0)
       const balance = Math.max(0, total - paid)
 
-      // Treat PAID as a computed state, not a source-of-truth field.
-      // (Users can set status manually; balance should win.)
-      const baseStatus: InvoiceStatus = inv.sentAt ? 'SENT' : 'OPEN'
-
-      const due = parseDateOnlyLocal(inv.dueDate)
-      const isPastDue = Boolean(due) && nowMs > endOfDayLocal(due as Date).getTime()
-      const effectiveStatus = balance <= 0
-        ? 'PAID'
-        : isPastDue
-          ? 'OVERDUE'
-          : paid > 0
-            ? 'PARTIALLY_PAID'
-            : baseStatus
+      const effectiveStatus = invoiceEffectiveStatus(
+        {
+          status: inv.status,
+          sentAt: inv.sentAt,
+          dueDate: inv.dueDate,
+          totalCents: total,
+          paidCents: paid,
+        },
+        nowMs
+      )
 
       return { inv, total, paid, balance, effectiveStatus }
     })

@@ -5,6 +5,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesPaymentFromDb } from '@/lib/sales/db-mappers'
+import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -77,16 +78,24 @@ export async function POST(request: NextRequest) {
 
   const input = parsed.data
 
-  const row = await prisma.salesPayment.create({
-    data: {
-      source: 'MANUAL' as any,
-      paymentDate: input.paymentDate,
-      amountCents: input.amountCents,
-      method: input.method,
-      reference: input.reference,
-      clientId: input.clientId || null,
-      invoiceId: input.invoiceId || null,
-    },
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.salesPayment.create({
+      data: {
+        source: 'MANUAL' as any,
+        paymentDate: input.paymentDate,
+        amountCents: input.amountCents,
+        method: input.method,
+        reference: input.reference,
+        clientId: input.clientId || null,
+        invoiceId: input.invoiceId || null,
+      },
+    })
+
+    if (created.invoiceId) {
+      await recomputeInvoiceStoredStatus(tx as any, String(created.invoiceId), { createdByUserId: authResult.id })
+    }
+
+    return created
   })
 
   return NextResponse.json({ ok: true, payment: salesPaymentFromDb(row as any) })

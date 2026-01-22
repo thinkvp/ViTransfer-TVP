@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '@/lib/sales/db-mappers'
+import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import type { SalesLineItem, SalesSettings } from '@/lib/sales/types'
 
 function nowIso(): string {
@@ -215,6 +216,8 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
   let skippedMissingAmount = 0
 
   await prisma.$transaction(async (tx) => {
+    const touchedInvoiceIds = new Set<string>()
+
     const invoiceQboIds = Array.from(
       new Set(
         (Array.isArray(nativePayments) ? nativePayments : [])
@@ -282,6 +285,11 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
 
       await (tx as any).salesPayment.create({ data })
       ingested += 1
+      touchedInvoiceIds.add(inv.id)
+    }
+
+    for (const invoiceId of touchedInvoiceIds) {
+      await recomputeInvoiceStoredStatus(tx as any, invoiceId, { createdByUserId: null })
     }
   })
 

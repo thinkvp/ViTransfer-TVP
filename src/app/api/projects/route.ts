@@ -69,6 +69,20 @@ export async function GET(request: NextRequest) {
         clientId: true,
         maxRevisions: true,
         enableRevisions: true,
+        assignedUsers: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            receiveNotifications: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                displayColor: true,
+              },
+            },
+          },
+        },
         videos: {
           select: {
             id: true,
@@ -118,6 +132,13 @@ export async function GET(request: NextRequest) {
     const projectsWithPhotoCounts = projects.map((p) => ({
       ...p,
       photoCount: photoCountByProjectId.get(p.id) ?? 0,
+      assignedUsers:
+        (p as any).assignedUsers
+          ?.map((pu: any) => ({
+            ...(pu.user || {}),
+            receiveNotifications: pu.receiveNotifications !== false,
+          }))
+          .filter((u: any) => u?.id) || [],
     }))
 
     const response = NextResponse.json({ projects: projectsWithPhotoCounts })

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { sendAdminInvoicePaidEmail } from '@/lib/email'
 import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -113,8 +114,15 @@ export async function POST(request: NextRequest) {
 
     const didInsert = Array.isArray(inserted) && inserted.length > 0
 
+    const nowMs = Date.now()
+
+    if (didInsert) {
+      // Keep stored invoice status and any active public share snapshot in sync.
+      await recomputeInvoiceStoredStatus(prisma as any, String(docId), { createdByUserId: null, nowMs }).catch(() => null)
+    }
+
     // Best-effort: mark the public invoice snapshot as paid.
-    const paidAtIso = new Date().toISOString()
+    const paidAtIso = new Date(nowMs).toISOString()
     const paidAtYmd = paidAtIso.slice(0, 10)
 
     const expiresAt = addDaysLocal(endOfDayLocal(new Date()), 30)

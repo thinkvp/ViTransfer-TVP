@@ -23,6 +23,13 @@ type Project = {
   enableRevisions: boolean
   videos: any[]
   recipients: any[]
+  assignedUsers?: Array<{
+    id: string
+    email?: string | null
+    name?: string | null
+    displayColor?: string | null
+    receiveNotifications?: boolean
+  }>
   _count: { comments: number }
   photoCount?: number
 }

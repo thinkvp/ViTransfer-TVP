@@ -10,7 +10,7 @@ import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { canDoAction } from '@/lib/rbac'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -98,11 +98,13 @@ export async function GET(
                 id: true,
                 name: true,
                 email: true,
+                displayColor: true,
                 appRole: {
                   select: {
                     id: true,
                     name: true,
                     isSystemAdmin: true,
+                    permissions: true,
                   },
                 },
               },
@@ -213,10 +215,27 @@ export async function GET(
       smtpConfigured,
       assignedUsers:
         (project as any).assignedUsers
-          ?.map((pu: any) => ({
-            ...(pu.user || {}),
-            receiveNotifications: pu.receiveNotifications !== false,
-          }))
+          ?.map((pu: any) => {
+            const user = pu.user || {}
+            const role = user?.appRole || null
+            const rolePermissions = normalizeRolePermissions(role?.permissions)
+            const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+            return {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              displayColor: user.displayColor,
+              appRole: role
+                ? {
+                    id: role.id,
+                    name: role.name,
+                    isSystemAdmin: role.isSystemAdmin,
+                  }
+                : null,
+              canAccessSharePage: isAdminRole || canDoAction(rolePermissions, 'accessSharePage'),
+              receiveNotifications: pu.receiveNotifications !== false,
+            }
+          })
           .filter((u: any) => u?.id) || [],
     }
 
@@ -353,7 +372,7 @@ export async function PATCH(
       } else {
         const rows = await prisma.user.findMany({
           where: { id: { in: effective.map((u) => u.userId) } },
-          select: { id: true, appRole: { select: { isSystemAdmin: true } } },
+          select: { id: true, appRole: { select: { isSystemAdmin: true, name: true, permissions: true } } },
         })
 
         const foundById = new Map(rows.map((r) => [r.id, r]))
@@ -370,7 +389,23 @@ export async function PATCH(
           )
         }
 
-        assignedUsersToSet = effective
+        const shareAccessByUserId = new Map<string, { isAdminRole: boolean; canAccessSharePage: boolean }>(
+          rows.map((r) => {
+            const role = r.appRole
+            const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+            const permissions = normalizeRolePermissions(role?.permissions)
+            const canAccessSharePage = isAdminRole || canDoAction(permissions, 'accessSharePage')
+            return [String(r.id), { isAdminRole, canAccessSharePage }] as const
+          })
+        )
+
+        assignedUsersToSet = effective.map((u) => {
+          const flags = shareAccessByUserId.get(u.userId)
+          if (flags && !flags.isAdminRole && !flags.canAccessSharePage) {
+            return { ...u, receiveNotifications: false }
+          }
+          return u
+        })
       }
     }
 

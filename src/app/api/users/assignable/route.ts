@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -54,11 +55,13 @@ export async function GET(request: NextRequest) {
         email: true,
         username: true,
         name: true,
+        displayColor: true,
         appRole: {
           select: {
             id: true,
             name: true,
             isSystemAdmin: true,
+            permissions: true,
           },
         },
       },
@@ -66,7 +69,28 @@ export async function GET(request: NextRequest) {
       take,
     })
 
-    const response = NextResponse.json({ users })
+    const safeUsers = users.map((u) => {
+      const role = u.appRole
+      const permissions = normalizeRolePermissions(role?.permissions)
+      const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+      return {
+        id: u.id,
+        email: u.email,
+        username: u.username,
+        name: u.name,
+        displayColor: u.displayColor,
+        appRole: role
+          ? {
+              id: role.id,
+              name: role.name,
+              isSystemAdmin: role.isSystemAdmin,
+            }
+          : null,
+        canAccessSharePage: isAdminRole || canDoAction(permissions, 'accessSharePage'),
+      }
+    })
+
+    const response = NextResponse.json({ users: safeUsers })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

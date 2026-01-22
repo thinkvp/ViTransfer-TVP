@@ -19,6 +19,10 @@ import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-statu
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
 import { fetchSalesSettings, listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
+import {
+  invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
+  quoteEffectiveStatus as computeQuoteEffectiveStatus,
+} from '@/lib/sales/status'
 
 type ClientResponse = {
   id: string
@@ -432,19 +436,25 @@ export default function ClientDetailPage() {
 
   const invoiceEffectiveStatus = useCallback(
     (inv: SalesInvoice): InvoiceStatus => {
-      const baseStatus: InvoiceStatus = inv.status === 'OPEN' || inv.status === 'SENT'
-        ? (inv.sentAt ? 'SENT' : 'OPEN')
-        : inv.status
-
       const totalCents = sumLineItemsTotal(inv.items, salesTaxRatePercent)
       const paidCents = invoicePaidCents(inv)
-      const balanceCents = Math.max(0, totalCents - paidCents)
 
-      if (balanceCents <= 0) return 'PAID'
-      if (paidCents > 0) return 'PARTIALLY_PAID'
-      return baseStatus
+      return computeInvoiceEffectiveStatus({
+        status: inv.status,
+        sentAt: inv.sentAt,
+        dueDate: inv.dueDate,
+        totalCents,
+        paidCents,
+      })
     },
     [invoicePaidCents, salesTaxRatePercent]
+  )
+
+  const quoteEffectiveStatus = useCallback(
+    (q: SalesQuote): QuoteStatus => {
+      return computeQuoteEffectiveStatus(q)
+    },
+    []
   )
 
   useEffect(() => {
@@ -897,35 +907,38 @@ export default function ClientDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sales.quotes.slice(0, 10).map((q) => (
-                          <tr key={q.id} className="border-b border-border/60 last:border-b-0">
-                            <td className="px-3 py-2 font-medium">
-                              <Link href={`/admin/sales/quotes/${q.id}`} className="hover:underline">
-                                {q.quoteNumber}
-                              </Link>
-                            </td>
-                            <td className="px-3 py-2 tabular-nums">{q.issueDate}</td>
-                            <td className="px-3 py-2 text-muted-foreground">
-                              {q.projectId ? (
-                                <Link href={`/admin/projects/${q.projectId}`} className="hover:underline">
-                                  {resolvedProjectTitleById[q.projectId] ?? q.projectId}
+                        {sales.quotes.slice(0, 10).map((q) => {
+                          const effectiveStatus = quoteEffectiveStatus(q)
+                          return (
+                            <tr key={q.id} className="border-b border-border/60 last:border-b-0">
+                              <td className="px-3 py-2 font-medium">
+                                <Link href={`/admin/sales/quotes/${q.id}`} className="hover:underline">
+                                  {q.quoteNumber}
                                 </Link>
-                              ) : (
-                                '—'
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              <span
-                                className={cn(
-                                  'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap',
-                                  quoteStatusBadgeClass(q.status)
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">{q.issueDate}</td>
+                              <td className="px-3 py-2 text-muted-foreground">
+                                {q.projectId ? (
+                                  <Link href={`/admin/projects/${q.projectId}`} className="hover:underline">
+                                    {resolvedProjectTitleById[q.projectId] ?? q.projectId}
+                                  </Link>
+                                ) : (
+                                  '—'
                                 )}
-                              >
-                                {quoteStatusLabel(q.status)}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap',
+                                    quoteStatusBadgeClass(effectiveStatus)
+                                  )}
+                                >
+                                  {quoteStatusLabel(effectiveStatus)}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>

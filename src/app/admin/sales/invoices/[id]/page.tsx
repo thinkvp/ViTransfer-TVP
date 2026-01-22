@@ -34,27 +34,9 @@ import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesView
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
+import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
 
 const TAX_RATE_OPTIONS = [0, 10]
-
-function parseDateOnlyLocal(value: string | null | undefined): Date | null {
-  if (!value) return null
-  const s = String(value).trim()
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-  if (m) {
-    const yyyy = Number(m[1])
-    const mm = Number(m[2])
-    const dd = Number(m[3])
-    if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null
-    return new Date(yyyy, mm - 1, dd)
-  }
-  const d = new Date(s)
-  return Number.isFinite(d.getTime()) ? d : null
-}
-
-function endOfDayLocal(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
-}
 
 function statusBadgeClass(status: InvoiceStatus): string {
   switch (status) {
@@ -417,21 +399,18 @@ export default function InvoiceDetailPage() {
   }, [paidOnYmd])
 
   const effectiveStatus = useMemo((): InvoiceStatus => {
-    const baseStatus: InvoiceStatus = status === 'OPEN' || status === 'SENT'
-      ? status
-      : (invoice?.sentAt ? 'SENT' : 'OPEN')
-
-    if (totalCents <= 0) return baseStatus
-    if (balanceCents <= 0) return 'PAID'
-
-    const due = parseDateOnlyLocal(dueDate || invoice?.dueDate)
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-    const isPastDue = Boolean(due) && nowMs > endOfDayLocal(due as Date).getTime()
-    if (isPastDue) return 'OVERDUE'
-    if (paidCents > 0) return 'PARTIALLY_PAID'
-
-    return baseStatus
-  }, [balanceCents, dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
+    return computeInvoiceEffectiveStatus(
+      {
+        status,
+        sentAt: invoice?.sentAt,
+        dueDate: dueDate || invoice?.dueDate || null,
+        totalCents,
+        paidCents,
+      },
+      nowMs
+    )
+  }, [dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
 
   const invoiceStatusDisplay = useMemo((): string => {
     if (effectiveStatus !== 'PAID') return statusLabel(effectiveStatus)

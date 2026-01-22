@@ -25,6 +25,10 @@ import { ProjectKeyDates } from '@/components/ProjectKeyDates'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
 import { fetchSalesSettings, listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
+import {
+  invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
+  quoteEffectiveStatus as computeQuoteEffectiveStatus,
+} from '@/lib/sales/status'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -69,25 +73,6 @@ export default function ProjectPage() {
   const ymdFromIso = (iso: string): string | null => {
     const s = typeof iso === 'string' ? iso : ''
     return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null
-  }
-
-  function parseDateOnlyLocal(value: string | null | undefined): Date | null {
-    if (!value) return null
-    const s = String(value).trim()
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-    if (m) {
-      const yyyy = Number(m[1])
-      const mm = Number(m[2])
-      const dd = Number(m[3])
-      if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null
-      return new Date(yyyy, mm - 1, dd)
-    }
-    const d = new Date(s)
-    return Number.isFinite(d.getTime()) ? d : null
-  }
-
-  function endOfDayLocal(d: Date): Date {
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
   }
 
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
@@ -204,41 +189,30 @@ export default function ProjectPage() {
 
   const quoteEffectiveStatus = useCallback(
     (q: SalesQuote): QuoteStatus => {
-      if (q.status === 'ACCEPTED') return 'ACCEPTED'
-      if (q.status === 'CLOSED') return 'CLOSED'
-
-      const until = parseDateOnlyLocal(q.validUntil)
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-      const isExpired = Boolean(until) && nowMs > endOfDayLocal(until as Date).getTime()
-      if (isExpired) return 'CLOSED'
-
-      return q.status
+      return computeQuoteEffectiveStatus(q, nowMs)
     },
     [nowIso]
   )
 
   const invoiceEffectiveStatus = useCallback(
     (inv: SalesInvoice): InvoiceStatus => {
-      const baseStatus: InvoiceStatus = inv.status === 'OPEN' || inv.status === 'SENT'
-        ? inv.status
-        : (inv.sentAt ? 'SENT' : 'OPEN')
-
       const totalCents = sumLineItemsTotal(inv.items, taxRatePercent)
       const paidLocalCents = projectPayments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
       const paidStripeCents = stripePaidByInvoiceId[inv.id]?.paidCents ?? 0
       const paidCents = paidLocalCents + paidStripeCents
-      const balanceCents = Math.max(0, totalCents - paidCents)
-
-      if (totalCents <= 0) return baseStatus
-      if (balanceCents <= 0) return 'PAID'
-
-      const due = parseDateOnlyLocal(inv.dueDate)
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-      const isPastDue = Boolean(due) && nowMs > endOfDayLocal(due as Date).getTime()
-      if (isPastDue) return 'OVERDUE'
-      if (paidCents > 0) return 'PARTIALLY_PAID'
 
-      return baseStatus
+      return computeInvoiceEffectiveStatus(
+        {
+          status: inv.status,
+          sentAt: inv.sentAt,
+          dueDate: inv.dueDate,
+          totalCents,
+          paidCents,
+        },
+        nowMs
+      )
     },
     [nowIso, projectPayments, taxRatePercent, stripePaidByInvoiceId]
   )
@@ -694,89 +668,104 @@ export default function ProjectPage() {
 
             {(salesLoading || projectQuotes.length > 0 || projectInvoices.length > 0) && (
               <Card>
-                <CardContent className="pt-6 space-y-6">
+                <CardContent className="pt-6 space-y-4">
                   {salesLoading && projectQuotes.length === 0 && projectInvoices.length === 0 ? (
                     <div className="text-sm text-muted-foreground">Loading sales…</div>
                   ) : null}
-                  {projectQuotes.length > 0 && (
-                    <div className="space-y-2">
+
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div className="space-y-2 min-w-0">
                       <div className="text-sm font-medium">Quotes</div>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead className="bg-muted/30 text-xs text-muted-foreground">
-                            <tr className="text-left">
-                              <th className="px-3 py-2">Quote</th>
-                              <th className="px-3 py-2">Status</th>
+                            <tr>
+                              <th className="px-3 py-2 text-left">Quote</th>
+                              <th className="px-3 py-2 text-center">Status</th>
                               <th className="px-3 py-2 text-right">Amount (inc tax)</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {projectQuotes.slice(0, 5).map((q: SalesQuote) => {
-                              const totalCents = sumLineItemsTotal(Array.isArray(q.items) ? q.items : [], taxRatePercent)
-                              const effectiveStatus = quoteEffectiveStatus(q)
-                              return (
-                                <tr key={q.id} className="border-t">
-                                  <td className="px-3 py-2">
-                                    <Link href={`/admin/sales/quotes/${q.id}`} className="font-medium hover:underline">
-                                      {q.quoteNumber}
-                                    </Link>
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <span
-                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${quoteStatusBadgeClass(effectiveStatus)}`}
-                                    >
-                                      {quoteStatusLabel(effectiveStatus)}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
-                                </tr>
-                              )
-                            })}
+                            {projectQuotes.length === 0 ? (
+                              <tr className="border-t">
+                                <td colSpan={3} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                  {salesLoading ? 'Loading…' : 'No quotes for project.'}
+                                </td>
+                              </tr>
+                            ) : (
+                              projectQuotes.slice(0, 5).map((q: SalesQuote) => {
+                                const totalCents = sumLineItemsTotal(Array.isArray(q.items) ? q.items : [], taxRatePercent)
+                                const effectiveStatus = quoteEffectiveStatus(q)
+                                return (
+                                  <tr key={q.id} className="border-t">
+                                    <td className="px-3 py-2">
+                                      <Link href={`/admin/sales/quotes/${q.id}`} className="font-medium hover:underline">
+                                        {q.quoteNumber}
+                                      </Link>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span
+                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${quoteStatusBadgeClass(effectiveStatus)}`}
+                                      >
+                                        {quoteStatusLabel(effectiveStatus)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
+                                  </tr>
+                                )
+                              })
+                            )}
                           </tbody>
                         </table>
                       </div>
                     </div>
-                  )}
 
-                  {projectInvoices.length > 0 && (
-                    <div className="space-y-2">
+                    <div className="space-y-2 min-w-0">
                       <div className="text-sm font-medium">Invoices</div>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead className="bg-muted/30 text-xs text-muted-foreground">
-                            <tr className="text-left">
-                              <th className="px-3 py-2">Invoice</th>
-                              <th className="px-3 py-2">Status</th>
+                            <tr>
+                              <th className="px-3 py-2 text-left">Invoice</th>
+                              <th className="px-3 py-2 text-center">Status</th>
                               <th className="px-3 py-2 text-right">Amount (inc tax)</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {projectInvoices.slice(0, 5).map((inv: SalesInvoice) => {
-                              const totalCents = sumLineItemsTotal(Array.isArray(inv.items) ? inv.items : [], taxRatePercent)
-                              const effectiveStatus = invoiceEffectiveStatus(inv)
-                              return (
-                                <tr key={inv.id} className="border-t">
-                                  <td className="px-3 py-2">
-                                    <Link href={`/admin/sales/invoices/${inv.id}`} className="font-medium hover:underline">
-                                      {inv.invoiceNumber}
-                                    </Link>
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <span
-                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${invoiceStatusBadgeClass(effectiveStatus)}`}
-                                    >
-                                      {invoiceStatusLabel(effectiveStatus)}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
-                                </tr>
-                              )
-                            })}
+                            {projectInvoices.length === 0 ? (
+                              <tr className="border-t">
+                                <td colSpan={3} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                  {salesLoading ? 'Loading…' : 'No invoices for project.'}
+                                </td>
+                              </tr>
+                            ) : (
+                              projectInvoices.slice(0, 5).map((inv: SalesInvoice) => {
+                                const totalCents = sumLineItemsTotal(Array.isArray(inv.items) ? inv.items : [], taxRatePercent)
+                                const effectiveStatus = invoiceEffectiveStatus(inv)
+                                return (
+                                  <tr key={inv.id} className="border-t">
+                                    <td className="px-3 py-2">
+                                      <Link href={`/admin/sales/invoices/${inv.id}`} className="font-medium hover:underline">
+                                        {inv.invoiceNumber}
+                                      </Link>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span
+                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${invoiceStatusBadgeClass(effectiveStatus)}`}
+                                      >
+                                        {invoiceStatusLabel(effectiveStatus)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
+                                  </tr>
+                                )
+                              })
+                            )}
                           </tbody>
                         </table>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
             )}

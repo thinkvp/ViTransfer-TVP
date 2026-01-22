@@ -5,6 +5,7 @@ import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
+import { canDoAction, normalizeRolePermissions } from '../lib/rbac'
 
 /**
  * Process admin notification summaries
@@ -130,7 +131,7 @@ export async function processAdminNotifications() {
       },
       select: {
         projectId: true,
-        user: { select: { id: true, email: true, name: true } },
+        user: { select: { id: true, email: true, name: true, appRole: { select: { permissions: true, name: true, isSystemAdmin: true } } } },
       },
     })
 
@@ -138,6 +139,15 @@ export async function processAdminNotifications() {
     for (const row of assignedUsers) {
       const user = row.user
       if (!user?.email) continue
+
+      // Users without Share Page access should not receive Share-related email summaries.
+      const role = user.appRole
+      const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+      if (!isAdminRole) {
+        const permissions = normalizeRolePermissions(role?.permissions)
+        if (!canDoAction(permissions, 'accessSharePage')) continue
+      }
+
       if (!usersById.has(user.id)) {
         usersById.set(user.id, { email: user.email, name: user.name || null, projects: [] })
       }
