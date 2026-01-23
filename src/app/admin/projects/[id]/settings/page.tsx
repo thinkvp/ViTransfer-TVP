@@ -962,7 +962,7 @@ export default function ProjectSettingsPage() {
                             }}
                           />
                           <p className="text-xs text-muted-foreground">
-                            Must be at least 1. Applies to each video group independently.
+                            Must be at least 1. Applies to each video name independently.
                           </p>
                         </div>
                       </div>

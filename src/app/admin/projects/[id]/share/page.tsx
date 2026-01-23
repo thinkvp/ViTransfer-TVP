@@ -37,6 +37,7 @@ export default function AdminSharePage() {
   const [activeVideoName, setActiveVideoName] = useState<string>('')
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
+  const [allVideosByName, setAllVideosByName] = useState<Record<string, any[]>>({})
   const [tokensLoading, setTokensLoading] = useState(false)
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
@@ -385,6 +386,49 @@ export default function AdminSharePage() {
     }
   }, [activeVideosRaw, fetchTokensForVideos])
 
+  // Preload thumbnails for ALL videos on page load (ensures sidebar thumbnails are visible immediately)
+  useEffect(() => {
+    if (!project?.videosByName) return
+
+    const allVideos = Object.values(project.videosByName)
+      .flat()
+      .filter((v: any) => !tokenCacheRef.current.has(v.id))
+
+    if (allVideos.length === 0) return
+
+    // Preload in background without blocking UI
+    const preloadThumbnails = async () => {
+      const tokenized = await fetchTokensForVideos(allVideos)
+      
+      // Update allVideosByName with tokenized videos
+      setAllVideosByName((prev) => {
+        const updated = { ...prev }
+        tokenized.forEach((video: any) => {
+          const videoName = Object.entries(project.videosByName).find(
+            ([_, videos]: any) => (videos as any[]).some((v: any) => v.id === video.id)
+          )?.[0]
+          
+          if (videoName) {
+            if (!updated[videoName]) {
+              updated[videoName] = []
+            }
+            updated[videoName] = updated[videoName].map((v: any) => 
+              v.id === video.id ? video : v
+            )
+            if (!updated[videoName].some((v: any) => v.id === video.id)) {
+              updated[videoName].push(video)
+            }
+          }
+        })
+        return updated
+      })
+    }
+
+    preloadThumbnails().catch(() => {
+      // Silently fail - this is just a performance optimization
+    })
+  }, [project?.videosByName, fetchTokensForVideos])
+
   // Handle video selection (identical to public share)
   const handleVideoSelect = (videoName: string) => {
     setActiveAlbumId(null)
@@ -506,7 +550,7 @@ export default function AdminSharePage() {
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {/* Video Sidebar */}
         <VideoSidebar
-          videosByName={project.videosByName || {}}
+          videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
           activeVideoName={activeVideoName}
           onVideoSelect={handleVideoSelect}
           albums={albums.map((a: any) => ({

@@ -32,7 +32,7 @@ interface VideoPlayerProps {
   watermarkEnabled?: boolean
   isAdmin?: boolean // Admin users can see all versions (default: false for clients)
   isGuest?: boolean // Guest mode - limited view (videos only, no downloads)
-  activeVideoName?: string // The video group name (for maintaining selection after reload)
+  activeVideoName?: string // The video name (for maintaining selection after reload)
   initialSeekTime?: number | null // Initial timestamp to seek to (from URL params)
   initialVideoIndex?: number // Initial video index to select (from URL params)
   shareToken?: string | null

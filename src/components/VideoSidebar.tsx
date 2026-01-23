@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { Play, ChevronDown, ChevronUp, GripVertical, CheckCircle2, Images } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import Image from 'next/image'
 
 interface VideoGroup {
   name: string
@@ -24,6 +25,40 @@ interface VideoSidebarProps {
   initialCollapsed?: boolean
 }
 
+// Helper function to calculate thumbnail dimensions maintaining aspect ratio within 16:9
+const calculateThumbnailDimensions = (
+  videoWidth: number | null,
+  videoHeight: number | null,
+  containerWidth: number,
+  containerHeight: number = Math.round(containerWidth * 9 / 16)
+): { width: number; height: number; top: number; left: number } => {
+  // Default to 16:9 if dimensions not available
+  const vidWidth = videoWidth || 16
+  const vidHeight = videoHeight || 9
+
+  const videoAspectRatio = vidWidth / vidHeight
+  const containerAspectRatio = containerWidth / containerHeight
+
+  let finalWidth: number
+  let finalHeight: number
+
+  // If video is wider than container, constrain by width
+  if (videoAspectRatio > containerAspectRatio) {
+    finalWidth = containerWidth
+    finalHeight = Math.round(containerWidth / videoAspectRatio)
+  } else {
+    // If video is taller than container, constrain by height
+    finalHeight = containerHeight
+    finalWidth = Math.round(containerHeight * videoAspectRatio)
+  }
+
+  // Center the thumbnail within the container
+  const top = Math.round((containerHeight - finalHeight) / 2)
+  const left = Math.round((containerWidth - finalWidth) / 2)
+
+  return { width: finalWidth, height: finalHeight, top, left }
+}
+
 export default function VideoSidebar({
   videosByName,
   activeVideoName,
@@ -41,6 +76,7 @@ export default function VideoSidebar({
   const [sidebarWidth, setSidebarWidth] = useState(256) // Default 256px (w-64)
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
+  const [thumbnailDimensions, setThumbnailDimensions] = useState<Record<string, any>>({})
 
   const safeVideosByName = videosByName || {}
   const videoGroups: VideoGroup[] = Object.entries(safeVideosByName).map(([name, videos]) => ({
@@ -76,6 +112,27 @@ export default function VideoSidebar({
       }
     }
   }, [])
+
+  // Calculate thumbnail dimensions when sidebar width changes
+  useEffect(() => {
+    const dims: Record<string, any> = {}
+    // Account for: nav padding (12px left + 12px right) + button padding (12px left + 12px right) = 48px
+    const containerWidth = sidebarWidth - 48
+    const containerHeight = Math.round(containerWidth * 9 / 16)
+
+    for (const [videoName, videos] of Object.entries(videosByName || {})) {
+      const latestVideo = videos[0]
+      if (latestVideo) {
+        dims[videoName] = calculateThumbnailDimensions(
+          latestVideo.width || latestVideo.videoWidth,
+          latestVideo.height || latestVideo.videoHeight,
+          containerWidth,
+          containerHeight
+        )
+      }
+    }
+    setThumbnailDimensions(dims)
+  }, [sidebarWidth, videosByName])
 
   const hasExplicitHeightClass = /\b(?:h|max-h)-/.test(className ?? '')
 
@@ -128,7 +185,8 @@ export default function VideoSidebar({
         style={{ width: `${sidebarWidth}px` }}
         className={cn(
           'hidden lg:block bg-card border border-border relative rounded-lg',
-          'overflow-y-auto self-stretch min-h-0',
+          'overflow-y-auto overflow-x-hidden self-stretch min-h-0',
+          'sidebar-scrollbar',
           // Default to full viewport height (minus admin header), but allow override via className
           !hasExplicitHeightClass && 'h-[calc(100dvh-var(--admin-header-height,0px))]',
           className
@@ -151,40 +209,76 @@ export default function VideoSidebar({
             const renderVideoButton = (group: VideoGroup) => {
               const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
               const isActive = !activeAlbumId && activeVideoName === group.name
+              const latestVideo = group.videos[0]
+              const thumbnailUrl = latestVideo?.thumbnailUrl
+              const dims = thumbnailDimensions[group.name]
+              const containerWidth = sidebarWidth - 48 // Account for nav + button padding
+              const containerHeight = Math.round(containerWidth * 9 / 16)
+
               return (
                 <button
                   key={group.name}
                   onClick={() => onVideoSelect(group.name)}
                   className={cn(
-                    'w-full text-left p-3 rounded-lg transition-all duration-200',
+                    'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
                     'hover:bg-accent hover:text-accent-foreground',
-                    'flex items-center justify-between gap-3',
                     isActive
                       ? 'bg-primary/10 text-primary font-medium border border-primary/20'
                       : 'text-foreground'
                   )}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {/* Thumbnail */}
+                  {thumbnailUrl && dims && (
                     <div
-                      className={cn(
-                        'w-2 h-2 rounded-full shrink-0',
-                        isActive ? 'bg-primary' : 'bg-muted-foreground'
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{group.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
-                      </p>
+                      className="bg-black rounded overflow-hidden flex items-center justify-center"
+                      style={{
+                        width: containerWidth,
+                        height: containerHeight,
+                      }}
+                    >
+                      <div
+                        className="relative"
+                        style={{
+                          width: dims.width,
+                          height: dims.height,
+                        }}
+                      >
+                        <Image
+                          src={thumbnailUrl}
+                          alt={group.name}
+                          fill
+                          className="object-cover"
+                          sizes={`${containerWidth}px`}
+                          priority={isActive}
+                        />
+                      </div>
                     </div>
-                  </div>
-                  {isActive && (
-                    hasApprovedVideo ? (
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
-                    ) : (
-                      <Play className="w-4 h-4 shrink-0 text-primary" fill="currentColor" />
-                    )
                   )}
+
+                  {/* Video Info */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div
+                        className={cn(
+                          'w-2 h-2 rounded-full shrink-0',
+                          isActive ? 'bg-primary' : 'bg-muted-foreground'
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{group.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
+                        </p>
+                      </div>
+                    </div>
+                    {isActive && (
+                      hasApprovedVideo ? (
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
+                      ) : (
+                        <Play className="w-4 h-4 shrink-0 text-primary" fill="currentColor" />
+                      )
+                    )}
+                  </div>
                 </button>
               )
             }
@@ -280,253 +374,164 @@ export default function VideoSidebar({
         </div>
       </aside>
 
-      {/* Mobile Dropdown */}
-      <div className="lg:hidden mb-4 bg-card border border-border rounded-lg overflow-hidden">
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="w-full p-4 flex items-center justify-between text-left hover:bg-accent transition-colors"
-        >
-          <div className="flex-1 min-w-0 flex items-center gap-4">
-            <div className="w-24 flex-shrink-0">
-              <p className="text-xs text-muted-foreground leading-tight text-right">
-                {isCollapsed ? (
-                  <>
-                    Tap to<br />
-                    select {activeAlbum || !shouldShowVideos ? 'album' : 'video'}
-                  </>
-                ) : (
-                  <>
-                    Currently<br />
-                    viewing
-                  </>
-                )}
-              </p>
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground truncate">
-                {activeAlbum ? activeAlbum.name : (activeVideoName || 'Select')}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {activeAlbum
-                  ? `${activeAlbum.photoCount ?? 0} photo${(activeAlbum.photoCount ?? 0) === 1 ? '' : 's'}`
-                  : `${videoGroups.find(g => g.name === activeVideoName)?.versionCount || 0} versions`
-                }
-              </p>
-            </div>
+      {/* Mobile Horizontal Scrollable Row */}
+      <div className="lg:hidden">
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-accent/30">
+            {shouldShowVideos && videoGroups.length > 0 && shouldShowAlbums && albumsList.length > 0
+              ? 'Videos & Albums'
+              : shouldShowVideos && videoGroups.length > 0
+              ? 'Videos'
+              : 'Albums'}
           </div>
-          {isCollapsed ? (
-            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0 ml-3" />
-          ) : (
-            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0 ml-3" />
-          )}
-        </button>
-
-        {!isCollapsed && (
-          <div className="border-t border-border">
-            {(() => {
-              // Split videos into For Review and Approved groups
-              const forReview = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
-              const approved = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
-
-              const renderVideoButton = (group: VideoGroup, isLast: boolean) => {
-                const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
+          <div className="overflow-x-auto mobile-scrollbar">
+            <div className="flex gap-3 p-3">
+              {/* Videos */}
+              {shouldShowVideos && sortedVideoGroups(videoGroups).map((group) => {
                 const isActive = !activeAlbumId && activeVideoName === group.name
+                const latestVideo = group.videos[0]
+                const thumbnailUrl = latestVideo?.thumbnailUrl
+                const mobileThumbSize = 100
+                const mobileThumbHeight = Math.round(mobileThumbSize * 9 / 16)
+                const latestVideoDims = calculateThumbnailDimensions(
+                  latestVideo?.width || latestVideo?.videoWidth,
+                  latestVideo?.height || latestVideo?.videoHeight,
+                  mobileThumbSize,
+                  mobileThumbHeight
+                )
+
                 return (
                   <button
                     key={group.name}
-                    onClick={() => {
-                      onVideoSelect(group.name)
-                      setIsCollapsed(true) // Auto-collapse after selection to show video player
-                    }}
+                    onClick={() => onVideoSelect(group.name)}
                     className={cn(
-                      'w-full text-left p-4 transition-colors',
-                      'hover:bg-accent',
-                      'flex items-center justify-between gap-3',
-                      'border-b border-border',
-                      isLast && approved.length === 0 && 'last:border-b-0',
-                      isActive
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground'
+                      'flex flex-col gap-2 flex-shrink-0 transition-all duration-200',
+                      'rounded-lg p-2',
+                      isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                     )}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {/* Thumbnail */}
+                    {thumbnailUrl && latestVideoDims && (
                       <div
-                        className={cn(
-                          'w-2 h-2 rounded-full shrink-0',
-                          isActive ? 'bg-primary' : 'bg-muted-foreground'
-                        )}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm">{group.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
-                        </p>
+                        className="bg-black rounded overflow-hidden flex items-center justify-center"
+                        style={{
+                          width: mobileThumbSize,
+                          height: mobileThumbHeight,
+                        }}
+                      >
+                        <div
+                          className="relative"
+                          style={{
+                            width: latestVideoDims.width,
+                            height: latestVideoDims.height,
+                          }}
+                        >
+                          <Image
+                            src={thumbnailUrl}
+                            alt={group.name}
+                            fill
+                            className="object-cover"
+                            sizes={`${mobileThumbSize}px`}
+                            priority={isActive}
+                          />
+                        </div>
                       </div>
-                    </div>
-                    {isActive && (
-                      hasApprovedVideo ? (
-                        <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
-                      ) : (
-                        <Play className="w-4 h-4 shrink-0 text-primary" fill="currentColor" />
-                      )
                     )}
+
+                    {/* Title and version count */}
+                    <div className="flex flex-col gap-1 items-center">
+                      <p className="text-xs font-medium text-foreground truncate max-w-[90px] text-center">
+                        {group.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
+                      </p>
+                    </div>
                   </button>
                 )
-              }
+              })}
 
-              return (
-                <>
-                  {shouldShowVideos && forReview.length > 0 && (
-                    <>
-                      <div className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-accent/30">
-                        For Review
-                      </div>
-                      {forReview.map((group, index) => renderVideoButton(group, index === forReview.length - 1))}
-                    </>
-                  )}
+              {/* Albums */}
+              {shouldShowAlbums && albumsList.map((a) => {
+                const isActive = activeAlbumId === a.id
 
-                  {shouldShowVideos && approved.length > 0 && (
-                    <>
-                      <div className="px-4 py-3 text-xs font-semibold text-success uppercase tracking-wider bg-success-visible flex items-center gap-2">
-                        <CheckCircle2 className="w-3 h-3" />
-                        Approved
-                      </div>
-                      {approved.map((group, index) => (
-                        <button
-                          key={group.name}
-                          onClick={() => {
-                            onVideoSelect(group.name)
-                            setIsCollapsed(true) // Auto-collapse after selection to show video player
-                          }}
-                          className={cn(
-                            'w-full text-left p-4 transition-colors',
-                            'hover:bg-accent',
-                            'flex items-center justify-between gap-3',
-                            'border-b border-border',
-                            index === approved.length - 1 && 'last:border-b-0',
-                            !activeAlbumId && activeVideoName === group.name
-                              ? 'bg-primary/10 text-primary font-medium'
-                              : 'text-foreground'
-                          )}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div
-                              className={cn(
-                                'w-2 h-2 rounded-full shrink-0',
-                                !activeAlbumId && activeVideoName === group.name ? 'bg-primary' : 'bg-muted-foreground'
-                              )}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm">{group.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
-                              </p>
-                            </div>
-                          </div>
-                          {!activeAlbumId && activeVideoName === group.name && (
-                            <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
-                          )}
-                        </button>
-                      ))}
-                    </>
-                  )}
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => onAlbumSelect?.(a.id)}
+                    className={cn(
+                      'flex flex-col gap-2 flex-shrink-0 transition-all duration-200',
+                      'rounded-lg p-2',
+                      isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
+                    )}
+                  >
+                    {/* Album Placeholder */}
+                    <div
+                      className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
+                      style={{
+                        width: 100,
+                        height: Math.round(100 * 9 / 16),
+                      }}
+                    >
+                      <Images className="w-6 h-6 text-muted-foreground" />
+                    </div>
 
-                  {albumsList.length > 0 && (
-                    <>
-                      <div className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-accent/30 flex items-center gap-2">
-                        <Images className="w-3 h-3" />
-                        Albums
-                      </div>
-                      {albumsList.map((a, index) => (
-                        <button
-                          key={a.id}
-                          onClick={() => {
-                            onAlbumSelect?.(a.id)
-                            setIsCollapsed(true)
-                          }}
-                          className={cn(
-                            'w-full text-left p-4 transition-colors',
-                            'hover:bg-accent',
-                            'flex items-center justify-between gap-3',
-                            'border-b border-border',
-                            index === albumsList.length - 1 && 'last:border-b-0',
-                            activeAlbumId === a.id
-                              ? 'bg-primary/10 text-primary font-medium'
-                              : 'text-foreground'
-                          )}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div
-                              className={cn(
-                                'w-2 h-2 rounded-full shrink-0',
-                                activeAlbumId === a.id ? 'bg-primary' : 'bg-muted-foreground'
-                              )}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm">{a.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
-                              </p>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </>
-                  )}
-
-                  {shouldShowAlbums && (
-                    <>
-                      <div className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-accent/30 flex items-center gap-2">
-                        <Images className="w-3 h-3" />
-                        Albums
-                      </div>
-                      {albumsList.map((a, index) => {
-                        const isLast = index === albumsList.length - 1
-                        const isActive = activeAlbumId === a.id
-                        return (
-                          <button
-                            key={a.id}
-                            onClick={() => {
-                              onAlbumSelect?.(a.id)
-                              setIsCollapsed(true)
-                            }}
-                            className={cn(
-                              'w-full text-left p-4 transition-colors',
-                              'hover:bg-accent',
-                              'flex items-center justify-between gap-3',
-                              'border-b border-border',
-                              isLast && 'last:border-b-0',
-                              isActive
-                                ? 'bg-primary/10 text-primary font-medium'
-                                : 'text-foreground'
-                            )}
-                          >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                              <div
-                                className={cn(
-                                  'w-2 h-2 rounded-full shrink-0',
-                                  isActive ? 'bg-primary' : 'bg-muted-foreground'
-                                )}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm">{a.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
-                                </p>
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </>
-                  )}
-                </>
-              )
-            })()}
+                    {/* Title and Count */}
+                    <div className="flex flex-col items-center">
+                      <p className="text-xs font-medium text-foreground truncate max-w-[90px] text-center">
+                        {a.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        )}
+        </div>
       </div>
+
+      <style jsx global>{`
+        /* Discreet desktop sidebar scrollbar */
+        .sidebar-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .sidebar-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .sidebar-scrollbar::-webkit-scrollbar-thumb {
+          background: hsl(var(--muted-foreground) / 0.2);
+          border-radius: 3px;
+        }
+        .sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: hsl(var(--muted-foreground) / 0.3);
+        }
+        .sidebar-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
+        }
+
+        /* Discreet mobile horizontal scrollbar */
+        .mobile-scrollbar::-webkit-scrollbar {
+          height: 6px;
+        }
+        .mobile-scrollbar::-webkit-scrollbar-track {
+          background: hsl(var(--accent));
+        }
+        .mobile-scrollbar::-webkit-scrollbar-thumb {
+          background: hsl(var(--muted-foreground) / 0.3);
+          border-radius: 3px;
+        }
+        .mobile-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: hsl(var(--muted-foreground) / 0.4);
+        }
+        .mobile-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: hsl(var(--muted-foreground) / 0.3) hsl(var(--accent));
+        }
+      `}</style>
     </>
   )
 }

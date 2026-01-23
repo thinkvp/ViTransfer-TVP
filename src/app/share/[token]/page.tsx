@@ -49,6 +49,7 @@ export default function SharePage() {
   const [activeVideoName, setActiveVideoName] = useState<string>('')
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
+  const [allVideosByName, setAllVideosByName] = useState<Record<string, any[]>>({})
   const [tokensLoading, setTokensLoading] = useState(false)
   const [albums, setAlbums] = useState<any[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
@@ -380,7 +381,7 @@ export default function SharePage() {
       })
       if (videoNames.length === 0) return
 
-      // Determine which video group should be active
+      // Determine which video should be active
       if (!activeVideoName) {
         let videoNameToUse: string | null = null
 
@@ -558,6 +559,49 @@ export default function SharePage() {
       isMounted = false
     }
   }, [activeVideosRaw, shareToken, fetchTokensForVideos])
+
+  // Preload thumbnails for ALL videos on page load (ensures sidebar thumbnails are visible immediately)
+  useEffect(() => {
+    if (!project?.videosByName || !shareToken) return
+
+    const allVideos = Object.values(project.videosByName)
+      .flat()
+      .filter((v: any) => !tokenCacheRef.current.has(v.id))
+
+    if (allVideos.length === 0) return
+
+    // Preload in background without blocking UI
+    const preloadThumbnails = async () => {
+      const tokenized = await fetchTokensForVideos(allVideos)
+      
+      // Update allVideosByName with tokenized videos
+      setAllVideosByName((prev) => {
+        const updated = { ...prev }
+        tokenized.forEach((video: any) => {
+          const videoName = Object.entries(project.videosByName).find(
+            ([_, videos]: any) => (videos as any[]).some((v: any) => v.id === video.id)
+          )?.[0]
+          
+          if (videoName) {
+            if (!updated[videoName]) {
+              updated[videoName] = []
+            }
+            updated[videoName] = updated[videoName].map((v: any) => 
+              v.id === video.id ? video : v
+            )
+            if (!updated[videoName].some((v: any) => v.id === video.id)) {
+              updated[videoName].push(video)
+            }
+          }
+        })
+        return updated
+      })
+    }
+
+    preloadThumbnails().catch(() => {
+      // Silently fail - this is just a performance optimization
+    })
+  }, [project?.videosByName, shareToken, fetchTokensForVideos])
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {
@@ -943,7 +987,7 @@ export default function SharePage() {
     <div className="h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row overflow-hidden">
       {/* Video Sidebar - contains both desktop and mobile versions internally */}
       <VideoSidebar
-        videosByName={project.videosByName || {}}
+        videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
         activeVideoName={activeVideoName}
         onVideoSelect={handleVideoSelect}
         heading={project.title}
