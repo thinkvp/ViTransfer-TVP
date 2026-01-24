@@ -41,6 +41,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const album = await prisma.album.findUnique({ where: { id: albumId }, select: { id: true, projectId: true } })
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
 
+  // Reflect immediate work in progress (uploading).
+  await prisma.album.update({
+    where: { id: album.id },
+    data: { status: 'UPLOADING' },
+  }).catch(() => {})
+
   if (auth.appRoleIsSystemAdmin !== true) {
     const project = await prisma.project.findUnique({
       where: { id: album.projectId },

@@ -3,11 +3,92 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
-import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { z } from 'zod'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+const updateAlbumSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+})
+
+// PATCH /api/albums/[albumId] - update album (admin)
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {
+  const auth = await requireApiAdmin(request)
+  if (auth instanceof Response) return auth
+
+  const forbiddenMenu = requireMenuAccess(auth, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  // Allow both album managers and full-control project admins to rename albums.
+  const forbiddenAction = requireAnyActionAccess(auth, ['manageProjectAlbums', 'projectsFullControl'])
+  if (forbiddenAction) return forbiddenAction
+
+  const rateLimitResult = await rateLimit(
+    request,
+    { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many update requests. Please slow down.' },
+    'album-update'
+  )
+  if (rateLimitResult) return rateLimitResult
+
+  const { albumId } = await params
+
+  const body = await request.json().catch(() => null)
+  const parsed = updateAlbumSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+  }
+
+  const album = await prisma.album.findUnique({
+    where: { id: albumId },
+    select: { id: true, projectId: true },
+  })
+  if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
+
+  if (auth.appRoleIsSystemAdmin !== true) {
+    const project = await prisma.project.findUnique({
+      where: { id: album.projectId },
+      select: { status: true, assignedUsers: { select: { userId: true } } },
+    })
+
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+    const assigned = project.assignedUsers?.some((u) => u.userId === auth.id)
+    if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    if (!isVisibleProjectStatusForUser(auth, project.status)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
+  const data: any = {}
+  if (typeof parsed.data.name === 'string') {
+    const trimmed = parsed.data.name.trim()
+    if (!trimmed) {
+      return NextResponse.json({ error: 'Album name cannot be empty' }, { status: 400 })
+    }
+    data.name = trimmed
+  }
+
+  // Return a JSON-safe subset (some Album fields are BigInt and would break JSON serialization)
+  const updated = await prisma.album.update({
+    where: { id: albumId },
+    data,
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      notes: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+
+  return NextResponse.json({ album: updated })
+}
 
 // DELETE /api/albums/[albumId] - delete album (admin)
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {

@@ -6,15 +6,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
-import { apiDelete, apiJson, apiPost } from '@/lib/api-client'
+import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { AlbumPhotoUploadQueue } from '@/components/AlbumPhotoUploadQueue'
+import { InlineEdit } from '@/components/InlineEdit'
 
 type AlbumSummary = {
   id: string
   name: string
   notes: string | null
+  status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR'
   createdAt: string
   updatedAt: string
   _count?: { photos?: number }
@@ -64,6 +66,10 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const [newAlbumName, setNewAlbumName] = useState('')
   const [newAlbumNotes, setNewAlbumNotes] = useState('')
   const [creating, setCreating] = useState(false)
+
+  const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null)
+  const [editAlbumValue, setEditAlbumValue] = useState('')
+  const [savingAlbumId, setSavingAlbumId] = useState<string | null>(null)
 
   const [photosByAlbumId, setPhotosByAlbumId] = useState<Record<string, AlbumPhoto[]>>({})
   const [photosLoadingByAlbumId, setPhotosLoadingByAlbumId] = useState<Record<string, boolean>>({})
@@ -165,6 +171,20 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
+  // Refresh the album list in the background while any album is still uploading/processing.
+  // This keeps the header pill in sync (similar to how videos update as status changes).
+  useEffect(() => {
+    const hasBusyAlbums = albums.some((a) => a.status === 'UPLOADING' || a.status === 'PROCESSING')
+    if (!hasBusyAlbums) return
+
+    const timer = setTimeout(() => {
+      void fetchAlbums()
+    }, 15000)
+
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albums, projectId])
+
   const toggleAlbum = async (albumId: string) => {
     const wasExpanded = expandedAlbumId === albumId
     if (wasExpanded) {
@@ -179,6 +199,40 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
     // Fetch ZIP status when opening the album
     void fetchZipStatus(albumId)
+  }
+
+  const handleStartEditAlbumName = (albumId: string, currentName: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingAlbumId(albumId)
+    setEditAlbumValue(currentName)
+  }
+
+  const handleCancelEditAlbumName = () => {
+    setEditingAlbumId(null)
+    setEditAlbumValue('')
+  }
+
+  const handleSaveAlbumName = async (albumId: string) => {
+    const nextName = editAlbumValue.trim()
+    if (!nextName) {
+      alert('Album name cannot be empty')
+      return
+    }
+
+    setSavingAlbumId(albumId)
+    apiPatch(`/api/albums/${albumId}`, { name: nextName })
+      .then(() => {
+        setAlbums((prev) => prev.map((a) => (a.id === albumId ? { ...a, name: nextName } : a)))
+        setEditingAlbumId(null)
+        setEditAlbumValue('')
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : 'Failed to update album name'
+        alert(message)
+      })
+      .finally(() => {
+        setSavingAlbumId(null)
+      })
   }
 
   const fetchZipStatus = useCallback(async (albumId: string) => {
@@ -196,12 +250,15 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       const prevTimer = zipPollTimersRef.current.get(albumId)
       if (prevTimer) clearTimeout(prevTimer)
 
-      if (shouldPoll && expandedAlbumId === albumId) {
+      // Poll until the zips are ready so the UI can update even when the album is collapsed.
+      // Use a faster interval when expanded, slower when collapsed.
+      if (shouldPoll) {
+        const intervalMs = expandedAlbumId === albumId ? 5000 : 15000
         zipPollTimersRef.current.set(
           albumId,
           setTimeout(() => {
             void fetchZipStatus(albumId)
-          }, 5000)
+          }, intervalMs)
         )
       }
     } catch {
@@ -248,6 +305,18 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         return next
       })
 
+      setZipStatusByAlbumId((prev) => {
+        const next = { ...prev }
+        delete next[albumId]
+        return next
+      })
+
+      const zipTimer = zipPollTimersRef.current.get(albumId)
+      if (zipTimer) {
+        clearTimeout(zipTimer)
+        zipPollTimersRef.current.delete(albumId)
+      }
+
       if (expandedAlbumId === albumId) {
         setExpandedAlbumId(null)
       }
@@ -265,21 +334,34 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
       onProjectDataChanged?.()
 
+      // The delete endpoint invalidates ZIPs and moves the album into PROCESSING.
+      // Optimistically reflect that here so the header pill updates immediately.
+      setAlbums((prev) =>
+        prev.map((a) => {
+          if (a.id !== albumId) return a
+          const nextCount =
+            a._count && typeof a._count.photos === 'number' ? Math.max(0, (a._count.photos || 0) - 1) : undefined
+          return {
+            ...a,
+            status: 'PROCESSING',
+            _count: nextCount === undefined ? a._count : { photos: nextCount },
+          }
+        })
+      )
+
       setPhotosByAlbumId((prev) => ({
         ...prev,
         [albumId]: (prev[albumId] || []).filter((p) => p.id !== photoId),
       }))
 
-      setAlbums((prev) =>
-        prev.map((a) => {
-          if (a.id !== albumId) return a
-          if (!a._count || typeof a._count.photos !== 'number') return a
-          return {
-            ...a,
-            _count: { photos: Math.max(0, (a._count.photos || 0) - 1) },
-          }
-        })
-      )
+      // Kick the ZIP status UI (and its polling) to update immediately.
+      void fetchZipStatus(albumId)
+
+      // Also refresh the albums list shortly after, so status/counts stay accurate.
+      if (refreshAlbumsTimerRef.current) clearTimeout(refreshAlbumsTimerRef.current)
+      refreshAlbumsTimerRef.current = setTimeout(() => {
+        void fetchAlbums()
+      }, 1000)
     } catch (e: any) {
       alert(e?.message || 'Failed to delete photo')
     }
@@ -379,18 +461,54 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <Images className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <CardTitle className="text-lg truncate">{album.name}</CardTitle>
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    {editingAlbumId === album.id ? (
+                      <InlineEdit
+                        value={editAlbumValue}
+                        onChange={setEditAlbumValue}
+                        onSave={() => handleSaveAlbumName(album.id)}
+                        onCancel={handleCancelEditAlbumName}
+                        disabled={savingAlbumId === album.id}
+                        inputClassName="h-8 w-full sm:w-64"
+                        stopPropagation={true}
+                      />
+                    ) : (
+                      <>
+                        <CardTitle className="text-lg truncate">{album.name}</CardTitle>
+                        {projectStatus !== 'APPROVED' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible flex-shrink-0"
+                            onClick={(e) => handleStartEditAlbumName(album.id, album.name, e)}
+                            title="Edit album name"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground mt-1">
                     {count} photo{count === 1 ? '' : 's'}
                   </p>
                 </div>
               </div>
 
-              {isExpanded ? (
-                <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-              ) : (
-                <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-              )}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {(album.status === 'UPLOADING' || album.status === 'PROCESSING') && Number(count) > 0 && (
+                  <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-primary-visible text-primary border-2 border-primary-visible">
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                    PROCESSING
+                  </span>
+                )}
+
+                {isExpanded ? (
+                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                )}
+              </div>
             </CardHeader>
 
             {isExpanded && (

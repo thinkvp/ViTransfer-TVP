@@ -260,19 +260,20 @@ export function ShareAlbumViewer({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-xl font-semibold truncate">{album?.name || 'Album'}</h2>
           {album?.notes && <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{album.notes}</p>}
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center sm:gap-2 sm:flex-shrink-0">
           {showThemeToggle && <ThemeToggle />}
           <Button
             type="button"
             variant="outline"
             onClick={() => void requestZip('social')}
             disabled={photos.length === 0 || !album?.zip?.socialReady}
+            className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
           >
             <Download className="w-4 h-4 mr-2" />
             Download Social Media Sized
@@ -282,6 +283,7 @@ export function ShareAlbumViewer({
             variant="outline"
             onClick={() => void requestZip('full')}
             disabled={photos.length === 0 || !album?.zip?.fullReady}
+            className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
           >
             <Download className="w-4 h-4 mr-2" />
             Download Full Resolution
@@ -352,16 +354,17 @@ export function ShareAlbumViewer({
           </DialogHeader>
           {viewerPhoto && (
             <div className="flex-1 min-h-0 flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <p className="text-sm text-muted-foreground">
                   This is a low resolution preview. Use the buttons to download the original versions.
                 </p>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center sm:gap-2 sm:shrink-0">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => window.open(viewerPhoto.socialDownloadUrl, '_blank', 'noopener,noreferrer')}
                     disabled={!viewerPhoto.socialReady}
+                    className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                   >
                     <Download className="w-4 h-4 mr-2" />
                     Download Social Media Sized
@@ -370,6 +373,7 @@ export function ShareAlbumViewer({
                     type="button"
                     variant="outline"
                     onClick={() => window.open(viewerPhoto.downloadUrl, '_blank', 'noopener,noreferrer')}
+                    className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                   >
                     <Download className="w-4 h-4 mr-2" />
                     Download Full Resolution

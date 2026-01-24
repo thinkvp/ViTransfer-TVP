@@ -468,6 +468,7 @@ export default function SharePage() {
     if (!shareToken) return videos
 
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
+    const isWatermarkEnabled = project?.watermarkEnabled === true
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -482,10 +483,27 @@ export default function SharePage() {
           let downloadToken = null
 
           if (video.approved) {
-            const originalToken = await fetchVideoToken(video.id, 'original')
-            streamToken720p = originalToken
-            streamToken1080p = originalToken
-            downloadToken = originalToken
+            // Always allow downloading the ORIGINAL file once approved.
+            // For playback: keep streaming the preview unless watermarks are enabled.
+            const shouldStreamOriginal = isWatermarkEnabled
+
+            if (shouldStreamOriginal) {
+              const originalToken = await fetchVideoToken(video.id, 'original')
+              streamToken720p = originalToken
+              streamToken1080p = originalToken
+              downloadToken = originalToken
+            } else {
+              const [originalToken, token720, token1080] = await Promise.all([
+                fetchVideoToken(video.id, 'original'),
+                fetchVideoToken(video.id, '720p'),
+                fetchVideoToken(video.id, '1080p'),
+              ])
+              downloadToken = originalToken || null
+
+              // Prefer preview streams; fall back to original if previews are unavailable.
+              streamToken720p = token720 || originalToken
+              streamToken1080p = token1080 || originalToken
+            }
           } else {
             const [token720, token1080] = await Promise.all([
               fetchVideoToken(video.id, '720p'),
@@ -995,6 +1013,7 @@ export default function SharePage() {
           id: String(a.id),
           name: String(a.name || ''),
           photoCount: Number(a?._count?.photos || 0),
+          previewPhotoUrl: (a as any)?.previewPhotoUrl || null,
         }))}
         activeAlbumId={activeAlbumId}
         onAlbumSelect={handleAlbumSelect}
@@ -1054,6 +1073,7 @@ export default function SharePage() {
                     isGuest={isGuest}
                     shareToken={shareToken}
                     commentsForTimeline={filteredComments}
+                    hideDownloadButton={true}
                   />
                 </div>
               ) : (

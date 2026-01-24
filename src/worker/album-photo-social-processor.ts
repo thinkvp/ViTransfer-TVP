@@ -68,6 +68,12 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
     },
   })
 
+  // Surface background work at the album level.
+  await prisma.album.update({
+    where: { id: photo.albumId },
+    data: { status: 'PROCESSING' },
+  }).catch(() => {})
+
   try {
     const inputPath = getFilePath(photo.storagePath)
     const outputPath = getFilePath(socialStoragePath)

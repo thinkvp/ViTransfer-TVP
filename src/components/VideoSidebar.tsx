@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect, useRef } from 'react'
-import { Play, ChevronDown, ChevronUp, GripVertical, CheckCircle2, Images } from 'lucide-react'
+import { Play, ChevronDown, ChevronUp, GripVertical, CheckCircle2, Images, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
 
@@ -15,7 +15,7 @@ interface VideoSidebarProps {
   videosByName: Record<string, any[]>
   activeVideoName: string
   onVideoSelect: (videoName: string) => void
-  albums?: Array<{ id: string; name: string; photoCount?: number }>
+  albums?: Array<{ id: string; name: string; photoCount?: number; previewPhotoUrl?: string | null }>
   activeAlbumId?: string | null
   onAlbumSelect?: (albumId: string) => void
   heading?: string
@@ -258,12 +258,6 @@ export default function VideoSidebar({
                   {/* Video Info */}
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div
-                        className={cn(
-                          'w-2 h-2 rounded-full shrink-0',
-                          isActive ? 'bg-primary' : 'bg-muted-foreground'
-                        )}
-                      />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{group.name}</p>
                         <p className="text-xs text-muted-foreground">
@@ -321,26 +315,45 @@ export default function VideoSidebar({
                     <div className="space-y-1">
                       {albumsList.map((a) => {
                         const isActive = activeAlbumId === a.id
+                        const previewUrl = (a as any)?.previewPhotoUrl as string | null | undefined
+                        const containerWidth = sidebarWidth - 48
+                        const containerHeight = Math.round(containerWidth * 9 / 16)
                         return (
                           <button
                             key={a.id}
                             onClick={() => onAlbumSelect?.(a.id)}
                             className={cn(
-                              'w-full text-left p-3 rounded-lg transition-all duration-200',
+                              'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
                               'hover:bg-accent hover:text-accent-foreground',
-                              'flex items-center justify-between gap-3',
                               isActive
                                 ? 'bg-primary/10 text-primary font-medium border border-primary/20'
                                 : 'text-foreground'
                             )}
                           >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                            {previewUrl ? (
                               <div
-                                className={cn(
-                                  'w-2 h-2 rounded-full shrink-0',
-                                  isActive ? 'bg-primary' : 'bg-muted-foreground'
-                                )}
-                              />
+                                className="bg-black rounded overflow-hidden relative"
+                                style={{ width: containerWidth, height: containerHeight }}
+                              >
+                                <Image
+                                  src={previewUrl}
+                                  alt={a.name}
+                                  fill
+                                  className="object-cover"
+                                  sizes={`${containerWidth}px`}
+                                  priority={isActive}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
+                                style={{ width: containerWidth, height: containerHeight }}
+                              >
+                                <Images className="w-6 h-6 text-muted-foreground" />
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm">{a.name}</p>
                                 <p className="text-xs text-muted-foreground">
@@ -391,6 +404,7 @@ export default function VideoSidebar({
                 const isActive = !activeAlbumId && activeVideoName === group.name
                 const latestVideo = group.videos[0]
                 const thumbnailUrl = latestVideo?.thumbnailUrl
+                const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
                 const mobileThumbSize = 100
                 const mobileThumbHeight = Math.round(mobileThumbSize * 9 / 16)
                 const latestVideoDims = calculateThumbnailDimensions(
@@ -413,7 +427,7 @@ export default function VideoSidebar({
                     {/* Thumbnail */}
                     {thumbnailUrl && latestVideoDims && (
                       <div
-                        className="bg-black rounded overflow-hidden flex items-center justify-center"
+                        className="bg-black rounded overflow-hidden flex items-center justify-center relative"
                         style={{
                           width: mobileThumbSize,
                           height: mobileThumbHeight,
@@ -435,6 +449,12 @@ export default function VideoSidebar({
                             priority={isActive}
                           />
                         </div>
+
+                        {hasApprovedVideo && (
+                          <div className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-success flex items-center justify-center shadow">
+                            <Check className="h-4 w-4 text-white" />
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -454,6 +474,9 @@ export default function VideoSidebar({
               {/* Albums */}
               {shouldShowAlbums && albumsList.map((a) => {
                 const isActive = activeAlbumId === a.id
+                const previewUrl = (a as any)?.previewPhotoUrl as string | null | undefined
+                const mobileThumbSize = 100
+                const mobileThumbHeight = Math.round(mobileThumbSize * 9 / 16)
 
                 return (
                   <button
@@ -465,16 +488,28 @@ export default function VideoSidebar({
                       isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                     )}
                   >
-                    {/* Album Placeholder */}
-                    <div
-                      className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
-                      style={{
-                        width: 100,
-                        height: Math.round(100 * 9 / 16),
-                      }}
-                    >
-                      <Images className="w-6 h-6 text-muted-foreground" />
-                    </div>
+                    {previewUrl ? (
+                      <div
+                        className="bg-black rounded overflow-hidden relative"
+                        style={{ width: mobileThumbSize, height: mobileThumbHeight }}
+                      >
+                        <Image
+                          src={previewUrl}
+                          alt={a.name}
+                          fill
+                          className="object-cover"
+                          sizes={`${mobileThumbSize}px`}
+                          priority={isActive}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
+                        style={{ width: mobileThumbSize, height: mobileThumbHeight }}
+                      >
+                        <Images className="w-6 h-6 text-muted-foreground" />
+                      </div>
+                    )}
 
                     {/* Title and Count */}
                     <div className="flex flex-col items-center">

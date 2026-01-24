@@ -77,6 +77,47 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     return
   }
 
+  const albumRowId = album.id
+  const projectId = album.projectId
+
+  // Keep album-level status in sync with background work.
+  await prisma.album.update({ where: { id: albumRowId }, data: { status: 'PROCESSING' } }).catch(() => {})
+
+  async function maybeMarkAlbumReady() {
+    try {
+      const uploadingCount = await prisma.albumPhoto.count({ where: { albumId, status: 'UPLOADING' } })
+      if (uploadingCount > 0) return
+
+      const pendingSocialCount = await prisma.albumPhoto.count({
+        where: {
+          albumId,
+          status: 'READY',
+          OR: [{ socialStatus: 'PENDING' }, { socialStatus: 'PROCESSING' }],
+        },
+      })
+      if (pendingSocialCount > 0) return
+
+      const zipFullPath = getFilePath(getAlbumZipStoragePath({ projectId, albumId: albumRowId, variant: 'full' }))
+      const zipSocialPath = getFilePath(getAlbumZipStoragePath({ projectId, albumId: albumRowId, variant: 'social' }))
+
+      const fullExists = fs.existsSync(zipFullPath)
+      const socialExists = fs.existsSync(zipSocialPath)
+
+      // Consider an empty album READY even if zips do not exist.
+      const anyReadyPhotos = await prisma.albumPhoto.count({ where: { albumId, status: 'READY' } })
+      if (anyReadyPhotos === 0) {
+        await prisma.album.update({ where: { id: albumRowId }, data: { status: 'READY' } })
+        return
+      }
+
+      if (fullExists && socialExists) {
+        await prisma.album.update({ where: { id: albumRowId }, data: { status: 'READY' } })
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   // Avoid zipping while uploads are still in progress.
   const uploadingCount = await prisma.albumPhoto.count({
     where: { albumId, status: 'UPLOADING' },
@@ -133,6 +174,8 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
         // Best-effort: daily reconciliation will restore correctness.
       }
     }
+
+    await maybeMarkAlbumReady()
     return
   }
 
@@ -192,4 +235,6 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
   }
 
   console.log(`[WORKER] Generated ${variant} album ZIP: ${albumId}`)
+
+  await maybeMarkAlbumReady()
 }

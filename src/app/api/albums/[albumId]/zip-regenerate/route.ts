@@ -37,6 +37,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
 
+  // Immediately reflect that background work is required.
+  await prisma.album.update({
+    where: { id: album.id },
+    data: { status: 'PROCESSING' },
+  }).catch(() => {})
+
   if (auth.appRoleIsSystemAdmin !== true) {
     const project = await prisma.project.findUnique({
       where: { id: album.projectId },

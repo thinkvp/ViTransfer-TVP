@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
+import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,6 +46,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return accessCheck.errorResponse || NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
   }
 
+  const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
+
   // Project type gating: Photos disabled.
   if (projectMeta.enablePhotos === false) {
     return NextResponse.json({ albums: [] })
@@ -63,14 +66,43 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       fullZipFileSize: true,
       socialZipFileSize: true,
       _count: { select: { photos: true } },
+      photos: {
+        where: { status: 'READY' },
+        orderBy: { createdAt: 'asc' },
+        take: 1,
+        select: { id: true },
+      },
     },
   })
 
-  const albumsSafe = albums.map((a) => ({
-    ...a,
-    fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
-    socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
-  }))
+  const albumsSafe = await Promise.all(
+    albums.map(async (a) => {
+      const firstPhotoId = (a as any)?.photos?.[0]?.id as string | undefined
+      let previewPhotoUrl: string | null = null
+
+      if (firstPhotoId) {
+        try {
+          const tokenValue = await generateAlbumPhotoAccessToken({
+            photoId: firstPhotoId,
+            albumId: a.id,
+            projectId: a.projectId,
+            request,
+            sessionId,
+          })
+          previewPhotoUrl = `/api/content/photo/${tokenValue}`
+        } catch {
+          // ignore
+        }
+      }
+
+      return {
+        ...a,
+        previewPhotoUrl,
+        fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
+        socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
+      }
+    })
+  )
 
   return NextResponse.json({ albums: albumsSafe })
 }

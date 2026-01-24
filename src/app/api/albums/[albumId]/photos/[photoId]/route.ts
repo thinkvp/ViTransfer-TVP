@@ -91,6 +91,11 @@ export async function DELETE(
 
     // Invalidate and (debounced) regenerate album ZIPs
     try {
+      await prisma.album.update({
+        where: { id: albumId },
+        data: { status: 'PROCESSING' },
+      }).catch(() => {})
+
       const fullZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId, variant: 'full' })
       const socialZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId, variant: 'social' })
 

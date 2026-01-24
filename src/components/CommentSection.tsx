@@ -915,18 +915,7 @@ export function CommentSectionView({
           </div>
         ) : null}
 
-        {showVideoActions && isAdminView && (headerVideo as any)?.approved ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleDownloadSelected}
-              disabled={downloading}
-            >
-              {downloading ? 'Preparing...' : 'Download'}
-            </Button>
-          </div>
-        ) : null}
+        {null}
         </CardHeader>
 
       <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
@@ -945,20 +934,35 @@ export function CommentSectionView({
         {/* Approval Status Banner */}
         {commentsDisabled && (
           <div className="bg-success-visible border-b-2 border-success-visible p-4 flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-8 h-8 text-success flex-shrink-0" />
-              <div>
-                <h3 className="text-foreground font-medium">
-                  {isApproved ? 'Project Approved' : 'Video Approved'}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {isApproved
-                    ? 'The final version is ready for download without watermarks.'
-                    : approvedVideo
-                    ? `${approvedVideo.versionLabel} of this video has been approved and is ready for download.`
-                    : 'A version of this video has been approved and is ready for download.'}
-                </p>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <CheckCircle2 className="w-8 h-8 text-success flex-shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-foreground font-medium">
+                    {isApproved ? 'Project Approved' : 'Video Approved'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {isApproved
+                      ? 'The final version is ready for download without watermarks.'
+                      : approvedVideo
+                      ? `${approvedVideo.versionLabel} of this video has been approved and is ready for download.`
+                      : 'A version of this video has been approved and is ready for download.'}
+                  </p>
+                </div>
               </div>
+
+              {showVideoActions && (headerVideo as any)?.approved ? (
+                <div className="flex-shrink-0">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleDownloadSelected}
+                    disabled={downloading}
+                  >
+                    {downloading ? 'Preparing...' : 'Download'}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
         )}
@@ -1023,18 +1027,7 @@ export function CommentSectionView({
                     >
                       Approve Video
                     </Button>
-                  ) : (
-                    !isAdminView && (headerVideo as any)?.approved && (
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={handleDownloadSelected}
-                        disabled={downloading}
-                      >
-                        {downloading ? 'Preparing...' : 'Download'}
-                      </Button>
-                    )
-                  )}
+                  ) : null}
 
                   {showThemeToggle && !isAdminView ? (
                     <div className="shrink-0">

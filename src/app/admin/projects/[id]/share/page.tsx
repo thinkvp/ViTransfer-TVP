@@ -90,6 +90,7 @@ export default function AdminSharePage() {
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     const sessionId = sessionIdRef.current
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
+    const isWatermarkEnabled = project?.watermarkEnabled === true
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -119,12 +120,19 @@ export default function AdminSharePage() {
           }
 
           if (video.approved) {
+            const shouldStreamOriginal = isWatermarkEnabled
             const responseOriginal = await apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=original&sessionId=${sessionId}`)
             if (responseOriginal.ok) {
               const dataOriginal = await responseOriginal.json()
               downloadToken = dataOriginal.token
-              streamToken720p = streamToken720p || dataOriginal.token
-              streamToken1080p = streamToken1080p || dataOriginal.token
+
+              if (shouldStreamOriginal) {
+                streamToken720p = dataOriginal.token
+                streamToken1080p = dataOriginal.token
+              } else {
+                streamToken720p = streamToken720p || dataOriginal.token
+                streamToken1080p = streamToken1080p || dataOriginal.token
+              }
             }
           }
 
@@ -557,6 +565,7 @@ export default function AdminSharePage() {
             id: String(a.id),
             name: String(a.name || ''),
             photoCount: Number(a?._count?.photos || 0),
+            previewPhotoUrl: (a as any)?.previewPhotoUrl || null,
           }))}
           activeAlbumId={activeAlbumId}
           onAlbumSelect={handleAlbumSelect}

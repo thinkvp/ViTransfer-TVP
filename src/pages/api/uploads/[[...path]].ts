@@ -582,6 +582,12 @@ async function handleAlbumPhotoUploadFinish(
     },
   })
 
+  // Upload is complete; downstream derivative + ZIP work will run next.
+  await prisma.album.update({
+    where: { id: photo.albumId },
+    data: { status: 'PROCESSING' },
+  }).catch(() => {})
+
   console.log(`[UPLOAD] Album photo uploaded and marked READY: ${photoId}`)
 
   // Queue social-size derivative generation
