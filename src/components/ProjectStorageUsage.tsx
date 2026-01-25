@@ -8,6 +8,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 
 type StorageSummary = {
   totalBytes: number
+  diskTotalBytes?: number | null
+  diskOtherBytes?: number | null
   capacityBytes?: number | null
   availableBytes?: number | null
   breakdown: {
@@ -24,6 +26,16 @@ type StorageSummary = {
     albumZipSocialBytes?: number
     communicationsBytes?: number
   }
+
+  // Optional on-disk breakdown that matches actual volume folder sizes.
+  // When present, it should be used alongside diskTotalBytes.
+  diskBreakdown?: {
+    videosBytes: number
+    videoAssetsBytes: number
+    commentAttachmentsBytes: number
+    photosBytes: number
+    projectFilesBytes: number
+  } | null
 }
 
 type Row = {
@@ -51,7 +63,9 @@ export function ProjectStorageUsage({
       setLoading(true)
       setError(null)
       try {
-        const res = await apiFetch(`/api/projects/${projectId}/storage`)
+        // Ask the server for on-disk sizes when available.
+        // The server may omit these fields (older versions or unsupported environments).
+        const res = await apiFetch(`/api/projects/${projectId}/storage?includeDisk=1`)
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
           throw new Error(body?.error || 'Failed to load storage usage')
@@ -72,18 +86,18 @@ export function ProjectStorageUsage({
   }, [projectId, refreshTrigger])
 
   const rows: Row[] = useMemo(() => {
-    const total = Math.max(0, Number(data?.totalBytes || 0))
-    const b = data?.breakdown
+    const effectiveTotal = Math.max(0, Number((data?.diskTotalBytes ?? data?.totalBytes) || 0))
+    const b = (data?.diskBreakdown ?? data?.breakdown) as StorageSummary['breakdown'] | null | undefined
     if (!b) return []
 
     // Keep the UI to a stable set of rows.
     const photosBytes =
       Number(b.photosBytes || 0) +
-      Number(b.socialPhotosBytes || 0) +
-      Number(b.albumZipFullBytes || 0) +
-      Number(b.albumZipSocialBytes || 0)
+      Number((b as any).socialPhotosBytes || 0) +
+      Number((b as any).albumZipFullBytes || 0) +
+      Number((b as any).albumZipSocialBytes || 0)
 
-    const projectFilesBytes = Number(b.projectFilesBytes || 0) + Number(b.communicationsBytes || 0)
+    const projectFilesBytes = Number(b.projectFilesBytes || 0) + Number((b as any).communicationsBytes || 0)
 
     const items: Array<{ key: Row['key']; label: string; bytes: number }> = [
       { key: 'videosBytes', label: 'Videos', bytes: Number(b.videosBytes || 0) },
@@ -96,14 +110,14 @@ export function ProjectStorageUsage({
     return items
       .map((it) => {
         const bytes = Math.max(0, it.bytes)
-        const pct = total > 0 ? Math.round((bytes / total) * 1000) / 10 : 0
+        const pct = effectiveTotal > 0 ? Math.round((bytes / effectiveTotal) * 1000) / 10 : 0
         return { ...it, pct }
       })
       .sort((a, b2) => b2.bytes - a.bytes)
   }, [data])
 
   const totalLabel = useMemo(() => {
-    const total = Number(data?.totalBytes || 0)
+    const total = Number((data?.diskTotalBytes ?? data?.totalBytes) || 0)
     return formatFileSize(total)
   }, [data])
 
@@ -152,6 +166,14 @@ export function ProjectStorageUsage({
                   <div className="text-sm text-muted-foreground">Total</div>
                   <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
                 </div>
+                {typeof data.diskTotalBytes === 'number' && (
+                  <div className="mt-1 flex items-baseline justify-between gap-3">
+                    <div className="text-xs text-muted-foreground">Source</div>
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                      On disk{typeof data.diskOtherBytes === 'number' && data.diskOtherBytes > 0 ? ` • ${formatFileSize(data.diskOtherBytes)} other` : ''}
+                    </div>
+                  </div>
+                )}
                 {availableLabel && (
                   <div className="mt-1 flex items-baseline justify-between gap-3">
                     <div className="text-xs text-muted-foreground">Available space</div>
@@ -166,7 +188,7 @@ export function ProjectStorageUsage({
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-medium">{r.label}</div>
                       <div className="text-xs text-muted-foreground tabular-nums">
-                        {formatFileSize(r.bytes)}{data.totalBytes > 0 ? ` • ${r.pct}%` : ''}
+                        {formatFileSize(r.bytes)}{((data.diskTotalBytes ?? data.totalBytes) || 0) > 0 ? ` • ${r.pct}%` : ''}
                       </div>
                     </div>
                     <div className="h-2 w-full rounded-full bg-muted overflow-hidden">

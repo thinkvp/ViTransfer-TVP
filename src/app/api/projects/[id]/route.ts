@@ -220,6 +220,7 @@ export async function GET(
     const projectData = {
       ...project,
       totalBytes: asNumberBigInt((project as any).totalBytes),
+      diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
       videos: project.videos.map((video: any) => ({
         ...video,
         originalFileSize: video.originalFileSize.toString(),
@@ -772,6 +773,8 @@ export async function PATCH(
       })
     }
 
+    // NOTE: Project status changes no longer move storage folders.
+
     // When an admin manually marks a project APPROVED, send the Project Approved email immediately.
     // (Client-driven approvals have their own notification path in /api/projects/[id]/approve.)
     if (validatedBody.status === 'APPROVED' && previousStatus !== 'APPROVED') {
@@ -872,12 +875,11 @@ export async function PATCH(
     return NextResponse.json({
       ...project,
       totalBytes: asNumberBigInt((project as any).totalBytes),
+      diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
     })
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Operation failed' },
-      { status: 500 }
-    )
+    console.error('[API] Error updating project:', error)
+    return NextResponse.json({ error: 'Operation failed' }, { status: 500 })
   }
 }
 

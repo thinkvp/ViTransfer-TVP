@@ -4,7 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getRedisForQueue } from '@/lib/redis'
-import { reconcileAllProjectsTotalBytes } from '@/lib/project-total-bytes'
+import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 
 export const runtime = 'nodejs'
 
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (e) {
     console.warn('[SETTINGS] Failed to enqueue reconcile-project-total-bytes; running inline:', e)
-    const result = await reconcileAllProjectsTotalBytes()
+    const result = await reconcileAllProjectsStorageTotals()
     return NextResponse.json({ ok: true, queued: false, ranInline: true, result })
   } finally {
     try {

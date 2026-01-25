@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
-import { Mail, Edit, Trash2, Plus, Star, Check, Bell, BellOff } from 'lucide-react'
+import { Edit, Trash2, Plus, Star, Check, Bell, BellOff } from 'lucide-react'
 import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 import { generateRandomHexDisplayColor } from '@/lib/display-color'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 interface Recipient {
   id?: string
@@ -252,7 +253,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3">
                   <div className="flex-1 space-y-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <InitialsAvatar name={recipient.name} email={recipient.email} displayColor={recipient.displayColor} />
                       <span className="text-sm font-medium truncate">
                         {recipient.name || recipient.email || 'No contact info'}
                       </span>
@@ -264,7 +265,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                       )}
                     </div>
                     {recipient.name && recipient.email && (
-                      <div className="flex items-center gap-2 pl-6">
+                      <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground truncate">{recipient.email}</span>
                       </div>
                     )}
@@ -297,13 +298,6 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
                         )}
                       </Button>
                     )}
-
-                    <span
-                      className="h-6 w-6 rounded-full border border-border bg-muted/40 flex-shrink-0"
-                      style={recipient.displayColor ? { backgroundColor: recipient.displayColor } : undefined}
-                      title={recipient.displayColor ? `Display colour: ${recipient.displayColor}` : 'Display colour: not set'}
-                      aria-label={recipient.displayColor ? `Display colour ${recipient.displayColor}` : 'Display colour not set'}
-                    />
 
                     <Button
                       type="button"

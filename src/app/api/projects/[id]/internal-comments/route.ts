@@ -139,10 +139,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (parentId) {
     const parent = await prisma.projectInternalComment.findUnique({
       where: { id: parentId },
-      select: { id: true, projectId: true },
+      select: { id: true, projectId: true, parentId: true },
     })
     if (!parent || parent.projectId !== projectId) {
       return NextResponse.json({ error: 'Invalid parent comment' }, { status: 400 })
+    }
+
+    // Only allow one level of nesting: replies must target a top-level comment.
+    if (parent.parentId) {
+      return NextResponse.json({ error: 'Replies can only be made to the original comment' }, { status: 400 })
     }
   }
 

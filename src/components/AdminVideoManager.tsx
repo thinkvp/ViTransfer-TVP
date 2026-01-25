@@ -196,7 +196,7 @@ export default function AdminVideoManager({
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <Video className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="min-w-0">
                     {editingGroupName === groupName ? (
                       <InlineEdit
                         value={editGroupValue}
@@ -208,26 +208,28 @@ export default function AdminVideoManager({
                         stopPropagation={true}
                       />
                     ) : (
-                      <>
-                        <CardTitle className="text-lg">{groupName}</CardTitle>
-                        {projectStatus !== 'APPROVED' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible flex-shrink-0"
-                            onClick={(e) => handleStartEditGroupName(groupName, e)}
-                            title="Edit video name"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </Button>
-                        )}
-                        {hasApprovedVideos && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 ml-2 rounded text-xs font-medium bg-success-visible text-success border border-success-visible flex-shrink-0">
-                            <CheckCircle2 className="w-3 h-3" />
-                            {approvedCount} Approved
-                          </span>
-                        )}
-                      </>
+                      <div className="min-w-0">
+                        <CardTitle className="text-lg leading-snug break-words">
+                          <span>{groupName}</span>
+                          {projectStatus !== 'APPROVED' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="ml-1 h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible inline-flex align-text-top"
+                              onClick={(e) => handleStartEditGroupName(groupName, e)}
+                              title="Edit video name"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                          )}
+                          {hasApprovedVideos && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 ml-2 rounded text-xs font-medium bg-success-visible text-success border border-success-visible">
+                              <CheckCircle2 className="w-3 h-3" />
+                              {approvedCount} Approved
+                            </span>
+                          )}
+                        </CardTitle>
+                      </div>
                     )}
                   </div>
                   {editingGroupName !== groupName && (

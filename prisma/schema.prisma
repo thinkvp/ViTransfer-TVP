@@ -162,6 +162,13 @@ model Project {
   // Updated incrementally when related files are added/removed, and reconciled daily by the worker.
   totalBytes BigInt @default(0)
 
+  // On-disk storage total (bytes) for the project volume folder.
+  // This includes derived/transcoded artifacts (previews, thumbnails, timeline sprites/VTT, etc)
+  // and any other files present under projects/{projectId}.
+  // Nullable so we can distinguish "not computed yet" from a real 0-byte project.
+  // Updated via the daily reconcile job and manual admin action.
+  diskBytes BigInt?
+
   // Comment restrictions
   restrictCommentsToLatestVersion Boolean @default(false)
   hideFeedback                    Boolean @default(false)

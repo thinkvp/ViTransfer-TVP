@@ -7,8 +7,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Mail, Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X, DollarSign } from 'lucide-react'
+import { Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X, DollarSign } from 'lucide-react'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from '@/lib/display-color'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 export interface EditableRecipient {
   id?: string
@@ -358,7 +359,7 @@ export function RecipientsEditor({
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3">
                 <div className="flex-1 space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <InitialsAvatar name={recipient.name} email={recipient.email} displayColor={recipient.displayColor} />
                     <span className="text-sm font-medium truncate">
                       {recipient.name || recipient.email || 'No contact info'}
                     </span>
@@ -369,9 +370,7 @@ export function RecipientsEditor({
                     )}
                   </div>
                   {recipient.name && recipient.email && (
-                    <div className="text-xs text-muted-foreground truncate">
-                      {recipient.email}
-                    </div>
+                    <div className="text-xs text-muted-foreground truncate">{recipient.email}</div>
                   )}
                 </div>
 
@@ -404,14 +403,6 @@ export function RecipientsEditor({
                   >
                     <Pencil className="w-4 h-4" />
                   </Button>
-                  {showDisplayColor && (
-                    <span
-                      className="w-6 h-6 rounded-full border border-border flex-shrink-0"
-                      style={recipient.displayColor ? { backgroundColor: recipient.displayColor } : undefined}
-                      title={recipient.displayColor ? `Display colour: ${recipient.displayColor}` : 'Display colour: not set'}
-                      aria-label={recipient.displayColor ? `Display colour ${recipient.displayColor}` : 'Display colour not set'}
-                    />
-                  )}
                   <Button
                     type="button"
                     variant="outline"
@@ -562,6 +553,11 @@ export function RecipientsEditor({
                       onClick={() => setClientSelection((prev) => ({ ...prev, [item.key]: !prev[item.key] }))}
                     >
                       <Checkbox checked={Boolean(clientSelection[item.key])} />
+                      <InitialsAvatar
+                        name={item.recipient.name}
+                        email={item.recipient.email}
+                        displayColor={item.recipient.displayColor}
+                      />
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{item.recipient.name || item.recipient.email || 'Unnamed recipient'}</div>
                         {item.recipient.name && item.recipient.email && (

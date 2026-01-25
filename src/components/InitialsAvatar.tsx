@@ -1,4 +1,6 @@
-export function getUserInitials(name?: string | null, email?: string | null): string {
+import { cn } from '@/lib/utils'
+
+function getUserInitials(name?: string | null, email?: string | null): string {
   const cleanedName = String(name || '').trim()
 
   const normalizeToken = (token: string) => token.replace(/[^\p{L}\p{N}]+/gu, '')
@@ -41,4 +43,32 @@ export function getUserInitials(name?: string | null, email?: string | null): st
   }
 
   return '--'
+}
+
+export function InitialsAvatar(props: {
+  name?: string | null
+  email?: string | null
+  displayColor?: string | null
+  className?: string
+  title?: string
+}) {
+  const { name, email, displayColor, className, title } = props
+
+  const initials = getUserInitials(name, email)
+  const bg = typeof displayColor === 'string' && displayColor.trim() ? displayColor : '#64748b'
+  const label = (title ?? String(name || email || '').trim()) || 'Recipient'
+
+  return (
+    <div
+      className={cn(
+        'h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none flex-shrink-0',
+        className
+      )}
+      style={{ backgroundColor: bg, color: '#fff' }}
+      title={label}
+      aria-label={label}
+    >
+      {initials}
+    </div>
+  )
 }

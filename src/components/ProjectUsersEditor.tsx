@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { apiFetch } from '@/lib/api-client'
 import { Bell, BellOff, Plus, Shield, Trash2 } from 'lucide-react'
 import type { ButtonProps } from '@/components/ui/button'
-import { getUserInitials } from '@/lib/user-initials'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 export type AssignableUser = {
   id: string
@@ -64,9 +64,6 @@ export function ProjectUsersEditor({
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<AssignableUser[]>([])
   const [loading, setLoading] = useState(false)
-
-  const avatarBg = (u: AssignableUser) =>
-    typeof u?.displayColor === 'string' && u.displayColor.trim() ? u.displayColor : '#64748b'
 
   const normalizeKey = (u: AssignableUser) => String(u?.id || '')
 
@@ -233,14 +230,7 @@ export function ProjectUsersEditor({
               <div className="flex items-start justify-between gap-2 p-3">
                 <div className="flex-1 space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <div
-                      className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none flex-shrink-0"
-                      style={{ backgroundColor: avatarBg(u), color: '#fff' }}
-                      title={String(u.name || u.email)}
-                      aria-label={String(u.name || u.email)}
-                    >
-                      {getUserInitials(u.name, u.email)}
-                    </div>
+                    <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} />
                     <span className="text-sm font-medium truncate">{u.name || u.email}</span>
                     {u.appRole?.isSystemAdmin === true && (
                       <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
@@ -329,14 +319,7 @@ export function ProjectUsersEditor({
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div
-                              className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none flex-shrink-0"
-                              style={{ backgroundColor: avatarBg(u), color: '#fff' }}
-                              title={String(u.name || u.email)}
-                              aria-label={String(u.name || u.email)}
-                            >
-                              {getUserInitials(u.name, u.email)}
-                            </div>
+                            <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} />
                             <div className="font-medium truncate">{u.name || u.email}</div>
                             {u.appRole?.isSystemAdmin === true && (
                               <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">

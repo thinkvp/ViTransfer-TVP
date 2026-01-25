@@ -1122,6 +1122,8 @@ export function CommentSectionView({
                         commentsDisabled={commentsDisabled}
                         isViewerMessage={isViewerMessage}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
+                        showAuthorAvatar
+                        showColorEdge={false}
                       />
                     ) : (
                       // Has replies - render extended bubble
@@ -1150,6 +1152,8 @@ export function CommentSectionView({
                         onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}
                         canDeleteReply={allowAnyReplyDelete ? canDeleteReply : undefined}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
+                        showAuthorAvatar
+                        showColorEdge={false}
                       />
                     )}
                   </div>

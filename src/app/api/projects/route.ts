@@ -7,6 +7,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { createProjectSchema, validateRequest } from '@/lib/validation'
 import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getSafeguardLimits } from '@/lib/settings'
+import { getRawStoragePath, setProjectRedirect } from '@/lib/storage'
+import * as fs from 'fs'
 export const runtime = 'nodejs'
 
 
@@ -73,6 +75,7 @@ export async function GET(request: NextRequest) {
         createdAt: true,
         updatedAt: true,
         totalBytes: true,
+        diskBytes: true,
         watermarkEnabled: true,
         sharePassword: true,
         authMode: true,
@@ -147,6 +150,7 @@ export async function GET(request: NextRequest) {
       ...p,
       photoCount: photoCountByProjectId.get(p.id) ?? 0,
       totalBytes: asNumberBigInt((p as any).totalBytes),
+      diskBytes: (p as any).diskBytes == null ? null : asNumberBigInt((p as any).diskBytes),
       assignedUsers:
         (p as any).assignedUsers
           ?.map((pu: any) => ({
@@ -525,6 +529,24 @@ export async function POST(request: NextRequest) {
       ...project,
       totalBytes: asNumberBigInt((project as any).totalBytes),
     })
+
+    // Initialize physical storage layout for this project.
+    // Real data lives under projects/YYYY-MM/{projectId}. Legacy paths under projects/{projectId}/...
+    // are resolved via the central redirect index file in projects/.
+    try {
+      const createdAt = (project as any).createdAt ? new Date((project as any).createdAt) : new Date()
+      const yyyy = createdAt.getUTCFullYear()
+      const mm = String(createdAt.getUTCMonth() + 1).padStart(2, '0')
+      const ym = `${yyyy}-${mm}`
+
+      const targetRel = `projects/${ym}/${project.id}`
+      const targetAbs = getRawStoragePath(targetRel)
+      await fs.promises.mkdir(targetAbs, { recursive: true })
+
+      await setProjectRedirect(project.id, targetRel)
+    } catch (e) {
+      console.warn('[PROJECT CREATE] Failed to initialize project storage folders:', e)
+    }
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

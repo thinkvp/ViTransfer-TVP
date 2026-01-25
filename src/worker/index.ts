@@ -24,7 +24,7 @@ import { processSalesReminders } from './sales-reminders'
 import { processAutoStartProjectsOnShootingKeyDate } from './auto-start-projects-on-shooting'
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
-import { reconcileAllProjectsTotalBytes } from '@/lib/project-total-bytes'
+import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -398,7 +398,7 @@ async function main() {
     }
   )
 
-  // Reconcile derived Project.totalBytes (daily @ 04:30 server/container time)
+  // Reconcile derived Project.totalBytes + Project.diskBytes (daily @ 04:30 server/container time)
   await notificationQueue.add(
     'reconcile-project-total-bytes',
     {},
@@ -472,8 +472,8 @@ async function main() {
       }
 
       if (job.name === 'reconcile-project-total-bytes') {
-        console.log('[TOTALS] Running scheduled project totalBytes reconciliation...')
-        const result = await reconcileAllProjectsTotalBytes()
+        console.log('[TOTALS] Running scheduled project totalBytes + diskBytes reconciliation...')
+        const result = await reconcileAllProjectsStorageTotals()
         console.log('[TOTALS] Reconciliation completed', result)
         return
       }

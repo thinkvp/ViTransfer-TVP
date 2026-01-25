@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
-import { getUserInitials } from '@/lib/user-initials'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 type ProjectAssignedUser = {
   id: string
@@ -34,6 +34,7 @@ interface Project {
   createdAt: string | Date
   updatedAt: string | Date
   totalBytes?: number | null
+  diskBytes?: number | null
   maxRevisions: number
   enableRevisions: boolean
   videos: any[]
@@ -60,6 +61,12 @@ function formatProjectData(bytes: number | null | undefined): string {
   const v = Number(gb.toFixed(2))
   if (v >= 10) return `${Number(v.toFixed(1)).toFixed(1)} GB`
   return `${v.toFixed(2)} GB`
+}
+
+function getProjectDataBytes(project: Project): number | null {
+  const raw = typeof project.diskBytes === 'number' ? project.diskBytes : project.totalBytes
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null
+  return Math.max(0, raw)
 }
 
 interface ProjectsListProps {
@@ -317,7 +324,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       if (tableSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (tableSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
       if (tableSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
-      if (tableSortKey === 'data') return dir * ((Number(a.totalBytes) || 0) - (Number(b.totalBytes) || 0))
+      if (tableSortKey === 'data') return dir * ((getProjectDataBytes(a) || 0) - (getProjectDataBytes(b) || 0))
       if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       if (tableSortKey === 'updatedAt') return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
       return 0
@@ -590,7 +597,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                       const versionsCount = (project.videos || []).length
                       const commentsCount = project._count?.comments || 0
                       const photosCount = Number(project.photoCount) || 0
-                      const dataLabel = formatProjectData(project.totalBytes)
+                      const dataLabel = formatProjectData(getProjectDataBytes(project))
                       const clientName = (() => {
                         const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
                         return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
@@ -698,31 +705,23 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                                 {Array.isArray(project.assignedUsers) && project.assignedUsers.length > 0 ? (
                                   <div className="flex items-center -space-x-1">
                                     {project.assignedUsers.slice(0, 6).map((u, idx) => {
-                                      const initials = getUserInitials(u?.name, u?.email)
-                                      const bg = typeof u?.displayColor === 'string' && u.displayColor.trim() ? u.displayColor : '#64748b'
-                                      const label = String(u?.name || u?.email || '').trim()
                                       return (
-                                        <div
+                                        <InitialsAvatar
                                           key={String(u?.id || idx)}
-                                          className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
-                                          style={{ backgroundColor: bg, color: '#fff' }}
-                                          title={label}
-                                          aria-label={label}
-                                        >
-                                          {initials}
-                                        </div>
+                                          name={u?.name}
+                                          email={u?.email}
+                                          displayColor={u?.displayColor}
+                                        />
                                       )
                                     })}
 
                                     {project.assignedUsers.length > 6 && (
-                                      <div
-                                        className="h-7 w-7 rounded-full ring-2 ring-background flex items-center justify-center text-[11px] font-semibold uppercase select-none"
-                                        style={{ backgroundColor: '#94a3b8', color: '#fff' }}
+                                      <InitialsAvatar
+                                        name={`+${project.assignedUsers.length - 6}`}
+                                        email={null}
+                                        displayColor="#94a3b8"
                                         title={`${project.assignedUsers.length - 6} more`}
-                                        aria-label={`${project.assignedUsers.length - 6} more`}
-                                      >
-                                        +{project.assignedUsers.length - 6}
-                                      </div>
+                                      />
                                     )}
                                   </div>
                                 ) : (

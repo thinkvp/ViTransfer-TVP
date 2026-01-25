@@ -461,7 +461,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <Images className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <div className="min-w-0">
                     {editingAlbumId === album.id ? (
                       <InlineEdit
                         value={editAlbumValue}
@@ -473,20 +473,22 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                         stopPropagation={true}
                       />
                     ) : (
-                      <>
-                        <CardTitle className="text-lg truncate">{album.name}</CardTitle>
-                        {projectStatus !== 'APPROVED' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible flex-shrink-0"
-                            onClick={(e) => handleStartEditAlbumName(album.id, album.name, e)}
-                            title="Edit album name"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </Button>
-                        )}
-                      </>
+                      <div className="min-w-0">
+                        <CardTitle className="text-lg leading-snug break-words">
+                          <span>{album.name}</span>
+                          {projectStatus !== 'APPROVED' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="ml-1 h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible inline-flex align-text-top"
+                              onClick={(e) => handleStartEditAlbumName(album.id, album.name, e)}
+                              title="Edit album name"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </CardTitle>
+                      </div>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground mt-1">

@@ -399,6 +399,42 @@ export async function DELETE(
 
     // Delete all associated files from storage
     try {
+      // Delete comment attachment files for this video/version (best-effort).
+      // Note: deleting Comment rows will cascade-delete CommentFile rows in DB,
+      // but we must remove the physical files separately.
+      const commentFiles = await prisma.commentFile.findMany({
+        where: {
+          projectId,
+          comment: {
+            videoId: id,
+          },
+        },
+        select: {
+          id: true,
+          storagePath: true,
+        },
+      })
+
+      const commentFileIdsToDelete = commentFiles.map((f) => f.id)
+      for (const file of commentFiles) {
+        try {
+          // Only delete if no other CommentFile row references the same storagePath
+          // outside of the set that will be cascade-deleted.
+          const sharedCount = await prisma.commentFile.count({
+            where: {
+              storagePath: file.storagePath,
+              id: { notIn: commentFileIdsToDelete },
+            },
+          })
+
+          if (sharedCount === 0) {
+            await deleteFile(file.storagePath)
+          }
+        } catch {
+          // Ignore per-file errors to avoid blocking video deletion
+        }
+      }
+
       // Delete asset files only if no other assets point to the same storage path
       for (const asset of video.assets) {
         const sharedCount = await prisma.videoAsset.count({
@@ -451,10 +487,19 @@ export async function DELETE(
       // Continue with database deletion even if storage deletion fails
     }
 
-    // Delete video from database (cascade will handle comments)
-    await prisma.video.delete({
-      where: { id: id },
-    })
+    // Delete associated comments (and cascading replies/files) before deleting the video.
+    // Note: Comment.videoId is not a FK to Video, so DB-level cascade cannot apply.
+    await prisma.$transaction([
+      prisma.comment.deleteMany({
+        where: {
+          projectId,
+          videoId: id,
+        },
+      }),
+      prisma.video.delete({
+        where: { id },
+      }),
+    ])
 
     // Update the stored project data total
     await recalculateAndStoreProjectTotalBytes(projectId)

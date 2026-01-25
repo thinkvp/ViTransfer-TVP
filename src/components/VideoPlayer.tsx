@@ -10,6 +10,7 @@ import { Button } from './ui/button'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,26 @@ import {
 } from './ui/dialog'
 
 const DEFAULT_ASPECT_RATIO = 16 / 9
+
+function formatTimestampForDuration(seconds: number, durationSeconds: number): string {
+  const s = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+  const d = Number.isFinite(durationSeconds) ? Math.max(0, durationSeconds) : 0
+  if (!d) return formatTimestamp(s)
+
+  const totalSeconds = Math.floor(s)
+  const secs = totalSeconds % 60
+
+  // If duration shows hours, always show hours for current time too (H:MM:SS).
+  if (d >= 3600) {
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+  }
+
+  // Duration is MM:SS, so keep current time as MM:SS (pad minutes to 2 digits).
+  const minutes = Math.floor(totalSeconds / 60)
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
 
 interface VideoPlayerProps {
   videos: Video[]
@@ -83,6 +104,7 @@ export default function VideoPlayer({
   const [showPosterOverlay, setShowPosterOverlay] = useState(true)
 
   const [canShowTimelineHover, setCanShowTimelineHover] = useState(true)
+  const [isMobileViewport, setIsMobileViewport] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -143,6 +165,22 @@ export default function VideoPlayer({
     update()
 
     // Safari < 14 uses addListener/removeListener
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', update)
+      return () => mql.removeEventListener('change', update)
+    }
+
+    mql.addListener(update)
+    return () => mql.removeListener(update)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mql = window.matchMedia('(max-width: 639px)')
+    const update = () => setIsMobileViewport(mql.matches)
+    update()
+
     if (typeof mql.addEventListener === 'function') {
       mql.addEventListener('change', update)
       return () => mql.removeEventListener('change', update)
@@ -279,12 +317,12 @@ export default function VideoPlayer({
   const timelineCommentMarkers = useMemo(() => {
     const duration = effectiveDurationSeconds
     if (!selectedVideo?.id || !duration || duration <= 0) {
-      return [] as Array<{ id: string; seconds: number; isInternal: boolean; displayColor?: string | null }>
+      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }>
     }
 
     const fps = (selectedVideo as any)?.fps || 24
 
-    const markers: Array<{ id: string; seconds: number; isInternal: boolean; displayColor?: string | null }> = []
+    const markers: Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }> = []
     // Only show markers for top-level comments.
     // Replies are nested and should not create their own timeline markers.
     for (const comment of commentsForTimeline || []) {
@@ -301,7 +339,10 @@ export default function VideoPlayer({
           id: String(comment.id),
           seconds: clamped,
           isInternal: Boolean((comment as any).isInternal),
+          replyCount: Array.isArray((comment as any).replies) ? (comment as any).replies.length : 0,
           displayColor: (comment as any).displayColor || null,
+          authorName: (comment as any).authorName || null,
+          authorEmail: (comment as any).authorEmail || null,
         })
       } catch {
         // ignore invalid timecodes
@@ -1191,7 +1232,7 @@ export default function VideoPlayer({
         {/* Custom Controls + Timeline (enables hover thumbnails) */}
         <div className="relative flex-shrink-0">
           <div
-            className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+            className="flex flex-col gap-2 pt-4 sm:pt-0 sm:flex-row sm:items-center sm:gap-3"
             onPointerDownCapture={handleControlsPointerDownCapture}
           >
             {/* Desktop/tablet: left controls */}
@@ -1207,7 +1248,8 @@ export default function VideoPlayer({
               </Button>
 
               <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
+                {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
+                {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
               </div>
             </div>
 
@@ -1282,16 +1324,29 @@ export default function VideoPlayer({
                   <div className="absolute inset-0 z-10">
                     {timelineCommentMarkers.map((m) => {
                       const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
-                      const markerColorClass = m.displayColor
-                        ? ''
-                        : (m.isInternal ? 'bg-foreground' : 'bg-muted-foreground')
-                      const markerStyle = m.displayColor ? { backgroundColor: m.displayColor } : undefined
+                      const avatarColor = m.displayColor || (m.isInternal ? '#0f172a' : '#64748b')
+                      const avatarName = (m.authorName || '').trim() || (m.isInternal ? 'Admin' : 'Client')
+
+                      const position = (() => {
+                        // On mobile, clamp markers at the edges so the circle never renders off-screen.
+                        if (!isMobileViewport) {
+                          return { left: `${leftPct}%`, transform: 'translate(-50%, -50%)' }
+                        }
+                        if (leftPct <= 2) {
+                          return { left: '0%', transform: 'translate(0%, -50%)' }
+                        }
+                        if (leftPct >= 98) {
+                          return { left: '100%', transform: 'translate(-100%, -50%)' }
+                        }
+                        return { left: `${leftPct}%`, transform: 'translate(-50%, -50%)' }
+                      })()
+
                       return (
                         <button
                           key={m.id}
                           type="button"
-                          className="absolute -top-3 h-8 w-4 bg-transparent focus:outline-none"
-                          style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
+                          className="absolute top-1/2 bg-transparent opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100 active:opacity-100 focus-visible:outline-none"
+                          style={position}
                           title="Jump to comment"
                           aria-label="Jump to comment"
                           onPointerEnter={(e) => {
@@ -1344,14 +1399,23 @@ export default function VideoPlayer({
                             e.stopPropagation()
                           }}
                         >
-                          <span
-                            className={`absolute left-1/2 top-0 h-8 w-0.5 -translate-x-1/2 ${markerColorClass}`}
-                            style={markerStyle}
-                          />
-                          <span
-                            className={`absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${markerColorClass}`}
-                            style={markerStyle}
-                          />
+                          <span className="relative block">
+                            <InitialsAvatar
+                              name={avatarName}
+                              email={m.authorEmail || null}
+                              displayColor={avatarColor}
+                              className="h-[30px] w-[30px] sm:h-[24px] sm:w-[24px] text-[10px] sm:text-[9px] ring-2"
+                            />
+
+                            {m.replyCount > 0 ? (
+                              <span
+                                className="absolute -top-1 -right-1 grid h-4 w-4 sm:h-3.5 sm:w-3.5 place-items-center rounded-full bg-white text-[10px] sm:text-[9px] font-semibold text-black border border-black"
+                                title={`${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}`}
+                              >
+                                {m.replyCount}
+                              </span>
+                            ) : null}
+                          </span>
                         </button>
                       )
                     })}
@@ -1408,7 +1472,7 @@ export default function VideoPlayer({
                         />
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
-                        {formatTimestamp(timelineHover.timeSeconds)}
+                        {formatTimestampForDuration(timelineHover.timeSeconds, effectiveDurationSeconds)}
                       </div>
                     </>
                   )}
@@ -1550,7 +1614,8 @@ export default function VideoPlayer({
                 </Button>
 
                 <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                  {formatTimestamp(currentTimeSeconds)} / {formatTimestamp(durationSeconds || (selectedVideo as any)?.duration || 0)}
+                  {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
+                  {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
                 </div>
               </div>
 

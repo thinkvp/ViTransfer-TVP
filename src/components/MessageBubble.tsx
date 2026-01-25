@@ -5,6 +5,7 @@ import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download } f
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import DOMPurify from 'dompurify'
 import { CommentFileDisplay } from './FileDisplay'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 let domPurifyConfigured = false
 
@@ -66,6 +67,10 @@ interface MessageBubbleProps {
   onDeleteReply?: (replyId: string) => void
   canDeleteReply?: (reply: Comment) => boolean
   onDownloadCommentFile?: (commentId: string, fileId: string, fileName: string) => Promise<void>
+
+  // UI options
+  showAuthorAvatar?: boolean
+  showColorEdge?: boolean
 }
 
 /**
@@ -106,6 +111,8 @@ export default function MessageBubble({
   onDeleteReply,
   canDeleteReply,
   onDownloadCommentFile,
+  showAuthorAvatar = false,
+  showColorEdge = true,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
 
@@ -124,6 +131,9 @@ export default function MessageBubble({
   const fallbackBorderColorClass = comment.isInternal ? 'border-l-foreground' : 'border-l-muted-foreground'
   const displayColor = (comment as any)?.displayColor as string | null | undefined
 
+  const avatarName = effectiveAuthorName || 'Anonymous'
+  const avatarEmail = (comment as any)?.authorEmail as string | null | undefined
+
   const textColor = 'text-foreground'
 
   const handleTimestampClick = () => {
@@ -140,14 +150,28 @@ export default function MessageBubble({
       <div className="w-full">
         <div
           data-comment-block
-          className={`bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`}
-          style={displayColor ? { borderLeftColor: displayColor } : undefined}
+          className={
+            showColorEdge
+              ? `bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`
+              : 'bg-card border border-border rounded-lg p-3'
+          }
+          style={showColorEdge && displayColor ? { borderLeftColor: displayColor } : undefined}
         >
           {/* Header row: name left, time right */}
           <div className="flex items-start justify-between gap-3 mb-2">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-foreground truncate">
-                {effectiveAuthorName || 'Anonymous'}
+              <div className="flex items-center gap-2 min-w-0">
+                {showAuthorAvatar ? (
+                  <InitialsAvatar
+                    name={avatarName}
+                    email={avatarEmail}
+                    displayColor={displayColor || null}
+                    className="h-6 w-6 text-[10px] ring-2"
+                  />
+                ) : null}
+                <div className="text-sm font-semibold text-foreground truncate">
+                  {effectiveAuthorName || 'Anonymous'}
+                </div>
               </div>
             </div>
             <div className="text-xs text-muted-foreground whitespace-nowrap">
@@ -244,6 +268,10 @@ export default function MessageBubble({
                         ((reply as any).user.name || (reply as any).user.email) :
                         null)
 
+                    const replyDisplayColor = (reply as any)?.displayColor as string | null | undefined
+                    const replyAvatarName = replyEffectiveName || 'Anonymous'
+                    const replyAvatarEmail = (reply as any)?.authorEmail as string | null | undefined
+
                     const replyDeletable = onDeleteReply && (!canDeleteReply || canDeleteReply(reply))
 
                     return (
@@ -251,6 +279,14 @@ export default function MessageBubble({
                         <div className="flex items-start justify-between gap-3 mb-1">
                           <div className="flex items-center gap-2 min-w-0">
                             <CornerDownRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                            {showAuthorAvatar ? (
+                              <InitialsAvatar
+                                name={replyAvatarName}
+                                email={replyAvatarEmail}
+                                displayColor={replyDisplayColor || null}
+                                className="h-5 w-5 text-[9px] ring-2"
+                              />
+                            ) : null}
                             <span className="text-xs font-semibold text-foreground truncate">
                               {replyEffectiveName || 'Anonymous'}
                             </span>

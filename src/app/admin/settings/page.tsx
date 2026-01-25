@@ -9,6 +9,7 @@ import { DomainConfigurationSection } from '@/components/settings/DomainConfigur
 import { EmailSettingsSection } from '@/components/settings/EmailSettingsSection'
 import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
 import { ProjectBehaviorSection } from '@/components/settings/ProjectBehaviorSection'
+import { DeveloperToolsSection } from '@/components/settings/DeveloperToolsSection'
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
@@ -218,6 +219,7 @@ export default function GlobalSettingsPage() {
   const [showCompanyBranding, setShowCompanyBranding] = useState(false)
   const [showDomainConfiguration, setShowDomainConfiguration] = useState(false)
   const [showEmailSettings, setShowEmailSettings] = useState(false)
+  const [showDeveloperTools, setShowDeveloperTools] = useState(false)
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
@@ -847,11 +849,16 @@ export default function GlobalSettingsPage() {
             setAutoCloseApprovedProjectsEnabled={setAutoCloseApprovedProjectsEnabled}
             autoCloseApprovedProjectsAfterDays={autoCloseApprovedProjectsAfterDays}
             setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
+            show={showProjectBehavior}
+            setShow={setShowProjectBehavior}
+          />
+
+          <DeveloperToolsSection
             onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
             recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
             recalculateProjectDataTotalsResult={recalcProjectDataResult}
-            show={showProjectBehavior}
-            setShow={setShowProjectBehavior}
+            show={showDeveloperTools}
+            setShow={setShowDeveloperTools}
           />
 
           <PushNotificationsSection
