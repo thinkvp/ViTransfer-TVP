@@ -17,6 +17,8 @@ import { sumLineItemsSubtotal, sumLineItemsTax } from '../lib/sales/money'
 import { calcStripeGrossUpCents } from '../lib/sales/stripe-fees'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '../lib/sales/db-mappers'
 
+const DEBUG_SALES_REMINDERS = process.env.DEBUG_SALES_REMINDERS === 'true'
+
 function parseYmd(value: unknown): Date | null {
   const s = typeof value === 'string' ? value.trim() : ''
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
@@ -142,6 +144,15 @@ export async function processSalesReminders() {
     : 3
 
   if (!overdueEnabled && !quoteExpiryEnabled) return
+
+  const debugSkip = (kind: 'INVOICE' | 'QUOTE', doc: any, reason: string) => {
+    if (!DEBUG_SALES_REMINDERS) return
+    const id = typeof doc?.id === 'string' ? doc.id : ''
+    const number = kind === 'INVOICE'
+      ? String(doc?.invoiceNumber || '')
+      : String(doc?.quoteNumber || '')
+    console.log(`[SALES][REMINDERS][SKIP] ${kind}`, { id, number, reason })
+  }
 
   const settingsRow = await prisma.salesSettings.upsert({
     where: { id: 'default' },
@@ -327,38 +338,67 @@ export async function processSalesReminders() {
     for (let i = 0; i < invoices.length; i++) {
       const inv: any = invoices[i]
       const enabled = inv?.remindersEnabled !== false
-      if (!enabled) continue
+      if (!enabled) {
+        debugSkip('INVOICE', inv, 'remindersDisabled')
+        continue
+      }
 
-      // Only send reminders for invoices that have been sent and are not paid.
-      const invoiceStatus = typeof inv?.status === 'string' ? inv.status.trim().toUpperCase() : ''
-      if (!['SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(invoiceStatus)) continue
+      // Eligibility is intentionally simple:
+      // - due date exists and is past
+      // - outstanding balance > 0
+      // (We do not depend on the stored status, since invoices may be sent outside the app.)
 
       const dueYmd = typeof inv?.dueDate === 'string' ? inv.dueDate : null
-      if (!dueYmd) continue
+      if (!dueYmd) {
+        debugSkip('INVOICE', inv, 'missingDueDate')
+        continue
+      }
 
       const dueDate = parseYmd(dueYmd)
-      if (!dueDate) continue
+      if (!dueDate) {
+        debugSkip('INVOICE', inv, `invalidDueDate(${String(dueYmd)})`)
+        continue
+      }
 
       // Must be overdue now
-      if (now.getTime() <= endOfDayLocal(dueDate).getTime()) continue
+      if (now.getTime() <= endOfDayLocal(dueDate).getTime()) {
+        debugSkip('INVOICE', inv, 'notOverdueYet')
+        continue
+      }
 
       const totalCents = invoiceTotalCents(inv as SalesInvoice, settings)
       const paidStripe = stripePaidByInvoiceId[String(inv.id)]?.paidCents ?? 0
       const paidManual = manualPaidByInvoiceId[String(inv.id)]?.paidCents ?? 0
       const paidCents = Math.max(0, Math.trunc(paidStripe + paidManual))
       const outstandingCents = Math.max(0, Math.trunc(totalCents - paidCents))
-      if (outstandingCents <= 0) continue
+      if (outstandingCents <= 0) {
+        debugSkip('INVOICE', inv, 'noOutstandingBalance')
+        continue
+      }
 
       const triggerYmd = addBusinessDaysYmd(dueYmd, overdueDays)
-      if (!triggerYmd || triggerYmd !== today) continue
+      if (!triggerYmd) {
+        debugSkip('INVOICE', inv, 'triggerDateCalcFailed')
+        continue
+      }
+      if (triggerYmd !== today) {
+        debugSkip('INVOICE', inv, `notTriggerDay(trigger=${triggerYmd},today=${today})`)
+        continue
+      }
 
       if (typeof inv?.lastOverdueReminderSentYmd === 'string' && inv.lastOverdueReminderSentYmd === today) continue
 
       const clientId = typeof inv?.clientId === 'string' ? inv.clientId : ''
-      if (!clientId) continue
+      if (!clientId) {
+        debugSkip('INVOICE', inv, 'missingClientId')
+        continue
+      }
 
       const recipientEmails = await getRecipientEmailsForClient(clientId)
-      if (!recipientEmails.length) continue
+      if (!recipientEmails.length) {
+        debugSkip('INVOICE', inv, 'noRecipientsWithSalesReminders')
+        continue
+      }
 
       const client = await prisma.client.findFirst({
         where: { id: clientId, deletedAt: null },
