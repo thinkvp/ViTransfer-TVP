@@ -141,7 +141,6 @@ export async function POST(request: NextRequest) {
     }
 
     let created = 0
-    let updated = 0
     let skipped = 0
 
     for (const inv of all) {
@@ -155,6 +154,13 @@ export async function POST(request: NextRequest) {
         where: { qboId },
         select: { id: true },
       })
+
+      // Match daily pull semantics: we only store NEW imports.
+      // Existing imports are treated as skipped (no update/write).
+      if (existing) {
+        skipped += 1
+        continue
+      }
 
       const data = {
         qboId,
@@ -170,14 +176,17 @@ export async function POST(request: NextRequest) {
         raw: inv,
       }
 
-      await (prisma as any).quickBooksInvoiceImport.upsert({
-        where: { qboId },
-        create: data,
-        update: data,
-      })
-
-      if (existing) updated += 1
-      else created += 1
+      try {
+        await (prisma as any).quickBooksInvoiceImport.create({ data })
+        created += 1
+      } catch (e: any) {
+        // If another pull created it concurrently, count as skipped.
+        if (e?.code === 'P2002') {
+          skipped += 1
+          continue
+        }
+        throw e
+      }
     }
 
     const customerQboIds = Array.from(
@@ -254,7 +263,7 @@ export async function POST(request: NextRequest) {
       refreshTokenPersisted: auth.refreshTokenPersisted,
       lookbackDays,
       fetched: all.length,
-      stored: { created, updated, skipped },
+      stored: { created, updated: 0, skipped },
       native: {
         invoices: nativeInvoices,
       },

@@ -133,7 +133,6 @@ export async function POST(request: NextRequest) {
     }
 
     let created = 0
-    let updated = 0
     let skipped = 0
     let skippedUnmatchedInvoice = 0
     let appliedLinksCreated = 0
@@ -240,6 +239,14 @@ export async function POST(request: NextRequest) {
         select: { id: true },
       })
 
+      // Match daily pull semantics: we only store NEW imports.
+      // Existing imports are treated as skipped (no update/write), and we do not
+      // rewrite applied-invoice links.
+      if (existing) {
+        skipped += 1
+        continue
+      }
+
       const data = {
         qboId,
         txnDate: parseQboDate(p?.TxnDate),
@@ -252,25 +259,28 @@ export async function POST(request: NextRequest) {
         raw: p,
       }
 
-      const saved = await (prisma as any).quickBooksPaymentImport.upsert({
-        where: { qboId },
-        create: data,
-        update: data,
-        select: { id: true },
-      })
-
-      if (existing) updated += 1
-      else created += 1
-
-      await (prisma as any).quickBooksPaymentAppliedInvoice.deleteMany({
-        where: { paymentImportId: saved.id },
-      })
+      let savedId: string
+      try {
+        const saved = await (prisma as any).quickBooksPaymentImport.create({
+          data,
+          select: { id: true },
+        })
+        savedId = saved.id
+        created += 1
+      } catch (e: any) {
+        // If another pull created it concurrently, count as skipped.
+        if (e?.code === 'P2002') {
+          skipped += 1
+          continue
+        }
+        throw e
+      }
 
       for (const row of appliedMatched) {
         const invoiceImportId = invoiceImportIdByQboId.get(row.invoiceQboId) ?? null
         await (prisma as any).quickBooksPaymentAppliedInvoice.create({
           data: {
-            paymentImportId: saved.id,
+            paymentImportId: savedId,
             invoiceQboId: row.invoiceQboId,
             invoiceImportId,
             amount: row.amount,
@@ -314,7 +324,7 @@ export async function POST(request: NextRequest) {
       refreshTokenPersisted: auth.refreshTokenPersisted,
       lookbackDays,
       fetched: all.length,
-      stored: { created, updated, skipped, skippedUnmatchedInvoice, appliedInvoiceLinks: appliedLinksCreated },
+      stored: { created, updated: 0, skipped, skippedUnmatchedInvoice, appliedInvoiceLinks: appliedLinksCreated },
       native: {
         payments: nativePayments,
         omittedMissingAmount: nativeOmittedMissingAmount,
