@@ -5,6 +5,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
+import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -118,6 +119,20 @@ export async function POST(request: NextRequest) {
         createdByUserId: authResult.id,
       },
     })
+
+    // Create the public sales share token immediately so Views & Tracking
+    // is available even before the first email is sent.
+    try {
+      await upsertSalesDocumentShareForDoc(tx as any, {
+        type: 'INVOICE',
+        doc: salesInvoiceFromDb(row as any),
+        clientId: row.clientId,
+        projectId: row.projectId,
+      })
+    } catch (e) {
+      // Best-effort; do not block invoice creation.
+      console.error('[SALES] Failed to create invoice share token:', e)
+    }
 
     return row
   })

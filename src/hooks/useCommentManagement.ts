@@ -10,6 +10,7 @@ import { getAccessToken } from '@/lib/token-store'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
+  authorType?: 'USER' | 'RECIPIENT' | 'ANONYMOUS'
 }
 
 interface UseCommentManagementProps {
@@ -401,6 +402,7 @@ export function useCommentManagement({
       authorEmail: isAdminContext ? null : (clientEmail || null),
       isInternal: isInternalComment,
       recipientId: isAdminContext ? null : (recipientId || null),
+      authorType: isAdminContext ? 'USER' : (recipientId ? 'RECIPIENT' : 'ANONYMOUS'),
       displayColorSnapshot: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -603,8 +605,13 @@ export function useCommentManagement({
         return
       }
 
-      if (targetComment.isInternal) {
-        alert('Only client comments can be deleted.')
+      const canClientDeleteThis =
+        targetComment?.authorType
+          ? targetComment.authorType === 'RECIPIENT'
+          : !targetComment.isInternal
+
+      if (!canClientDeleteThis) {
+        alert('Only recipient comments can be deleted.')
         return
       }
 

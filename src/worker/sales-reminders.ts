@@ -6,6 +6,7 @@ import {
   emailCardStyle,
   emailPrimaryButtonStyle,
   escapeHtml,
+  firstWordName,
   getEmailSettings,
   renderEmailShell,
   sendEmail,
@@ -257,21 +258,25 @@ export async function processSalesReminders() {
 
   void today
 
-  async function getRecipientEmailsForClient(clientId: string): Promise<string[]> {
+  async function getRecipientContactsForClient(clientId: string): Promise<Array<{ email: string; name: string | null }>> {
     const list = await (prisma as any).clientRecipient
       .findMany({
         where: { clientId, receiveSalesReminders: true },
-        select: { email: true },
+        select: { email: true, name: true },
       })
       .catch(() => [])
 
-    const set = new Set<string>()
+    const byEmail = new Map<string, { email: string; name: string | null }>()
     for (const r of list) {
-      const e = (typeof r?.email === 'string' ? r.email : '').trim()
-      if (e.includes('@')) set.add(e)
+      const email = (typeof r?.email === 'string' ? r.email : '').trim()
+      if (!email.includes('@')) continue
+      if (byEmail.has(email.toLowerCase())) continue
+
+      const name = typeof r?.name === 'string' ? r.name.trim() : ''
+      byEmail.set(email.toLowerCase(), { email, name: name || null })
     }
 
-    return Array.from(set)
+    return Array.from(byEmail.values())
   }
 
   async function upsertSalesShare(input: {
@@ -394,8 +399,8 @@ export async function processSalesReminders() {
         continue
       }
 
-      const recipientEmails = await getRecipientEmailsForClient(clientId)
-      if (!recipientEmails.length) {
+      const recipientContacts = await getRecipientContactsForClient(clientId)
+      if (!recipientContacts.length) {
         debugSkip('INVOICE', inv, 'noRecipientsWithSalesReminders')
         continue
       }
@@ -446,6 +451,11 @@ export async function processSalesReminders() {
       const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
       const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
+      const greeting = (email: string, name: string | null) => {
+        const fallback = email.split('@')[0] || 'there'
+        return firstWordName(name) || firstWordName(fallback) || fallback
+      }
+
       const html = renderEmailShell({
         companyName,
         companyLogoUrl,
@@ -456,7 +466,7 @@ export async function processSalesReminders() {
         appDomain: emailSettings.appDomain || appBaseUrl,
         bodyContent: `
           <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
-            Hi,
+            Hi <strong>${escapeHtml(greeting(recipientContacts[0]?.email || '', recipientContacts[0]?.name ?? null))}</strong>,
           </p>
 
           <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
@@ -491,7 +501,9 @@ export async function processSalesReminders() {
       let sentAny = false
 
       // Send individually so we can track each recipient in SalesEmailTracking.
-      for (const toEmail of recipientEmails) {
+      for (const r of recipientContacts) {
+        const toEmail = r.email
+        const helloName = greeting(r.email, r.name)
         const trackingToken = randomToken()
         const htmlTracked = renderEmailShell({
           companyName,
@@ -505,7 +517,7 @@ export async function processSalesReminders() {
           appDomain: emailSettings.appDomain || appBaseUrl,
           bodyContent: `
             <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
-              Hi,
+              Hi <strong>${escapeHtml(helloName)}</strong>,
             </p>
 
             <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
@@ -604,8 +616,8 @@ export async function processSalesReminders() {
       const clientId = typeof q?.clientId === 'string' ? q.clientId : ''
       if (!clientId) continue
 
-      const recipientEmails = await getRecipientEmailsForClient(clientId)
-      if (!recipientEmails.length) continue
+      const recipientContacts = await getRecipientContactsForClient(clientId)
+      if (!recipientContacts.length) continue
 
       const client = await prisma.client.findFirst({
         where: { id: clientId, deletedAt: null },
@@ -654,7 +666,14 @@ export async function processSalesReminders() {
 
       let sentAny = false
 
-      for (const toEmail of recipientEmails) {
+      const greeting = (email: string, name: string | null) => {
+        const fallback = email.split('@')[0] || 'there'
+        return firstWordName(name) || firstWordName(fallback) || fallback
+      }
+
+      for (const r of recipientContacts) {
+        const toEmail = r.email
+        const helloName = greeting(r.email, r.name)
         const trackingToken = randomToken()
         const htmlTracked = renderEmailShell({
           companyName,
@@ -668,7 +687,7 @@ export async function processSalesReminders() {
           appDomain: emailSettings.appDomain || appBaseUrl,
           bodyContent: `
             <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
-              Hi,
+              Hi <strong>${escapeHtml(helloName)}</strong>,
             </p>
 
             <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">

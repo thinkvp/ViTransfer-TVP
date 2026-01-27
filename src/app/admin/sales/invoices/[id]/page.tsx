@@ -242,7 +242,7 @@ export default function InvoiceDetailPage() {
       try {
         const res = await apiFetch(`/api/admin/sales/share-token?docType=INVOICE&docId=${encodeURIComponent(id)}`, { cache: 'no-store' })
         if (!res.ok) return
-        const json = (await res.json()) as { token: string | null }
+        const json = (await res.json()) as { token?: string | null }
         if (!cancelled) setShareToken(typeof json?.token === 'string' ? json.token : null)
       } catch {
         // ignore

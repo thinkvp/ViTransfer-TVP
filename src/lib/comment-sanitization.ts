@@ -50,6 +50,16 @@ export function sanitizeComment(
 ) {
   const normalizedTimecode = normalizeTimecode(comment)
 
+  // Non-PII author classification for UI permissions.
+  // - USER: created by an authenticated admin user (may be internal or share-visible)
+  // - RECIPIENT: created by a project recipient (share page)
+  // - ANONYMOUS: legacy/unlinked client comment
+  const authorType: 'USER' | 'RECIPIENT' | 'ANONYMOUS' = comment?.userId
+    ? 'USER'
+    : comment?.recipientId
+      ? 'RECIPIENT'
+      : 'ANONYMOUS'
+
   const sanitized: any = {
     id: comment.id,
     projectId: comment.projectId,
@@ -58,6 +68,7 @@ export function sanitizeComment(
     timecode: normalizedTimecode,
     content: comment.content,
     isInternal: comment.isInternal,
+    authorType,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     parentId: comment.parentId,

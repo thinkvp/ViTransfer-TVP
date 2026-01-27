@@ -439,7 +439,7 @@ export function SecuritySettingsSection({
                 Client Session Timeout
               </Label>
               <p className="text-xs text-muted-foreground mt-1">
-                Configure how long client share sessions stay active. Admin sessions always use 15 minutes with auto-refresh.
+                Configure how long client share sessions stay active. Admin sessions always use 30 minutes with auto-refresh.
               </p>
             </div>
 

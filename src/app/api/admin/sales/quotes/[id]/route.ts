@@ -5,6 +5,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
+import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -112,6 +113,19 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
           createdByUserId: authResult.id,
         },
       })
+
+      // Keep the public sales share snapshot in sync with edits.
+      try {
+        await upsertSalesDocumentShareForDoc(tx as any, {
+          type: 'QUOTE',
+          doc: salesQuoteFromDb(next as any),
+          clientId: next.clientId,
+          projectId: next.projectId,
+          quoteValidUntilYmd: next.validUntil,
+        })
+      } catch {
+        // Best-effort; do not block quote edits.
+      }
 
       return { conflict: false, row: next }
     })

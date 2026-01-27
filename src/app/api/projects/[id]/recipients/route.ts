@@ -13,6 +13,7 @@ export const runtime = 'nodejs'
 const addRecipientSchema = z.object({
   email: z.string().email('Invalid email format').nullable().optional(),
   name: z.string().nullable().optional(),
+  clientRecipientId: z.string().nullable().optional(),
   displayColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid display colour').nullable().optional(),
   alsoAddToClient: z.boolean().optional(),
   isPrimary: z.boolean().optional().default(false)
@@ -108,10 +109,10 @@ export async function POST(
       )
     }
 
-    const { email, name = null, isPrimary = false, displayColor = null, alsoAddToClient = false } = validation.data
+    const { email, name = null, isPrimary = false, displayColor = null, alsoAddToClient = false, clientRecipientId = null } = validation.data
 
     // Add recipient
-    const recipient = await addRecipient(projectId, email, name, isPrimary, displayColor, alsoAddToClient)
+    const recipient = await addRecipient(projectId, email, name, isPrimary, displayColor, alsoAddToClient, clientRecipientId)
 
     return NextResponse.json({ recipient }, { status: 201 })
   } catch (error: any) {

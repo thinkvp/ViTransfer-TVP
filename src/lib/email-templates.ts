@@ -3,7 +3,7 @@
  * Clean, minimal, and easy to scan
  */
 
-import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, escapeHtml, renderEmailShell } from './email'
+import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, escapeHtml, firstWordName, renderEmailShell } from './email'
 import { formatTimecodeDisplay } from './timecode'
 
 interface NotificationData {
@@ -68,9 +68,10 @@ function formatTimecodeForEmail(timecode: string | null | undefined, useFullTime
  * Client notification summary
  */
 export function generateNotificationSummaryEmail(data: NotificationSummaryData): string {
-  const greeting = data.recipientName !== data.recipientEmail
+  const rawGreeting = data.recipientName !== data.recipientEmail
     ? data.recipientName
     : 'there'
+  const greeting = firstWordName(rawGreeting) || rawGreeting
 
   // Count notification types
   const commentCount = data.notifications.filter(n => n.type === 'CLIENT_COMMENT' || n.type === 'ADMIN_REPLY').length
@@ -158,7 +159,8 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
  * Admin summary - multi-project
  */
 export function generateAdminSummaryEmail(data: AdminSummaryData): string {
-  const greeting = data.adminName ? data.adminName : 'there'
+  const rawGreeting = data.adminName ? data.adminName : 'there'
+  const greeting = firstWordName(rawGreeting) || rawGreeting
   const totalComments = data.projects.reduce((sum, p) => sum + p.notifications.length, 0)
   const projectCount = data.projects.length
 
@@ -230,7 +232,8 @@ export interface InternalCommentSummaryEmailData {
 }
 
 export function generateInternalCommentSummaryEmail(data: InternalCommentSummaryEmailData): string {
-  const greeting = data.recipientName ? data.recipientName : 'there'
+  const rawGreeting = data.recipientName ? data.recipientName : 'there'
+  const greeting = firstWordName(rawGreeting) || rawGreeting
   const total = data.projects.reduce((sum, p) => sum + p.comments.length, 0)
   const projectCount = data.projects.length
 
@@ -295,7 +298,8 @@ export interface ProjectInviteInternalUsersEmailData {
 }
 
 export function generateProjectInviteInternalUsersEmail(data: ProjectInviteInternalUsersEmailData): string {
-  const greeting = data.recipientName ? data.recipientName : 'there'
+  const rawGreeting = data.recipientName ? data.recipientName : 'there'
+  const greeting = firstWordName(rawGreeting) || rawGreeting
   const notes = (data.notes || '').trim()
   const attachments = Array.isArray(data.attachments) ? data.attachments : []
 

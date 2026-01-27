@@ -1093,9 +1093,15 @@ export function CommentSectionView({
                 const isViewerMessage = isAdminView ? comment.isInternal : !comment.isInternal
                 const hasReplies = comment.replies && comment.replies.length > 0
                 const repliesExpanded = expandedReplies[comment.id] ?? true // Default to expanded
-                const canDeleteParent = canAdminDelete || (canClientDelete && !comment.isInternal)
+                const isRecipientAuthored = (c: any) => {
+                  if (c?.authorType) return c.authorType === 'RECIPIENT'
+                  // Back-compat fallback (less strict): only non-internal.
+                  return !c?.isInternal
+                }
+
+                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment))
                 const allowAnyReplyDelete = canAdminDelete || canClientDelete
-                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && !reply.isInternal)
+                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply))
 
                 return (
                   <div key={comment.id}>

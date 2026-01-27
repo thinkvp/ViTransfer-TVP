@@ -30,7 +30,7 @@ export const dynamic = 'force-dynamic'
  *    - Mitigates token theft impact
  *
  * 4. SHORT-LIVED ACCESS TOKENS
- *    - Access token: 15 minutes
+ *    - Access token: 30 minutes
  *    - Refresh token: 3 days
  *    - Limits exposure window
  *

@@ -167,7 +167,7 @@ export async function getSafeguardLimits(): Promise<SafeguardLimits> {
  * - Video access token TTL
  * - Redis session mappings for content streaming
  *
- * NOT used for admin JWT sessions (those stay fixed at 15 min with auto-refresh)
+ * NOT used for admin JWT sessions (those stay fixed at 30 min with auto-refresh)
  */
 export async function getClientSessionTimeoutSeconds(): Promise<number> {
   const now = Date.now()

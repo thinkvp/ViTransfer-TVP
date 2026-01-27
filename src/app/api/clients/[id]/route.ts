@@ -18,6 +18,11 @@ const recipientSchema = z.object({
   receiveSalesReminders: z.boolean().optional(),
 })
 
+function normalizeEmail(email: unknown): string | null {
+  const value = (typeof email === 'string' ? email : '').trim().toLowerCase()
+  return value ? value : null
+}
+
 const updateClientSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   address: z.string().trim().max(500).nullable().optional(),
@@ -137,8 +142,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const recipientsInput = parsed.data.recipients
       ? parsed.data.recipients.map((r) => ({
+          id: r.id ? String(r.id) : undefined,
           name: r.name ?? null,
-          email: r.email ?? null,
+          email: normalizeEmail(r.email),
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: r.receiveNotifications !== false,
@@ -178,30 +184,110 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           }
         }
 
-        await tx.clientRecipient.deleteMany({ where: { clientId: id } })
-        if (normalized.length > 0) {
-          await tx.clientRecipient.createMany({
-            data: normalized.map((r) => ({ ...r, clientId: id })),
-          })
+        const existingRecipients = await tx.clientRecipient.findMany({
+          where: { clientId: id },
+          select: { id: true, email: true },
+        })
+
+        const existingById = new Map(existingRecipients.map((r: any) => [String(r.id), r]))
+        const existingByEmail = new Map(
+          existingRecipients
+            .filter((r: any) => normalizeEmail(r.email))
+            .map((r: any) => [normalizeEmail(r.email) as string, String(r.id)])
+        )
+
+        const keepIds = new Set<string>()
+        const toCreate: Array<any> = []
+
+        for (const r of normalized) {
+          // Prefer explicit ID; otherwise try to preserve by matching email.
+          let targetId: string | null = r.id && existingById.has(r.id) ? r.id : null
+          if (!targetId && r.email) {
+            const byEmail = existingByEmail.get(r.email)
+            if (byEmail) targetId = byEmail
+          }
+
+          if (targetId) {
+            keepIds.add(targetId)
+            await tx.clientRecipient.update({
+              where: { id: targetId },
+              data: {
+                name: r.name ?? null,
+                email: r.email ?? null,
+                displayColor: r.displayColor ?? null,
+                isPrimary: Boolean(r.isPrimary),
+                receiveNotifications: r.receiveNotifications !== false,
+                receiveSalesReminders: r.receiveSalesReminders !== false,
+              } as any,
+            } as any)
+          } else {
+            toCreate.push({
+              clientId: id,
+              name: r.name ?? null,
+              email: r.email ?? null,
+              displayColor: r.displayColor ?? null,
+              isPrimary: Boolean(r.isPrimary),
+              receiveNotifications: r.receiveNotifications !== false,
+              receiveSalesReminders: r.receiveSalesReminders !== false,
+            })
+          }
         }
 
-        // Keep project recipient colours in sync (best-effort) for this client.
-        // Only matches recipients by email.
-        const projectIds = await tx.project.findMany({
+        // Delete removed recipients
+        if (keepIds.size > 0) {
+          await tx.clientRecipient.deleteMany({
+            where: {
+              clientId: id,
+              id: { notIn: Array.from(keepIds) },
+            },
+          })
+        } else {
+          await tx.clientRecipient.deleteMany({ where: { clientId: id } })
+        }
+
+        // Create new recipients (need IDs back, so do individual creates)
+        const createdRecipients: Array<{ id: string; email: string | null; name: string | null; displayColor: string | null }> = []
+        for (const r of toCreate) {
+          const created = await tx.clientRecipient.create({
+            data: r,
+            select: { id: true, email: true, name: true, displayColor: true },
+          } as any)
+          createdRecipients.push({
+            id: String((created as any).id),
+            email: normalizeEmail((created as any).email),
+            name: (created as any).name ?? null,
+            displayColor: (created as any).displayColor ?? null,
+          })
+          keepIds.add(String((created as any).id))
+        }
+
+        // Keep project recipients in sync for this client.
+        // Prefer stable linkage by clientRecipientId; best-effort fallback by email.
+        const updatedRecipients = await tx.clientRecipient.findMany({
           where: { clientId: id },
-          select: { id: true },
+          select: { id: true, email: true, name: true, displayColor: true },
         })
-        const projectIdList = projectIds.map((p) => p.id)
-        if (projectIdList.length > 0) {
-          for (const r of normalized) {
-            if (!r.email) continue
+
+        for (const r of updatedRecipients as any[]) {
+          const clientRecipientId = String(r.id)
+          const email = normalizeEmail(r.email)
+          const name = r.name ?? null
+          const displayColor = r.displayColor ?? null
+
+          await tx.projectRecipient.updateMany({
+            where: { clientRecipientId },
+            data: { email, name, displayColor } as any,
+          } as any).catch(() => null)
+
+          if (email) {
             await tx.projectRecipient.updateMany({
               where: {
-                projectId: { in: projectIdList },
-                email: r.email,
-              },
-              data: { displayColor: r.displayColor ?? null },
-            })
+                project: { clientId: id },
+                clientRecipientId: null,
+                email,
+              } as any,
+              data: { clientRecipientId, name, displayColor } as any,
+            } as any).catch(() => null)
           }
         }
       }

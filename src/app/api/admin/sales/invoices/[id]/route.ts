@@ -5,6 +5,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
+import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,6 +23,35 @@ const patchSchema = z.object({
   sentAt: z.string().datetime().nullable().optional(),
   remindersEnabled: z.boolean().optional(),
 })
+
+async function computeInvoicePaidAtYmdForExpiry(tx: any, invoiceId: string): Promise<string | null> {
+  const id = String(invoiceId || '').trim()
+  if (!id) return null
+
+  const paymentsAgg = await tx.salesPayment.aggregate({
+    where: { invoiceId: id },
+    _max: { paymentDate: true },
+  }).catch(() => null)
+
+  const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
+    where: { invoiceDocId: id },
+    _max: { createdAt: true },
+  }).catch(() => null)
+
+  const latestLocalYmd = typeof paymentsAgg?._max?.paymentDate === 'string' ? paymentsAgg._max.paymentDate : null
+
+  const stripeCreatedAt = stripeAgg?._max?.createdAt
+  const stripeIso = typeof stripeCreatedAt === 'string'
+    ? stripeCreatedAt
+    : (stripeCreatedAt && typeof (stripeCreatedAt as any).toISOString === 'function' ? (stripeCreatedAt as any).toISOString() : null)
+  const latestStripeYmd = typeof stripeIso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(stripeIso) ? stripeIso.slice(0, 10) : null
+
+  return [latestLocalYmd, latestStripeYmd]
+    .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+    .sort()
+    .at(-1)
+    ?? null
+}
 
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiAdmin(request)
@@ -110,6 +140,24 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
           createdByUserId: authResult.id,
         },
       })
+
+      // Keep the public sales share snapshot in sync with edits.
+      // IMPORTANT: Preserve expiry for paid invoices by deriving paidAt from payment records.
+      try {
+        const invoicePaidAtYmd = next.status === 'PAID'
+          ? await computeInvoicePaidAtYmdForExpiry(tx as any, next.id)
+          : null
+
+        await upsertSalesDocumentShareForDoc(tx as any, {
+          type: 'INVOICE',
+          doc: salesInvoiceFromDb(next as any),
+          clientId: next.clientId,
+          projectId: next.projectId,
+          invoicePaidAtYmd,
+        })
+      } catch {
+        // Best-effort; do not block invoice edits.
+      }
 
       return { conflict: false, row: next }
     })

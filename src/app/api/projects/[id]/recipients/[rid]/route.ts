@@ -12,6 +12,7 @@ export const runtime = 'nodejs'
 const updateRecipientSchema = z.object({
   name: z.string().nullable().optional(),
   email: z.string().email('Invalid email format').nullable().optional(),
+  clientRecipientId: z.string().nullable().optional(),
   displayColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid display colour').nullable().optional(),
   isPrimary: z.boolean().optional(),
   receiveNotifications: z.boolean().optional()

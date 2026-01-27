@@ -252,6 +252,8 @@ export async function DELETE(
       select: {
         id: true,
         isInternal: true,
+        userId: true,
+        recipientId: true,
         projectId: true,
         project: {
           select: {
@@ -335,9 +337,28 @@ export async function DELETE(
         )
       }
 
+      // SECURITY: Clients must NEVER be able to delete admin/user-authored comments.
+      // The only exception is implicit: when a client deletes a recipient-authored parent
+      // comment, any admin replies are deleted as a cascade.
+      if (existingComment.userId) {
+        return NextResponse.json(
+          { error: 'Only recipient comments can be deleted by clients' },
+          { status: 403 }
+        )
+      }
+
+      // Restrict client deletions to recipient-authored comments only.
+      // (Legacy anonymous comments without a linked recipient should not be deletable.)
+      if (!existingComment.recipientId) {
+        return NextResponse.json(
+          { error: 'Only recipient comments can be deleted by clients' },
+          { status: 403 }
+        )
+      }
+
       if (existingComment.isInternal) {
         return NextResponse.json(
-          { error: 'Only client comments can be deleted by clients' },
+          { error: 'Only recipient comments can be deleted by clients' },
           { status: 403 }
         )
       }

@@ -11,6 +11,7 @@ import {
   emailCardStyle,
   emailPrimaryButtonStyle,
   escapeHtml,
+  firstWordName,
   getEmailSettings,
   renderEmailShell,
   sendEmail,
@@ -219,7 +220,9 @@ export async function POST(request: NextRequest) {
     const trackingToken = randomToken()
 
     const emailLower = toEmail.toLowerCase()
-    const recipientName = recipientNameByEmail.get(emailLower) || (toEmail.split('@')[0] || 'there')
+    const nameFromDb = recipientNameByEmail.get(emailLower)
+    const fallback = toEmail.split('@')[0] || 'there'
+    const recipientName = firstWordName(nameFromDb) || firstWordName(fallback) || fallback
 
     const introLine = isQuote
       ? 'Please find the attached Quote. You can also view and accept the quote using the link below.'

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { getAccessToken, getRefreshToken, clearTokens } from '@/lib/token-store'
 
-const INACTIVITY_TIMEOUT = 15 * 60 * 1000 // 15 minutes
+const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
 
 export default function SessionMonitor() {

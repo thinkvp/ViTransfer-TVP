@@ -18,6 +18,7 @@ import {
 	renderPasswordEmail,
 	renderProjectApprovedEmail,
 	renderProjectGeneralNotificationEmail,
+	firstWordName,
 	renderEmailShell,
 } from '../src/lib/email'
 
@@ -111,6 +112,7 @@ async function main() {
 		outDir,
 		'05-admin-approval.html',
 		(await renderAdminProjectApprovedEmail({
+			greetingName: 'Morgan',
 			clientName: 'Alex',
 			projectTitle: 'Winter Campaign',
 			approvedVideos: [{ id: 'vid1', name: 'Cut A' }],
@@ -360,7 +362,7 @@ async function main() {
 			</div>
 
 			${notes ? `
-				<div style="${cardStyle}">
+					Hi <strong>${escapeHtml(firstWordName(recipientName) || recipientName)}</strong>,
 					<div style="font-size: 14px; color: #111827; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(notes)}</div>
 				</div>
 			` : ''}

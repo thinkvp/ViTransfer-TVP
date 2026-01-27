@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '@/lib/sales/db-mappers'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
+import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 import type { SalesLineItem, SalesSettings } from '@/lib/sales/types'
 
 function nowIso(): string {
@@ -122,6 +123,18 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
           },
         })
 
+        try {
+          await upsertSalesDocumentShareForDoc(tx as any, {
+            type: 'QUOTE',
+            doc: salesQuoteFromDb(created as any),
+            clientId,
+            projectId: null,
+            quoteValidUntilYmd: created.validUntil,
+          })
+        } catch {
+          // Best-effort; do not block ingest.
+        }
+
         ingested += 1
         continue
       }
@@ -189,6 +202,17 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
             createdByUserId: null,
           },
         })
+
+        try {
+          await upsertSalesDocumentShareForDoc(tx as any, {
+            type: 'INVOICE',
+            doc: salesInvoiceFromDb(created as any),
+            clientId,
+            projectId: null,
+          })
+        } catch {
+          // Best-effort; do not block ingest.
+        }
 
         ingested += 1
         continue

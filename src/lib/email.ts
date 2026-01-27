@@ -115,6 +115,13 @@ function sanitizeEmailHeader(value: string): string {
     .trim()
 }
 
+export function firstWordName(value: unknown): string | null {
+  const s = typeof value === 'string' ? value.trim() : ''
+  if (!s) return null
+  const first = s.split(/\s+/)[0]?.trim()
+  return first ? first : null
+}
+
 export interface EmailShellOptions {
   companyName: string
   title: string
@@ -531,7 +538,7 @@ export async function renderNewVersionEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
@@ -654,7 +661,7 @@ export async function renderNewAlbumReadyEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
@@ -799,7 +806,7 @@ export async function renderProjectApprovedEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
@@ -919,7 +926,7 @@ export async function renderCommentNotificationEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
@@ -1199,7 +1206,7 @@ export async function renderAdminProjectApprovedEmail({
     appDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(greetingName || 'there')}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(greetingName) || greetingName || 'there')}</strong>,
       </p>
 
       <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.5;">
@@ -1337,7 +1344,7 @@ export async function renderAdminInvoicePaidEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin: 0 0 18px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(greetingName || 'there')}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(greetingName) || greetingName || 'there')}</strong>,
       </p>
 
       <div style="${cardStyle}">
@@ -1501,7 +1508,7 @@ export async function renderAdminQuoteAcceptedEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin: 0 0 18px 0; font-size: 16px; color: #111827; line-height: 1.5;">
-        Hi <strong>${escapeHtml(greetingName || 'there')}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(greetingName) || greetingName || 'there')}</strong>,
       </p>
 
       <div style="${cardStyle}">
@@ -1638,7 +1645,7 @@ export async function renderProjectGeneralNotificationEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
       </p>
       <p style="margin:0 0 24px; font-size:15px;">
         Your project is ready for review. Click below to view and leave feedback.
@@ -1988,7 +1995,7 @@ export async function renderPasswordEmail({
     appDomain: resolved.appDomain,
     bodyContent: `
       <p style="margin:0 0 16px; font-size:15px; color:#1f2937; line-height:1.6;">
-        Hi <strong>${escapeHtml(clientName)}</strong>,
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
       </p>
       <p style="margin:0 0 16px; font-size:15px; color:#374151; line-height:1.6;">
         Use this password to access your project.  You should have received a link to the project in a separate email.
