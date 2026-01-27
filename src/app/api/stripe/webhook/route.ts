@@ -26,6 +26,13 @@ function parseIntSafe(v: unknown): number | null {
   return Math.trunc(n)
 }
 
+function formatMoneyWithCurrency(cents: number, currency: string): string {
+  const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : 'AUD'
+  const amount = (cents / 100).toFixed(2)
+  if (cur === 'AUD') return `A$${amount}`
+  return `${cur} ${amount}`
+}
+
 export async function POST(request: NextRequest) {
   const webhookSecret = typeof process.env.STRIPE_WEBHOOK_SECRET === 'string' ? process.env.STRIPE_WEBHOOK_SECRET.trim() : ''
   if (!webhookSecret) {
@@ -169,8 +176,8 @@ export async function POST(request: NextRequest) {
           'Client': clientName || undefined,
           'Project': projectTitle || undefined,
           'Currency': currency,
-          'Amount (invoice)': invoiceAmountCents,
-          'Amount (total)': totalAmountCents,
+          'Amount (invoice)': formatMoneyWithCurrency(invoiceAmountCents, currency),
+          'Amount (total)': formatMoneyWithCurrency(totalAmountCents, currency),
           'Payment Intent': paymentIntentId || undefined,
         },
       }).catch(() => {})
