@@ -162,7 +162,8 @@ export default function ProjectsDashboardKeyDates() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<KeyDatesResponse | null>(null)
-  const [showAllUpcoming, setShowAllUpcoming] = useState(false)
+  const UPCOMING_PAGE_SIZE = 6
+  const [upcomingPage, setUpcomingPage] = useState(0)
 
   const [personalReminderOptions, setPersonalReminderOptions] = useState<{
     users: Array<{ id: string; name: string; email: string }>
@@ -404,10 +405,18 @@ export default function ProjectsDashboardKeyDates() {
       })
   }, [data?.keyDates, data?.personalKeyDates, today])
 
+  const upcomingTotalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(upcoming.length / UPCOMING_PAGE_SIZE))
+  }, [UPCOMING_PAGE_SIZE, upcoming.length])
+
+  useEffect(() => {
+    setUpcomingPage((p) => Math.min(Math.max(0, p), upcomingTotalPages - 1))
+  }, [upcomingTotalPages])
+
   const upcomingVisible = useMemo(() => {
-    if (showAllUpcoming) return upcoming
-    return upcoming.slice(0, 10)
-  }, [showAllUpcoming, upcoming])
+    const start = upcomingPage * UPCOMING_PAGE_SIZE
+    return upcoming.slice(start, start + UPCOMING_PAGE_SIZE)
+  }, [UPCOMING_PAGE_SIZE, upcoming, upcomingPage])
 
   const monthLabel = useMemo(() => {
     return monthCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -926,10 +935,26 @@ export default function ProjectsDashboardKeyDates() {
                 )
               })}
 
-              {upcoming.length > 10 ? (
-                <div className="pt-1">
-                  <Button variant="ghost" size="sm" onClick={() => setShowAllUpcoming((v) => !v)}>
-                    {showAllUpcoming ? 'Show fewer' : `Show all (${upcoming.length.toLocaleString()})`}
+              {upcomingTotalPages > 1 ? (
+                <div className="pt-2 flex items-center justify-between gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
+                    disabled={upcomingPage <= 0}
+                  >
+                    Previous
+                  </Button>
+                  <div className="text-xs text-muted-foreground tabular-nums">
+                    Page {(upcomingPage + 1).toLocaleString()} of {upcomingTotalPages.toLocaleString()}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUpcomingPage((p) => Math.min(upcomingTotalPages - 1, p + 1))}
+                    disabled={upcomingPage >= upcomingTotalPages - 1}
+                  >
+                    Next
                   </Button>
                 </div>
               ) : null}
@@ -979,7 +1004,7 @@ export default function ProjectsDashboardKeyDates() {
                   return (
                     <div
                       key={`${idx}-${cell.ymd || 'empty'}`}
-                      className={`min-h-[64px] rounded-md border border-border p-1.5 overflow-hidden min-w-0 ${
+                      className={`min-h-[72px] rounded-md border border-border p-1.5 overflow-hidden min-w-0 ${
                         isToday ? 'bg-primary/5 border-primary/30' : 'bg-background'
                       }`}
                     >

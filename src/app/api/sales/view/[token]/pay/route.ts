@@ -77,7 +77,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (status === 'PAID') return NextResponse.json({ error: 'Invoice is already paid' }, { status: 400 })
 
   const items = Array.isArray(doc?.items) ? doc.items : []
-  const taxRatePercent = Number((share.settingsJson as any)?.taxRatePercent)
+  const liveSalesSettings = await prisma.salesSettings
+    .upsert({ where: { id: 'default' }, create: { id: 'default' }, update: {}, select: { taxRatePercent: true } })
+    .catch(() => null)
+  const taxRatePercent = Number(liveSalesSettings?.taxRatePercent)
   const defaultTaxRate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
 
   const subtotalCents = sumLineItemsSubtotal(items)

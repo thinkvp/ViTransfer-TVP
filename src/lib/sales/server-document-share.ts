@@ -76,17 +76,12 @@ export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
 
   const client = await (tx as any).client.findFirst({
     where: { id: input.clientId, deletedAt: null },
-    select: { name: true, address: true },
+    select: { name: true },
   }).catch(() => null)
 
   const project = input.projectId
     ? await (tx as any).project.findFirst({ where: { id: input.projectId }, select: { title: true } }).catch(() => null)
     : null
-
-  const clientAddress = typeof client?.address === 'string' && client.address.trim() ? client.address.trim() : null
-  const docSnapshot = clientAddress
-    ? { ...(input.doc as any), clientAddress }
-    : input.doc
 
   const expiresAt = computeExpiresAt({
     type: input.type,
@@ -109,7 +104,7 @@ export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
       type: input.type,
       docId,
       docNumber,
-      docJson: docSnapshot as any,
+      docJson: input.doc as any,
       settingsJson: settingsJson as any,
       clientName: typeof client?.name === 'string' ? client.name : null,
       projectTitle: typeof project?.title === 'string' ? project.title : null,
@@ -118,7 +113,7 @@ export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
     update: {
       token,
       docNumber,
-      docJson: docSnapshot as any,
+      docJson: input.doc as any,
       settingsJson: settingsJson as any,
       clientName: typeof client?.name === 'string' ? client.name : null,
       projectTitle: typeof project?.title === 'string' ? project.title : null,

@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
         status: true,
         dueDate: true,
         itemsJson: true,
-        payments: { select: { amountCents: true } },
+        payments: { where: { excludeFromInvoiceBalance: false }, select: { amountCents: true } },
         client: { select: { name: true } },
         project: { select: { id: true, title: true } },
       },

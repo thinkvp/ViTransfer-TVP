@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import Image from 'next/image'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/db'
+import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
 import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 import PublicSalesDocActions from './public-sales-doc-actions'
@@ -169,7 +170,12 @@ export default async function SalesDocPublicViewPage(
 
   const type = share.type as DocType
   const doc = share.docJson as any
-  const settings = share.settingsJson as any
+
+  const liveSettingsRow = await prisma.salesSettings
+    .upsert({ where: { id: 'default' }, create: { id: 'default' }, update: {} })
+    .catch(() => null)
+  const liveSettings = liveSettingsRow ? salesSettingsFromDb(liveSettingsRow as any) : null
+  const settings = (liveSettings ?? (share.settingsJson as any) ?? {}) as any
 
   const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
     where: { id: 'default' },
@@ -210,6 +216,33 @@ export default async function SalesDocPublicViewPage(
     : (['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'].includes(rawStatus) ? (rawStatus as InvoiceStatus) : null)
   )
 
+  const paidCentsFromDb = type === 'INVOICE'
+    ? await (async () => {
+        const invoiceId = String(share.docId || '').trim()
+        if (!invoiceId) return 0
+
+        const [localAgg, stripeAgg] = await Promise.all([
+          (prisma as any).salesPayment
+            .aggregate({
+              where: { invoiceId, excludeFromInvoiceBalance: false },
+              _sum: { amountCents: true },
+            })
+            .catch(() => null),
+          (prisma as any).salesInvoiceStripePayment
+            .aggregate({
+              where: { invoiceDocId: invoiceId },
+              _sum: { invoiceAmountCents: true },
+            })
+            .catch(() => null),
+        ])
+
+        const local = Number(localAgg?._sum?.amountCents ?? 0)
+        const stripe = Number(stripeAgg?._sum?.invoiceAmountCents ?? 0)
+        const total = (Number.isFinite(local) ? local : 0) + (Number.isFinite(stripe) ? stripe : 0)
+        return Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0
+      })()
+    : 0
+
   const nowMs = Date.now()
 
   const effectiveStatus = (type === 'QUOTE'
@@ -227,12 +260,12 @@ export default async function SalesDocPublicViewPage(
           const invoiceStatus = status as InvoiceStatus
           const totalCentsForStatus = Number.isFinite(totalCents) ? totalCents : 0
 
-          // We don't have payment records in the public snapshot; approximate paid state from status.
+          // Use real payment totals when possible, but preserve manual PAID/PARTIALLY_PAID status.
           const paidCentsForStatus = invoiceStatus === 'PAID'
-            ? totalCentsForStatus
+            ? Math.max(totalCentsForStatus, paidCentsFromDb)
             : invoiceStatus === 'PARTIALLY_PAID'
-              ? 1
-              : 0
+              ? Math.max(1, paidCentsFromDb)
+              : paidCentsFromDb
 
           const baseStatus: InvoiceStatus = invoiceStatus === 'OPEN' || invoiceStatus === 'SENT'
             ? invoiceStatus
@@ -252,21 +285,27 @@ export default async function SalesDocPublicViewPage(
       : null)
   )
 
-  const clientName = share.clientName || 'Client'
-  const projectTitle = share.projectTitle
+  const docClientId = safeString(doc?.clientId).trim()
+  const docProjectId = safeString(doc?.projectId).trim()
 
-  let clientAddress = safeString(doc?.clientAddress)
-  if (!clientAddress) {
-    const clientId = safeString(doc?.clientId)
-    if (clientId) {
-      const client = await prisma.client.findFirst({
-        where: { id: clientId, deletedAt: null },
-        select: { address: true },
-      })
-      clientAddress = typeof client?.address === 'string' ? client.address : ''
-    }
-  }
-  clientAddress = clientAddress.trim()
+  const [liveClient, liveProject] = await Promise.all([
+    docClientId
+      ? prisma.client.findFirst({ where: { id: docClientId, deletedAt: null }, select: { name: true, address: true } }).catch(() => null)
+      : Promise.resolve(null),
+    docProjectId
+      ? prisma.project.findFirst({ where: { id: docProjectId }, select: { title: true } }).catch(() => null)
+      : Promise.resolve(null),
+  ])
+
+  const liveClientName = typeof liveClient?.name === 'string' ? liveClient.name.trim() : ''
+  const liveClientAddress = typeof liveClient?.address === 'string' ? liveClient.address.trim() : ''
+  const liveProjectTitle = typeof liveProject?.title === 'string' ? liveProject.title.trim() : ''
+
+  const clientName = liveClientName || share.clientName || 'Client'
+  const projectTitle = liveProjectTitle || share.projectTitle
+
+  // Prefer the current client address; fall back to any snapshot value if needed.
+  const clientAddress = (liveClientAddress || safeString(doc?.clientAddress)).trim()
 
   const canAcceptQuote = type === 'QUOTE' && effectiveStatus === 'OPEN'
   const canPayInvoice = type === 'INVOICE'

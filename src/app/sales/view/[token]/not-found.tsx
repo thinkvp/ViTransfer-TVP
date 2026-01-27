@@ -1,5 +1,4 @@
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
+
 
 export default function SalesDocPublicNotFound() {
   return (
@@ -11,11 +10,7 @@ export default function SalesDocPublicNotFound() {
             This document link is incorrect, has expired, or has been revoked.
             If you need assistance, please contact us and we can provide a new link.
           </p>
-          <div className="mt-6 flex gap-2 flex-wrap">
-            <Button asChild variant="outline">
-              <Link href="/">Home</Link>
-            </Button>
-          </div>
+
         </div>
       </div>
     </div>

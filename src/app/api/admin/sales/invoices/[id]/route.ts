@@ -29,7 +29,7 @@ async function computeInvoicePaidAtYmdForExpiry(tx: any, invoiceId: string): Pro
   if (!id) return null
 
   const paymentsAgg = await tx.salesPayment.aggregate({
-    where: { invoiceId: id },
+    where: { invoiceId: id, excludeFromInvoiceBalance: false },
     _max: { paymentDate: true },
   }).catch(() => null)
 

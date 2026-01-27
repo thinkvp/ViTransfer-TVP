@@ -16,6 +16,7 @@ import {
   renderEmailShell,
   sendEmail,
 } from '@/lib/email'
+import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
 import { renderInvoicePdfBytes, renderQuotePdfBytes } from '@/lib/sales/pdf'
 import type { PdfPartyInfo } from '@/lib/sales/pdf'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
@@ -117,33 +118,43 @@ export async function POST(request: NextRequest) {
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const doc = share.docJson as unknown as SalesQuote | SalesInvoice
-  const settings = share.settingsJson as unknown as SalesSettings
+  const liveSettingsRow = await prisma.salesSettings
+    .upsert({ where: { id: 'default' }, create: { id: 'default' }, update: {} })
+    .catch(() => null)
+  const settings = (liveSettingsRow
+    ? salesSettingsFromDb(liveSettingsRow as any)
+    : (share.settingsJson as unknown as SalesSettings)
+  )
 
   const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
     where: { id: 'default' },
     select: { enabled: true, feePercent: true, feeFixedCents: true, currencies: true },
   }).catch(() => null)
 
-  let clientAddress: string | undefined
   const docAny: any = doc as any
   const clientId = typeof docAny?.clientId === 'string' ? docAny.clientId.trim() : ''
-  const addressFromDoc = typeof docAny?.clientAddress === 'string' ? docAny.clientAddress.trim() : ''
-  if (addressFromDoc) {
-    clientAddress = addressFromDoc
-  } else {
-    if (clientId) {
-      const client = await prisma.client.findFirst({
-        where: { id: clientId, deletedAt: null },
-        select: { address: true },
-      })
-      if (typeof client?.address === 'string' && client.address.trim()) {
-        clientAddress = client.address.trim()
-      }
+
+  let liveClientName: string | undefined
+  let liveClientAddress: string | undefined
+  if (clientId) {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, deletedAt: null },
+      select: { name: true, address: true },
+    }).catch(() => null)
+
+    if (typeof client?.name === 'string' && client.name.trim()) {
+      liveClientName = client.name.trim()
+    }
+    if (typeof client?.address === 'string' && client.address.trim()) {
+      liveClientAddress = client.address.trim()
     }
   }
 
+  const addressFromDoc = typeof docAny?.clientAddress === 'string' ? docAny.clientAddress.trim() : ''
+  const clientAddress = liveClientAddress || (addressFromDoc ? addressFromDoc : undefined)
+
   const pdfInfo: PdfPartyInfo = {
-    clientName: share.clientName || undefined,
+    clientName: liveClientName || share.clientName || undefined,
     clientAddress,
     projectTitle: share.projectTitle || undefined,
     publicQuoteUrl: isQuote ? shareUrl : undefined,

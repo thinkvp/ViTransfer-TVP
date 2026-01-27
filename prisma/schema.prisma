@@ -1166,6 +1166,10 @@ model SalesPayment {
 
   source SalesPaymentSource @default(MANUAL)
 
+  // If true, this payment is informational/reconciliatory only and should not affect invoice totals/status.
+  // Used to prevent double-counting when a Stripe-paid invoice later has an accounting mirror payment imported from QuickBooks.
+  excludeFromInvoiceBalance Boolean @default(false)
+
   paymentDate String
   amountCents Int
   method      String @default("")

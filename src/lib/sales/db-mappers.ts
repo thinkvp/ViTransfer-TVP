@@ -57,6 +57,7 @@ export type DbSalesPayment = {
   reference: string
   clientId: string | null
   invoiceId: string | null
+  excludeFromInvoiceBalance?: boolean
   createdAt: Date
   updatedAt: Date
   source: string
@@ -135,6 +136,7 @@ export function salesPaymentFromDb(row: DbSalesPayment): SalesPaymentWithMeta {
     reference: row.reference ?? '',
     clientId: row.clientId,
     invoiceId: row.invoiceId,
+    excludeFromInvoiceBalance: Boolean((row as any).excludeFromInvoiceBalance),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     source: typeof row.source === 'string' ? row.source : undefined,

@@ -89,7 +89,7 @@ export default function SalesInvoicesPage() {
     updatedAt: new Date(0).toISOString(),
   })
   const [invoices, setInvoices] = useState<SalesInvoiceWithVersion[]>([])
-  const [payments, setPayments] = useState<Array<{ invoiceId: string | null; amountCents: number; paymentDate: string }>>([])
+  const [payments, setPayments] = useState<Array<{ invoiceId: string | null; amountCents: number; paymentDate: string; excludeFromInvoiceBalance?: boolean }>>([])
   const [clientNameById, setClientNameById] = useState<Record<string, string>>({})
   const [projectTitleById, setProjectTitleById] = useState<Record<string, string>>({})
   const [statusFilterSelected, setStatusFilterSelected] = useState<Set<InvoiceStatus>>(new Set())
@@ -267,7 +267,7 @@ export default function SalesInvoicesPage() {
     const clientDetails = inv.clientId ? await fetchClientDetails(inv.clientId).catch(() => null) : null
     let publicInvoiceUrl: string | undefined
     try {
-      const relevantPayments = payments.filter((p) => p.invoiceId === inv.id)
+      const relevantPayments = payments.filter((p) => p.invoiceId === inv.id && !p.excludeFromInvoiceBalance)
       const totalCents = invoiceTotalCents(inv)
       const paidCents = relevantPayments.reduce((acc, p) => acc + p.amountCents, 0)
       const stripeInfo = stripePaidByInvoiceId[inv.id]
@@ -310,7 +310,7 @@ export default function SalesInvoicesPage() {
   }
 
   const onView = async (inv: SalesInvoiceWithVersion) => {
-    const relevantPayments = payments.filter((p) => p.invoiceId === inv.id)
+    const relevantPayments = payments.filter((p) => p.invoiceId === inv.id && !p.excludeFromInvoiceBalance)
     const totalCents = invoiceTotalCents(inv)
     const paidCents = relevantPayments.reduce((acc, p) => acc + p.amountCents, 0)
     const stripeInfo = stripePaidByInvoiceId[inv.id]

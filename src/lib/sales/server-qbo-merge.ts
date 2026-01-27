@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '@/lib/sales/db-mappers'
+import { sumLineItemsTotal } from '@/lib/sales/money'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 import type { SalesLineItem, SalesSettings } from '@/lib/sales/types'
@@ -242,6 +243,9 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
   await prisma.$transaction(async (tx) => {
     const touchedInvoiceIds = new Set<string>()
 
+    const settings = await getSalesSettings(tx as any)
+    const taxRatePercent = Number.isFinite(Number((settings as any).taxRatePercent)) ? Number((settings as any).taxRatePercent) : 10
+
     const invoiceQboIds = Array.from(
       new Set(
         (Array.isArray(nativePayments) ? nativePayments : [])
@@ -253,9 +257,52 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
     const invoices = invoiceQboIds.length
       ? await (tx as any).salesInvoice.findMany({
           where: { qboId: { in: invoiceQboIds } },
-          select: { id: true, qboId: true, clientId: true },
+          select: { id: true, qboId: true, clientId: true, itemsJson: true },
         })
       : []
+
+    const invoiceIds = invoices.map((r: any) => String(r.id)).filter(Boolean)
+
+    const invoiceTotalCentsById = new Map<string, number>()
+    for (const inv of invoices) {
+      const id = String((inv as any)?.id || '').trim()
+      if (!id) continue
+      const items = Array.isArray((inv as any)?.itemsJson) ? ((inv as any).itemsJson as any[]) : []
+      const total = sumLineItemsTotal(items as any, taxRatePercent)
+      invoiceTotalCentsById.set(id, Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0)
+    }
+
+    const stripePayments = (invoiceIds.length
+      ? await (tx as any).salesInvoiceStripePayment.findMany({
+          where: { invoiceDocId: { in: invoiceIds } },
+          select: { invoiceDocId: true, invoiceAmountCents: true },
+          take: 5000,
+        })
+      : []) as Array<{ invoiceDocId: string | null; invoiceAmountCents: number | null }>
+
+    const stripePaidByInvoiceId: Record<string, number> = stripePayments.reduce((acc, p) => {
+      const id = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
+      const cents = Number(p?.invoiceAmountCents)
+      if (!id || !Number.isFinite(cents) || cents <= 0) return acc
+      acc[id] = (acc[id] ?? 0) + Math.max(0, Math.trunc(cents))
+      return acc
+    }, {} as Record<string, number>)
+
+    const localPayments = (invoiceIds.length
+      ? await (tx as any).salesPayment.findMany({
+          where: { invoiceId: { in: invoiceIds }, excludeFromInvoiceBalance: false },
+          select: { invoiceId: true, amountCents: true },
+          take: 20000,
+        })
+      : []) as Array<{ invoiceId: string | null; amountCents: number | null }>
+
+    const localPaidByInvoiceId: Record<string, number> = localPayments.reduce((acc, p) => {
+      const id = typeof p?.invoiceId === 'string' ? p.invoiceId : ''
+      const cents = Number(p?.amountCents)
+      if (!id || !Number.isFinite(cents) || cents <= 0) return acc
+      acc[id] = (acc[id] ?? 0) + Math.max(0, Math.trunc(cents))
+      return acc
+    }, {} as Record<string, number>)
 
     const invoiceByQboId = new Map<string, { id: string; clientId: string }>(
       invoices
@@ -296,20 +343,39 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
         continue
       }
 
+      const invoiceTotalCents = invoiceTotalCentsById.get(inv.id) ?? 0
+      const paidStripeCents = stripePaidByInvoiceId[inv.id] ?? 0
+      const paidLocalCents = localPaidByInvoiceId[inv.id] ?? 0
+      const paidBeforeCents = Math.max(0, Math.trunc(paidStripeCents + paidLocalCents))
+
+      // If Stripe already paid this invoice (or this payment would push us past the invoice total),
+      // treat the QBO payment as an accounting mirror and exclude it from invoice balance/status.
+      const wouldOverpay = invoiceTotalCents > 0 && paidBeforeCents + Math.max(0, Math.trunc(amountCents)) > invoiceTotalCents
+      const alreadyPaid = invoiceTotalCents > 0 && paidBeforeCents >= invoiceTotalCents
+      const excludeFromInvoiceBalance = paidStripeCents > 0 && (alreadyPaid || wouldOverpay)
+
+      const normalizedReference = excludeFromInvoiceBalance
+        ? ensurePrefix(reference, 'QB (reconciled): ')
+        : reference
+
       const data = {
         source: 'QUICKBOOKS',
         paymentDate,
         amountCents: Math.max(0, Math.trunc(amountCents)),
         method,
-        reference,
+        reference: normalizedReference,
         clientId,
         invoiceId: inv.id,
+        excludeFromInvoiceBalance,
         qboId,
       }
 
       await (tx as any).salesPayment.create({ data })
       ingested += 1
-      touchedInvoiceIds.add(inv.id)
+
+      if (!excludeFromInvoiceBalance) {
+        touchedInvoiceIds.add(inv.id)
+      }
     }
 
     for (const invoiceId of touchedInvoiceIds) {

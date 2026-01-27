@@ -231,7 +231,7 @@ export async function processSalesReminders() {
 
   const salesPayments = invoiceIds.length
     ? await prisma.salesPayment.findMany({
-        where: { invoiceId: { in: invoiceIds } },
+        where: { invoiceId: { in: invoiceIds }, excludeFromInvoiceBalance: false },
         select: { invoiceId: true, amountCents: true, paymentDate: true },
         take: 10000,
       }).catch(() => [])

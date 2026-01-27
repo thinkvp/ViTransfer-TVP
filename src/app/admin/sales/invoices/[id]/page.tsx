@@ -364,7 +364,8 @@ export default function InvoiceDetailPage() {
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
   const totalCents = subtotalCents + taxCents
 
-  const localPaidCents = useMemo(() => payments.reduce((acc, p) => acc + p.amountCents, 0), [payments])
+  const countablePayments = useMemo(() => payments.filter((p) => !p.excludeFromInvoiceBalance), [payments])
+  const localPaidCents = useMemo(() => countablePayments.reduce((acc, p) => acc + p.amountCents, 0), [countablePayments])
   const stripePaidCents = useMemo(() => stripePayments.reduce((acc, p) => acc + (Number.isFinite(p.invoiceAmountCents) ? p.invoiceAmountCents : 0), 0), [stripePayments])
   const paidCents = localPaidCents + stripePaidCents
   const balanceCents = Math.max(0, totalCents - paidCents)
@@ -372,7 +373,7 @@ export default function InvoiceDetailPage() {
   const paidOnYmd = useMemo((): string | null => {
     if (paidCents <= 0) return null
 
-    const latestLocalYmd = payments
+    const latestLocalYmd = countablePayments
       .map((p) => p.paymentDate)
       .filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
       .sort()
@@ -391,7 +392,7 @@ export default function InvoiceDetailPage() {
       .sort()
       .at(-1)
       ?? null
-  }, [paidCents, payments, stripePayments])
+  }, [countablePayments, paidCents, stripePayments])
 
   const paidOnDisplay = useMemo((): string | null => {
     if (!paidOnYmd) return null
@@ -417,7 +418,7 @@ export default function InvoiceDetailPage() {
 
     const entries: Array<{ ymd: string; amountCents: number }> = []
 
-    for (const p of payments) {
+    for (const p of countablePayments) {
       if (!Number.isFinite(p.amountCents) || p.amountCents <= 0) continue
       const ymd = typeof p.paymentDate === 'string' ? p.paymentDate : ''
       if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) continue
@@ -443,7 +444,7 @@ export default function InvoiceDetailPage() {
       .join(', ')
 
     return `Paid: ${details}`
-  }, [effectiveStatus, paidCents, paidOnDisplay, payments, stripePayments])
+  }, [countablePayments, effectiveStatus, paidCents, paidOnDisplay, stripePayments])
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const projectTitleById = useMemo(
@@ -510,7 +511,7 @@ export default function InvoiceDetailPage() {
   const onViewPublic = async () => {
     if (!invoice) return
 
-    const latestPaymentDate = payments
+    const latestPaymentDate = countablePayments
       .map((p) => p.paymentDate)
       .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
       .sort()
@@ -566,7 +567,7 @@ export default function InvoiceDetailPage() {
     const clientDetails = clientId ? await fetchClientDetails(clientId).catch(() => null) : null
     let publicInvoiceUrl: string | undefined
     try {
-      const latestPaymentDate = payments
+      const latestPaymentDate = countablePayments
         .map((p) => p.paymentDate)
         .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
         .sort()

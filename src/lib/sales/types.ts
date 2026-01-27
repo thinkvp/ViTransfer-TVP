@@ -66,6 +66,7 @@ export type SalesPayment = {
   reference: string
   clientId: string | null
   invoiceId: string | null
+  excludeFromInvoiceBalance?: boolean
   createdAt: string
 }
 

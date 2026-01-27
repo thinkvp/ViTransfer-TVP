@@ -54,7 +54,7 @@ export async function recomputeInvoiceStoredStatus(
   const totalCents = subtotalCents + taxCents
 
   const paymentsAgg = await tx.salesPayment.aggregate({
-    where: { invoiceId: id },
+    where: { invoiceId: id, excludeFromInvoiceBalance: false },
     _sum: { amountCents: true },
     _max: { paymentDate: true },
   })

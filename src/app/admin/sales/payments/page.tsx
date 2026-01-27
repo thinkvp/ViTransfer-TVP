@@ -213,7 +213,9 @@ export default function SalesPaymentsPage() {
       const subtotal = sumLineItemsSubtotal(inv.items)
       const tax = sumLineItemsTax(inv.items, taxRatePercent)
       const total = subtotal + tax
-      const localPaid = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+      const localPaid = payments
+        .filter((p) => p.invoiceId === inv.id && !p.excludeFromInvoiceBalance)
+        .reduce((acc, p) => acc + p.amountCents, 0)
       const stripePaid = stripePaidCentsByInvoiceId[inv.id] ?? 0
       const paid = localPaid + stripePaid
       byId.set(inv.id, { totalCents: total, paidCents: paid, balanceCents: Math.max(0, total - paid) })
@@ -556,7 +558,9 @@ export default function SalesPaymentsPage() {
                         <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                           <td className="px-3 py-2 tabular-nums">{p.paymentDate}</td>
                           <td className="px-3 py-2 tabular-nums font-medium">${centsToDollars(p.amountCents)}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{p.method || '—'}</td>
+                          <td className="px-3 py-2 text-muted-foreground">
+                            {p.method || '—'}{p.excludeFromInvoiceBalance ? ' (reconciled)' : ''}
+                          </td>
                           <td className="px-3 py-2 text-muted-foreground">{p.reference || '—'}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {p.clientId ? (

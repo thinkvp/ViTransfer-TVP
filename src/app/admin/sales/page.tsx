@@ -222,7 +222,9 @@ export default function SalesDashboardPage() {
         const subtotal = sumLineItemsSubtotal(inv.items)
         const tax = sumLineItemsTax(inv.items, settings.taxRatePercent)
         const total = subtotal + tax
-        const paid = payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
+        const paid = payments
+          .filter((p) => p.invoiceId === inv.id && !p.excludeFromInvoiceBalance)
+          .reduce((acc, p) => acc + p.amountCents, 0)
         const balance = Math.max(0, total - paid)
 
         const due = parseDateOnlyLocal(inv.dueDate)
@@ -252,6 +254,7 @@ export default function SalesDashboardPage() {
 
     const recentPayments = payments
       .filter((p) => {
+        if (p.excludeFromInvoiceBalance) return false
         const d = parseDateOnlyLocal(p.paymentDate)
         return Boolean(d) && (d as Date).getTime() >= thresholdMs
       })
