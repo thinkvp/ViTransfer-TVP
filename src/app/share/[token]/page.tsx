@@ -363,22 +363,15 @@ export default function SharePage() {
     if (activeAlbumId) return
     if (project?.enableVideos === false) return
     if (project?.videosByName) {
-      // Sort video names: prioritize In Review (unapproved) videos, then alphabetically
-      const videoNames = Object.keys(project.videosByName).sort((a, b) => {
-        const aVideos = project.videosByName[a]
-        const bVideos = project.videosByName[b]
-        
-        // Check if any version of each video is unapproved (In Review)
-        const aHasUnapproved = aVideos.some((v: any) => !v.approved)
-        const bHasUnapproved = bVideos.some((v: any) => !v.approved)
-        
-        // Prioritize videos with unapproved versions
-        if (aHasUnapproved && !bHasUnapproved) return -1
-        if (!aHasUnapproved && bHasUnapproved) return 1
-        
-        // If both have same approval state, sort alphabetically
-        return a.localeCompare(b, undefined, { sensitivity: 'base' })
-      })
+      // Sort video names: prioritize the sidebar "For Review" group (no approved versions), then "Approved", then alphabetically.
+      // Keep this in sync with the grouping logic in VideoSidebar.
+      const names = Object.keys(project.videosByName)
+      const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+      const isApprovedGroup = (videoName: string) => (project.videosByName[videoName] || []).some((v: any) => v?.approved === true)
+
+      const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
+      const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
+      const videoNames = [...forReview, ...approved]
       if (videoNames.length === 0) return
 
       // Determine which video should be active
@@ -1009,6 +1002,7 @@ export default function SharePage() {
         activeVideoName={activeVideoName}
         onVideoSelect={handleVideoSelect}
         heading={project.title}
+        hideApprovalGrouping={isGuest}
         albums={albums.map((a: any) => ({
           id: String(a.id),
           name: String(a.name || ''),

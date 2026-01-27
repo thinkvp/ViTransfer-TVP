@@ -21,6 +21,7 @@ interface VideoSidebarProps {
   heading?: string
   showVideos?: boolean
   showAlbums?: boolean
+  hideApprovalGrouping?: boolean
   className?: string
   initialCollapsed?: boolean
 }
@@ -69,6 +70,7 @@ export default function VideoSidebar({
   heading,
   showVideos = true,
   showAlbums = true,
+  hideApprovalGrouping = false,
   className,
   initialCollapsed = true,
 }: VideoSidebarProps) {
@@ -202,9 +204,11 @@ export default function VideoSidebar({
 
         <nav className="p-3">
           {(() => {
-            // Split videos into For Review and Approved groups
+            // Split videos into For Review and Approved groups.
+            // Note: on some share modes (e.g. guest), approval flags may be hidden; allow callers to disable grouping.
             const forReview = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
             const approved = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
+            const flatAlphabetical = sortedVideoGroups(videoGroups)
 
             const renderVideoButton = (group: VideoGroup) => {
               const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
@@ -259,7 +263,7 @@ export default function VideoSidebar({
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm">{group.name}</p>
+                        <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
                         <p className="text-xs text-muted-foreground">
                           {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
                         </p>
@@ -279,7 +283,13 @@ export default function VideoSidebar({
 
             return (
               <>
-                {forReview.length > 0 && (
+                {hideApprovalGrouping && flatAlphabetical.length > 0 && (
+                  <div className="space-y-1 mb-4">
+                    {flatAlphabetical.map(renderVideoButton)}
+                  </div>
+                )}
+
+                {!hideApprovalGrouping && forReview.length > 0 && (
                   <>
                     <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       For Review
@@ -290,7 +300,7 @@ export default function VideoSidebar({
                   </>
                 )}
 
-                {approved.length > 0 && (
+                {!hideApprovalGrouping && approved.length > 0 && (
                   <>
                     {forReview.length > 0 && (
                       <div className="border-t border-border my-3" />
@@ -355,7 +365,7 @@ export default function VideoSidebar({
 
                             <div className="flex items-center justify-between gap-3">
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm">{a.name}</p>
+                                <p className="text-sm leading-snug line-clamp-2 break-words">{a.name}</p>
                                 <p className="text-xs text-muted-foreground">
                                   {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
                                 </p>
@@ -460,7 +470,7 @@ export default function VideoSidebar({
 
                     {/* Title and version count */}
                     <div className="flex flex-col gap-1 items-center">
-                      <p className="text-xs font-medium text-foreground truncate max-w-[90px] text-center">
+                      <p className="text-xs font-medium text-foreground line-clamp-2 break-words max-w-[90px] text-center leading-snug">
                         {group.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -513,7 +523,7 @@ export default function VideoSidebar({
 
                     {/* Title and Count */}
                     <div className="flex flex-col items-center">
-                      <p className="text-xs font-medium text-foreground truncate max-w-[90px] text-center">
+                      <p className="text-xs font-medium text-foreground line-clamp-2 break-words max-w-[90px] text-center leading-snug">
                         {a.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
