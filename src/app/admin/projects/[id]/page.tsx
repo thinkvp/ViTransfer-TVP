@@ -23,8 +23,9 @@ import { RecipientsEditor, type EditableRecipient } from '@/components/Recipient
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 import { ProjectKeyDates } from '@/components/ProjectKeyDates'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
-import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
-import { fetchSalesSettings, listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
+import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
+import { fetchSalesRollup } from '@/lib/sales/admin-api'
+import type { SalesRollupPaymentRow, SalesRollupResponse } from '@/lib/sales/admin-api'
 import {
   invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
   quoteEffectiveStatus as computeQuoteEffectiveStatus,
@@ -55,26 +56,13 @@ export default function ProjectPage() {
 
   const [salesTick, setSalesTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
-  const [stripePaidByInvoiceId, setStripePaidByInvoiceId] = useState<
-    Record<string, { paidCents: number; latestYmd: string | null }>
-  >({})
 
   const [salesLoading, setSalesLoading] = useState(false)
   const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
-  const [payments, setPayments] = useState<SalesPayment[]>([])
+  const [payments, setPayments] = useState<SalesRollupPaymentRow[]>([])
   const [projectQuotes, setProjectQuotes] = useState<SalesQuote[]>([])
   const [projectInvoices, setProjectInvoices] = useState<SalesInvoice[]>([])
-
-  type StripePayment = {
-    invoiceDocId: string
-    invoiceAmountCents: number
-    createdAt: string
-  }
-
-  const ymdFromIso = (iso: string): string | null => {
-    const s = typeof iso === 'string' ? iso : ''
-    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null
-  }
+  const [salesRollup, setSalesRollup] = useState<SalesRollupResponse | null>(null)
 
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
   const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
@@ -115,21 +103,23 @@ export default function ProjectPage() {
 
       try {
         setSalesLoading(true)
-        const [settings, quotes, invoices, allPayments] = await Promise.all([
-          fetchSalesSettings(),
-          listSalesQuotes({ projectId: project.id, limit: 500 }),
-          listSalesInvoices({ projectId: project.id, limit: 500 }),
-          listSalesPayments({ limit: 500 }),
-        ])
+        const r = await fetchSalesRollup({
+          projectId: project.id,
+          invoicesLimit: 1000,
+          quotesLimit: 1000,
+          paymentsLimit: 5000,
+          stripePaymentsLimit: 500,
+          includeInvoices: true,
+          includeQuotes: true,
+          includePayments: true,
+        })
 
         if (cancelled) return
-        setTaxRatePercent(settings.taxRatePercent)
-        setProjectQuotes(quotes as any)
-        setProjectInvoices(invoices as any)
-
-        const invoiceIds = new Set((invoices as any[]).map((i: any) => String(i?.id ?? '')).filter((x) => x.trim()))
-        const filteredPayments = allPayments.filter((p) => p.invoiceId && invoiceIds.has(p.invoiceId))
-        setPayments(filteredPayments)
+        setTaxRatePercent(r.taxRatePercent)
+        setProjectQuotes(r.quotes)
+        setProjectInvoices(r.invoices)
+        setPayments(r.payments)
+        setSalesRollup(r)
       } finally {
         if (!cancelled) setSalesLoading(false)
       }
@@ -146,66 +136,29 @@ export default function ProjectPage() {
     return payments.filter((p) => p.invoiceId && invoiceIds.has(p.invoiceId))
   }, [payments, projectInvoices])
 
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      const ids = projectInvoices.map((i) => i.id).filter((docId) => typeof docId === 'string' && docId.trim())
-      if (!ids.length) {
-        if (!cancelled) setStripePaidByInvoiceId({})
-        return
-      }
-
-      try {
-        const res = await apiFetch(
-          `/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`,
-          { cache: 'no-store' }
-        )
-        if (!res.ok) return
-        const json = (await res.json().catch(() => null)) as { payments?: StripePayment[] } | null
-        const list = Array.isArray(json?.payments) ? json!.payments! : []
-
-        const next: Record<string, { paidCents: number; latestYmd: string | null }> = {}
-        for (const p of list) {
-          const invoiceDocId = typeof (p as any)?.invoiceDocId === 'string' ? (p as any).invoiceDocId : ''
-          const amount = Number((p as any)?.invoiceAmountCents)
-          if (!invoiceDocId || !Number.isFinite(amount)) continue
-          const paidCents = Math.max(0, Math.trunc(amount))
-          const ymd = ymdFromIso(String((p as any)?.createdAt ?? ''))
-
-          const base = next[invoiceDocId] ?? { paidCents: 0, latestYmd: null }
-          const latestYmd = [base.latestYmd, ymd]
-            .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-            .sort()
-            .at(-1)
-            ?? null
-          next[invoiceDocId] = { paidCents: base.paidCents + paidCents, latestYmd }
-        }
-
-        if (!cancelled) setStripePaidByInvoiceId(next)
-      } catch {
-        // ignore
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [projectInvoices])
-
   const quoteEffectiveStatus = useCallback(
     (q: SalesQuote): QuoteStatus => {
+      const rollupStatus = salesRollup?.quoteEffectiveStatusById?.[q.id]
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'ACCEPTED' || rollupStatus === 'CLOSED') {
+        return rollupStatus
+      }
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
       return computeQuoteEffectiveStatus(q, nowMs)
     },
-    [nowIso]
+    [nowIso, salesRollup?.quoteEffectiveStatusById]
   )
 
   const invoiceEffectiveStatus = useCallback(
     (inv: SalesInvoice): InvoiceStatus => {
+      const rollupStatus = salesRollup?.invoiceRollupById?.[inv.id]?.effectiveStatus
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
+        return rollupStatus
+      }
       const totalCents = sumLineItemsTotal(inv.items, taxRatePercent)
-      const paidLocalCents = projectPayments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
-      const paidStripeCents = stripePaidByInvoiceId[inv.id]?.paidCents ?? 0
-      const paidCents = paidLocalCents + paidStripeCents
+      const paidFromRollup = Number(salesRollup?.invoiceRollupById?.[inv.id]?.paidCents)
+      const paidCents = Number.isFinite(paidFromRollup)
+        ? Math.max(0, Math.trunc(paidFromRollup))
+        : projectPayments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
 
       return computeInvoiceEffectiveStatus(
@@ -219,7 +172,7 @@ export default function ProjectPage() {
         nowMs
       )
     },
-    [nowIso, projectPayments, taxRatePercent, stripePaidByInvoiceId]
+    [nowIso, projectPayments, salesRollup?.invoiceRollupById, taxRatePercent]
   )
 
   function invoiceStatusLabel(status: InvoiceStatus): string {

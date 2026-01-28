@@ -7,11 +7,10 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2, Send } from 'lucide-react'
-import { apiFetch, apiPost } from '@/lib/api-client'
+import { apiPost } from '@/lib/api-client'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { fetchClientDetails } from '@/lib/sales/lookups'
-import { listSalesPayments } from '@/lib/sales/admin-api'
-import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { fetchSalesRollup } from '@/lib/sales/admin-api'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
 
 type Recipient = {
@@ -118,58 +117,18 @@ export function SalesSendEmailDialog(props: {
     if (invoicePaidAt !== undefined) return invoicePaidAt ?? null
 
     const invoice = doc as SalesInvoice
-    const relevantPayments = await listSalesPayments({ invoiceId: invoice.id, limit: 500 }).catch(() => [])
-    const subtotalCents = sumLineItemsSubtotal(invoice.items)
-    const taxCents = sumLineItemsTax(invoice.items, settings.taxRatePercent)
-    const totalCents = subtotalCents + taxCents
+    const r = await fetchSalesRollup({
+      invoiceIds: [invoice.id],
+      includeInvoices: true,
+      includeQuotes: false,
+      includePayments: false,
+    }).catch(() => null)
 
-    const stripePaid = await (async (): Promise<{ paidCents: number; latestYmd: string | null }> => {
-      try {
-        const res = await apiFetch(
-          `/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(invoice.id)}&limit=50`,
-          { cache: 'no-store' }
-        )
-        if (!res.ok) return { paidCents: 0, latestYmd: null }
-        const json = (await res.json().catch(() => null)) as { payments?: any[] } | null
-        const list = Array.isArray(json?.payments) ? json!.payments! : []
+    const invRollup = r?.invoiceRollupById?.[invoice.id]
+    if (!invRollup) return null
 
-        let paidCents = 0
-        let latestYmd: string | null = null
-        for (const p of list) {
-          const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
-          if (invoiceDocId !== invoice.id) continue
-
-          const amount = Number(p?.invoiceAmountCents)
-          if (!Number.isFinite(amount)) continue
-          paidCents += Math.max(0, Math.trunc(amount))
-
-          const createdAt = typeof p?.createdAt === 'string' ? p.createdAt : ''
-          const ymd = /^\d{4}-\d{2}-\d{2}/.test(createdAt) ? createdAt.slice(0, 10) : null
-          if (ymd && (!latestYmd || ymd > latestYmd)) latestYmd = ymd
-        }
-
-        return { paidCents, latestYmd }
-      } catch {
-        return { paidCents: 0, latestYmd: null }
-      }
-    })()
-
-    const paidCents = relevantPayments.reduce((acc, p) => acc + p.amountCents, 0) + stripePaid.paidCents
-    const balanceCents = Math.max(0, totalCents - paidCents)
-
-    const latestPaymentDate = relevantPayments
-      .map((p) => p.paymentDate)
-      .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-      .sort()
-      .at(-1)
-
-    const latestAnyYmd = [latestPaymentDate ?? null, stripePaid.latestYmd]
-      .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-      .sort()
-      .at(-1)
-
-    return (totalCents > 0 && balanceCents <= 0)
-      ? (latestAnyYmd ?? new Date().toISOString().slice(0, 10))
+    return (invRollup.totalCents > 0 && invRollup.balanceCents <= 0)
+      ? (invRollup.latestPaymentYmd ?? new Date().toISOString().slice(0, 10))
       : null
   }
 

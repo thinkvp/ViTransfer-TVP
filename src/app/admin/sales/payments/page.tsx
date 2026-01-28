@@ -14,19 +14,18 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { ClientOption, SalesInvoice, SalesPayment } from '@/lib/sales/types'
+import type { ClientOption, SalesInvoice } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, dollarsToCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { apiFetch } from '@/lib/api-client'
 import {
   createSalesPayment,
   deleteSalesPayment,
+  fetchSalesRollup,
   fetchSalesSettings,
-  listSalesInvoices,
-  listSalesPayments,
 } from '@/lib/sales/admin-api'
+import type { SalesRollupResponse, SalesRollupPaymentRow } from '@/lib/sales/admin-api'
 
 type PaymentFilter = 'LINKED' | 'UNLINKED'
 
@@ -40,8 +39,9 @@ export default function SalesPaymentsPage() {
   const [creating, setCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
-  const [payments, setPayments] = useState<SalesPayment[]>([])
+  const [payments, setPayments] = useState<SalesRollupPaymentRow[]>([])
   const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
+  const [rollup, setRollup] = useState<SalesRollupResponse | null>(null)
 
   const [filterSelected, setFilterSelected] = useState<Set<PaymentFilter>>(new Set())
   const [tableSortKey, setTableSortKey] = useState<'paymentDate' | 'amount' | 'method' | 'reference' | 'client' | 'invoice'>(
@@ -57,8 +57,6 @@ export default function SalesPaymentsPage() {
   const [amount, setAmount] = useState<string>('')
   const [method, setMethod] = useState<string>('Bank transfer')
   const [reference, setReference] = useState<string>('')
-  const [stripePaidCentsByInvoiceId, setStripePaidCentsByInvoiceId] = useState<Record<string, number>>({})
-  const [stripePayments, setStripePayments] = useState<SalesPayment[]>([])
 
   useEffect(() => {
     const run = async () => {
@@ -83,16 +81,16 @@ export default function SalesPaymentsPage() {
     async function run() {
       try {
         setLoading(true)
-        const [settings, invs, pays] = await Promise.all([
+        const [settings, r] = await Promise.all([
           fetchSalesSettings(),
-          listSalesInvoices({ limit: 500 }),
-          listSalesPayments({ limit: 500 }),
+          fetchSalesRollup({ invoicesLimit: 2000, quotesLimit: 1, paymentsLimit: 5000, stripePaymentsLimit: 500, includeQuotes: false }),
         ])
 
         if (cancelled) return
         setTaxRatePercent(settings.taxRatePercent)
-        setInvoices(invs)
-        setPayments(pays)
+        setInvoices(r.invoices)
+        setPayments(r.payments)
+        setRollup(r)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -125,104 +123,34 @@ export default function SalesPaymentsPage() {
     localStorage.setItem('admin_sales_payments_filter', JSON.stringify([...filterSelected]))
   }, [filterSelected])
 
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      const ids = invoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
-      if (!ids.length) {
-        if (!cancelled) setStripePaidCentsByInvoiceId({})
-        if (!cancelled) setStripePayments([])
-        return
-      }
+  const displayPayments = useMemo(() => payments, [payments])
 
-      try {
-        const res = await apiFetch(`/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`, { cache: 'no-store' })
-        if (!res.ok) return
-        const json = (await res.json().catch(() => null)) as { payments?: unknown[] } | null
-        const list = Array.isArray(json?.payments) ? json!.payments! : []
-
-        const nextPaidByInvoiceId: Record<string, number> = {}
-        const nextPayments: SalesPayment[] = []
-
-        const invoiceById = new Map(invoices.map((inv) => [inv.id, inv]))
-
-        for (const p of list as any[]) {
-          const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
-          const invoiceAmountCents = Number(p?.invoiceAmountCents)
-          if (!invoiceDocId || !Number.isFinite(invoiceAmountCents)) continue
-
-          const normalizedInvoiceCents = Math.max(0, Math.trunc(invoiceAmountCents))
-          nextPaidByInvoiceId[invoiceDocId] = (nextPaidByInvoiceId[invoiceDocId] ?? 0) + normalizedInvoiceCents
-
-          const createdAt = typeof p?.createdAt === 'string' ? p.createdAt : new Date().toISOString()
-          const ymd = /^\d{4}-\d{2}-\d{2}/.test(createdAt) ? createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
-
-          const paymentIntentId = typeof p?.stripePaymentIntentId === 'string' && p.stripePaymentIntentId.trim()
-            ? p.stripePaymentIntentId.trim()
-            : null
-          const sessionId = typeof p?.stripeCheckoutSessionId === 'string' && p.stripeCheckoutSessionId.trim()
-            ? p.stripeCheckoutSessionId.trim()
-            : null
-          const invoiceNumber = typeof p?.invoiceNumber === 'string' ? p.invoiceNumber : ''
-
-          const inv = invoiceById.get(invoiceDocId)
-          const clientId = inv?.clientId ?? null
-
-          const recordId = typeof p?.id === 'string' && p.id.trim() ? p.id.trim() : crypto.randomUUID()
-
-          nextPayments.push({
-            id: `stripe-payment-${recordId}`,
-            paymentDate: ymd,
-            amountCents: normalizedInvoiceCents,
-            method: 'Stripe',
-            reference: paymentIntentId ?? sessionId ?? (invoiceNumber ? `Stripe payment for ${invoiceNumber}` : 'Stripe payment'),
-            clientId,
-            invoiceId: invoiceDocId,
-            createdAt,
-          })
-        }
-
-        if (!cancelled) setStripePaidCentsByInvoiceId(nextPaidByInvoiceId)
-        if (!cancelled) setStripePayments(nextPayments)
-      } catch {
-        // ignore
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [invoices])
-
-  const displayPayments = useMemo(() => {
-    const local = payments
-    if (!stripePayments.length) return local
-    const existingIds = new Set(local.map((p) => p.id))
-    return [...local, ...stripePayments.filter((p) => !existingIds.has(p.id))]
-  }, [payments, stripePayments])
-
-  const isReadOnlyPayment = (p: SalesPayment): boolean => p.id.startsWith('stripe-payment-')
+  const isReadOnlyPayment = (p: SalesRollupPaymentRow): boolean => p.source === 'STRIPE'
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const invoiceNumberById = useMemo(() => Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber])), [invoices])
 
   const invoiceTotals = useMemo(() => {
     const byId = new Map<string, { totalCents: number; paidCents: number; balanceCents: number }>()
-
+    const map = rollup?.invoiceRollupById ?? {}
     for (const inv of invoices) {
+      const r = map[inv.id]
+      const total = Number(r?.totalCents)
+      const paid = Number(r?.paidCents)
+      const balance = Number(r?.balanceCents)
+
       const subtotal = sumLineItemsSubtotal(inv.items)
       const tax = sumLineItemsTax(inv.items, taxRatePercent)
-      const total = subtotal + tax
-      const localPaid = payments
-        .filter((p) => p.invoiceId === inv.id && !p.excludeFromInvoiceBalance)
-        .reduce((acc, p) => acc + p.amountCents, 0)
-      const stripePaid = stripePaidCentsByInvoiceId[inv.id] ?? 0
-      const paid = localPaid + stripePaid
-      byId.set(inv.id, { totalCents: total, paidCents: paid, balanceCents: Math.max(0, total - paid) })
-    }
+      const fallbackTotal = subtotal + tax
 
+      byId.set(inv.id, {
+        totalCents: Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : fallbackTotal,
+        paidCents: Number.isFinite(paid) ? Math.max(0, Math.trunc(paid)) : 0,
+        balanceCents: Number.isFinite(balance) ? Math.max(0, Math.trunc(balance)) : Math.max(0, fallbackTotal),
+      })
+    }
     return byId
-  }, [invoices, payments, stripePaidCentsByInvoiceId, taxRatePercent])
+  }, [invoices, rollup?.invoiceRollupById, taxRatePercent])
 
   const unpaidInvoices = useMemo(() => {
     return invoices.filter((inv) => (invoiceTotals.get(inv.id)?.balanceCents ?? 0) > 0)
@@ -289,8 +217,8 @@ export default function SalesPaymentsPage() {
 
   const sortedPayments = useMemo(() => {
     const dir = tableSortDirection === 'asc' ? 1 : -1
-    const getClientName = (p: SalesPayment) => (p.clientId ? clientNameById[p.clientId] ?? p.clientId : '')
-    const getInvoiceNumber = (p: SalesPayment) => (p.invoiceId ? invoiceNumberById[p.invoiceId] ?? p.invoiceId : '')
+    const getClientName = (p: SalesRollupPaymentRow) => (p.clientId ? clientNameById[p.clientId] ?? p.clientId : '')
+    const getInvoiceNumber = (p: SalesRollupPaymentRow) => (p.invoiceId ? invoiceNumberById[p.invoiceId] ?? p.invoiceId : '')
 
     return [...filteredPayments].sort((a, b) => {
       if (tableSortKey === 'paymentDate') return dir * String(a.paymentDate || '').localeCompare(String(b.paymentDate || ''))

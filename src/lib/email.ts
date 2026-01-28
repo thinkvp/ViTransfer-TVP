@@ -1161,16 +1161,20 @@ export async function renderAdminProjectApprovedEmail({
   clientName,
   projectTitle,
   approvedVideos = [],
+  awaitingVideos = [],
   isComplete = true,
   isApproval = true,
+  actionVideoName,
   greetingName,
   branding,
 }: {
   clientName: string
   projectTitle: string
   approvedVideos?: Array<{ name: string; id: string }>
+  awaitingVideos?: Array<{ name: string; id: string }>
   isComplete?: boolean
   isApproval?: boolean
+  actionVideoName?: string | null
   greetingName?: string
   branding?: EmailBrandingOverrides
 }): Promise<RenderedEmail> {
@@ -1182,14 +1186,15 @@ export async function renderAdminProjectApprovedEmail({
   }
 
   const action = isApproval ? 'Approved' : 'Unapproved'
+  const resolvedActionVideoName = (actionVideoName && actionVideoName.trim()) ? actionVideoName.trim() : (approvedVideos[0]?.name || '')
   const subject = isComplete
     ? `Client ${action} Project: ${projectTitle}`
-    : `Client ${action} Video: ${projectTitle} - ${approvedVideos[0]?.name || 'Video'}`
+    : `Client ${action} Video: ${projectTitle} - ${resolvedActionVideoName || 'Video'}`
 
   const statusTitle = isComplete ? `Project ${action}` : `Video ${action}`
   const statusMessage = isComplete
     ? `The complete project has been ${isApproval ? 'approved' : 'unapproved'} by the client`
-    : `${approvedVideos[0]?.name || 'A video'} has been ${isApproval ? 'approved' : 'unapproved'} by the client`
+    : `${resolvedActionVideoName || 'A video'} has been ${isApproval ? 'approved' : 'unapproved'} by the client`
 
   const headerGradient = EMAIL_THEME.headerBackground
   const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
@@ -1215,7 +1220,7 @@ export async function renderAdminProjectApprovedEmail({
 
       ${approvedVideos.length > 0 ? `
         <div style="${cardStyle}">
-          <div style="${cardTitleStyle}">${isApproval ? 'Approved' : 'Unapproved'} Videos</div>
+          <div style="${cardTitleStyle}">Approved Videos</div>
           ${approvedVideos.map(v => `
             <div style="font-size: 15px; color: #374151; padding: 4px 0;">
               <span style="display: inline-block; width: 6px; height: 6px; background: ${EMAIL_THEME.accent}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
@@ -1223,6 +1228,22 @@ export async function renderAdminProjectApprovedEmail({
           `).join('')}
         </div>
       ` : ''}
+
+      <div style="${cardStyle}; margin-top: 16px;">
+        <div style="${cardTitleStyle}">Awaiting Approval</div>
+        ${awaitingVideos.length > 0
+          ? awaitingVideos.map(v => `
+              <div style="font-size: 15px; color: #374151; padding: 4px 0;">
+                <span style="display: inline-block; width: 6px; height: 6px; background: ${EMAIL_THEME.accent}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+              </div>
+            `).join('')
+          : `
+            <div style="font-size: 15px; color: #374151; padding: 4px 0;">
+              No videos currently awaiting approval
+            </div>
+          `
+        }
+      </div>
 
       <div style="text-align: center; margin: 32px 0;">
         <a href="${escapeHtml(appDomain)}/admin" style="${primaryButtonStyle}">
@@ -1240,15 +1261,19 @@ export async function sendAdminProjectApprovedEmail({
   clientName,
   projectTitle,
   approvedVideos = [],
+  awaitingVideos = [],
   isComplete = true,
   isApproval = true,
+  actionVideoName,
 }: {
   adminEmails: string[]
   clientName: string
   projectTitle: string
   approvedVideos?: Array<{ name: string; id: string }>
+  awaitingVideos?: Array<{ name: string; id: string }>
   isComplete?: boolean
   isApproval?: boolean
+  actionVideoName?: string | null
 }) {
   const uniqueEmails = [...new Set(adminEmails.map((e) => String(e || '').trim()).filter(Boolean))]
   const users = await prisma.user.findMany({
@@ -1266,8 +1291,10 @@ export async function sendAdminProjectApprovedEmail({
       clientName,
       projectTitle,
       approvedVideos,
+      awaitingVideos,
       isComplete,
       isApproval,
+      actionVideoName,
       greetingName,
     })
 

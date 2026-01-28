@@ -17,8 +17,9 @@ import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
-import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesPayment, SalesQuote } from '@/lib/sales/types'
-import { fetchSalesSettings, listSalesInvoices, listSalesPayments, listSalesQuotes } from '@/lib/sales/admin-api'
+import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
+import { fetchSalesRollup } from '@/lib/sales/admin-api'
+import type { SalesRollupPaymentRow, SalesRollupResponse } from '@/lib/sales/admin-api'
 import {
   invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
   quoteEffectiveStatus as computeQuoteEffectiveStatus,
@@ -148,9 +149,9 @@ export default function ClientDetailPage() {
   const [salesLoading, setSalesLoading] = useState(false)
   const [salesQuotes, setSalesQuotes] = useState<SalesQuote[]>([])
   const [salesInvoices, setSalesInvoices] = useState<SalesInvoice[]>([])
-  const [salesPayments, setSalesPayments] = useState<SalesPayment[]>([])
+  const [salesPayments, setSalesPayments] = useState<SalesRollupPaymentRow[]>([])
   const [salesTaxRatePercent, setSalesTaxRatePercent] = useState<number>(0)
-  const [stripePaidCentsByInvoiceId, setStripePaidCentsByInvoiceId] = useState<Record<string, number>>({})
+  const [salesRollup, setSalesRollup] = useState<SalesRollupResponse | null>(null)
 
   const [extraProjectTitles, setExtraProjectTitles] = useState<Record<string, string>>({})
 
@@ -175,18 +176,23 @@ export default function ClientDetailPage() {
     async function run() {
       try {
         setSalesLoading(true)
-        const [settings, quotes, invoices, payments] = await Promise.all([
-          fetchSalesSettings(),
-          listSalesQuotes({ clientId, limit: 500 }),
-          listSalesInvoices({ clientId, limit: 500 }),
-          listSalesPayments({ clientId, limit: 500 }),
-        ])
+        const r = await fetchSalesRollup({
+          clientId,
+          invoicesLimit: 1000,
+          quotesLimit: 1000,
+          paymentsLimit: 5000,
+          stripePaymentsLimit: 500,
+          includeInvoices: true,
+          includeQuotes: true,
+          includePayments: true,
+        })
 
         if (cancelled) return
-        setSalesTaxRatePercent(settings.taxRatePercent)
-        setSalesQuotes(quotes as any)
-        setSalesInvoices(invoices as any)
-        setSalesPayments(payments)
+        setSalesTaxRatePercent(r.taxRatePercent)
+        setSalesQuotes(r.quotes)
+        setSalesInvoices(r.invoices)
+        setSalesPayments(r.payments)
+        setSalesRollup(r)
       } finally {
         if (!cancelled) setSalesLoading(false)
       }
@@ -197,44 +203,6 @@ export default function ClientDetailPage() {
       cancelled = true
     }
   }, [clientId, salesTick])
-
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      const ids = salesInvoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
-      if (!ids.length) {
-        if (!cancelled) setStripePaidCentsByInvoiceId({})
-        return
-      }
-
-      try {
-        const res = await apiFetch(`/api/admin/sales/stripe-payments?invoiceDocIds=${encodeURIComponent(ids.join(','))}&limit=500`, {
-          cache: 'no-store',
-        })
-        if (!res.ok) return
-        const json = (await res.json().catch(() => null)) as { payments?: unknown[] } | null
-        const list = Array.isArray(json?.payments) ? json!.payments! : []
-
-        const next: Record<string, number> = {}
-        for (const p of list as any[]) {
-          const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
-          const invoiceAmountCents = Number(p?.invoiceAmountCents)
-          if (!invoiceDocId || !Number.isFinite(invoiceAmountCents)) continue
-          const normalized = Math.max(0, Math.trunc(invoiceAmountCents))
-          next[invoiceDocId] = (next[invoiceDocId] ?? 0) + normalized
-        }
-
-        if (!cancelled) setStripePaidCentsByInvoiceId(next)
-      } catch {
-        // ignore
-      }
-    }
-
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [salesInvoices])
 
   const loadClient = useCallback(async () => {
     setLoading(true)
@@ -428,15 +396,20 @@ export default function ClientDetailPage() {
 
   const invoicePaidCents = useCallback(
     (inv: SalesInvoice): number => {
-      const localPaid = sales.payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
-      const stripePaid = stripePaidCentsByInvoiceId[inv.id] ?? 0
-      return localPaid + stripePaid
+      const r = salesRollup?.invoiceRollupById?.[inv.id]
+      const paid = Number(r?.paidCents)
+      if (Number.isFinite(paid)) return Math.max(0, Math.trunc(paid))
+      return sales.payments.filter((p) => p.invoiceId === inv.id).reduce((acc, p) => acc + p.amountCents, 0)
     },
-    [sales.payments, stripePaidCentsByInvoiceId]
+    [sales.payments, salesRollup?.invoiceRollupById]
   )
 
   const invoiceEffectiveStatus = useCallback(
     (inv: SalesInvoice): InvoiceStatus => {
+      const rollupStatus = salesRollup?.invoiceRollupById?.[inv.id]?.effectiveStatus
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
+        return rollupStatus
+      }
       const totalCents = sumLineItemsTotal(inv.items, salesTaxRatePercent)
       const paidCents = invoicePaidCents(inv)
 
@@ -448,14 +421,18 @@ export default function ClientDetailPage() {
         paidCents,
       })
     },
-    [invoicePaidCents, salesTaxRatePercent]
+    [invoicePaidCents, salesRollup?.invoiceRollupById, salesTaxRatePercent]
   )
 
   const quoteEffectiveStatus = useCallback(
     (q: SalesQuote): QuoteStatus => {
+      const rollupStatus = salesRollup?.quoteEffectiveStatusById?.[q.id]
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'ACCEPTED' || rollupStatus === 'CLOSED') {
+        return rollupStatus
+      }
       return computeQuoteEffectiveStatus(q)
     },
-    []
+    [salesRollup?.quoteEffectiveStatusById]
   )
 
   useEffect(() => {

@@ -205,6 +205,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             slug: project.slug,
             clientNotificationSchedule: project.clientNotificationSchedule
           },
+          video: {
+            id: selectedVideoId,
+            name: selectedVideo.name,
+            versionLabel: (selectedVideo as any).versionLabel ?? null,
+          },
           approvedVideos: approvedVideosList,
           approved: true,
           authorName: safeAuthorName,

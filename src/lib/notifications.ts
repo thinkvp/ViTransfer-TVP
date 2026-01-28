@@ -297,6 +297,11 @@ export async function handleApprovalNotification(context: ApprovalNotificationCo
 async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   const { project, video, approvedVideos, approved, authorName, authorEmail, isComplete = false } = context
 
+  const triggerVideo = video ? { id: video.id, name: video.name } : null
+  const videosForPush = isComplete
+    ? (approvedVideos || (triggerVideo ? [triggerVideo] : []))
+    : (triggerVideo ? [triggerVideo] : (approvedVideos || []))
+
   const shareUrl = await generateShareUrl(project.slug)
   const allRecipients = await getProjectRecipients(project.id)
   const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
@@ -386,13 +391,44 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
     const action = approved ? 'approval' : 'unapproval'
     console.log(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${internalEmails.length} internal user(s)`)
 
+    // Build full per-project lists for the email UI.
+    // Important: approvals are versioned per video name; treat "video" as the unique name.
+    const projectVideos = await prisma.video.findMany({
+      where: { projectId: project.id },
+      select: { id: true, name: true, approved: true },
+    })
+
+    const byName = new Map<string, Array<{ id: string; name: string; approved: boolean }>>()
+    for (const v of projectVideos) {
+      const key = String(v.name || '').trim() || 'Untitled Video'
+      const list = byName.get(key) || []
+      list.push(v)
+      byName.set(key, list)
+    }
+
+    const approvedList: Array<{ id: string; name: string }> = []
+    const awaitingList: Array<{ id: string; name: string }> = []
+    for (const [name, versions] of byName.entries()) {
+      const approvedVersion = versions.find((vv) => vv.approved)
+      if (approvedVersion) {
+        approvedList.push({ id: approvedVersion.id, name })
+      } else {
+        awaitingList.push({ id: versions[0]!.id, name })
+      }
+    }
+
+    approvedList.sort((a, b) => a.name.localeCompare(b.name))
+    awaitingList.sort((a, b) => a.name.localeCompare(b.name))
+
     const result = await sendAdminProjectApprovedEmail({
       adminEmails: internalEmails,
       clientName: authorName || 'Client',
       projectTitle: project.title,
-      approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),
+      approvedVideos: approvedList,
+      awaitingVideos: awaitingList,
       isApproval: approved, // Pass whether this is approval or unapproval
       isComplete, // Pass whether this is complete project or partial
+      actionVideoName: video?.name || null,
     })
 
     if (result.success) {
@@ -403,7 +439,7 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   }
 
   // Send push notification for video approval
-  const videoNames = approvedVideos?.map(v => v.name).join(', ') || video?.name || 'Unknown'
+  const videoNames = videosForPush.map(v => v.name).join(', ') || video?.name || 'Unknown'
   const approvalStatus = approved ? 'approved' : 'unapproved'
   
   await sendPushNotification({
@@ -411,7 +447,7 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
     projectId: project.id,
     projectName: project.title,
     title: `Video ${approved ? 'Approved' : 'Unapproved'}`,
-    message: `Client ${approvalStatus} video${approvedVideos && approvedVideos.length > 1 ? 's' : ''}`,
+    message: `Client ${approvalStatus} video${videosForPush.length > 1 ? 's' : ''}`,
     details: {
       'Project': project.title,
       'Video(s)': videoNames,

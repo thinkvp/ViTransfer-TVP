@@ -5,16 +5,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
+  fetchSalesRollup,
   fetchSalesSettings,
-  listSalesInvoices,
-  listSalesPayments,
-  listSalesQuotes,
 } from '@/lib/sales/admin-api'
-import type { SalesInvoiceWithVersion, SalesQuoteWithVersion } from '@/lib/sales/admin-api'
-import type { InvoiceStatus, QuoteStatus, SalesPayment, SalesSettings } from '@/lib/sales/types'
+import type { SalesRollupResponse } from '@/lib/sales/admin-api'
+import type { InvoiceStatus, QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
-import { endOfDayLocal, invoiceEffectiveStatus, parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
+import { parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
 
 function quoteStatusBadgeClass(status: QuoteStatus): string {
   switch (status) {
@@ -92,9 +90,7 @@ export default function SalesDashboardPage() {
     paymentDetails: '',
     updatedAt: new Date(0).toISOString(),
   })
-  const [quotes, setQuotes] = useState<SalesQuoteWithVersion[]>([])
-  const [invoices, setInvoices] = useState<SalesInvoiceWithVersion[]>([])
-  const [payments, setPayments] = useState<SalesPayment[]>([])
+  const [rollup, setRollup] = useState<SalesRollupResponse | null>(null)
 
   useEffect(() => {
     // Local-storage pages: re-render when returning to this tab.
@@ -112,17 +108,18 @@ export default function SalesDashboardPage() {
 
     ;(async () => {
       try {
-        const [s, q, inv, pay] = await Promise.all([
+        const [s, r] = await Promise.all([
           fetchSalesSettings(),
-          listSalesQuotes(),
-          listSalesInvoices(),
-          listSalesPayments(),
+          fetchSalesRollup({
+            invoicesLimit: 2000,
+            quotesLimit: 2000,
+            paymentsLimit: 5000,
+            stripePaymentsLimit: 200,
+          }),
         ])
         if (cancelled) return
         setSettings(s)
-        setQuotes(q)
-        setInvoices(inv)
-        setPayments(pay)
+        setRollup(r)
       } catch {
         // ignore
       } finally {
@@ -148,64 +145,26 @@ export default function SalesDashboardPage() {
   }, [])
 
   const stats = useMemo(() => {
-    const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-
-    const openQuotes = quotes.filter((q) => {
-      const st = quoteEffectiveStatus(q, nowMs)
-      return st === 'OPEN' || st === 'SENT'
-    }).length
-
-    const openQuoteDrafts = quotes.filter((q) => quoteEffectiveStatus(q, nowMs) === 'OPEN').length
-
-    const invoiceTotals = invoices.map((inv) => {
-      const subtotal = sumLineItemsSubtotal(inv.items)
-      const tax = sumLineItemsTax(inv.items, settings.taxRatePercent)
-      const total = subtotal + tax
-      const paid = payments
-        .filter((p) => p.invoiceId === inv.id)
-        .reduce((pAcc, p) => pAcc + p.amountCents, 0)
-      const balance = Math.max(0, total - paid)
-
-      const effectiveStatus = invoiceEffectiveStatus(
-        {
-          status: inv.status,
-          sentAt: inv.sentAt,
-          dueDate: inv.dueDate,
-          totalCents: total,
-          paidCents: paid,
-        },
-        nowMs
-      )
-
-      return { inv, total, paid, balance, effectiveStatus }
-    })
-
-    const openInvoices = invoiceTotals.filter((e) => e.effectiveStatus !== 'PAID')
-    const overdueInvoices = invoiceTotals.filter((e) => e.effectiveStatus === 'OVERDUE')
-
-    const openBalanceCents = openInvoices.reduce((acc, e) => acc + e.balance, 0)
-
-    return {
-      openQuotes,
-      openQuoteDrafts,
-      openInvoices: openInvoices.length,
-      overdueInvoices: overdueInvoices.length,
-      openBalanceCents,
+    return rollup?.stats ?? {
+      openQuotes: 0,
+      openQuoteDrafts: 0,
+      openInvoices: 0,
+      overdueInvoices: 0,
+      openBalanceCents: 0,
     }
-  }, [invoices, nowIso, payments, quotes, settings.taxRatePercent])
+  }, [rollup?.stats])
 
   const dashboardData = useMemo(() => {
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
 
+    const invoices = rollup?.invoices ?? []
+    const quotes = rollup?.quotes ?? []
+    const payments = rollup?.payments ?? []
+    const invoiceRollupById = rollup?.invoiceRollupById ?? {}
+
     const quoteRows = quotes
       .map((q) => {
-        const validUntil = parseDateOnlyLocal(q.validUntil)
-        const isExpired = Boolean(validUntil) && nowMs > endOfDayLocal(validUntil as Date).getTime()
-        const effectiveStatus: QuoteStatus = (q.status === 'CLOSED' || q.status === 'ACCEPTED')
-          ? q.status
-          : isExpired
-            ? 'CLOSED'
-            : q.status
+        const effectiveStatus = quoteEffectiveStatus(q, nowMs)
 
         const subtotal = sumLineItemsSubtotal(q.items)
         const tax = sumLineItemsTax(q.items, settings.taxRatePercent)
@@ -219,26 +178,11 @@ export default function SalesDashboardPage() {
 
     const invoiceRows = invoices
       .map((inv) => {
-        const subtotal = sumLineItemsSubtotal(inv.items)
-        const tax = sumLineItemsTax(inv.items, settings.taxRatePercent)
-        const total = subtotal + tax
-        const paid = payments
-          .filter((p) => p.invoiceId === inv.id && !p.excludeFromInvoiceBalance)
-          .reduce((acc, p) => acc + p.amountCents, 0)
-        const balance = Math.max(0, total - paid)
+        const r = invoiceRollupById[inv.id]
+        const effectiveStatus = (r?.effectiveStatus as InvoiceStatus) ?? inv.status
+        const balance = Number.isFinite(Number(r?.balanceCents)) ? Number(r!.balanceCents) : 0
 
-        const due = parseDateOnlyLocal(inv.dueDate)
-        const isPastDue = Boolean(due) && nowMs > endOfDayLocal(due as Date).getTime()
-        const baseStatus: InvoiceStatus = inv.sentAt ? 'SENT' : 'OPEN'
-        const effectiveStatus: InvoiceStatus = balance <= 0
-          ? 'PAID'
-          : isPastDue
-            ? 'OVERDUE'
-            : paid > 0
-              ? 'PARTIALLY_PAID'
-              : baseStatus
-
-        return { invoice: inv, effectiveStatus, balanceCents: balance }
+        return { invoice: inv, effectiveStatus, balanceCents: Math.max(0, Math.trunc(balance)) }
       })
       .filter((r) => r.effectiveStatus !== 'PAID')
       .sort((a, b) => {
@@ -251,7 +195,6 @@ export default function SalesDashboardPage() {
     const thresholdMs = nowMs
       ? new Date(new Date(nowMs).setDate(new Date(nowMs).getDate() - 30)).getTime()
       : 0
-
     const recentPayments = payments
       .filter((p) => {
         if (p.excludeFromInvoiceBalance) return false
@@ -264,7 +207,7 @@ export default function SalesDashboardPage() {
     const invoiceNumberById = Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber]))
 
     return { quoteRows, invoiceRows, recentPayments, invoiceNumberById }
-  }, [invoices, nowIso, payments, quotes, settings.taxRatePercent])
+  }, [nowIso, rollup, settings.taxRatePercent])
 
   return (
     <div className="space-y-4 sm:space-y-6">

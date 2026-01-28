@@ -14,11 +14,12 @@ import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import {
   deleteSalesInvoice,
   fetchSalesInvoice,
+  fetchSalesRollup,
   fetchSalesSettings,
   listSalesPayments,
   patchSalesInvoice,
 } from '@/lib/sales/admin-api'
-import type { SalesInvoiceWithVersion } from '@/lib/sales/admin-api'
+import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { ClientOption, InvoiceStatus, ProjectOption, SalesLineItem, SalesPayment, SalesSettings } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
@@ -114,6 +115,7 @@ export default function InvoiceDetailPage() {
   })
 
   const [invoice, setInvoice] = useState<SalesInvoiceWithVersion | null>(null)
+  const [salesRollup, setSalesRollup] = useState<SalesRollupResponse | null>(null)
   const [shareToken, setShareToken] = useState<string | null | undefined>(undefined)
   const [trackingRefreshKey, setTrackingRefreshKey] = useState(0)
   const [sendOpen, setSendOpen] = useState(false)
@@ -157,15 +159,17 @@ export default function InvoiceDetailPage() {
       if (!id) {
         setInvoice(null)
         setPayments([])
+        setSalesRollup(null)
         setLoaded(true)
         return
       }
 
       try {
-        const [s, inv, pay] = await Promise.all([
+        const [s, inv, pay, r] = await Promise.all([
           fetchSalesSettings(),
           fetchSalesInvoice(id),
           listSalesPayments({ invoiceId: id, limit: 5000 }),
+          fetchSalesRollup({ invoiceIds: [id], includeInvoices: true, includeQuotes: false, includePayments: false }),
         ])
 
         if (cancelled) return
@@ -173,6 +177,7 @@ export default function InvoiceDetailPage() {
         setSettings(s)
         setInvoice(inv)
         setPayments(pay)
+        setSalesRollup(r)
 
         setStatus(inv.status)
         setClientId(inv.clientId ?? '')
@@ -195,6 +200,7 @@ export default function InvoiceDetailPage() {
         if (!cancelled) {
           setInvoice(null)
           setPayments([])
+          setSalesRollup(null)
         }
       } finally {
         if (!cancelled) setLoaded(true)
@@ -367,11 +373,23 @@ export default function InvoiceDetailPage() {
   const countablePayments = useMemo(() => payments.filter((p) => !p.excludeFromInvoiceBalance), [payments])
   const localPaidCents = useMemo(() => countablePayments.reduce((acc, p) => acc + p.amountCents, 0), [countablePayments])
   const stripePaidCents = useMemo(() => stripePayments.reduce((acc, p) => acc + (Number.isFinite(p.invoiceAmountCents) ? p.invoiceAmountCents : 0), 0), [stripePayments])
-  const paidCents = localPaidCents + stripePaidCents
-  const balanceCents = Math.max(0, totalCents - paidCents)
+  const paidCents = useMemo(() => {
+    const r = salesRollup?.invoiceRollupById?.[id]
+    const paid = Number(r?.paidCents)
+    return Number.isFinite(paid) ? Math.max(0, Math.trunc(paid)) : localPaidCents + stripePaidCents
+  }, [id, localPaidCents, salesRollup?.invoiceRollupById, stripePaidCents])
+
+  const balanceCents = useMemo(() => {
+    const r = salesRollup?.invoiceRollupById?.[id]
+    const bal = Number(r?.balanceCents)
+    return Number.isFinite(bal) ? Math.max(0, Math.trunc(bal)) : Math.max(0, totalCents - paidCents)
+  }, [id, paidCents, salesRollup?.invoiceRollupById, totalCents])
 
   const paidOnYmd = useMemo((): string | null => {
     if (paidCents <= 0) return null
+
+    const rollupYmd = salesRollup?.invoiceRollupById?.[id]?.latestPaymentYmd
+    if (typeof rollupYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rollupYmd)) return rollupYmd
 
     const latestLocalYmd = countablePayments
       .map((p) => p.paymentDate)
@@ -392,7 +410,7 @@ export default function InvoiceDetailPage() {
       .sort()
       .at(-1)
       ?? null
-  }, [countablePayments, paidCents, stripePayments])
+  }, [countablePayments, id, paidCents, salesRollup?.invoiceRollupById, stripePayments])
 
   const paidOnDisplay = useMemo((): string | null => {
     if (!paidOnYmd) return null
@@ -400,6 +418,10 @@ export default function InvoiceDetailPage() {
   }, [paidOnYmd])
 
   const effectiveStatus = useMemo((): InvoiceStatus => {
+    const rollupStatus = salesRollup?.invoiceRollupById?.[id]?.effectiveStatus
+    if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
+      return rollupStatus
+    }
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
     return computeInvoiceEffectiveStatus(
       {
@@ -411,7 +433,7 @@ export default function InvoiceDetailPage() {
       },
       nowMs
     )
-  }, [dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
+  }, [dueDate, id, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, salesRollup?.invoiceRollupById, status, totalCents])
 
   const invoiceStatusDisplay = useMemo((): string => {
     if (effectiveStatus !== 'PAID') return statusLabel(effectiveStatus)
@@ -517,20 +539,9 @@ export default function InvoiceDetailPage() {
       .sort()
       .at(-1)
 
-    const latestStripeYmd = stripePayments
-      .map((p) => (typeof p.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : ''))
-      .filter((d) => Boolean(d))
-      .sort()
-      .at(-1)
-
-    const latestAnyPaymentYmd = [latestPaymentDate, latestStripeYmd]
-      .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-      .sort()
-      .at(-1)
-      ?? null
-
+    const rollupPaidAt = salesRollup?.invoiceRollupById?.[invoice.id]?.latestPaymentYmd ?? null
     const invoicePaidAt = (effectiveStatus === 'PAID' || (totalCents > 0 && balanceCents <= 0))
-      ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
+      ? (rollupPaidAt ?? paidOnYmd ?? new Date().toISOString().slice(0, 10))
       : null
 
     const url = await createSalesDocShareUrl({
@@ -567,26 +578,9 @@ export default function InvoiceDetailPage() {
     const clientDetails = clientId ? await fetchClientDetails(clientId).catch(() => null) : null
     let publicInvoiceUrl: string | undefined
     try {
-      const latestPaymentDate = countablePayments
-        .map((p) => p.paymentDate)
-        .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-        .sort()
-        .at(-1)
-
-      const latestStripeYmd = stripePayments
-        .map((p) => (typeof p.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.createdAt) ? p.createdAt.slice(0, 10) : ''))
-        .filter((d) => Boolean(d))
-        .sort()
-        .at(-1)
-
-      const latestAnyPaymentYmd = [latestPaymentDate, latestStripeYmd]
-        .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-        .sort()
-        .at(-1)
-        ?? null
-
+      const rollupPaidAt = salesRollup?.invoiceRollupById?.[invoice.id]?.latestPaymentYmd ?? null
       const invoicePaidAt = (effectiveStatus === 'PAID' || (totalCents > 0 && balanceCents <= 0))
-        ? (latestAnyPaymentYmd ?? new Date().toISOString().slice(0, 10))
+        ? (rollupPaidAt ?? paidOnYmd ?? new Date().toISOString().slice(0, 10))
         : null
 
       publicInvoiceUrl = await createSalesDocShareUrl({

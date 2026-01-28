@@ -117,3 +117,71 @@ export async function createSalesPayment(payload: {
 export async function deleteSalesPayment(id: string): Promise<void> {
   await apiDelete(`/api/admin/sales/payments/${encodeURIComponent(id)}`)
 }
+
+export type SalesRollupPaymentRow = {
+  id: string
+  source: 'LOCAL' | 'STRIPE'
+  paymentDate: string
+  amountCents: number
+  method: string | null
+  reference: string | null
+  clientId: string | null
+  invoiceId: string | null
+  excludeFromInvoiceBalance?: boolean
+  createdAt: string
+}
+
+export type SalesRollupResponse = {
+  taxRatePercent: number
+  invoices: SalesInvoiceWithVersion[]
+  quotes: SalesQuoteWithVersion[]
+  payments: SalesRollupPaymentRow[]
+  invoiceRollupById: Record<
+    string,
+    {
+      totalCents: number
+      paidLocalCents: number
+      paidStripeCents: number
+      paidCents: number
+      balanceCents: number
+      effectiveStatus: string
+      latestPaymentYmd: string | null
+    }
+  >
+  quoteEffectiveStatusById: Record<string, string>
+  stats: {
+    openQuotes: number
+    openQuoteDrafts: number
+    openInvoices: number
+    overdueInvoices: number
+    openBalanceCents: number
+  }
+}
+
+export async function fetchSalesRollup(input?: {
+  clientId?: string
+  projectId?: string
+  invoiceIds?: string[]
+  invoicesLimit?: number
+  quotesLimit?: number
+  paymentsLimit?: number
+  stripePaymentsLimit?: number
+  includeInvoices?: boolean
+  includeQuotes?: boolean
+  includePayments?: boolean
+}): Promise<SalesRollupResponse> {
+  const params = new URLSearchParams()
+  if (input?.clientId) params.set('clientId', input.clientId)
+  if (input?.projectId) params.set('projectId', input.projectId)
+  if (Array.isArray(input?.invoiceIds) && input!.invoiceIds!.length) params.set('invoiceIds', input!.invoiceIds!.join(','))
+  if (typeof input?.invoicesLimit === 'number') params.set('invoicesLimit', String(input.invoicesLimit))
+  if (typeof input?.quotesLimit === 'number') params.set('quotesLimit', String(input.quotesLimit))
+  if (typeof input?.paymentsLimit === 'number') params.set('paymentsLimit', String(input.paymentsLimit))
+  if (typeof input?.stripePaymentsLimit === 'number') params.set('stripePaymentsLimit', String(input.stripePaymentsLimit))
+  if (typeof input?.includeInvoices === 'boolean') params.set('includeInvoices', String(input.includeInvoices))
+  if (typeof input?.includeQuotes === 'boolean') params.set('includeQuotes', String(input.includeQuotes))
+  if (typeof input?.includePayments === 'boolean') params.set('includePayments', String(input.includePayments))
+
+  const qs = params.toString()
+  return apiJson<SalesRollupResponse>(`/api/admin/sales/rollup${qs ? `?${qs}` : ''}`, { cache: 'no-store' })
+}
