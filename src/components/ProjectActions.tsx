@@ -249,16 +249,28 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   useEffect(() => {
     if (!showNotificationModal) return
     if (notificationType !== 'internal-invite') return
-    // Default: select all assigned internal users with email
-    setSelectedInternalUserIds(assignedUsersWithEmail.map((u) => String(u.id)))
+    // Default: select all assigned internal users with email.
+    // Preserve an explicit user selection across refreshes (e.g. after sending).
+    setSelectedInternalUserIds((prev) => {
+      const available = assignedUsersWithEmail.map((u) => String(u.id))
+      const availableSet = new Set(available)
+      const filtered = prev.filter((id) => availableSet.has(id))
+      return filtered.length > 0 ? filtered : available
+    })
   }, [assignedUsersWithEmail, notificationType, showNotificationModal])
 
   useEffect(() => {
     if (!showNotificationModal) return
     if (notificationType === 'internal-invite') return
 
-    // Default: select all project recipients with email
-    setSelectedRecipientIds(projectRecipientsWithEmail.map((r) => String(r.id)))
+    // Default: select all project recipients with email.
+    // Preserve an explicit user selection across refreshes (e.g. after sending).
+    setSelectedRecipientIds((prev) => {
+      const available = projectRecipientsWithEmail.map((r) => String(r.id))
+      const availableSet = new Set(available)
+      const filtered = prev.filter((id) => availableSet.has(id))
+      return filtered.length > 0 ? filtered : available
+    })
   }, [notificationType, projectRecipientsWithEmail, showNotificationModal])
 
   const selectedAttachmentsMeta = projectFiles
@@ -340,14 +352,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     })
       .then((data) => {
         setMessage({ type: 'success', text: data.message || 'Notification sent successfully!' })
-        setSelectedVideoName('')
-        setSelectedVideoId('')
-        setSelectedAlbumId('')
+        // Keep selections intact (recipients/users/video/version/album) so the UI doesn't
+        // appear to "refresh" and select everything again after a router refresh.
         setEntireProjectNotes('')
         setInternalInviteNotes('')
-        setSelectedRecipientIds([])
-        setSelectedInternalUserIds([])
-        setSelectedProjectFileIds([])
         setSendPasswordSeparately(false)
 
         // Sending a notification can auto-transition NOT_STARTED → IN_REVIEW.

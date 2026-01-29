@@ -59,7 +59,11 @@ COPY package.json package-lock.json* ./
 COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
 
-RUN npm install --legacy-peer-deps
+RUN if [ -f package-lock.json ]; then \
+            npm ci --legacy-peer-deps; \
+        else \
+            npm install --legacy-peer-deps; \
+        fi
 
 RUN echo "Running npm security audit..." && \
     if audit_output="$(npm audit --audit-level=high 2>&1)"; then \
@@ -104,7 +108,11 @@ COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
 
 ENV NODE_ENV=production
-RUN npm install --omit=dev --legacy-peer-deps
+RUN if [ -f package-lock.json ]; then \
+            npm ci --omit=dev --legacy-peer-deps; \
+        else \
+            npm install --omit=dev --legacy-peer-deps; \
+        fi
 
 # ========================================
 # App image

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Video } from '@prisma/client'
 import { formatDuration, formatFileSize } from '@/lib/utils'
 import { Progress } from './ui/progress'
@@ -9,7 +9,7 @@ import { Switch } from './ui/switch'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Download, Check, X } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Download, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -51,6 +51,7 @@ export default function VideoList({
   const [savingAllowApprovalId, setSavingAllowApprovalId] = useState<string | null>(null)
   const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
+  const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
 
   // Polling removed from VideoList to prevent duplicate polling
   // Parent component (Project page) handles polling for processing videos
@@ -59,6 +60,39 @@ export default function VideoList({
   useEffect(() => {
     setVideos(initialVideos)
   }, [initialVideos])
+
+  const latestVersionId = useMemo(() => {
+    if (initialVideos.length === 0) return null
+    let best = initialVideos[0] as any
+    for (const v of initialVideos as any[]) {
+      const bestVersion = typeof best?.version === 'number' ? best.version : Number.NEGATIVE_INFINITY
+      const currentVersion = typeof v?.version === 'number' ? v.version : Number.NEGATIVE_INFINITY
+      if (currentVersion > bestVersion) best = v
+    }
+    return best?.id ?? null
+  }, [initialVideos])
+
+  useEffect(() => {
+    setExpandedVideoIds((prev) => {
+      const existing = new Set((initialVideos as any[]).map((v) => String(v.id)))
+      const filtered = prev.filter((id) => existing.has(id))
+      if (filtered.length > 0) return filtered
+      return latestVersionId ? [String(latestVersionId)] : []
+    })
+  }, [initialVideos, latestVersionId])
+
+  const toggleExpanded = (videoId: string) => {
+    setExpandedVideoIds((prev) =>
+      prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId]
+    )
+
+    // If a panel is being collapsed, also hide the asset uploader for that version.
+    setUploadingAssetsFor((prev) => (prev === videoId ? null : prev))
+  }
+
+  const ensureExpanded = (videoId: string) => {
+    setExpandedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]))
+  }
 
   const handleDelete = async (videoId: string) => {
     if (!effectiveCanDelete) return
@@ -299,7 +333,10 @@ export default function VideoList({
   return (
     <div className="space-y-4">
       {videos.map((video) => (
-        <div key={video.id} className="border rounded-lg p-2 sm:p-3 space-y-2">
+        (() => {
+          const isExpanded = expandedVideoIds.includes(video.id)
+          return (
+        <div key={video.id} className="border rounded-lg bg-muted/40 p-2 sm:p-3 space-y-2">
           {/* Top row: Approved badge + Version label + Action buttons */}
           <div className="flex justify-between items-center gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -370,7 +407,13 @@ export default function VideoList({
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => setUploadingAssetsFor(uploadingAssetsFor === video.id ? null : video.id)}
+                    onClick={() => {
+                      setUploadingAssetsFor((prev) => {
+                        const willOpen = prev !== video.id
+                        if (willOpen) ensureExpanded(video.id)
+                        return willOpen ? video.id : null
+                      })
+                    }}
                     className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                     title="Upload Assets"
                   >
@@ -399,6 +442,17 @@ export default function VideoList({
                     title="Delete video"
                   >
                     <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+                {video.status === 'READY' && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => toggleExpanded(video.id)}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent"
+                    title={isExpanded ? 'Collapse version' : 'Expand version'}
+                  >
+                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </Button>
                 )}
               </div>
@@ -442,38 +496,38 @@ export default function VideoList({
           )}
 
           {video.status === 'READY' && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
-              <div>
-                <p className="text-muted-foreground">Duration</p>
-                <p className="font-medium">{formatDuration(video.duration)}</p>
+            isExpanded && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
+                <div>
+                  <p className="text-muted-foreground">Duration</p>
+                  <p className="font-medium">{formatDuration(video.duration)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">FPS</p>
+                  <p className="font-medium">{video.fps ? `${video.fps.toFixed(2)}` : 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Resolution</p>
+                  <p className="font-medium">
+                    {video.width}x{video.height}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Size</p>
+                  <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-muted-foreground">FPS</p>
-                <p className="font-medium">{video.fps ? `${video.fps.toFixed(2)}` : 'N/A'}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Resolution</p>
-                <p className="font-medium">
-                  {video.width}x{video.height}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Size</p>
-                <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
-              </div>
-            </div>
+            )
           )}
 
           {/* Version Notes */}
           {video.status === 'READY' && (
+            isExpanded && (
             <div className="pt-3">
               {isAdmin && effectiveCanManageAllowApproval && editingId !== video.id && (
                 <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
-                    <div className="text-xs text-muted-foreground">
-                      When disabled, clients won’t see the Approve Video button for this version.
-                    </div>
                   </div>
                   <Switch
                     checked={Boolean((video as any).allowApproval)}
@@ -547,28 +601,26 @@ export default function VideoList({
                 </p>
               )}
             </div>
+            )
           )}
 
           {/* Asset upload section */}
-          {isAdmin && uploadingAssetsFor === video.id && video.status === 'READY' && (
+          {isAdmin && isExpanded && uploadingAssetsFor === video.id && video.status === 'READY' && (
             <div className="mt-4 pt-4 border-t space-y-4">
-              <div>
-                <h5 className="text-sm font-medium mb-3">Upload Additional Assets</h5>
-                <VideoAssetUploadQueue
-                  videoId={video.id}
-                  maxConcurrent={3}
-                  onUploadComplete={() => {
-                    setAssetRefreshTrigger(prev => prev + 1) // Trigger asset list refresh
-                    onRefresh?.()
-                  }}
-                />
-              </div>
+              <VideoAssetUploadQueue
+                videoId={video.id}
+                maxConcurrent={3}
+                onUploadComplete={() => {
+                  setAssetRefreshTrigger(prev => prev + 1) // Trigger asset list refresh
+                  onRefresh?.()
+                }}
+              />
             </div>
           )}
 
           {/* Asset list section - always visible for READY videos if admin */}
           {isAdmin && video.status === 'READY' && (
-            <div className="mt-4 pt-4 border-t">
+            isExpanded && (
               <VideoAssetList
                 videoId={video.id}
                 videoName={video.name}
@@ -581,9 +633,11 @@ export default function VideoList({
                 }}
                 refreshTrigger={assetRefreshTrigger}
               />
-            </div>
+            )
           )}
         </div>
+          )
+        })()
       ))}
 
       <ReprocessModal

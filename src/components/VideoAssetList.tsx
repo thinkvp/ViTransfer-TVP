@@ -267,15 +267,11 @@ export function VideoAssetList({
   }
 
   if (assets.length === 0) {
-    return (
-      <div className="text-center py-6 text-sm text-muted-foreground">
-        No assets uploaded for this video yet
-      </div>
-    )
+    return null
   }
 
   return (
-    <>
+    <div className="mt-4 pt-4 border-t">
       <div className="space-y-2">
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-medium text-muted-foreground">
@@ -370,6 +366,6 @@ export function VideoAssetList({
           }
         }}
       />
-    </>
+    </div>
   )
 }

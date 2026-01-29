@@ -460,34 +460,33 @@ export default function VideoUpload({
         </div>
       )}
 
-      {/* Version Label */}
-      <div className="space-y-2">
-        <Label htmlFor="versionLabel">Version Label (Optional)</Label>
-        <Input
-          id="versionLabel"
-          value={versionLabel}
-          onChange={(e) => setVersionLabel(e.target.value)}
-          placeholder="Leave empty for auto-generated label (v1, v2, etc.)"
-          disabled={uploading}
-        />
-      </div>
-
-      {showAllowApprovalField && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
-            <div className="text-xs text-muted-foreground">
-              When disabled, clients won’t see the Approve Video button for this version.
-            </div>
-          </div>
-          <Switch
-            checked={allowApproval}
-            onCheckedChange={(v) => setAllowApproval(Boolean(v))}
+      {/* Version Label + Allow Approval */}
+      <div className={showAllowApprovalField ? 'grid gap-4 sm:grid-cols-2' : 'space-y-2'}>
+        <div className="space-y-2">
+          <Label htmlFor="versionLabel">Version Label (Optional)</Label>
+          <Input
+            id="versionLabel"
+            value={versionLabel}
+            onChange={(e) => setVersionLabel(e.target.value)}
+            placeholder="Leave empty for auto-generated label (v1, v2, etc.)"
             disabled={uploading}
-            aria-label="Allow approval of version"
           />
         </div>
-      )}
+
+        {showAllowApprovalField && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
+            </div>
+            <Switch
+              checked={allowApproval}
+              onCheckedChange={(v) => setAllowApproval(Boolean(v))}
+              disabled={uploading}
+              aria-label="Allow approval of version"
+            />
+          </div>
+        )}
+      </div>
 
       {/* Version Notes */}
       {showVideoNotesField && (
@@ -611,11 +610,6 @@ export default function VideoUpload({
       >
         {uploading ? 'Uploading...' : 'Upload Video'}
       </Button>
-
-      <p className="text-xs text-muted-foreground">
-        Upload the original file without watermark. Preview versions will be generated
-        automatically. Upload can be paused and resumed if interrupted.
-      </p>
     </div>
   )
 }
