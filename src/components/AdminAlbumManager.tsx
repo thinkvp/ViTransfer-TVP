@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { AlbumPhotoUploadQueue } from '@/components/AlbumPhotoUploadQueue'
@@ -80,8 +80,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   const refreshAlbumsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-
-  const hasAlbums = albums.length > 0
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
@@ -684,8 +682,23 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
             </Button>
           ) : (
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle>Add Album</CardTitle>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => {
+                    setShowNewAlbumForm(false)
+                    setNewAlbumName('')
+                    setNewAlbumNotes('')
+                  }}
+                  disabled={creating}
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -717,24 +730,10 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                   <p className="text-xs text-muted-foreground mt-1">Max 500 characters</p>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex justify-end">
                   <Button type="button" onClick={() => void handleCreateAlbum()} disabled={creating}>
                     Create Album
                   </Button>
-                  {hasAlbums && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setShowNewAlbumForm(false)
-                        setNewAlbumName('')
-                        setNewAlbumNotes('')
-                      }}
-                      disabled={creating}
-                    >
-                      Cancel
-                    </Button>
-                  )}
                 </div>
               </CardContent>
             </Card>

@@ -564,7 +564,7 @@ export default function AdminSharePage() {
           onAlbumSelect={handleAlbumSelect}
           showVideos={project.enableVideos !== false}
           showAlbums={project.enablePhotos !== false}
-          className="w-64 flex-shrink-0 max-h-full"
+          className="flex-shrink-0 h-[calc(100dvh-var(--admin-header-height))]"
         />
 
         {/* Main Content Area */}

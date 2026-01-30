@@ -5,11 +5,11 @@ import { Video } from '@prisma/client'
 import { formatDuration, formatFileSize } from '@/lib/utils'
 import { Progress } from './ui/progress'
 import { Button } from './ui/button'
-import { Switch } from './ui/switch'
+import { Checkbox } from './ui/checkbox'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Download, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -420,18 +420,6 @@ export default function VideoList({
                     <Upload className="w-4 h-4" />
                   </Button>
                 )}
-                {isAdmin && video.status === 'READY' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDownloadVideo(video.id)}
-                    disabled={downloadingId === video.id}
-                    className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20"
-                    title="Download Video"
-                  >
-                    <Download className="w-4 h-4" />
-                  </Button>
-                )}
                 {isAdmin && effectiveCanDelete && (
                   <Button
                     variant="ghost"
@@ -462,14 +450,41 @@ export default function VideoList({
           {/* Bottom row: Filename */}
           {editingId !== video.id && (
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-muted-foreground break-all flex-1 min-w-0">
-                {video.originalFileName}
-              </p>
-              {(video as any).approved && (
-                <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 bg-success-visible text-success border-2 border-success-visible">
-                  Approved
-                </span>
+              {isAdmin && video.status === 'READY' ? (
+                <button
+                  type="button"
+                  onClick={() => handleDownloadVideo(video.id)}
+                  disabled={downloadingId === video.id}
+                  title="Download video"
+                  className="text-sm font-medium text-foreground hover:underline flex-1 min-w-0 truncate text-left disabled:opacity-50"
+                >
+                  {video.originalFileName}
+                </button>
+              ) : (
+                <p className="text-sm text-muted-foreground flex-1 min-w-0 truncate" title={video.originalFileName}>
+                  {video.originalFileName}
+                </p>
               )}
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {(video as any).approved && (
+                  <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-success-visible text-success border-2 border-success-visible">
+                    Approved
+                  </span>
+                )}
+
+                {isAdmin && video.status === 'READY' && !(video as any).approved && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Approvable?</span>
+                    <Checkbox
+                      checked={Boolean((video as any).allowApproval)}
+                      onCheckedChange={(checked) => handleToggleAllowApproval(video.id, Boolean(checked))}
+                      disabled={!effectiveCanManageAllowApproval || savingAllowApprovalId === video.id}
+                      aria-label="Approvable"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -524,21 +539,7 @@ export default function VideoList({
           {video.status === 'READY' && (
             isExpanded && (
             <div className="pt-3">
-              {isAdmin && effectiveCanManageAllowApproval && editingId !== video.id && (
-                <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
-                  </div>
-                  <Switch
-                    checked={Boolean((video as any).allowApproval)}
-                    onCheckedChange={(v) => handleToggleAllowApproval(video.id, Boolean(v))}
-                    disabled={savingAllowApprovalId === video.id}
-                    aria-label="Allow approval of version"
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <p className="text-muted-foreground text-xs sm:text-sm">Version Notes</p>
                 {isAdmin && editingId !== video.id && (
                   editingNotesId === video.id ? (
@@ -589,7 +590,6 @@ export default function VideoList({
                     disabled={savingNotesId === video.id}
                     placeholder="Add notes for this version (optional)"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">Max 500 characters</p>
                 </div>
               ) : (
                 <p className="text-sm mt-1 whitespace-pre-wrap">

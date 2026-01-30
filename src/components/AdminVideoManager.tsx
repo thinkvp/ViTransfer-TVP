@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
-import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
 import { InlineEdit } from './InlineEdit'
@@ -64,6 +64,7 @@ export default function AdminVideoManager({
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
   const [showNewVideoForm, setShowNewVideoForm] = useState(!hasVideos) // Auto-show if no videos
   const [newVideoName, setNewVideoName] = useState('')
+  const [showNewVersionForGroup, setShowNewVersionForGroup] = useState<string | null>(null)
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
   const [editGroupValue, setEditGroupValue] = useState('')
   const [savingGroupName, setSavingGroupName] = useState<string | null>(null)
@@ -79,9 +80,11 @@ export default function AdminVideoManager({
     if (wasExpanded) {
       // Collapse current video
       setExpandedGroup(null)
+      setShowNewVersionForGroup(null)
     } else {
       // Expand this video (and collapse any other)
       setExpandedGroup(name)
+      setShowNewVersionForGroup(null)
       // Notify parent when expanding a video
       if (onVideoSelect && videoGroups[name]) {
         onVideoSelect(name, videoGroups[name])
@@ -253,12 +256,43 @@ export default function AdminVideoManager({
                 {/* Upload new version for this video */}
                 {projectStatus !== 'APPROVED' && (
                   <div className="mt-4">
-                    <h4 className="text-sm font-medium mb-3">Upload New Version</h4>
-                    <VideoUpload
-                      projectId={projectId}
-                      videoName={groupName}
-                      onUploadComplete={handleUploadComplete}
-                    />
+                    {showNewVersionForGroup !== groupName ? (
+                      <Button
+                        variant="outline"
+                        size="lg"
+                        onClick={() => setShowNewVersionForGroup(groupName)}
+                        className="w-full border-dashed"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add New Version
+                      </Button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-medium">Upload New Version</h4>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setShowNewVersionForGroup(null)}
+                            title="Close"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        <VideoUpload
+                          projectId={projectId}
+                          videoName={groupName}
+                          allowApproval={canFullControl ? undefined : false}
+                          showAllowApprovalField={canFullControl}
+                          onUploadComplete={() => {
+                            setShowNewVersionForGroup(null)
+                            handleUploadComplete()
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -266,18 +300,7 @@ export default function AdminVideoManager({
                 <div className="mt-5">
                   <h4 className="text-sm font-medium mb-3">All Versions</h4>
                   <VideoList
-                    videos={groupVideos.sort((a, b) => {
-                      if (sortMode === 'alphabetical') {
-                        // Alphabetical by version label
-                        return a.versionLabel.localeCompare(b.versionLabel)
-                      } else {
-                        // Status sorting: approved first, then by version descending
-                        if (a.approved !== b.approved) {
-                          return a.approved ? -1 : 1
-                        }
-                        return b.version - a.version
-                      }
-                    })}
+                    videos={groupVideos.slice().sort((a, b) => b.version - a.version)}
                     onRefresh={onRefresh}
                     canDelete={canFullControl}
                     canApprove={canFullControl}
@@ -305,8 +328,21 @@ export default function AdminVideoManager({
             </Button>
           ) : (
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle>Add New Video</CardTitle>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => {
+                    setShowNewVideoForm(false)
+                    setNewVideoName('')
+                  }}
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -318,9 +354,6 @@ export default function AdminVideoManager({
                     placeholder="e.g., Introduction, Tutorial, Demo"
                     required
                   />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Give this video a descriptive name
-                  </p>
                 </div>
 
                 {/* Hide all upload/version details until a name is entered (matches existing behavior) */}
@@ -338,19 +371,6 @@ export default function AdminVideoManager({
                     Enter a video name to start uploading
                   </div>
                 )}
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setShowNewVideoForm(false)
-                      setNewVideoName('')
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           )}

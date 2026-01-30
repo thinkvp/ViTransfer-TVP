@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
-import { Download, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 
 interface ProjectFile {
   id: string
@@ -116,8 +116,15 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
     <div className="space-y-2">
       {files.map((f) => (
         <div key={f.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
-          <div className="min-w-0">
-            <div className="text-sm font-medium truncate">{f.fileName}</div>
+          <div className="flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => void handleDownload(f)}
+              className="w-full text-sm font-medium truncate text-left text-foreground hover:underline"
+              title={`Download ${f.fileName}`}
+            >
+              {f.fileName}
+            </button>
             <div className="text-xs text-muted-foreground truncate">
               {formatFileSize(Number(f.fileSize))}
               {f.sourceType === 'emailAttachment'
@@ -128,9 +135,6 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button type="button" variant="outline" size="sm" onClick={() => void handleDownload(f)}>
-              <Download className="w-4 h-4" />
-            </Button>
             {canDelete && !!f.deleteUrl && (
               <Button
                 type="button"

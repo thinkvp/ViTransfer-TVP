@@ -816,7 +816,7 @@ export default function ProjectsDashboardKeyDates() {
       >
         <ChevronLeft className="w-4 h-4" />
       </Button>
-      <div className="text-sm font-medium tabular-nums w-[10.5rem] text-center">{monthLabel}</div>
+      <div className="text-sm font-medium tabular-nums w-[9rem] text-center">{monthLabel}</div>
       <Button
         variant="ghost"
         size="icon"
@@ -831,9 +831,41 @@ export default function ProjectsDashboardKeyDates() {
   return (
     <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <CardTitle className="text-base">Upcoming Key Dates</CardTitle>
-          <div className="text-xs text-muted-foreground tabular-nums">{upcoming.length.toLocaleString()} total</div>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="text-base">Upcoming Key Dates</CardTitle>
+            <div className="text-xs text-muted-foreground tabular-nums mt-1">
+              {upcoming.length.toLocaleString()} total
+            </div>
+          </div>
+
+          {upcomingTotalPages > 1 ? (
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
+                disabled={upcomingPage <= 0}
+                aria-label="Previous page"
+                title="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <div className="text-xs text-muted-foreground tabular-nums text-center w-[6.5rem]">
+                Page {(upcomingPage + 1).toLocaleString()} of {upcomingTotalPages.toLocaleString()}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setUpcomingPage((p) => Math.min(upcomingTotalPages - 1, p + 1))}
+                disabled={upcomingPage >= upcomingTotalPages - 1}
+                aria-label="Next page"
+                title="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="p-3 sm:p-4">
           {loading ? (
@@ -935,29 +967,6 @@ export default function ProjectsDashboardKeyDates() {
                 )
               })}
 
-              {upcomingTotalPages > 1 ? (
-                <div className="pt-2 flex items-center justify-between gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
-                    disabled={upcomingPage <= 0}
-                  >
-                    Previous
-                  </Button>
-                  <div className="text-xs text-muted-foreground tabular-nums">
-                    Page {(upcomingPage + 1).toLocaleString()} of {upcomingTotalPages.toLocaleString()}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setUpcomingPage((p) => Math.min(upcomingTotalPages - 1, p + 1))}
-                    disabled={upcomingPage >= upcomingTotalPages - 1}
-                  >
-                    Next
-                  </Button>
-                </div>
-              ) : null}
             </div>
           )}
         </CardContent>

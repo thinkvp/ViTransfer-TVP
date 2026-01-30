@@ -146,7 +146,7 @@ export function VideoAssetUploadQueue({
 
         {/* File Selection */}
         <div className="space-y-2">
-          <Label htmlFor={`asset-file-${videoId}`}>Asset Files (Multiple)</Label>
+          <Label htmlFor={`asset-file-${videoId}`}>Upload Asset Files (Multiple)</Label>
           <div className="flex items-center gap-2">
             <Input
               ref={fileInputRef}
@@ -251,13 +251,6 @@ export function VideoAssetUploadQueue({
               />
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Info message when queue is empty */}
-      {queue.length === 0 && (
-        <div className="text-center py-4 text-sm text-muted-foreground">
-          Select files above to add them to the upload queue. You can upload up to {maxConcurrent} files simultaneously.
         </div>
       )}
     </div>

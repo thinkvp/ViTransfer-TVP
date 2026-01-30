@@ -13,7 +13,6 @@ import {
   ImagePlay,
   Trash2,
   Loader2,
-  Download,
   Copy
 } from 'lucide-react'
 import { Button } from './ui/button'
@@ -297,7 +296,14 @@ export function VideoAssetList({
             >
               {getAssetIcon(asset)}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{asset.fileName}</p>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(asset.id, asset.fileName)}
+                  className="text-sm font-medium truncate text-left text-foreground hover:underline"
+                  title={`Download ${asset.fileName}`}
+                >
+                  {asset.fileName}
+                </button>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>{formatFileSizeBigInt(asset.fileSize)}</span>
                   <span>•</span>
@@ -321,15 +327,6 @@ export function VideoAssetList({
                     )}
                   </Button>
                 )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDownload(asset.id, asset.fileName)}
-                  title="Download asset"
-                >
-                  <Download className="h-4 w-4 text-primary" />
-                </Button>
                 {canManage && (
                   <Button
                     type="button"

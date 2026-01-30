@@ -2,9 +2,9 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Button } from './ui/button'
+import { Checkbox } from './ui/checkbox'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
-import { Switch } from './ui/switch'
 import { Textarea } from './ui/textarea'
 import { useRouter } from 'next/navigation'
 import { Upload, Pause, Play, X } from 'lucide-react'
@@ -474,16 +474,19 @@ export default function VideoUpload({
         </div>
 
         {showAllowApprovalField && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-card-foreground">Allow approval of version</div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Allow approval of version</div>
+            <div className="flex items-center gap-2 h-10">
+              <Checkbox
+                checked={allowApproval}
+                onCheckedChange={(v) => setAllowApproval(Boolean(v))}
+                disabled={uploading}
+                aria-label="Allow approval of version"
+              />
+              <span className={allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                {allowApproval ? 'Clients can approve version' : 'Client approval disabled'}
+              </span>
             </div>
-            <Switch
-              checked={allowApproval}
-              onCheckedChange={(v) => setAllowApproval(Boolean(v))}
-              disabled={uploading}
-              aria-label="Allow approval of version"
-            />
           </div>
         )}
       </div>
@@ -492,7 +495,7 @@ export default function VideoUpload({
       {showVideoNotesField && (
         <div className="space-y-2">
           <Label htmlFor="videoNotes">
-            Version Notes <span className="text-muted-foreground">(Optional)</span>
+            Version Notes <span className="text-muted-foreground dark:text-white">(Optional)</span>
           </Label>
           <Textarea
             id="videoNotes"
@@ -504,14 +507,13 @@ export default function VideoUpload({
             rows={3}
             maxLength={500}
           />
-          <p className="text-xs text-muted-foreground">Max 500 characters</p>
         </div>
       )}
 
       {/* File Selection */}
       <div className="space-y-2">
         <Label htmlFor="file">Video File (Original)</Label>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             ref={fileInputRef}
             id="file"
@@ -526,10 +528,18 @@ export default function VideoUpload({
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="w-full"
+            className="w-full sm:w-1/2"
           >
             <Upload className="w-4 h-4 mr-2" />
             {file ? 'Change File' : 'Drag & Drop or Click to Choose'}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleUpload}
+            disabled={!file || uploading}
+            className="w-full sm:w-1/2"
+          >
+            {uploading ? 'Uploading...' : 'Upload Video'}
           </Button>
         </div>
         {file && (
@@ -602,14 +612,6 @@ export default function VideoUpload({
         </div>
       )}
 
-      {/* Upload Button */}
-      <Button
-        onClick={handleUpload}
-        disabled={!file || uploading}
-        className="w-full"
-      >
-        {uploading ? 'Uploading...' : 'Upload Video'}
-      </Button>
     </div>
   )
 }
