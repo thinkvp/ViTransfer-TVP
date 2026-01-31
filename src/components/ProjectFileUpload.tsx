@@ -42,6 +42,7 @@ export function ProjectFileUpload({
   description,
   layout = 'stacked',
 }: ProjectFileUploadProps) {
+  const hasDescription = String(description || '').trim().length > 0
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<QueuedProjectFileUpload[]>([])
   const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
@@ -438,7 +439,7 @@ export function ProjectFileUpload({
           type="button"
           variant="outline"
           onClick={() => fileInputRef.current?.click()}
-          className="w-full"
+          className={layout === 'headerRow' ? 'w-auto sm:w-full' : 'w-full'}
           disabled={hasActiveUploads}
         >
           <Upload className="w-4 h-4 mr-2" />
@@ -478,14 +479,20 @@ export function ProjectFileUpload({
   return (
     <div className="space-y-4">
       {layout === 'headerRow' ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+        <div
+          className={
+            hasDescription
+              ? 'flex items-start justify-between gap-3 sm:items-center'
+              : 'flex items-center justify-between gap-3'
+          }
+        >
+          <div className="min-w-0">
             <div className="text-base font-medium">{title}</div>
-            {String(description || '').trim().length > 0 && (
+            {hasDescription && (
               <p className="text-xs text-muted-foreground mt-1">{description}</p>
             )}
           </div>
-          <div className="w-full sm:w-64">{picker}</div>
+          <div className="shrink-0 w-auto sm:w-64">{picker}</div>
         </div>
       ) : (
         picker

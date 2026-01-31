@@ -3,8 +3,6 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { Input } from './ui/input'
-import { Label } from './ui/label'
 import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
@@ -12,6 +10,7 @@ import { InlineEdit } from './InlineEdit'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { apiPatch } from '@/lib/api-client'
+import MultiVideoUploadModal from '@/components/MultiVideoUploadModal'
 
 interface VideoGroup {
   name: string
@@ -62,8 +61,7 @@ export default function AdminVideoManager({
   const hasVideos = videos.length > 0
   // Only allow one video expanded at a time - default collapsed
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
-  const [showNewVideoForm, setShowNewVideoForm] = useState(!hasVideos) // Auto-show if no videos
-  const [newVideoName, setNewVideoName] = useState('')
+  const [addVideosOpen, setAddVideosOpen] = useState(false)
   const [showNewVersionForGroup, setShowNewVersionForGroup] = useState<string | null>(null)
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
   const [editGroupValue, setEditGroupValue] = useState('')
@@ -92,18 +90,7 @@ export default function AdminVideoManager({
     }
   }
 
-  const handleAddNewVideo = () => {
-    if (newVideoName.trim()) {
-      setExpandedGroup(newVideoName)
-      setShowNewVideoForm(false)
-      setNewVideoName('')
-    }
-  }
-
   const handleUploadComplete = () => {
-    // Reset the "Add New Video" form when upload completes
-    setShowNewVideoForm(false)
-    setNewVideoName('')
     // Refresh the project data to show the new video
     onRefresh?.()
   }
@@ -316,64 +303,23 @@ export default function AdminVideoManager({
       {/* Add new video button */}
       {projectStatus !== 'APPROVED' && (
         <div>
-          {!showNewVideoForm ? (
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={() => setShowNewVideoForm(true)}
-              className="w-full border-dashed"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Video
-            </Button>
-          ) : (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <CardTitle>Add New Video</CardTitle>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => {
-                    setShowNewVideoForm(false)
-                    setNewVideoName('')
-                  }}
-                  title="Close"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="videoName">Video Name *</Label>
-                  <Input
-                    id="videoName"
-                    value={newVideoName}
-                    onChange={(e) => setNewVideoName(e.target.value)}
-                    placeholder="e.g., Introduction, Tutorial, Demo"
-                    required
-                  />
-                </div>
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => setAddVideosOpen(true)}
+            className="w-full border-dashed"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Video/s
+          </Button>
 
-                {/* Hide all upload/version details until a name is entered (matches existing behavior) */}
-
-                {newVideoName.trim() ? (
-                  <VideoUpload
-                    projectId={projectId}
-                    videoName={newVideoName.trim()}
-                    allowApproval={canFullControl ? undefined : false}
-                    showAllowApprovalField={canFullControl}
-                    onUploadComplete={handleUploadComplete}
-                  />
-                ) : (
-                  <div className="p-4 border-2 border-dashed border-border rounded-lg text-center text-sm text-muted-foreground">
-                    Enter a video name to start uploading
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          <MultiVideoUploadModal
+            open={addVideosOpen}
+            onOpenChange={setAddVideosOpen}
+            projectId={projectId}
+            canFullControl={canFullControl}
+            onUploadComplete={handleUploadComplete}
+          />
         </div>
       )}
     </div>

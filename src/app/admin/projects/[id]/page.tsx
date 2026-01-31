@@ -626,7 +626,7 @@ export default function ProjectPage() {
 
             {(projectQuotes.length > 0 || projectInvoices.length > 0) && (
               <Card>
-                <CardContent className="pt-6 space-y-4">
+                <CardContent className="pt-6 max-sm:pt-3 space-y-4">
                   {salesLoading && projectQuotes.length === 0 && projectInvoices.length === 0 ? (
                     <div className="text-sm text-muted-foreground">Loading sales…</div>
                   ) : null}
@@ -646,7 +646,7 @@ export default function ProjectPage() {
                           <tbody>
                             {projectQuotes.length === 0 ? (
                               <tr className="border-t">
-                                <td colSpan={3} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                <td colSpan={3} className="px-3 py-2 text-center text-sm text-muted-foreground">
                                   {salesLoading ? 'Loading…' : 'No quotes for project.'}
                                 </td>
                               </tr>
@@ -692,7 +692,7 @@ export default function ProjectPage() {
                           <tbody>
                             {projectInvoices.length === 0 ? (
                               <tr className="border-t">
-                                <td colSpan={3} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                <td colSpan={3} className="px-3 py-2 text-center text-sm text-muted-foreground">
                                   {salesLoading ? 'Loading…' : 'No invoices for project.'}
                                 </td>
                               </tr>
@@ -843,7 +843,7 @@ export default function ProjectPage() {
 
             {canDeleteInternalFiles && (
               <Card>
-                <CardContent className="pt-6">
+                <CardContent className="pt-6 max-sm:pt-3">
                   <ProjectUsersEditor
                     label="Users"
                     description=""

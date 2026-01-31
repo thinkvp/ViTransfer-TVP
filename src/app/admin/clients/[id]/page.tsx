@@ -570,7 +570,6 @@ export default function ClientDetailPage() {
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div className="min-w-0">
                 <CardTitle>Client Details</CardTitle>
-                <CardDescription>Update client contact information</CardDescription>
               </div>
               <div className="flex items-center justify-end gap-2 shrink-0">
                 <span className="text-sm text-muted-foreground">Active</span>
@@ -646,7 +645,6 @@ export default function ClientDetailPage() {
                 <div className="border rounded-lg p-4 bg-card">
                   <RecipientsEditor
                     label="Client Recipients"
-                    description="Recipients can be pulled into projects during project creation"
                     value={recipients}
                     onChange={setRecipients}
                     addButtonLabel="Add Recipient"
@@ -668,7 +666,6 @@ export default function ClientDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Files</CardTitle>
-              <CardDescription>Store contracts, brand assets and more</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <ClientFileUpload
@@ -682,7 +679,6 @@ export default function ClientDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Projects</CardTitle>
-              <CardDescription>Projects assigned to this client</CardDescription>
             </CardHeader>
             <CardContent>
               {projectsError && (
@@ -863,7 +859,6 @@ export default function ClientDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Sales</CardTitle>
-              <CardDescription>Quotes, invoices, and payments for this client</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">

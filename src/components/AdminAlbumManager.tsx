@@ -92,9 +92,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       const data = await apiJson<{ albums?: AlbumSummary[] }>(`/api/projects/${projectId}/albums`)
       const nextAlbums = data.albums || []
       setAlbums(nextAlbums)
-      if (!nextAlbums.length) {
-        setShowNewAlbumForm(true)
-      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load albums'
 
@@ -286,9 +283,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
       setAlbums((prev) => {
         const next = prev.filter((a) => a.id !== albumId)
-        if (next.length === 0) {
-          setShowNewAlbumForm(true)
-        }
         return next
       })
       setPhotosByAlbumId((prev) => {
@@ -727,7 +721,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                     maxLength={500}
                     disabled={creating}
                   />
-                  <p className="text-xs text-muted-foreground mt-1">Max 500 characters</p>
                 </div>
 
                 <div className="flex justify-end">

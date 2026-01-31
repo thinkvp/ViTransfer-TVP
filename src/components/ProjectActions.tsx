@@ -503,7 +503,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
         return (
       <Card>
-        <CardContent className="pt-6 space-y-3">
+        <CardContent className="pt-6 max-sm:pt-3 space-y-3">
           {canSendNotifications && (
             <div>
               <Button

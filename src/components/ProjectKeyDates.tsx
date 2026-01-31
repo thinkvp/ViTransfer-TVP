@@ -447,13 +447,13 @@ export function ProjectKeyDates({
 
   return (
     <div className="border rounded-lg p-4 bg-card space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3 sm:items-center">
+        <div className="min-w-0">
           <div className="text-base font-medium">Key Dates</div>
         </div>
         {canEdit && (
-          <div className="w-full sm:w-64">
-            <Button type="button" variant="outline" onClick={startAdd} className="w-full" disabled={Boolean(draft)}>
+          <div className="shrink-0 w-auto sm:w-64">
+            <Button type="button" variant="outline" onClick={startAdd} className="w-auto sm:w-full" disabled={Boolean(draft)}>
               <Plus className="w-4 h-4 mr-2" />
               Add Date
             </Button>

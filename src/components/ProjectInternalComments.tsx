@@ -381,12 +381,12 @@ export function ProjectInternalComments(props: {
         </div>
       </CardHeader>
 
-      <CardContent className="p-0">
+      <CardContent className="!p-0">
         <div className="flex flex-col max-h-[50vh]">
           <div
             ref={messagesContainerRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-auto p-4 space-y-3 bg-muted/30"
+            className="flex-1 overflow-auto px-4 py-4 sm:px-6 space-y-3 bg-muted/30"
           >
             {error ? (
               <div className="text-sm text-destructive">{error}</div>
@@ -422,7 +422,7 @@ export function ProjectInternalComments(props: {
             })}
           </div>
 
-          <div className="border-t border-border p-4 space-y-2">
+          <div className="border-t border-border px-4 py-4 sm:px-6 space-y-2">
             {replyingPreview ? (
               <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2">
                 <div className="min-w-0">

@@ -918,7 +918,7 @@ export function CommentSectionView({
         {null}
         </CardHeader>
 
-      <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
+      <CardContent className="flex-1 flex flex-col !p-0 overflow-hidden min-h-0">
         {headerVideo && (headerVideo as any)?.approved ? (
           <VideoAssetDownloadModal
             videoId={headerVideo.id}
@@ -1000,7 +1000,7 @@ export function CommentSectionView({
         )}
 
         {/* List Controls (directly above the message list) */}
-        <div className="px-4 py-2 border-b border-border bg-card flex-shrink-0">
+        <div className="px-4 sm:px-6 py-2 border-b border-border bg-card flex-shrink-0">
           <div className="flex flex-wrap items-center gap-2 justify-between">
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               {isAdminView && (
@@ -1081,7 +1081,7 @@ export function CommentSectionView({
         </div>
 
         {/* Messages Area - Threaded Conversations */}
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0 bg-muted/30">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 min-h-0 bg-muted/30">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
               <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />

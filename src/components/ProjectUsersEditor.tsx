@@ -179,14 +179,14 @@ export function ProjectUsersEditor({
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-3 sm:items-center">
+          <div className="min-w-0">
             <div className="text-base font-medium">{label}</div>
             {String(description || '').trim().length > 0 && (
               <p className="text-xs text-muted-foreground mt-1">{description}</p>
             )}
           </div>
-          <div className="w-full sm:w-64 flex justify-end">
+          <div className="shrink-0 w-auto sm:w-64 flex justify-end">
             <Button
               type="button"
               variant={addButtonVariant}
@@ -197,7 +197,7 @@ export function ProjectUsersEditor({
                 void loadSuggestions('', { allowEmpty: true })
               }}
               disabled={disabled || showAddForm}
-              className={addButtonClassName || 'w-full'}
+              className={addButtonClassName || 'w-auto sm:w-full'}
             >
               <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 mr-2'} />
               {!addButtonIconOnly && <span>{addButtonLabel}</span>}
