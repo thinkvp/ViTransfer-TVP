@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X, DollarSign } from 'lucide-react'
+import type { ButtonProps } from '@/components/ui/button'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from '@/lib/display-color'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
@@ -35,6 +36,10 @@ interface RecipientsEditorProps {
   value: EditableRecipient[]
   onChange: (next: EditableRecipient[]) => void
   addButtonLabel?: string
+  addButtonVariant?: ButtonProps['variant']
+  addButtonSize?: ButtonProps['size']
+  addButtonHideLabelOnMobile?: boolean
+  addButtonFixedWidth?: boolean
   emptyStateText?: string
   showNotificationsToggle?: boolean
   showSalesRemindersToggle?: boolean
@@ -55,6 +60,10 @@ export function RecipientsEditor({
   value,
   onChange,
   addButtonLabel = 'Add Recipient',
+  addButtonVariant = 'default',
+  addButtonSize = 'sm',
+  addButtonHideLabelOnMobile = true,
+  addButtonFixedWidth = true,
   emptyStateText,
   showNotificationsToggle = true,
   showSalesRemindersToggle = false,
@@ -335,17 +344,26 @@ export function RecipientsEditor({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3 sm:items-center">
+        <div className="min-w-0">
           <Label>{label}</Label>
           {description ? (
             <p className="text-xs text-muted-foreground mt-1">{description}</p>
           ) : null}
         </div>
-        <Button type="button" variant="default" size="sm" onClick={() => setShowAddForm(true)} disabled={showAddForm}>
-          <Plus className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">{addButtonLabel}</span>
-        </Button>
+        <div className={addButtonFixedWidth ? 'shrink-0 w-auto md:w-64 flex justify-end' : 'shrink-0 w-auto flex justify-end'}>
+          <Button
+            type="button"
+            variant={addButtonVariant}
+            size={addButtonSize}
+            onClick={() => setShowAddForm(true)}
+            disabled={showAddForm}
+            className={addButtonFixedWidth ? 'w-auto md:w-full' : 'w-auto'}
+          >
+            <Plus className={addButtonHideLabelOnMobile ? 'w-4 h-4 sm:mr-2' : 'w-4 h-4 mr-2'} />
+            <span className={addButtonHideLabelOnMobile ? 'hidden sm:inline' : undefined}>{addButtonLabel}</span>
+          </Button>
+        </div>
       </div>
 
       {recipients.length === 0 && !showAddForm ? (

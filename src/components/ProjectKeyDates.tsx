@@ -452,10 +452,10 @@ export function ProjectKeyDates({
           <div className="text-base font-medium">Key Dates</div>
         </div>
         {canEdit && (
-          <div className="shrink-0 w-auto sm:w-64">
-            <Button type="button" variant="outline" onClick={startAdd} className="w-auto sm:w-full" disabled={Boolean(draft)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Date
+          <div className="flex justify-end shrink-0">
+            <Button type="button" variant="outline" onClick={startAdd} disabled={Boolean(draft)} aria-label="Add Date">
+              <Plus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Add Date</span>
             </Button>
           </div>
         )}

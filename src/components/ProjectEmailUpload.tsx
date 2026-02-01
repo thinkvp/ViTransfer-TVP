@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, CheckCircle2, Loader2, Pause, Play, RotateCw, Trash2, Upload, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, Pause, Play, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react'
 import * as tus from 'tus-js-client'
 import { apiDelete, apiPost } from '@/lib/api-client'
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
@@ -427,12 +427,50 @@ export function ProjectEmailUpload({
     </div>
   )
 
-  return (
-    <div className={layout === 'headerRow' ? 'flex items-center justify-between gap-4' : 'space-y-3'}>
-      {layout === 'headerRow' && header}
+  if (compact) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3 sm:items-center">
+          {header}
 
-      <div className={layout === 'headerRow' ? 'w-full max-w-xl space-y-3' : 'space-y-3'}>
-        {layout !== 'headerRow' && header}
+          <div className="shrink-0 w-auto md:w-64 flex items-center justify-end">
+            {/* Mobile: normal button */}
+            <Button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={hasActiveUploads}
+              variant="outline"
+              className="sm:hidden"
+              aria-label="Add Email"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+
+            {/* Desktop: compact clickable drag/drop target */}
+            <button
+              type="button"
+              onClick={() => {
+                if (hasActiveUploads) return
+                fileInputRef.current?.click()
+              }}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              disabled={hasActiveUploads}
+              className={
+                `hidden sm:inline-flex h-9 w-auto md:w-full items-center justify-center rounded-md border border-dashed px-3 text-sm font-medium transition-colors ` +
+                (hasActiveUploads
+                  ? 'opacity-50 cursor-not-allowed'
+                  : (isDragging ? 'border-primary bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/50'))
+              }
+              aria-label={hasActiveUploads ? 'Uploading…' : '+ Add Email'}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              + Add Email
+            </button>
+          </div>
+        </div>
 
         {error && (
           <div className="flex gap-3 p-3 bg-destructive-visible border border-destructive-visible rounded-lg">
@@ -441,97 +479,24 @@ export function ProjectEmailUpload({
           </div>
         )}
 
-        <div
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          onClick={() => {
-            if (hasActiveUploads) return
-            fileInputRef.current?.click()
-          }}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (hasActiveUploads) return
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              fileInputRef.current?.click()
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".eml,message/rfc822"
+          multiple
+          onChange={(e) => {
+            const files = e.target.files
+            if (!files || files.length === 0) {
+              setSelectedFiles([])
+              return
             }
+            const next = Array.from(files)
+            handleFileSelect(next)
+            addFilesToQueue(next)
           }}
-          className={`border-2 border-dashed rounded-lg ${compact ? 'p-3' : 'p-6'} ${compact ? 'text-left' : 'text-center'} transition-colors ${
-            isDragging ? 'border-primary bg-primary/5' : 'border-border bg-muted/30 hover:bg-muted/50'
-          }`}
-        >
-          {!compact && <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />}
-
-          <div className={compact ? 'flex items-center justify-between gap-3' : ''}>
-            <div className={compact ? 'min-w-0' : ''}>
-              <p className={compact ? 'text-sm font-medium' : 'font-medium mb-1'}>
-                <span className="hidden sm:inline">Drag & drop .eml files here</span>
-                <span className="hidden">Tap to select .eml</span>
-              </p>
-              {!compact && <p className="hidden sm:block text-xs text-muted-foreground mb-3">or click to select</p>}
-              {compact && selectedFiles.length > 0 && (
-                <p className="text-xs text-muted-foreground truncate">Selected: {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}</p>
-              )}
-            </div>
-
-            {compact && (
-              <Button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  fileInputRef.current?.click()
-                }}
-                disabled={hasActiveUploads}
-                variant="outline"
-                size="sm"
-              >
-                Select .eml
-              </Button>
-            )}
-          </div>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".eml,message/rfc822"
-            multiple
-            onChange={(e) => handleFileSelect(e.target.files)}
-            className="hidden"
-            disabled={hasActiveUploads}
-          />
-
-          {!compact && (
-            <div className="flex items-center justify-center gap-2">
-              <Button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  fileInputRef.current?.click()
-                }}
-                disabled={hasActiveUploads}
-                variant="outline"
-                size="sm"
-              >
-                Select .eml
-              </Button>
-              {selectedFiles.length > 0 && (
-                <Button type="button" onClick={addSelectedToQueue} variant="default" size="sm">
-                  Add {selectedFiles.length} to queue
-                </Button>
-              )}
-            </div>
-          )}
-
-          {!compact && selectedFiles.length > 0 && (
-            <div className="mt-3 text-xs text-muted-foreground">
-              {selectedFiles.map((f) => f.name).slice(0, 3).join(', ')}
-              {selectedFiles.length > 3 ? ` +${selectedFiles.length - 3} more` : ''}
-            </div>
-          )}
-        </div>
+          className="hidden"
+          disabled={hasActiveUploads}
+        />
 
         {queue.length > 0 && (
           <div className="space-y-2">
@@ -612,12 +577,171 @@ export function ProjectEmailUpload({
             ))}
           </div>
         )}
+      </div>
+    )
+  }
 
-        {layout !== 'headerRow' && (
-          <div className="text-xs text-muted-foreground">
-            Emails are parsed after upload; they may appear after a short delay.
+  return (
+    <div className="space-y-3">
+      {header}
+
+      {error && (
+        <div className="flex gap-3 p-3 bg-destructive-visible border border-destructive-visible rounded-lg">
+          <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+          <pre className="text-sm text-destructive whitespace-pre-wrap">{error}</pre>
+        </div>
+      )}
+
+      <div
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onClick={() => {
+          if (hasActiveUploads) return
+          fileInputRef.current?.click()
+        }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (hasActiveUploads) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            fileInputRef.current?.click()
+          }
+        }}
+        className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+          isDragging ? 'border-primary bg-primary/5' : 'border-border bg-muted/30 hover:bg-muted/50'
+        }`}
+      >
+        <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+
+        <p className="font-medium mb-1">
+          <span className="hidden sm:inline">Drag & drop .eml files here</span>
+          <span className="hidden">Tap to select .eml</span>
+        </p>
+        <p className="hidden sm:block text-xs text-muted-foreground mb-3">or click to select</p>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".eml,message/rfc822"
+          multiple
+          onChange={(e) => handleFileSelect(e.target.files)}
+          className="hidden"
+          disabled={hasActiveUploads}
+        />
+
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              fileInputRef.current?.click()
+            }}
+            disabled={hasActiveUploads}
+            variant="outline"
+            size="sm"
+          >
+            Select .eml
+          </Button>
+          {selectedFiles.length > 0 && (
+            <Button type="button" onClick={addSelectedToQueue} variant="default" size="sm">
+              Add {selectedFiles.length} to queue
+            </Button>
+          )}
+        </div>
+
+        {selectedFiles.length > 0 && (
+          <div className="mt-3 text-xs text-muted-foreground">
+            {selectedFiles.map((f) => f.name).slice(0, 3).join(', ')}
+            {selectedFiles.length > 3 ? ` +${selectedFiles.length - 3} more` : ''}
           </div>
         )}
+      </div>
+
+      {queue.length > 0 && (
+        <div className="space-y-2">
+          {queue.map((u) => (
+            <div key={u.id} className="border rounded-lg bg-card px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{u.file.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {formatFileSize(u.file.size)}
+                    {u.status === 'uploading' && u.uploadSpeed > 0 ? ` • ${u.uploadSpeed} MB/s` : ''}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {u.status === 'uploading' && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => pauseUpload(u.id)}>
+                      <Pause className="w-4 h-4" />
+                    </Button>
+                  )}
+                  {u.status === 'paused' && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => resumeUpload(u.id)}>
+                      <Play className="w-4 h-4" />
+                    </Button>
+                  )}
+                  {u.status === 'error' && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => retryUpload(u.id)}>
+                      <RotateCw className="w-4 h-4" />
+                    </Button>
+                  )}
+                  <Button type="button" variant="outline" size="sm" onClick={() => removeUpload(u.id)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <div className="h-2 w-full rounded bg-muted overflow-hidden">
+                  <div
+                    className={`h-full transition-all ${
+                      u.status === 'completed'
+                        ? 'bg-emerald-500'
+                        : u.status === 'error'
+                          ? 'bg-destructive'
+                          : 'bg-primary'
+                    }`}
+                    style={{ width: `${Math.max(0, Math.min(100, u.progress))}%` }}
+                  />
+                </div>
+                <div className="w-12 text-right text-xs tabular-nums text-muted-foreground">{u.progress}%</div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+                <div className="min-w-0">
+                  {u.status === 'uploading' && (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading
+                    </span>
+                  )}
+                  {u.status === 'queued' && <span className="text-muted-foreground">Queued</span>}
+                  {u.status === 'paused' && <span className="text-muted-foreground">Paused</span>}
+                  {u.status === 'completed' && (
+                    <span className="inline-flex items-center gap-1 text-emerald-600">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Uploaded
+                    </span>
+                  )}
+                  {u.status === 'error' && <span className="text-destructive">{u.error || 'Upload failed'}</span>}
+                </div>
+                <div className="flex-shrink-0">
+                  {u.status === 'error' && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeUpload(u.id)}>
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground">
+        Emails are parsed after upload; they may appear after a short delay.
       </div>
     </div>
   )

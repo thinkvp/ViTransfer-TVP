@@ -499,6 +499,7 @@ export default function NewProjectPage() {
                   value={recipients}
                   onChange={setRecipients}
                   addButtonLabel="Add Recipient"
+                  addButtonFixedWidth={false}
                   emptyStateText="No recipients added yet."
                   showAlsoAddToClient
                   addMode="dialog"
@@ -790,14 +791,14 @@ export default function NewProjectPage() {
                 </p>
               </div>
 
-              <div className="flex w-full gap-3 pt-4 sm:justify-end">
+              <div className="flex w-full flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
                   size="lg"
                   onClick={() => router.push('/admin/projects')}
                   disabled={loading}
-                  className="flex-1 sm:flex-none"
+                  className="w-full sm:w-auto"
                 >
                   <X className="w-4 h-4 mr-2" />
                   <span>Cancel</span>
@@ -807,7 +808,7 @@ export default function NewProjectPage() {
                   variant="default"
                   size="lg"
                   disabled={loading}
-                  className="flex-1 sm:flex-none"
+                  className="w-full sm:w-auto"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   <span>{loading ? 'Creating...' : 'Create Project'}</span>

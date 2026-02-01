@@ -114,39 +114,13 @@ export function ProjectFileUpload({
     setError(null)
   }
 
-  const generateUploadId = (): string => {
-    const cryptoObj: Crypto | undefined = (globalThis as any).crypto
-    if (cryptoObj?.randomUUID) return `project-upload-${Date.now()}-${cryptoObj.randomUUID()}`
-    if (cryptoObj?.getRandomValues) {
-      const bytes = new Uint8Array(16)
-      cryptoObj.getRandomValues(bytes)
-      const hex = Array.from(bytes)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')
-      return `project-upload-${Date.now()}-${hex}`
-    }
-    return `project-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  }
-
-  const activeCounts = useMemo(() => {
-    return queue.reduce(
-      (acc, u) => {
-        acc[u.status] += 1
-        return acc
-      },
-      { queued: 0, uploading: 0, paused: 0, completed: 0, error: 0 } as Record<QueuedProjectFileUpload['status'], number>
-    )
-  }, [queue])
-
-  const hasActiveUploads = activeCounts.uploading > 0 || activeCounts.queued > 0 || activeCounts.paused > 0
-
-  const addSelectedToQueue = () => {
-    if (selectedFiles.length === 0) return
+  const addFilesToQueue = (files: File[]) => {
+    if (!files || files.length === 0) return
 
     const errors: string[] = []
     const nextItems: QueuedProjectFileUpload[] = []
 
-    for (const f of selectedFiles) {
+    for (const f of files) {
       const validation = validateFile(f)
       if (!validation.valid) {
         errors.push(`${f.name}: ${validation.error || 'Invalid file type'}`)
@@ -178,6 +152,34 @@ export function ProjectFileUpload({
     setError(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
+
+  const generateUploadId = (): string => {
+    const cryptoObj: Crypto | undefined = (globalThis as any).crypto
+    if (cryptoObj?.randomUUID) return `project-upload-${Date.now()}-${cryptoObj.randomUUID()}`
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint8Array(16)
+      cryptoObj.getRandomValues(bytes)
+      const hex = Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+      return `project-upload-${Date.now()}-${hex}`
+    }
+    return `project-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
+
+  const activeCounts = useMemo(() => {
+    return queue.reduce(
+      (acc, u) => {
+        acc[u.status] += 1
+        return acc
+      },
+      { queued: 0, uploading: 0, paused: 0, completed: 0, error: 0 } as Record<QueuedProjectFileUpload['status'], number>
+    )
+  }, [queue])
+
+  const hasActiveUploads = activeCounts.uploading > 0 || activeCounts.queued > 0 || activeCounts.paused > 0
+
+  const addSelectedToQueue = () => addFilesToQueue(selectedFiles)
 
   const updateUpload = (id: string, patch: Partial<QueuedProjectFileUpload>) => {
     setQueue((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)))
@@ -407,6 +409,47 @@ export function ProjectFileUpload({
     return { count: selectedFiles.length, totalSize }
   }, [selectedFiles])
 
+  const headerRowPicker = (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (hasActiveUploads) return
+        if (e.dataTransfer.files.length > 0) {
+          addFilesToQueue(Array.from(e.dataTransfer.files))
+        }
+      }}
+      className="flex justify-end"
+    >
+      <Input
+        ref={fileInputRef}
+        id="project-files"
+        type="file"
+        multiple
+        onChange={(e) => {
+          const files = e.target.files
+          if (!files || files.length === 0) return
+          addFilesToQueue(Array.from(files))
+        }}
+        className="hidden"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={hasActiveUploads}
+        aria-label="Add Files"
+      >
+        <Upload className="w-4 h-4 sm:mr-2" />
+        <span className="hidden sm:inline">Add Files</span>
+      </Button>
+    </div>
+  )
+
   const picker = (
     <div
       onDragOver={handleDragOver}
@@ -414,15 +457,9 @@ export function ProjectFileUpload({
       onDrop={handleDrop}
       className={`
         rounded-lg border-2 border-dashed transition-all
-        ${isDragging ? 'border-primary bg-primary/5 scale-[1.01] p-4' : 'border-transparent'}
+        ${isDragging ? 'border-primary bg-primary/5 scale-[1.01] p-4' : 'border-border bg-muted/30 hover:bg-muted/50 p-6'}
       `}
     >
-      {error && (
-        <div className="p-3 bg-destructive/10 border border-destructive rounded-md">
-          <p className="text-sm text-destructive whitespace-pre-line">{error}</p>
-        </div>
-      )}
-
       <div className="space-y-2">
         {layout === 'stacked' && <Label htmlFor="project-files">{title}</Label>}
 
@@ -435,15 +472,9 @@ export function ProjectFileUpload({
           className="hidden"
         />
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => fileInputRef.current?.click()}
-          className={layout === 'headerRow' ? 'w-auto sm:w-full' : 'w-full'}
-          disabled={hasActiveUploads}
-        >
+        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full" disabled={hasActiveUploads}>
           <Upload className="w-4 h-4 mr-2" />
-          {layout === 'headerRow' ? 'Add Files' : (selectedFiles.length > 0 ? 'Change Files' : 'Drag & Drop or Click to Choose')}
+          {selectedFiles.length > 0 ? 'Change Files' : 'Drag & Drop or Click to Choose'}
         </Button>
 
         {selectedSummary && (
@@ -479,23 +510,23 @@ export function ProjectFileUpload({
   return (
     <div className="space-y-4">
       {layout === 'headerRow' ? (
-        <div
-          className={
-            hasDescription
-              ? 'flex items-start justify-between gap-3 sm:items-center'
-              : 'flex items-center justify-between gap-3'
-          }
-        >
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-base font-medium">{title}</div>
             {hasDescription && (
               <p className="text-xs text-muted-foreground mt-1">{description}</p>
             )}
           </div>
-          <div className="shrink-0 w-auto sm:w-64">{picker}</div>
+          <div className="shrink-0">{headerRowPicker}</div>
         </div>
       ) : (
         picker
+      )}
+
+      {error && (
+        <div className="p-3 bg-destructive/10 border border-destructive rounded-md">
+          <p className="text-sm text-destructive whitespace-pre-line">{error}</p>
+        </div>
       )}
 
       {queue.length > 0 && (

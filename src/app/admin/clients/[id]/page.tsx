@@ -642,16 +642,18 @@ export default function ClientDetailPage() {
                   />
                 </div>
 
-                <div className="border rounded-lg p-4 bg-card">
-                  <RecipientsEditor
-                    label="Client Recipients"
-                    value={recipients}
-                    onChange={setRecipients}
-                    addButtonLabel="Add Recipient"
-                    showNotificationsToggle={false}
-                    showSalesRemindersToggle
-                  />
-                </div>
+                <RecipientsEditor
+                  label="Client Recipients"
+                  value={recipients}
+                  onChange={setRecipients}
+                  addButtonLabel="Add Recipient"
+                  addButtonVariant="outline"
+                  addButtonSize="default"
+                  addButtonHideLabelOnMobile={true}
+                  addButtonFixedWidth={false}
+                  showNotificationsToggle={false}
+                  showSalesRemindersToggle
+                />
 
                 <div className="flex items-center justify-end">
                   <Button type="submit" disabled={saving}>

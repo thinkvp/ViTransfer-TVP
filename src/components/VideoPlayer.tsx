@@ -7,7 +7,7 @@ import Image from 'next/image'
 type Video = any
 type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -1230,7 +1230,7 @@ export default function VideoPlayer({
         </div>
 
         {/* Custom Controls + Timeline (enables hover thumbnails) */}
-        <div className="relative flex-shrink-0">
+        <div className="relative flex-shrink-0 pl-[calc(env(safe-area-inset-left)+0.5rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:px-0">
           <div
             className="flex flex-col gap-2 pt-4 sm:pt-0 sm:flex-row sm:items-center sm:gap-3"
             onPointerDownCapture={handleControlsPointerDownCapture}
@@ -1601,33 +1601,34 @@ export default function VideoPlayer({
             </div>
 
             {/* Mobile: row 2 controls (left: play/time, right: volume/speed/fullscreen) */}
-            <div className="sm:hidden flex items-center justify-between gap-2 w-full">
-              <div className="flex items-center gap-2">
+            <div className="sm:hidden flex items-center gap-2 w-full min-w-0">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={togglePlayPause}
                   aria-label={isPlaying ? 'Pause' : 'Play'}
+                  className="h-8 w-8"
                 >
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </Button>
 
-                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap truncate min-w-0">
                   {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
                   {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-end gap-1 flex-shrink-0 flex-wrap max-w-full">
                 <div className="relative flex-shrink-0" data-volume-control="true">
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
+                    size="icon"
                     onClick={toggleMute}
                     aria-label={isMuted ? 'Unmute' : 'Mute'}
-                    className="relative overflow-hidden w-14 px-0"
+                    className="relative overflow-hidden h-8 w-8"
                   >
                     {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
                       <span
@@ -1647,10 +1648,10 @@ export default function VideoPlayer({
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="icon"
                       onClick={handleDecreaseSpeed}
                       aria-label="Decrease playback speed"
-                      className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                      className={cn('h-8 w-8', playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                     >
                       <Rewind className="w-4 h-4" />
                     </Button>
@@ -1658,10 +1659,10 @@ export default function VideoPlayer({
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="icon"
                       onClick={handleIncreaseSpeed}
                       aria-label="Increase playback speed"
-                      className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                      className={cn('h-8 w-8', playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                     >
                       <FastForward className="w-4 h-4" />
                     </Button>
@@ -1671,17 +1672,26 @@ export default function VideoPlayer({
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={toggleFullscreen}
                   aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                  className="h-8 w-8"
                 >
                   {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </Button>
 
                 {canShowApprovedDownload && approvedDownloadUrl && (
-                  <Button asChild type="button" variant="default" size="sm" aria-label="Download approved video" title="Download approved video">
+                  <Button
+                    asChild
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Download approved video"
+                    title="Download approved video"
+                    className="h-8 w-8"
+                  >
                     <a href={approvedDownloadUrl} download>
-                      Download
+                      <Download className="w-4 h-4" />
                     </a>
                   </Button>
                 )}

@@ -147,17 +147,19 @@ export default function NewClientPage() {
                   />
                 </div>
 
-                <div className="border rounded-lg p-4 bg-card">
-                  <RecipientsEditor
-                    label="Client Recipients"
-                    description="These recipients can be added to projects when creating a new project"
-                    value={recipients}
-                    onChange={setRecipients}
-                    addButtonLabel="Add Recipient"
-                    showNotificationsToggle={false}
-                    showSalesRemindersToggle
-                  />
-                </div>
+                <RecipientsEditor
+                  label="Client Recipients"
+                  description="These recipients can be added to projects when creating a new project"
+                  value={recipients}
+                  onChange={setRecipients}
+                  addButtonLabel="Add Recipient"
+                  addButtonVariant="outline"
+                  addButtonSize="default"
+                  addButtonHideLabelOnMobile={true}
+                  addButtonFixedWidth={false}
+                  showNotificationsToggle={false}
+                  showSalesRemindersToggle
+                />
 
                 <div className="flex items-center justify-end gap-2">
                   <Link href="/admin/clients">

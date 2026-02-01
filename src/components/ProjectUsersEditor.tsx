@@ -186,7 +186,7 @@ export function ProjectUsersEditor({
               <p className="text-xs text-muted-foreground mt-1">{description}</p>
             )}
           </div>
-          <div className="shrink-0 w-auto sm:w-64 flex justify-end">
+          <div className="flex justify-end shrink-0">
             <Button
               type="button"
               variant={addButtonVariant}
@@ -197,10 +197,11 @@ export function ProjectUsersEditor({
                 void loadSuggestions('', { allowEmpty: true })
               }}
               disabled={disabled || showAddForm}
-              className={addButtonClassName || 'w-auto sm:w-full'}
+              className={addButtonClassName}
+              aria-label={String(addButtonLabel)}
             >
-              <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 mr-2'} />
-              {!addButtonIconOnly && <span>{addButtonLabel}</span>}
+              <Plus className={addButtonIconOnly ? 'w-4 h-4' : 'w-4 h-4 sm:mr-2'} />
+              {!addButtonIconOnly && <span className="hidden sm:inline">{addButtonLabel}</span>}
             </Button>
           </div>
         </div>

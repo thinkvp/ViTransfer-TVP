@@ -604,21 +604,23 @@ export default function ProjectPage() {
                   )}
 
                   {canDeleteInternalFiles && (
-                    <div className="border rounded-lg p-4 bg-card">
-                      <RecipientsEditor
-                        label="Recipients"
-                        description=""
-                        value={editableRecipients}
-                        onChange={(next) => void persistRecipients(next)}
-                        addButtonLabel="Add Recipient"
-                        showNotificationsToggle={true}
-                        showDisplayColor={true}
-                        showAlsoAddToClient={Boolean(project?.clientId)}
-                        addMode="dialog"
-                        clientRecipients={clientRecipients}
-                        clientName={projectClientName || undefined}
-                      />
-                    </div>
+                    <RecipientsEditor
+                      label="Recipients"
+                      description=""
+                      value={editableRecipients}
+                      onChange={(next) => void persistRecipients(next)}
+                      addButtonLabel="Add Recipient"
+                      addButtonVariant="outline"
+                      addButtonSize="default"
+                      addButtonFixedWidth={false}
+                      addButtonHideLabelOnMobile={true}
+                      showNotificationsToggle={true}
+                      showDisplayColor={true}
+                      showAlsoAddToClient={Boolean(project?.clientId)}
+                      addMode="dialog"
+                      clientRecipients={clientRecipients}
+                      clientName={projectClientName || undefined}
+                    />
                   )}
                 </div>
               </CardContent>
@@ -856,6 +858,7 @@ export default function ProjectPage() {
                     addButtonLabel="Add Users"
                     addButtonSize="default"
                     addButtonVariant="outline"
+                    addButtonHideLabelOnMobile={true}
                   />
                 </CardContent>
               </Card>
