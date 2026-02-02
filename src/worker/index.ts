@@ -5,6 +5,7 @@ import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
 import { prisma } from '../lib/db'
 import os from 'os'
+import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
@@ -59,6 +60,10 @@ async function hasRetriableNotificationFailures(): Promise<boolean> {
 async function main() {
   console.log('[WORKER] Initializing video processing worker...')
 
+  // Centralized CPU allocation coordinates worker concurrency with FFmpeg thread usage.
+  const cpuAllocation = getCpuAllocation()
+  logCpuAllocation(cpuAllocation)
+
   if (DEBUG) {
     console.log('[WORKER DEBUG] Debug mode is ENABLED')
     console.log('[WORKER DEBUG] Node version:', process.version)
@@ -84,22 +89,14 @@ async function main() {
     console.log('[WORKER DEBUG] Storage initialized')
   }
 
-  // Calculate optimal concurrency based on available CPU cores
-  const cpuCores = os.cpus().length
-  let concurrency = 2
-  if (cpuCores <= 4) {
-    concurrency = 1
-  } else if (cpuCores <= 8) {
-    concurrency = 2
-  } else {
-    concurrency = 3
-  }
+  // Use centralized allocation for video worker concurrency.
+  const concurrency = cpuAllocation.videoWorkerConcurrency
 
-  console.log(`[WORKER] Worker concurrency: ${concurrency} (based on ${cpuCores} CPU cores)`)
+  console.log(`[WORKER] Video worker concurrency: ${concurrency} (from CPU allocation)`)
 
   if (DEBUG) {
     console.log('[WORKER DEBUG] CPU details:', {
-      cores: cpuCores,
+      threads: cpuAllocation.effectiveThreads,
       model: os.cpus()[0]?.model || 'Unknown',
       concurrency
     })

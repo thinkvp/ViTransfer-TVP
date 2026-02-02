@@ -131,6 +131,15 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       # DEBUG_WORKER: "true"  # Uncomment for verbose FFmpeg and worker debug logs
+
+      # Worker CPU / concurrency tuning (optional)
+      # - In containers, `os.cpus().length` can reflect host CPU rather than the container quota.
+      # - Set CPU_THREADS to match the worker container's CPU allocation (threads), e.g. 2, 4, 8.
+      # CPU_THREADS: "4"
+      # Force number of concurrent video jobs (default is computed from CPU_THREADS/host threads).
+      # VIDEO_WORKER_CONCURRENCY: "1"
+      # Force FFmpeg threads per job (default is computed to keep video/sprite FFmpeg usage ~50%).
+      # FFMPEG_THREADS_PER_JOB: "2"
       DATABASE_URL: postgresql://${POSTGRES_USER:-vitransfer}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vitransfer}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379

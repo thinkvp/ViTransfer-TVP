@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
+import { getCpuAllocation } from './cpu-config'
 
 // Debug mode - outputs verbose FFmpeg logs
 // Enable with: DEBUG_WORKER=true environment variable
@@ -220,6 +221,9 @@ export async function generateTimelineSprite(options: TimelineSpriteOptions): Pr
   const tileExpr = `tile=${tileColumns}x${tileRows}`
   const filter = `${fpsExpr},${scaleExpr},${tileExpr}`
 
+  const cpuAllocation = getCpuAllocation()
+  const threads = cpuAllocation.timelineThreadsPerJob
+
   // Note: -frames:v 1 because tile outputs a single sprite image.
   const args = [
     '-hide_banner',
@@ -228,17 +232,23 @@ export async function generateTimelineSprite(options: TimelineSpriteOptions): Pr
     '-t', `${Math.max(0, durationSeconds)}`,
     '-i', inputPath,
     '-vf', filter,
+    '-threads', threads.toString(),
     '-frames:v', '1',
     '-q:v', '3',
     outputPath,
   ]
 
   if (DEBUG) {
-    console.log('[FFMPEG DEBUG] Executing:', ffmpegPath, args.join(' '))
+    console.log('[FFMPEG DEBUG] Timeline sprite CPU allocation:', {
+      availableThreads: cpuAllocation.effectiveThreads,
+      budgetThreads: cpuAllocation.budgetThreads,
+      threadsPerJob: threads,
+    })
+    console.log('[FFMPEG DEBUG] Executing:', 'nice -n 10', ffmpegPath, args.join(' '))
   }
 
   await new Promise<void>((resolve, reject) => {
-    const ffmpeg = spawn(ffmpegPath, args)
+    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args])
     let stderr = ''
 
     ffmpeg.stderr.on('data', (data) => {
@@ -284,35 +294,27 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     })
   }
 
-  const cpuCores = os.cpus().length
+  // Centralized CPU allocation coordinates worker concurrency with FFmpeg threads.
+  // This prevents multi-video processing from multiplying into full CPU saturation.
+  const cpuAllocation = getCpuAllocation()
+  const threads = cpuAllocation.ffmpegThreadsPerJob
 
-  // Optimize preset based on CPU cores and workload
-  // - 'ultrafast': 1-2 cores (low-end systems)
-  // - 'faster': 3-4 cores (mid-range systems)
-  // - 'fast': 5-8 cores (good balance)
-  // - 'medium': 9+ cores (best quality/size ratio)
+  // Optimize preset based on available threads.
+  // Fewer threads -> use a faster preset to keep turnaround reasonable.
   let preset = 'fast'
-  if (cpuCores <= 2) {
-    preset = 'ultrafast'
-  } else if (cpuCores <= 4) {
+  if (threads <= 2) {
     preset = 'faster'
-  } else if (cpuCores <= 8) {
+  } else if (threads <= 4) {
     preset = 'fast'
   } else {
     preset = 'medium'
   }
 
-  // IMPORTANT: Limit CPU usage to prevent system freeze
-  // Use 50-75% of available cores, leaving headroom for system operations
-  // This prevents the system from becoming unresponsive during video processing
-  const maxThreads = Math.max(1, Math.floor(cpuCores * 0.75))
-  const threads = Math.min(maxThreads, 12) // Cap at 12 threads max
-
   if (DEBUG) {
     console.log('[FFMPEG DEBUG] CPU optimization:', {
-      totalCores: cpuCores,
+      availableThreads: cpuAllocation.effectiveThreads,
+      budgetThreads: cpuAllocation.budgetThreads,
       selectedPreset: preset,
-      maxThreads,
       threads
     })
   }
