@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteFile } from '@/lib/storage'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -17,7 +17,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // SECURITY: Require admin authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -179,7 +179,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // SECURITY: Require admin authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -352,7 +352,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // SECURITY: Require admin authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

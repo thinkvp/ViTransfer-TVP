@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
@@ -65,7 +65,7 @@ function buildCommentText(comment: CommentRow, kind: 'comment' | 'reply'): strin
 }
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')

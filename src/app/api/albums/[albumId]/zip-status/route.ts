@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { albumZipExists, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/albums/[albumId]/zip-status (admin)
 export async function GET(request: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {
-  const auth = await requireApiAdmin(request)
+  const auth = await requireApiUser(request)
   if (auth instanceof Response) return auth
 
   const forbiddenMenu = requireMenuAccess(auth, 'projects')

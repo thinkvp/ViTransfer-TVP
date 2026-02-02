@@ -45,6 +45,7 @@ export type SecurityEventType =
   | 'HOTLINK_BLOCKED'
   | 'TOKEN_SESSION_MISMATCH'
   | 'SUSPICIOUS_ACTIVITY'
+  | 'GUEST_VIDEO_LINK_VIEWED'
   | 'BLOCKED_IP_ATTEMPT'
   | 'RATE_LIMIT_HIT'
 
@@ -239,6 +240,12 @@ export const SECURITY_EVENT_METADATA: Record<SecurityEventType, SecurityEventMet
     description: 'Unusually high request rate detected - possible automated scraping or abuse.',
     category: 'Video Access',
     severity: 'WARNING',
+  },
+  GUEST_VIDEO_LINK_VIEWED: {
+    label: 'Guest Video Link Viewed',
+    description: 'A guest viewed a video via a video-only guest link.',
+    category: 'Video Access',
+    severity: 'INFO',
   },
   BLOCKED_IP_ATTEMPT: {
     label: 'Blocked IP Access Attempt',

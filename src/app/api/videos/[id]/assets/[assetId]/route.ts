@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { getCurrentUserFromRequest, requireApiAdmin } from '@/lib/auth'
+import { getCurrentUserFromRequest, requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { verifyProjectAccess } from '@/lib/project-access'
@@ -153,7 +153,7 @@ export async function DELETE(
   const { id: videoId, assetId } = await params
 
   // Authentication - admin only
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

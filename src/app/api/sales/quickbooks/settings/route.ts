@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { Queue } from 'bullmq'
 import { getRedisForQueue } from '@/lib/redis'
@@ -26,11 +25,8 @@ function normalizeTime(value: unknown): string {
 }
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(
     request,
@@ -56,11 +52,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(
     request,

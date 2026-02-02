@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { Prisma } from '@prisma/client'
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
         notifySuccessfulAdminLogin: true,
         notifyFailedSharePasswordAttempt: true,
         notifySuccessfulShareAccess: true,
+        notifyGuestVideoLinkAccess: true,
         notifyClientComments: true,
         notifyVideoApproval: true,
         notifySalesQuoteViewed: true,
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -116,6 +117,7 @@ export async function PATCH(request: NextRequest) {
         notifySuccessfulAdminLogin: body.notifySuccessfulAdminLogin ?? true,
         notifyFailedSharePasswordAttempt: body.notifyFailedSharePasswordAttempt ?? true,
         notifySuccessfulShareAccess: body.notifySuccessfulShareAccess ?? true,
+        notifyGuestVideoLinkAccess: body.notifyGuestVideoLinkAccess ?? true,
         notifyClientComments: body.notifyClientComments ?? true,
         notifyVideoApproval: body.notifyVideoApproval ?? true,
         notifySalesQuoteViewed: body.notifySalesQuoteViewed ?? true,
@@ -136,6 +138,7 @@ export async function PATCH(request: NextRequest) {
         notifySuccessfulAdminLogin: body.notifySuccessfulAdminLogin ?? true,
         notifyFailedSharePasswordAttempt: body.notifyFailedSharePasswordAttempt ?? true,
         notifySuccessfulShareAccess: body.notifySuccessfulShareAccess ?? true,
+        notifyGuestVideoLinkAccess: body.notifyGuestVideoLinkAccess ?? true,
         notifyClientComments: body.notifyClientComments ?? true,
         notifyVideoApproval: body.notifyVideoApproval ?? true,
         notifySalesQuoteViewed: body.notifySalesQuoteViewed ?? true,

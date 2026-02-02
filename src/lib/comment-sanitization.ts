@@ -75,11 +75,18 @@ export function sanitizeComment(
   }
 
   // Non-PII: expose display color for UI highlights.
-  // - Internal/admin: from user.displayColor
-  // - Client: from recipient.displayColor
-  sanitized.displayColor = comment?.isInternal
-    ? (comment?.user?.displayColor || comment?.displayColorSnapshot || null)
-    : (comment?.recipient?.displayColor || comment?.displayColorSnapshot || null)
+  // IMPORTANT: author identity is not the same as visibility.
+  // Admin users can create client-visible comments (`isInternal === false`) that should
+  // still use the author's user.displayColor.
+  // - USER: from user.displayColor
+  // - RECIPIENT: from recipient.displayColor
+  // - ANONYMOUS: fall back to displayColorSnapshot if present
+  sanitized.displayColor =
+    authorType === 'USER'
+      ? (comment?.user?.displayColor || comment?.displayColorSnapshot || null)
+      : authorType === 'RECIPIENT'
+        ? (comment?.recipient?.displayColor || comment?.displayColorSnapshot || null)
+        : (comment?.displayColorSnapshot || null)
 
   // Attachments: safe metadata only (no storage paths)
   if (comment.files && Array.isArray(comment.files)) {

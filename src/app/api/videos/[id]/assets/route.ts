@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getCurrentUserFromRequest, requireApiAdmin } from '@/lib/auth'
+import { getCurrentUserFromRequest, requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
@@ -126,7 +126,7 @@ export async function POST(
   const { id: videoId } = await params
 
   // Authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

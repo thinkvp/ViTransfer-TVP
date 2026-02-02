@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom'
 type Comment = any
 type Video = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { CheckCircle2, ChevronDown, ChevronRight, Info, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Info, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import ThemeToggle from './ThemeToggle'
@@ -39,6 +39,7 @@ type CommentWithReplies = Comment & {
 interface CommentSectionProps {
   projectId: string
   projectSlug?: string
+  guestModeEnabled?: boolean
   comments: CommentWithReplies[]
   clientName: string
   clientEmail?: string
@@ -70,6 +71,7 @@ type CommentManagement = ReturnType<typeof useCommentManagement>
 export function CommentSectionView({
   projectId,
   projectSlug,
+  guestModeEnabled = false,
   comments: initialComments,
   clientName,
   clientEmail,
@@ -99,6 +101,8 @@ export function CommentSectionView({
   const [isVideoFullscreen, setIsVideoFullscreen] = useState(false)
   const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
   const [fullscreenChatPortalTarget, setFullscreenChatPortalTarget] = useState<HTMLElement | null>(null)
+
+  const [origin, setOrigin] = useState<string | null>(null)
 
   const router = useRouter()
   const {
@@ -141,6 +145,8 @@ export function CommentSectionView({
     // For true fullscreen we can also check fullscreenElement.
     const isFullscreenLike = document.fullscreenElement === el || el.classList.contains('fixed')
     setIsVideoFullscreen(isFullscreenLike)
+                          setGuestLinkUrl(null)
+                          setGuestLinkExpiresAt(null)
     setFullscreenChatPortalTarget(isFullscreenLike ? el : null)
   }, [])
 
@@ -189,6 +195,17 @@ export function CommentSectionView({
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
   const showFrames = useFullTimecode
   const [showVideoInfo, setShowVideoInfo] = useState(false)
+  const [guestLinkDialogOpen, setGuestLinkDialogOpen] = useState(false)
+  const [guestLinkGenerating, setGuestLinkGenerating] = useState(false)
+  const [guestLinkRefreshing, setGuestLinkRefreshing] = useState(false)
+  const [guestLinkLoadingExisting, setGuestLinkLoadingExisting] = useState(false)
+  const [guestLinkCheckedExisting, setGuestLinkCheckedExisting] = useState(false)
+  const [guestLinkMissing, setGuestLinkMissing] = useState(false)
+  const [guestLinkError, setGuestLinkError] = useState<string | null>(null)
+  const [guestLinkUrl, setGuestLinkUrl] = useState<string | null>(null)
+  const [guestLinkExpiresAt, setGuestLinkExpiresAt] = useState<string | null>(null)
+  const [guestLinkCopied, setGuestLinkCopied] = useState(false)
+  const [projectGuestLinkCopied, setProjectGuestLinkCopied] = useState(false)
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -200,6 +217,163 @@ export function CommentSectionView({
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
   const canAdminDelete = isAdminView && canAdminDeleteComments
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setOrigin(window.location.origin)
+  }, [])
+
+  const projectGuestUrl = (() => {
+    const resolvedOrigin = origin || (typeof window !== 'undefined' ? window.location.origin : null)
+    if (!resolvedOrigin) return null
+    const slug = typeof projectSlug === 'string' ? projectSlug.trim() : ''
+    if (!slug) return null
+    return new URL(`/share/${encodeURIComponent(slug)}/guest`, resolvedOrigin).toString()
+  })()
+
+  const postGuestVideoLink = async (action: 'generate' | 'refreshExpiry') => {
+    const response = isAdminView
+      ? await apiFetch('/api/guest-video-links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, projectId, videoId: selectedVideoId }),
+        })
+      : await fetch('/api/guest-video-links', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+          },
+          body: JSON.stringify({ action, projectId, videoId: selectedVideoId }),
+        })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(String((data as any)?.error || 'Failed to update link'))
+    }
+
+    const urlPath = String((data as any)?.urlPath || '')
+    const expiresAt = (data as any)?.expiresAt ? String((data as any).expiresAt) : null
+    if (!urlPath) {
+      throw new Error('Failed to update link')
+    }
+
+    const absolute = new URL(urlPath, window.location.origin).toString()
+    setGuestLinkUrl(absolute)
+    setGuestLinkExpiresAt(expiresAt)
+  }
+
+  const generateGuestVideoLink = async () => {
+    if (!guestModeEnabled) return
+    if (!projectId || !selectedVideoId) return
+
+    setGuestLinkGenerating(true)
+    setGuestLinkError(null)
+    setGuestLinkCopied(false)
+
+    try {
+      await postGuestVideoLink('generate')
+    } catch (e: any) {
+      setGuestLinkError(e?.message || 'Failed to generate link')
+    } finally {
+      setGuestLinkGenerating(false)
+    }
+  }
+
+  const refreshGuestVideoLinkExpiry = async () => {
+    if (!guestModeEnabled) return
+    if (!projectId || !selectedVideoId) return
+    if (!guestLinkUrl) return
+
+    setGuestLinkRefreshing(true)
+    setGuestLinkError(null)
+    setGuestLinkCopied(false)
+
+    try {
+      await postGuestVideoLink('refreshExpiry')
+    } catch (e: any) {
+      setGuestLinkError(e?.message || 'Failed to refresh expiry')
+    } finally {
+      setGuestLinkRefreshing(false)
+    }
+  }
+
+  const loadExistingGuestVideoLink = useCallback(async () => {
+    if (!guestModeEnabled) return
+    if (!guestLinkDialogOpen) return
+    if (!projectId || !selectedVideoId) return
+
+    setGuestLinkLoadingExisting(true)
+    setGuestLinkUrl(null)
+    setGuestLinkExpiresAt(null)
+    setGuestLinkError(null)
+    setGuestLinkCheckedExisting(false)
+    setGuestLinkMissing(false)
+    try {
+      const url = `/api/guest-video-links?projectId=${encodeURIComponent(projectId)}&videoId=${encodeURIComponent(selectedVideoId)}`
+      const response = isAdminView
+        ? await apiFetch(url, { cache: 'no-store' })
+        : await fetch(url, {
+            cache: 'no-store',
+            headers: {
+              ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+            },
+          })
+
+      if (response.status === 404) {
+        // No existing link for this version.
+        setGuestLinkCheckedExisting(true)
+        setGuestLinkMissing(true)
+        return
+      }
+
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setGuestLinkCheckedExisting(true)
+        setGuestLinkMissing(true)
+        return
+      }
+
+      const urlPath = String((data as any)?.urlPath || '')
+      const expiresAt = (data as any)?.expiresAt ? String((data as any).expiresAt) : null
+      if (!urlPath) return
+
+      const absolute = new URL(urlPath, window.location.origin).toString()
+      setGuestLinkUrl(absolute)
+      setGuestLinkExpiresAt(expiresAt)
+      setGuestLinkCheckedExisting(true)
+      setGuestLinkMissing(false)
+    } finally {
+      setGuestLinkLoadingExisting(false)
+    }
+  }, [guestModeEnabled, guestLinkDialogOpen, projectId, selectedVideoId, isAdminView, shareToken])
+
+  useEffect(() => {
+    if (!guestLinkDialogOpen) return
+    void loadExistingGuestVideoLink()
+  }, [guestLinkDialogOpen, loadExistingGuestVideoLink])
+
+  const copyGuestLink = async () => {
+    if (!guestLinkUrl) return
+    try {
+      await navigator.clipboard.writeText(guestLinkUrl)
+      setGuestLinkCopied(true)
+      setTimeout(() => setGuestLinkCopied(false), 1500)
+    } catch {
+      // ignore
+    }
+  }
+
+  const copyProjectGuestLink = async () => {
+    if (!projectGuestUrl) return
+    try {
+      await navigator.clipboard.writeText(projectGuestUrl)
+      setProjectGuestLinkCopied(true)
+      setTimeout(() => setProjectGuestLinkCopied(false), 1500)
+    } catch {
+      // ignore
+    }
+  }
 
   const handleDownloadCommentFile = async (commentId: string, fileId: string, fileName: string) => {
     try {
@@ -835,58 +1009,204 @@ export function CommentSectionView({
                 </div>
               )}
 
-              {showVideoActions ? (
-                <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8 ml-auto"
-                    onClick={() => setShowVideoInfo(true)}
-                    title="Info"
-                    aria-label="Info"
-                  >
-                    <Info className="w-4 h-4" />
-                  </Button>
+              {showVideoActions || guestModeEnabled ? (
+                <div className="ml-auto flex items-center gap-2">
+                  {guestModeEnabled ? (
+                    <>
+                      {/* Mobile: icon-only */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 sm:hidden"
+                        onClick={() => {
+                          setGuestLinkDialogOpen(true)
+                          setGuestLinkUrl(null)
+                          setGuestLinkExpiresAt(null)
+                          setGuestLinkError(null)
+                          setGuestLinkCheckedExisting(false)
+                          setGuestLinkMissing(false)
+                          setGuestLinkCopied(false)
+                          setProjectGuestLinkCopied(false)
+                        }}
+                        disabled={!selectedVideoId}
+                        aria-label="Share"
+                        title="Share"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </Button>
 
-                  <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Video Information</DialogTitle>
-                      <DialogDescription className="text-muted-foreground">
-                        Detailed metadata for this version
-                      </DialogDescription>
-                    </DialogHeader>
+                      {/* Desktop: icon + text */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="hidden sm:inline-flex h-8"
+                        onClick={() => {
+                          setGuestLinkDialogOpen(true)
+                          setGuestLinkUrl(null)
+                          setGuestLinkExpiresAt(null)
+                          setGuestLinkError(null)
+                          setGuestLinkCheckedExisting(false)
+                          setGuestLinkMissing(false)
+                          setGuestLinkCopied(false)
+                          setProjectGuestLinkCopied(false)
+                        }}
+                        disabled={!selectedVideoId}
+                        aria-label="Share"
+                        title="Share"
+                      >
+                        <Share2 className="w-4 h-4 mr-2" />
+                        Share
+                      </Button>
 
-                    {headerVideo ? (
-                      <div className="space-y-3 text-xs sm:text-sm">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-muted-foreground">Filename:</span>
-                          <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Resolution:</span>
-                          <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Codec:</span>
-                          <span className="font-medium">{(headerVideo as any).codec || 'N/A'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Duration:</span>
-                          <span className="font-medium">{formatTimestamp((headerVideo as any).duration)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">FPS:</span>
-                          <span className="font-medium">{(headerVideo as any).fps ? Number((headerVideo as any).fps).toFixed(2) : 'N/A'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Upload Date:</span>
-                          <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
-                        </div>
-                      </div>
-                    ) : null}
-                  </DialogContent>
-                </Dialog>
+                      <Dialog open={guestLinkDialogOpen} onOpenChange={setGuestLinkDialogOpen}>
+                        <DialogContent className="max-h-[85dvh] overflow-y-auto">
+                          <DialogHeader>
+                            <DialogTitle>Guest Links</DialogTitle>
+                            <DialogDescription>
+                              Guests will not be able to see or leave comments, see version notes or approve videos.
+                            </DialogDescription>
+                          </DialogHeader>
+
+                          <div className="mt-2 space-y-4">
+                            <div className="rounded-md border border-border bg-muted/30 p-3">
+                              <div className="text-sm font-medium text-foreground">Video-only link (expires in 14 days)</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                View-only link for the currently selected video version. The viewer cannot access other videos.
+                              </div>
+
+                              <div className="mt-3 flex items-center gap-2">
+                                {!guestLinkUrl && guestLinkCheckedExisting && guestLinkMissing ? (
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    onClick={generateGuestVideoLink}
+                                    disabled={guestLinkGenerating || !selectedVideoId}
+                                  >
+                                    {guestLinkGenerating ? 'Generating…' : 'Generate Video Link'}
+                                  </Button>
+                                ) : null}
+
+                                {guestLinkUrl ? (
+                                  <>
+                                    <Button type="button" variant="outline" onClick={copyGuestLink}>
+                                      {guestLinkCopied ? 'Copied Video Link' : 'Copy Video Link'}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      onClick={refreshGuestVideoLinkExpiry}
+                                      disabled={guestLinkRefreshing}
+                                    >
+                                      {guestLinkRefreshing ? 'Refreshing…' : 'Refresh Expiry'}
+                                    </Button>
+                                  </>
+                                ) : null}
+                              </div>
+
+                              {guestLinkError ? (
+                                <div className="mt-2 text-sm text-destructive">{guestLinkError}</div>
+                              ) : null}
+
+                              {guestLinkUrl ? (
+                                <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
+                                  <div className="text-xs text-muted-foreground mb-1">Share URL</div>
+                                  <div className="text-sm break-all font-mono">{guestLinkUrl}</div>
+                                  {guestLinkExpiresAt ? (
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                      Expires: {new Date(guestLinkExpiresAt).toLocaleString()}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+
+                              {!guestLinkUrl && guestLinkLoadingExisting ? (
+                                <div className="mt-3 text-xs text-muted-foreground">Loading existing link…</div>
+                              ) : null}
+                            </div>
+
+                            <div className="rounded-md border border-border bg-muted/30 p-3">
+                              <div className="text-sm font-medium text-foreground">Project guest link (expires at project completion)</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                Opens the full project in guest mode (videos only, no comments/approvals).
+                              </div>
+
+                              {projectGuestUrl ? (
+                                <>
+                                  <div className="mt-3 flex items-center gap-2">
+                                    <Button type="button" variant="outline" onClick={copyProjectGuestLink}>
+                                      {projectGuestLinkCopied ? 'Copied' : 'Copy Project Guest Link'}
+                                    </Button>
+                                  </div>
+
+                                  <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
+                                    <div className="text-xs text-muted-foreground mb-1">Share URL</div>
+                                    <div className="text-sm break-all font-mono">{projectGuestUrl}</div>
+                                  </div>
+                                </>
+                              ) : null}
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    </>
+                  ) : null}
+
+                  {showVideoActions ? (
+                    <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setShowVideoInfo(true)}
+                        title="Info"
+                        aria-label="Info"
+                      >
+                        <Info className="w-4 h-4" />
+                      </Button>
+
+                      <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Video Information</DialogTitle>
+                          <DialogDescription className="text-muted-foreground">
+                            Detailed metadata for this version
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        {headerVideo ? (
+                          <div className="space-y-3 text-xs sm:text-sm">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground">Filename:</span>
+                              <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Resolution:</span>
+                              <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Codec:</span>
+                              <span className="font-medium">{(headerVideo as any).codec || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Duration:</span>
+                              <span className="font-medium">{formatTimestamp((headerVideo as any).duration)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">FPS:</span>
+                              <span className="font-medium">{(headerVideo as any).fps ? Number((headerVideo as any).fps).toFixed(2) : 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Upload Date:</span>
+                              <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
+                            </div>
+                          </div>
+                        ) : null}
+                      </DialogContent>
+                    </Dialog>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </div>
@@ -1031,7 +1351,7 @@ export function CommentSectionView({
 
                   {showThemeToggle && !isAdminView ? (
                     <div className="shrink-0">
-                      <ThemeToggle />
+                      <ThemeToggle buttonClassName="h-8 w-8" iconClassName="w-4 h-4" />
                     </div>
                   ) : null}
                 </>

@@ -42,6 +42,14 @@ interface DownloadActivity {
   createdAt: Date
 }
 
+interface ViewActivity {
+  id: string
+  type: 'VIEW'
+  videoName: string
+  versionLabel: string
+  createdAt: Date
+}
+
 interface EmailActivity {
   id: string
   type: 'EMAIL'
@@ -73,6 +81,7 @@ interface StatusChangeActivity {
 }
 
 type Activity = AuthActivity | DownloadActivity | EmailActivity | EmailOpenActivity | StatusChangeActivity
+  | ViewActivity
 
 interface AnalyticsData {
   project: {
@@ -340,6 +349,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                               className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
                                 event.type === 'AUTH'
                                   ? getAccessMethodColor((event as AuthActivity).accessMethod)
+                                  : event.type === 'VIEW'
+                                    ? getAccessMethodColor('GUEST')
                                   : event.type === 'EMAIL' || event.type === 'EMAIL_OPEN'
                                     ? 'bg-warning-visible text-warning border-2 border-warning-visible'
                                     : 'bg-success-visible text-success border-2 border-success-visible'
@@ -353,6 +364,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     : (event as AuthActivity).accessMethod === 'GUEST'
                                       ? 'Guest Access'
                                       : 'Public Access'
+                              ) : event.type === 'VIEW' ? (
+                                'Video View'
                               ) : event.type === 'EMAIL' ? (
                                 <>
                                   <Mail className="w-3 h-3 inline mr-1" />
@@ -390,6 +403,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                 ) : (
                                   'Public visitor'
                                 )
+                              ) : event.type === 'VIEW' ? (
+                                'Guest visitor'
                               ) : event.type === 'EMAIL' ? (
                                 (event as EmailActivity).description
                               ) : event.type === 'EMAIL_OPEN' ? (
@@ -431,6 +446,15 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     <span className="text-sm text-muted-foreground break-all">{(event as AuthActivity).email}</span>
                                   </div>
                                 )}
+                              </div>
+                            ) : event.type === 'VIEW' ? (
+                              <div className="space-y-2">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">Action</span>
+                                  <span className="text-sm text-muted-foreground">
+                                    Viewed {(event as ViewActivity).videoName} ({(event as ViewActivity).versionLabel})
+                                  </span>
+                                </div>
                               </div>
                             ) : event.type === 'EMAIL' ? (
                               <div className="space-y-2">

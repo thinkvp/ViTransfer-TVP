@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'node:fs'
 import path from 'node:path'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 
 function readVersion(): string {
@@ -27,7 +27,7 @@ function readVersion(): string {
 }
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbiddenMenu = requireMenuAccess(authResult, 'settings')

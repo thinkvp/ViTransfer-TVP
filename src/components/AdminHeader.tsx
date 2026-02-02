@@ -6,6 +6,7 @@ import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarS
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
+import NotificationsBell from '@/components/NotificationsBell'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
@@ -84,16 +85,18 @@ export default function AdminHeader() {
               <User className="w-4 h-4" />
               <span className="max-w-[150px] lg:max-w-none truncate">{user.email}</span>
             </div>
-            <ThemeToggle />
+            <ThemeToggle buttonClassName="w-9 sm:w-10" iconClassName="h-4 w-4 sm:h-5 sm:w-5" />
             <Button
               variant="outline"
-              size="default"
+              size="icon"
               onClick={logout}
-              className="flex items-center justify-center gap-0 sm:gap-2 w-9 px-0 sm:w-auto sm:px-4"
+              aria-label="Sign Out"
+              title="Sign Out"
+              className="p-2 w-9 sm:w-10"
             >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Sign Out</span>
+              <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
+            {user.isSystemAdmin ? <NotificationsBell /> : null}
           </div>
         </div>
       </div>

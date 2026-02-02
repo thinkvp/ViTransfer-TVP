@@ -70,10 +70,8 @@ export default function RootLayout({
                   } else if (theme === 'light') {
                     document.documentElement.classList.remove('dark');
                   } else {
-                    // No saved preference, use system preference
-                    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                      document.documentElement.classList.add('dark');
-                    }
+                    // No saved preference: default to dark
+                    document.documentElement.classList.add('dark');
                   }
                 } catch (e) {}
               })();

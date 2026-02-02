@@ -8,6 +8,7 @@ import { revokeToken, isTokenRevoked, isUserTokensRevoked } from './token-revoca
 import { getRedis } from './redis'
 import { isShareSessionRevoked } from './session-invalidation'
 import { adminAllPermissions, normalizeRolePermissions, type RolePermissions } from './rbac'
+import { requireActionAccess, requireAnyActionAccess, requireMenuAccess } from './rbac-api'
 
 export interface AuthUser {
   id: string
@@ -394,10 +395,51 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 }
 
 export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
+  // DEPRECATED: legacy guard that checked `user.role === 'ADMIN'`.
+  // The app now uses RBAC via `appRoleIsSystemAdmin` + `permissions`.
+  // Keep this function as "require authenticated internal user" for compatibility.
   const user = await getCurrentUserFromRequest(request)
-  if (!user || user.role !== 'ADMIN') {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  return user
+}
+
+// RBAC-era naming: prefer these helpers going forward.
+export async function requireApiUser(request: NextRequest): Promise<AuthUser | Response> {
+  return requireApiAdmin(request)
+}
+
+export async function requireApiSystemAdmin(request: NextRequest): Promise<AuthUser | Response> {
+  const user = await requireApiAdmin(request)
+  if (user instanceof Response) return user
+  if (user.appRoleIsSystemAdmin !== true) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return user
+}
+
+export async function requireApiMenu(request: NextRequest, menu: Parameters<typeof requireMenuAccess>[1]): Promise<AuthUser | Response> {
+  const user = await requireApiAdmin(request)
+  if (user instanceof Response) return user
+  const forbidden = requireMenuAccess(user, menu)
+  if (forbidden) return forbidden
+  return user
+}
+
+export async function requireApiAction(request: NextRequest, action: Parameters<typeof requireActionAccess>[1]): Promise<AuthUser | Response> {
+  const user = await requireApiAdmin(request)
+  if (user instanceof Response) return user
+  const forbidden = requireActionAccess(user, action)
+  if (forbidden) return forbidden
+  return user
+}
+
+export async function requireApiAnyAction(request: NextRequest, actions: Parameters<typeof requireAnyActionAccess>[1]): Promise<AuthUser | Response> {
+  const user = await requireApiAdmin(request)
+  if (user instanceof Response) return user
+  const forbidden = requireAnyActionAccess(user, actions)
+  if (forbidden) return forbidden
   return user
 }
 
@@ -431,7 +473,7 @@ export async function getAuthContext(request: NextRequest): Promise<{
 }> {
   const user = await getCurrentUserFromRequest(request)
   const shareContext = await getShareContext(request)
-  const isAdmin = user?.role === 'ADMIN'
+  const isAdmin = !!user
 
   return { user, isAdmin, shareContext }
 }

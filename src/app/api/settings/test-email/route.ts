@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { testEmailConnection } from '@/lib/email'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   try {
     // SECURITY: Require admin authentication
-    const authResult = await requireApiAdmin(request)
+    const authResult = await requireApiUser(request)
     if (authResult instanceof Response) {
       return authResult
     }

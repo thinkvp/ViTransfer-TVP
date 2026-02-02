@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     const existingShare = await prisma.salesDocumentShare.findUnique({
       where: { token: shareToken },
-      select: { docJson: true, clientName: true, projectTitle: true, docNumber: true },
+      select: { docId: true, docJson: true, clientName: true, projectTitle: true, docNumber: true },
     }).catch(() => null)
 
     const currentDoc = (existingShare?.docJson ?? {}) as any
@@ -164,6 +164,7 @@ export async function POST(request: NextRequest) {
       const clientName = typeof existingShare?.clientName === 'string' ? existingShare.clientName : null
       const projectTitle = typeof existingShare?.projectTitle === 'string' ? existingShare.projectTitle : null
       const docNumberSafe = typeof existingShare?.docNumber === 'string' ? existingShare.docNumber : invoiceNumber
+      const invoiceId = typeof (existingShare as any)?.docId === 'string' ? String((existingShare as any).docId) : null
 
       await sendPushNotification({
         type: 'SALES_INVOICE_PAID',
@@ -172,6 +173,12 @@ export async function POST(request: NextRequest) {
         title: 'Invoice Paid',
         message: `${docNumberSafe} was paid via Stripe`,
         details: {
+          ...(invoiceId
+            ? {
+                salesInvoiceId: invoiceId,
+                __link: { href: `/admin/sales/invoices/${encodeURIComponent(invoiceId)}` },
+              }
+            : {}),
           'Invoice': docNumberSafe,
           'Client': clientName || undefined,
           'Project': projectTitle || undefined,
@@ -226,7 +233,6 @@ export async function POST(request: NextRequest) {
         const adminEmails = Array.from(new Set(
           candidates
             .filter((u: any) => u && typeof u.email === 'string' && u.email.trim())
-            .filter((u: any) => u.role === 'ADMIN')
             .filter((u: any) => {
               const isSystemAdmin = u?.appRole?.isSystemAdmin === true
               const perms = isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(u?.appRole?.permissions)

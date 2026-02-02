@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { invalidateEmailSettingsCache, isSmtpConfigured } from '@/lib/email'
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   // Check authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult // Return 401/403 response
   }
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   // Check authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult // Return 401/403 response
   }

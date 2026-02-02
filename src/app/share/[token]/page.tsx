@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams, usePathname, useSearchParams } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
@@ -22,7 +22,11 @@ import { cn } from '@/lib/utils'
 export default function SharePage() {
   const params = useParams()
   const searchParams = useSearchParams()
+  const pathname = usePathname()
   const token = params?.token as string
+
+  const wantsAutoGuest = typeof pathname === 'string' && pathname.endsWith('/guest')
+  const autoGuestAttemptedRef = useRef(false)
 
   // Parse URL parameters for video seeking
   const urlTimestamp = searchParams?.get('t') ? parseInt(searchParams.get('t')!, 10) : null
@@ -769,6 +773,22 @@ export default function SharePage() {
     }
   }
 
+  // Auto-enter guest mode when the URL ends with /guest.
+  // This should behave like clicking the “Guest Access” button on the auth screen.
+  useEffect(() => {
+    if (!wantsAutoGuest) return
+    if (autoGuestAttemptedRef.current) return
+    if (isAdminSession) return
+    if (isPasswordProtected === null) return
+    if (isAuthenticated) return
+    if (!guestMode) return
+
+    autoGuestAttemptedRef.current = true
+    void handleGuestEntry()
+    // Intentionally omit handleGuestEntry from deps (not stable).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsAutoGuest, isAdminSession, isPasswordProtected, isAuthenticated, guestMode])
+
   // Show loading state
   if (isPasswordProtected === null) {
     return (
@@ -780,6 +800,19 @@ export default function SharePage() {
 
   // Show authentication prompt
   if (isPasswordProtected && !isAuthenticated) {
+    if (wantsAutoGuest && guestMode) {
+      return (
+        <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
+          <Card className="bg-card border-border w-full max-w-md">
+            <CardHeader className="text-center">
+              <CardTitle className="text-foreground">Accessing as guest…</CardTitle>
+              <p className="text-muted-foreground text-sm mt-2">Please wait.</p>
+            </CardHeader>
+          </Card>
+        </div>
+      )
+    }
+
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
         <Card className="bg-card border-border w-full max-w-md">
@@ -995,7 +1028,7 @@ export default function SharePage() {
   })
 
   return (
-    <div className="h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row overflow-hidden">
+    <div className="h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
       {/* Video Sidebar - contains both desktop and mobile versions internally */}
       <VideoSidebar
         videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
@@ -1017,7 +1050,7 @@ export default function SharePage() {
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 ${activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 ${activeAlbumId ? 'overflow-hidden' : 'lg:overflow-y-auto'}`}>
         {/* Content Area */}
         <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
           {/* Content Area */}
@@ -1397,10 +1430,10 @@ function ShareFeedbackGrid({
 
   return (
     <>
-      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row flex-1 min-h-0 gap-4 sm:gap-6 lg:gap-0">
+      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0">
         <div
           ref={leftPaneRef}
-          className="flex-1 min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height))]"
+          className="flex-1 min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
         >
           <div
             className="flex-1 min-h-0 overflow-hidden"
@@ -1474,7 +1507,7 @@ function ShareFeedbackGrid({
 
         <div
           className={cn(
-            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height))] min-h-0 overflow-hidden flex-shrink-0',
+            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height,0px))] min-h-0 overflow-hidden flex-shrink-0',
             'lg:flex lg:flex-col'
           )}
           style={
@@ -1507,6 +1540,8 @@ function ShareFeedbackGrid({
           <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
             <CommentSectionView
               projectId={project.id}
+              projectSlug={shareSlug}
+              guestModeEnabled={Boolean(project.guestMode)}
               comments={serverComments as any}
               clientName={project.clientName}
               clientEmail={project.clientEmail}

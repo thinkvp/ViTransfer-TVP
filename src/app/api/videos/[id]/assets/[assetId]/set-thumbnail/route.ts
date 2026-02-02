@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
@@ -14,7 +14,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; assetId: string }> }
 ) {
   // 1. AUTHENTICATION
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

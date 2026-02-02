@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   EMAIL_THEME,
@@ -54,11 +53,8 @@ function firstCurrencyFromCsv(value: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(
     request,

@@ -33,6 +33,8 @@ model User {
   passkeys                PasskeyCredential[]
   projectStatusChanges    ProjectStatusChange[]
 
+  notificationReadState NotificationReadState?
+
   userKeyDates UserKeyDate[]
 
   salesQuoteRevisions   SalesQuoteRevision[]
@@ -209,6 +211,7 @@ model Project {
   recipients        ProjectRecipient[] // Multiple email recipients
   notificationQueue NotificationQueue[] // Pending notifications
   sharePageAccesses SharePageAccess[] // Share page authentication tracking
+  guestVideoShareLinks GuestVideoShareLink[] // Per-video-version guest-only share links
   emailEvents       ProjectEmailEvent[] // Logged client email notifications
   emailTracking     EmailTracking[] // Email open tracking pixels
   commentFiles      CommentFile[] // Files uploaded with comments
@@ -573,6 +576,7 @@ model Video {
   assets        VideoAsset[]
   emailEvents   ProjectEmailEvent[]
   emailTracking EmailTracking[]
+  guestVideoShareLinks GuestVideoShareLink[]
 
   @@index([projectId, version])
   @@index([projectId, name])
@@ -1243,6 +1247,7 @@ model PushNotificationSettings {
   notifySuccessfulAdminLogin       Boolean @default(true)
   notifyFailedSharePasswordAttempt Boolean @default(true)
   notifySuccessfulShareAccess      Boolean @default(true)
+  notifyGuestVideoLinkAccess       Boolean @default(true)
   notifyClientComments             Boolean @default(true)
   notifyVideoApproval              Boolean @default(true)
 
@@ -1274,6 +1279,17 @@ model PushNotificationLog {
   @@index([projectId])
   @@index([type])
   @@index([sentAt])
+}
+
+model NotificationReadState {
+  // One row per admin user.
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Null means “never opened notifications”.
+  lastSeenAt DateTime?
+
+  updatedAt DateTime @updatedAt
 }
 
 model SecuritySettings {
@@ -1461,6 +1477,30 @@ model SharePageAccess {
   @@index([projectId, createdAt])
   @@index([projectId, accessMethod])
   @@index([sessionId])
+}
+
+model GuestVideoShareLink {
+  id String @id @default(cuid())
+
+  // Random, non-guessable token used in the public URL.
+  token String @unique
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // A Video row represents a specific version.
+  videoId String
+  video   Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  // Link expiry (14 days from generation).
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, videoId])
+  @@index([expiresAt])
+  @@index([projectId])
+  @@index([videoId])
 }
 
 model PasskeyCredential {

@@ -107,6 +107,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         quoteNumber,
         clientName,
         viewUrl,
+        ...(typeof (updatedShare as any)?.docId === 'string'
+          ? {
+              salesQuoteId: String((updatedShare as any).docId),
+              __link: { href: `/admin/sales/quotes/${encodeURIComponent(String((updatedShare as any).docId))}` },
+            }
+          : {}),
       },
     })
   } catch {

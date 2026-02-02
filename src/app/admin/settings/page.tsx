@@ -92,6 +92,7 @@ interface PushNotificationSettings {
   notifySuccessfulAdminLogin: boolean
   notifyFailedSharePasswordAttempt: boolean
   notifySuccessfulShareAccess: boolean
+  notifyGuestVideoLinkAccess: boolean
   notifyClientComments: boolean
   notifyVideoApproval: boolean
   notifySalesQuoteViewed: boolean
@@ -206,6 +207,7 @@ export default function GlobalSettingsPage() {
   const [pushNotifySuccessfulAdminLogin, setPushNotifySuccessfulAdminLogin] = useState(true)
   const [pushNotifyFailedSharePasswordAttempt, setPushNotifyFailedSharePasswordAttempt] = useState(true)
   const [pushNotifySuccessfulShareAccess, setPushNotifySuccessfulShareAccess] = useState(true)
+  const [pushNotifyGuestVideoLinkAccess, setPushNotifyGuestVideoLinkAccess] = useState(true)
   const [pushNotifyClientComments, setPushNotifyClientComments] = useState(true)
   const [pushNotifyVideoApproval, setPushNotifyVideoApproval] = useState(true)
   const [pushNotifySalesQuoteViewed, setPushNotifySalesQuoteViewed] = useState(true)
@@ -322,6 +324,7 @@ export default function GlobalSettingsPage() {
           setPushNotifySuccessfulAdminLogin(pushData.notifySuccessfulAdminLogin ?? true)
           setPushNotifyFailedSharePasswordAttempt(pushData.notifyFailedSharePasswordAttempt ?? true)
           setPushNotifySuccessfulShareAccess(pushData.notifySuccessfulShareAccess ?? true)
+          setPushNotifyGuestVideoLinkAccess(pushData.notifyGuestVideoLinkAccess ?? true)
           setPushNotifyClientComments(pushData.notifyClientComments ?? true)
           setPushNotifyVideoApproval(pushData.notifyVideoApproval ?? true)
           setPushNotifySalesQuoteViewed(pushData.notifySalesQuoteViewed ?? true)
@@ -528,6 +531,7 @@ export default function GlobalSettingsPage() {
         notifySuccessfulAdminLogin: pushNotifySuccessfulAdminLogin,
         notifyFailedSharePasswordAttempt: pushNotifyFailedSharePasswordAttempt,
         notifySuccessfulShareAccess: pushNotifySuccessfulShareAccess,
+        notifyGuestVideoLinkAccess: pushNotifyGuestVideoLinkAccess,
         notifyClientComments: pushNotifyClientComments,
         notifyVideoApproval: pushNotifyVideoApproval,
         notifySalesQuoteViewed: pushNotifySalesQuoteViewed,
@@ -880,6 +884,8 @@ export default function GlobalSettingsPage() {
             setNotifyFailedSharePasswordAttempt={setPushNotifyFailedSharePasswordAttempt}
             notifySuccessfulShareAccess={pushNotifySuccessfulShareAccess}
             setNotifySuccessfulShareAccess={setPushNotifySuccessfulShareAccess}
+            notifyGuestVideoLinkAccess={pushNotifyGuestVideoLinkAccess}
+            setNotifyGuestVideoLinkAccess={setPushNotifyGuestVideoLinkAccess}
             notifyClientComments={pushNotifyClientComments}
             setNotifyClientComments={setPushNotifyClientComments}
             notifyVideoApproval={pushNotifyVideoApproval}

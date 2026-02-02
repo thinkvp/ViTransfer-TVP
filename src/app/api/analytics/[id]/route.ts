@@ -53,7 +53,7 @@ export async function GET(
           orderBy: { createdAt: 'desc' },
         },
         analytics: {
-          where: { eventType: 'DOWNLOAD_COMPLETE' },
+          where: { eventType: { in: ['DOWNLOAD_COMPLETE', 'VIDEO_VIEW'] } },
           orderBy: { createdAt: 'desc' },
           include: {
             video: {
@@ -141,18 +141,21 @@ export async function GET(
       return acc
     }, {} as Record<string, typeof project.videos>)
 
+    const downloadAnalytics = project.analytics.filter(a => a.eventType === 'DOWNLOAD_COMPLETE')
+    const viewAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_VIEW')
+
     // Create stats grouped by video name
     const videoStats = Object.entries(videosByName).map(([videoName, versions]) => {
       // Get all video IDs for this video name
       const videoIds = versions.map(v => v.id)
 
       // Get all analytics for these video IDs
-      const videoAnalytics = project.analytics.filter(a => videoIds.includes(a.videoId))
+      const videoAnalytics = downloadAnalytics.filter(a => videoIds.includes(a.videoId))
       const totalDownloads = videoAnalytics.length
 
       // Per-version breakdown
       const versionStats = versions.map(version => {
-        const versionAnalytics = project.analytics.filter(a => a.videoId === version.id)
+        const versionAnalytics = downloadAnalytics.filter(a => a.videoId === version.id)
         const downloads = versionAnalytics.length
         return {
           id: version.id,
@@ -178,7 +181,7 @@ export async function GET(
       NONE: project.sharePageAccesses.filter(a => a.accessMethod === 'NONE').length,
     }
 
-    const totalDownloads = project.analytics.length
+    const totalDownloads = downloadAnalytics.length
 
     // Combine authentication events and download events into single activity feed
     const authEvents = project.sharePageAccesses.map(access => ({
@@ -189,7 +192,7 @@ export async function GET(
       createdAt: access.createdAt,
     }))
 
-    const downloadEvents = project.analytics.map(download => {
+    const downloadEvents = downloadAnalytics.map(download => {
       let assetFileName: string | undefined
       let assetFileNames: string[] | undefined
 
@@ -215,6 +218,16 @@ export async function GET(
         assetFileName,
         assetFileNames,
         createdAt: download.createdAt,
+      }
+    })
+
+    const viewEvents = viewAnalytics.map(view => {
+      return {
+        id: view.id,
+        type: 'VIEW' as const,
+        videoName: view.video.name,
+        versionLabel: view.video.versionLabel,
+        createdAt: view.createdAt,
       }
     })
 
@@ -267,7 +280,7 @@ export async function GET(
     }))
 
     // Merge and sort all activity by timestamp (newest first)
-    const allActivity = [...authEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents, ...statusChangeEvents].sort(
+    const allActivity = [...authEvents, ...viewEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents, ...statusChangeEvents].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 

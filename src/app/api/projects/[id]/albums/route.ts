@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
@@ -28,7 +28,7 @@ const createAlbumSchema = z.object({
 
 // GET /api/projects/[id]/albums - list albums (admin)
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireApiAdmin(request)
+  const auth = await requireApiUser(request)
   if (auth instanceof Response) return auth
 
   const forbiddenMenu = requireMenuAccess(auth, 'projects')
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 // POST /api/projects/[id]/albums - create album (admin)
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireApiAdmin(request)
+  const auth = await requireApiUser(request)
   if (auth instanceof Response) return auth
 
   const forbiddenMenu = requireMenuAccess(auth, 'projects')

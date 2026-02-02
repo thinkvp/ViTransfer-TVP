@@ -154,12 +154,24 @@ export default async function SalesDocPublicViewPage(
     const isQuote = String(share.type) === 'QUOTE'
     const notifType = isQuote ? 'SALES_QUOTE_VIEWED' : 'SALES_INVOICE_VIEWED'
     const docNumber = String(share.docNumber || '')
+    const docId = typeof (share as any)?.docId === 'string' ? String((share as any).docId) : null
 
     await sendPushNotification({
       type: notifType as any,
       title: isQuote ? 'Quote Viewed' : 'Invoice Viewed',
       message: `A client viewed the ${isQuote ? 'quote' : 'invoice'} link`,
       details: {
+        ...(docId
+          ? {
+              salesDocType: isQuote ? 'QUOTE' : 'INVOICE',
+              salesDocId: docId,
+              __link: {
+                href: isQuote
+                  ? `/admin/sales/quotes/${encodeURIComponent(docId)}`
+                  : `/admin/sales/invoices/${encodeURIComponent(docId)}`,
+              },
+            }
+          : {}),
         'Number': docNumber,
         'Client': share.clientName || undefined,
         'Project': share.projectTitle || undefined,

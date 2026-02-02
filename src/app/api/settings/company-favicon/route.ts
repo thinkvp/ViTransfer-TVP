@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile, uploadFile } from '@/lib/storage'
 import { getImageDimensions } from '@/lib/image-dimensions'
@@ -15,7 +15,7 @@ const FAVICON_MAX_WIDTH = 512
 const FAVICON_MAX_HEIGHT = 512
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

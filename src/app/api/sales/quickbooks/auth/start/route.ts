@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
-import { requireApiAdmin } from '@/lib/auth'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireApiMenu } from '@/lib/auth'
 import { getRedis } from '@/lib/redis'
 
 export const runtime = 'nodejs'
@@ -33,11 +32,8 @@ function computeRedirectUri(request: NextRequest): string {
 }
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const clientId = process.env.QBO_CLIENT_ID?.trim()
   if (!clientId) {

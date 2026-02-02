@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateUploadedFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   // SECURITY: Require admin authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

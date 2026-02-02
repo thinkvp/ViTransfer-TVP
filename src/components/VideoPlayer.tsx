@@ -63,6 +63,10 @@ interface VideoPlayerProps {
   // Expected shape matches Comment (and optionally includes `replies`).
   commentsForTimeline?: any[]
 
+  // Optional: disables comment-related UI (markers, fullscreen comments toggle).
+  // Useful for minimal “player-only” viewers.
+  disableCommentsUI?: boolean
+
   // Optional: when true, VideoPlayer will fill its parent height (non-fullscreen)
   // and allow the video area to flex/shrink to fit available space.
   fitToContainerHeight?: boolean
@@ -86,6 +90,7 @@ export default function VideoPlayer({
   shareToken = null,
   hideDownloadButton = false, // Default to false (show download button)
   commentsForTimeline = [],
+  disableCommentsUI = false,
   fitToContainerHeight = false,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
@@ -315,6 +320,10 @@ export default function VideoPlayer({
   }, [selectedVideo?.id, selectedVideoWidth, selectedVideoHeight])
 
   const timelineCommentMarkers = useMemo(() => {
+    if (disableCommentsUI) {
+      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }>
+    }
+
     const duration = effectiveDurationSeconds
     if (!selectedVideo?.id || !duration || duration <= 0) {
       return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }>
@@ -356,7 +365,7 @@ export default function VideoPlayer({
       seen.add(m.id)
       return true
     })
-  }, [commentsForTimeline, effectiveDurationSeconds, selectedVideo])
+  }, [commentsForTimeline, disableCommentsUI, effectiveDurationSeconds, selectedVideo])
 
   const commentByIdForTimeline = useMemo(() => {
     const map = new Map<string, any>()
@@ -1563,7 +1572,7 @@ export default function VideoPlayer({
                 </>
               )}
 
-              {isInFullscreen && canShowTimelineHover && (
+              {isInFullscreen && canShowTimelineHover && !disableCommentsUI && (
                 <Button
                   type="button"
                   variant={isFullscreenChatOpen ? 'default' : 'outline'}

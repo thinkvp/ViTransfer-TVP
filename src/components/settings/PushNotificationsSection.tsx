@@ -25,6 +25,8 @@ interface PushNotificationsSectionProps {
   setNotifyFailedSharePasswordAttempt: (value: boolean) => void
   notifySuccessfulShareAccess: boolean
   setNotifySuccessfulShareAccess: (value: boolean) => void
+  notifyGuestVideoLinkAccess: boolean
+  setNotifyGuestVideoLinkAccess: (value: boolean) => void
   notifyClientComments: boolean
   setNotifyClientComments: (value: boolean) => void
   notifyVideoApproval: boolean
@@ -64,6 +66,8 @@ export function PushNotificationsSection({
   setNotifyFailedSharePasswordAttempt,
   notifySuccessfulShareAccess,
   setNotifySuccessfulShareAccess,
+  notifyGuestVideoLinkAccess,
+  setNotifyGuestVideoLinkAccess,
   notifyClientComments,
   setNotifyClientComments,
   notifyVideoApproval,
@@ -267,6 +271,23 @@ export function PushNotificationsSection({
                           id="notifySuccessfulShareAccess"
                           checked={notifySuccessfulShareAccess}
                           onCheckedChange={setNotifySuccessfulShareAccess}
+                        />
+                      </div>
+
+                      {/* Guest Video Link Access */}
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="notifyGuestVideoLinkAccess" className="text-sm font-normal">
+                            Guest Video Link Access
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            When a guest opens a video-only guest link
+                          </p>
+                        </div>
+                        <Switch
+                          id="notifyGuestVideoLinkAccess"
+                          checked={notifyGuestVideoLinkAccess}
+                          onCheckedChange={setNotifyGuestVideoLinkAccess}
                         />
                       </div>
 

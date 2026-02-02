@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   // Check authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { invalidateAllSessions, clearAllRateLimits } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -41,7 +41,7 @@ function hasPasswordAttemptsChanged(current: any, newAttempts?: string): boolean
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

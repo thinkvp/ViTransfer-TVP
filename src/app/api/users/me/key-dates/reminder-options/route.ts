@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/users/me/key-dates/reminder-options - users for reminder targeting (personal key dates)
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbidden = requireMenuAccess(authResult, 'projects')

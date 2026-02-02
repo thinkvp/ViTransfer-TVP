@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { getRateLimitedEntries, clearRateLimitByKey } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
  * ADMIN ONLY
  */
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
  * ADMIN ONLY
  */
 export async function DELETE(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

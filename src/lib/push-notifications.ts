@@ -7,6 +7,7 @@ export interface PushNotificationPayload {
     | 'SUCCESSFUL_ADMIN_LOGIN'
     | 'FAILED_SHARE_PASSWORD'
     | 'SHARE_ACCESS'
+    | 'GUEST_VIDEO_LINK_ACCESS'
     | 'CLIENT_COMMENT'
     | 'VIDEO_APPROVAL'
     | 'SALES_QUOTE_VIEWED'
@@ -44,6 +45,7 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'SUCCESSFUL_ADMIN_LOGIN': 'notifySuccessfulAdminLogin',
       'FAILED_SHARE_PASSWORD': 'notifyFailedSharePasswordAttempt',
       'SHARE_ACCESS': 'notifySuccessfulShareAccess',
+      'GUEST_VIDEO_LINK_ACCESS': 'notifyGuestVideoLinkAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',
       'SALES_QUOTE_VIEWED': 'notifySalesQuoteViewed',
@@ -70,7 +72,14 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
         success: result.success,
         statusCode: result.statusCode,
         message: result.message,
-        details: payload.details,
+        details: {
+          ...(payload.details ?? {}),
+          __payload: {
+            title: payload.title,
+            message: payload.message,
+            projectName: payload.projectName,
+          },
+        },
       },
     })
 
@@ -177,6 +186,8 @@ function getPriorityForType(type: string): number {
     case 'SUCCESSFUL_ADMIN_LOGIN':
       return 3 // Low
     case 'SHARE_ACCESS':
+      return 3 // Low
+    case 'GUEST_VIDEO_LINK_ACCESS':
       return 3 // Low
     case 'SALES_QUOTE_VIEWED':
       return 3 // Low

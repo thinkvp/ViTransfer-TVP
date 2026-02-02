@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 
@@ -47,7 +47,7 @@ const patchBodySchema = z
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ keyDateId: string }> }) {
   const { keyDateId } = await params
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbidden = requireMenuAccess(authResult, 'projects')
@@ -144,7 +144,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ keyDateId: string }> }) {
   const { keyDateId } = await params
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbidden = requireMenuAccess(authResult, 'projects')

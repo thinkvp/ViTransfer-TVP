@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
-import { requireMenuAccess } from '@/lib/rbac-api'
+import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
@@ -54,11 +53,8 @@ async function computeInvoicePaidAtYmdForExpiry(tx: any, invoiceId: string): Pro
 }
 
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(
     request,
@@ -79,11 +75,8 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
 }
 
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(
     request,
@@ -180,11 +173,8 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 }
 
 export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbiddenMenu = requireMenuAccess(authResult, 'sales')
-  if (forbiddenMenu) return forbiddenMenu
 
   const rateLimitResult = await rateLimit(
     request,

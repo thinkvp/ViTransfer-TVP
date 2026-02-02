@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAuth } from '@/lib/auth'
+import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { requireMenuAccess } from '@/lib/rbac-api'
 import type { SalesLineItem } from '@/lib/sales/types'
 import { sumLineItemsTotal } from '@/lib/sales/money'
 
@@ -54,11 +53,8 @@ function parseLineItems(itemsJson: unknown): SalesLineItem[] {
 
 // GET /api/admin/sales/calendar?month=YYYY-MM - sales calendar items (internal)
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAuth(request)
+  const authResult = await requireApiMenu(request, 'sales')
   if (authResult instanceof Response) return authResult
-
-  const forbidden = requireMenuAccess(authResult, 'sales')
-  if (forbidden) return forbidden
 
   const rateLimitResult = await rateLimit(
     request,

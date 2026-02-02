@@ -56,9 +56,9 @@ export async function GET(
     const bearerToken = parseBearerToken(request)
     if (bearerToken && !shareContext && projectMeta.authMode !== 'NONE') {
       const currentUser = await getCurrentUserFromRequest(request)
-      const isAdmin = currentUser?.role === 'ADMIN'
+      const isInternalUser = !!currentUser
 
-      if (!isAdmin) {
+      if (!isInternalUser) {
         // Token was sent but invalid/revoked - force re-authentication
         return NextResponse.json({
           error: 'Session expired or invalid. Please authenticate again.',

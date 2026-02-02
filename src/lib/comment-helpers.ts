@@ -88,10 +88,12 @@ export async function resolveCommentDisplayColorSnapshot(params: {
   userId?: string | null
   recipientId?: string | null
 }): Promise<string | null> {
-  const { projectId, isInternal, userId, recipientId } = params
+  const { projectId, userId, recipientId } = params
 
-  if (isInternal) {
-    if (!userId) return null
+  // NOTE: author identity is not the same as visibility.
+  // Admin users can create client-visible comments (isInternal === false).
+  // If a comment is linked to a user, always use user.displayColor.
+  if (userId) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { displayColor: true },
@@ -126,7 +128,8 @@ export async function backfillCommentDisplayColorSnapshots(projectId: string): P
       },
       select: {
         id: true,
-        isInternal: true,
+        userId: true,
+        recipientId: true,
         user: { select: { displayColor: true } },
         recipient: { select: { displayColor: true } },
       },
@@ -138,9 +141,11 @@ export async function backfillCommentDisplayColorSnapshots(projectId: string): P
     const updates: Array<ReturnType<typeof prisma.comment.update>> = []
 
     for (const comment of candidates) {
-      const snapshot = comment.isInternal
+      const snapshot = comment.userId
         ? (comment.user?.displayColor || null)
-        : (comment.recipient?.displayColor || null)
+        : comment.recipientId
+          ? (comment.recipient?.displayColor || null)
+          : null
 
       if (!snapshot) continue
 
@@ -203,7 +208,7 @@ export async function validateCommentPermissions(params: {
 
   // SECURITY: If isInternal flag is set, verify admin session
   if (isInternal) {
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    if (!currentUser) {
       return { valid: false, error: 'Unauthorized', errorStatus: 401 }
     }
   }

@@ -290,12 +290,6 @@ async function buildQuotePdfBytes(
     page.drawText('QUOTE', { x: right - 82, y: 800, size: 20, font: fontBold, color: textColor })
   }
 
-  const drawContinuationHeader = () => {
-    page.drawText(settings.businessName || 'Business', { x: left, y: 805, size: 12, font: fontBold, color: textColor })
-    drawRightText(page, `Quote #: ${quote.quoteNumber}`, right, 805, 12, fontBold, textColor)
-    page.drawLine({ start: { x: left, y: 792 }, end: { x: right, y: 792 }, thickness: 1, color: lineColor })
-  }
-
   // Table layout
   const colItemX = left
   const colItemW = 260
@@ -330,9 +324,6 @@ async function buildQuotePdfBytes(
   const newPage = (withTableHeader = false) => {
     page = doc.addPage([595.28, 841.89])
     y = topY
-    drawDocTitle()
-    drawContinuationHeader()
-    y = 770
     if (withTableHeader) {
       y = drawTableHeader(y)
     }
@@ -541,7 +532,7 @@ async function buildQuotePdfBytes(
     }
   }
 
-  addPageNumbers(doc, font, rgb(0.45, 0.45, 0.45))
+  addPageNumbers(doc, font, rgb(0.45, 0.45, 0.45), { leftLabel: `Quote: ${quote.quoteNumber}` })
   const bytes = await doc.save()
   return bytes
 }
@@ -558,7 +549,7 @@ function downloadBytes(filename: string, bytes: Uint8Array) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-function addPageNumbers(doc: any, font: any, color: any) {
+function addPageNumbers(doc: any, font: any, color: any, opts?: { leftLabel?: string; leftColor?: any }) {
   const pages = doc.getPages()
   const total = pages.length
   pages.forEach((p: any, idx: number) => {
@@ -566,6 +557,12 @@ function addPageNumbers(doc: any, font: any, color: any) {
     const size = 9
     const marginX = 50
     const y = 28
+
+    const leftLabel = String(opts?.leftLabel ?? '').trim()
+    if (leftLabel) {
+      p.drawText(leftLabel, { x: marginX, y, size, font, color: opts?.leftColor ?? color })
+    }
+
     const xRight = (typeof p.getWidth === 'function' ? p.getWidth() : 595.28) - marginX
     drawRightText(p, label, xRight, y, size, font, color)
   })
@@ -676,12 +673,6 @@ async function buildInvoicePdfBytes(
     page.drawText('INVOICE', { x: right - 95, y: 800, size: 20, font: fontBold, color: textColor })
   }
 
-  const drawContinuationHeader = () => {
-    page.drawText(settings.businessName || 'Business', { x: left, y: 805, size: 12, font: fontBold, color: textColor })
-    drawRightText(page, `Invoice #: ${invoice.invoiceNumber}`, right, 805, 12, fontBold, textColor)
-    page.drawLine({ start: { x: left, y: 792 }, end: { x: right, y: 792 }, thickness: 1, color: lineColor })
-  }
-
   // Table layout
   const colItemX = left
   const colItemW = 260
@@ -716,9 +707,6 @@ async function buildInvoicePdfBytes(
   const newPage = (withTableHeader = false) => {
     page = doc.addPage([595.28, 841.89])
     y = topY
-    drawDocTitle()
-    drawContinuationHeader()
-    y = 770
     if (withTableHeader) {
       y = drawTableHeader(y)
     }
@@ -1009,7 +997,7 @@ async function buildInvoicePdfBytes(
     }
   }
 
-  addPageNumbers(doc, font, rgb(0.45, 0.45, 0.45))
+  addPageNumbers(doc, font, rgb(0.45, 0.45, 0.45), { leftLabel: `Invoice: ${invoice.invoiceNumber}` })
   const bytes = await doc.save()
   return bytes
 }

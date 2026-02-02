@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 // POST /api/albums/[albumId]/zip-regenerate (admin)
 export async function POST(request: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {
-  const auth = await requireApiAdmin(request)
+  const auth = await requireApiUser(request)
   if (auth instanceof Response) return auth
 
   const forbiddenMenu = requireMenuAccess(auth, 'projects')

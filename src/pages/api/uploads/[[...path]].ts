@@ -77,10 +77,10 @@ const tusServer: Server = new Server({
 
       const payload = await verifyAdminAccessToken(bearer)
 
-      if (!payload || payload.role !== 'ADMIN') {
+      if (!payload) {
         throw {
           status_code: 403,
-          body: 'Admin access required'
+          body: 'Access required'
         }
       }
 

@@ -330,7 +330,7 @@ export async function trackVideoAccess(params: {
   request: NextRequest
   quality: string
   bandwidth?: number
-  eventType: 'PAGE_VISIT' | 'DOWNLOAD_COMPLETE'
+  eventType: 'PAGE_VISIT' | 'DOWNLOAD_COMPLETE' | 'VIDEO_VIEW'
   assetId?: string // Single asset download
   assetIds?: string[] // Multiple assets downloaded as ZIP
 }) {

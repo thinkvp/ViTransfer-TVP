@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { getAppUrl } from '@/lib/url'
@@ -22,7 +22,7 @@ function buildFeedUrl(appUrl: string, token: string): string {
 
 // GET /api/users/me/calendar-feed - returns a subscribe URL (creates token if missing)
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbidden = requireMenuAccess(authResult, 'projects')
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/users/me/calendar-feed - rotate the token (returns new subscribe URL)
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
   const forbidden = requireMenuAccess(authResult, 'projects')
