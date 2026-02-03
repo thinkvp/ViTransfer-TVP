@@ -415,6 +415,7 @@ export default function QuoteDetailPage() {
             onClick={() => void onViewPublic()}
             aria-label="View Quote"
             title="View Quote"
+            className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Eye className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">View Quote</span>
@@ -424,6 +425,7 @@ export default function QuoteDetailPage() {
             onClick={onSendEmail}
             aria-label="Send Email"
             title="Send Email"
+            className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Mail className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Send Email</span>
@@ -433,6 +435,7 @@ export default function QuoteDetailPage() {
             onClick={() => void onDownloadPdf()}
             aria-label="Download PDF"
             title="Download PDF"
+            className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Download className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Download PDF</span>
@@ -442,6 +445,7 @@ export default function QuoteDetailPage() {
             onClick={onDelete}
             aria-label="Delete quote"
             title="Delete quote"
+            className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Trash2 className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Delete</span>
@@ -591,30 +595,32 @@ export default function QuoteDetailPage() {
                   </div>
                 </div>
 
-                <div className="md:col-span-1 space-y-1">
-                  <Label>Qty</Label>
-                  <Input
-                    type="number"
-                    value={String(it.quantity)}
-                    min={1}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v > 0 ? v : 1 } : x)))
-                    }}
-                    className="h-9"
-                  />
-                </div>
+                <div className="grid grid-cols-2 gap-2 md:col-span-3 md:grid-cols-3">
+                  <div className="space-y-1 md:col-span-1">
+                    <Label>Qty</Label>
+                    <Input
+                      type="number"
+                      value={String(it.quantity)}
+                      min={1}
+                      onChange={(e) => {
+                        const v = Number(e.target.value)
+                        setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v > 0 ? v : 1 } : x)))
+                      }}
+                      className="h-9"
+                    />
+                  </div>
 
-                <div className="md:col-span-2 space-y-1">
-                  <Label>Unit ($)</Label>
-                  <Input
-                    value={centsToDollars(it.unitPriceCents)}
-                    onChange={(e) => {
-                      const cents = dollarsToCents(e.target.value)
-                      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, unitPriceCents: cents } : x)))
-                    }}
-                    className="h-9"
-                  />
+                  <div className="space-y-1 md:col-span-2">
+                    <Label>Unit ($)</Label>
+                    <Input
+                      value={centsToDollars(it.unitPriceCents)}
+                      onChange={(e) => {
+                        const cents = dollarsToCents(e.target.value)
+                        setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, unitPriceCents: cents } : x)))
+                      }}
+                      className="h-9"
+                    />
+                  </div>
                 </div>
 
                 <div className="md:col-span-3 space-y-1">

@@ -306,6 +306,23 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
   const allRecipients = await getProjectRecipients(project.id)
   const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
 
+  const projectMeta = await prisma.project.findUnique({
+    where: { id: project.id },
+    select: { companyName: true },
+  })
+
+  const primaryRecipientName =
+    allRecipients.find((r) => r.isPrimary)?.name ||
+    allRecipients[0]?.name ||
+    null
+
+  const clientDisplayName =
+    (typeof projectMeta?.companyName === 'string' && projectMeta.companyName.trim())
+      ? projectMeta.companyName.trim()
+      : (typeof primaryRecipientName === 'string' && primaryRecipientName.trim())
+        ? primaryRecipientName.trim()
+        : 'Client'
+
   // Internal recipients (admins + non-admins) assigned to this project with notifications enabled.
   // IMPORTANT: users without Share Page access should not receive Share-related emails.
   const internalUsers = await prisma.projectUser.findMany({
@@ -422,7 +439,7 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
 
     const result = await sendAdminProjectApprovedEmail({
       adminEmails: internalEmails,
-      clientName: authorName || 'Client',
+      clientName: clientDisplayName,
       projectTitle: project.title,
       approvedVideos: approvedList,
       awaitingVideos: awaitingList,

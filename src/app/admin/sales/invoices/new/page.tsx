@@ -282,30 +282,32 @@ export default function NewInvoicePage() {
                 </div>
               </div>
 
-              <div className="md:col-span-1 space-y-1">
-                <Label>Qty</Label>
-                <Input
-                  type="number"
-                  value={String(it.quantity)}
-                  min={1}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v > 0 ? v : 1 } : x)))
-                  }}
-                  className="h-9"
-                />
-              </div>
+              <div className="grid grid-cols-2 gap-2 md:col-span-3 md:grid-cols-3">
+                <div className="space-y-1 md:col-span-1">
+                  <Label>Qty</Label>
+                  <Input
+                    type="number"
+                    value={String(it.quantity)}
+                    min={1}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v > 0 ? v : 1 } : x)))
+                    }}
+                    className="h-9"
+                  />
+                </div>
 
-              <div className="md:col-span-2 space-y-1">
-                <Label>Unit ($)</Label>
-                <Input
-                  value={centsToDollars(it.unitPriceCents)}
-                  onChange={(e) => {
-                    const cents = dollarsToCents(e.target.value)
-                    setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, unitPriceCents: cents } : x)))
-                  }}
-                  className="h-9"
-                />
+                <div className="space-y-1 md:col-span-2">
+                  <Label>Unit ($)</Label>
+                  <Input
+                    value={centsToDollars(it.unitPriceCents)}
+                    onChange={(e) => {
+                      const cents = dollarsToCents(e.target.value)
+                      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, unitPriceCents: cents } : x)))
+                    }}
+                    className="h-9"
+                  />
+                </div>
               </div>
 
               <div className="md:col-span-3 space-y-1">

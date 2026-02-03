@@ -38,7 +38,8 @@ export function emailPrimaryButtonStyle({
     `border-radius:${borderRadiusPx}px`,
     `font-size:${fontSizePx}px`,
     'font-weight:600',
-    'box-shadow:0 2px 4px rgba(51,156,255,0.25)',
+    // Use a solid color (no alpha) for better webmail compatibility.
+    'box-shadow:0 2px 4px #cce6ff',
   ].join(';')
 }
 
@@ -126,6 +127,7 @@ export interface EmailShellOptions {
   companyName: string
   title: string
   subtitle?: string
+  subtitleColor?: string
   bodyContent: string
   footerNote?: string
   headerGradient: string
@@ -187,6 +189,7 @@ export function renderEmailShell({
   companyName,
   title,
   subtitle,
+  subtitleColor,
   bodyContent,
   footerNote,
   headerGradient,
@@ -213,6 +216,10 @@ export function renderEmailShell({
   const trackingPixel = trackingPixelsEnabled && trackingToken && trackingDomain
     ? `<img src="${trackingDomain}${trackingPath}/${trackingToken}" width="1" height="1" alt="" style="display:block;border:0;" />`
     : ''
+
+  // NOTE: Some webmail clients (including Zoho) inconsistently apply inline CSS colors.
+  // Use a solid hex color by default to keep subtitles legible on dark headers.
+  const resolvedSubtitleColor = (subtitleColor || '#ffffff').trim() || '#ffffff'
   
   return `
 <!DOCTYPE html>
@@ -222,12 +229,12 @@ export function renderEmailShell({
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body style="margin: 0; padding: 20px; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px #e5e7eb;">
 
     <!-- Header -->
     <div style="background: ${headerGradient}; padding: 32px 24px; text-align: center;">
       <div style="font-size: 24px; font-weight: 700; color: #ffffff; margin-bottom: 8px;">${escapeHtml(title)}</div>
-      ${subtitle ? `<div style="font-size: 15px; color: rgba(255,255,255,0.95);">${escapeHtml(subtitle)}</div>` : ''}
+      ${subtitle ? `<div style="font-size: 15px; color: ${escapeHtml(resolvedSubtitleColor)} !important;"><span style="color: ${escapeHtml(resolvedSubtitleColor)} !important; -webkit-text-fill-color: ${escapeHtml(resolvedSubtitleColor)} !important;">${escapeHtml(subtitle)}</span></div>` : ''}
     </div>
 
     ${companyLogoUrl ? `
@@ -1821,6 +1828,7 @@ export async function renderProjectKeyDateReminderEmail({
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Key Date Reminder',
     subtitle: hasProject ? projectTitle : 'Personal',
+    subtitleColor: '#ffffff',
     footerNote: resolved.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:15px; color:#374151;">
@@ -1845,12 +1853,6 @@ export async function renderProjectKeyDateReminderEmail({
         ${keyDate.notes && keyDate.notes.trim()
           ? `<div style="margin-top:10px; font-size:14px; color:#374151; white-space:pre-wrap;"><strong>Notes:</strong><br/>${escapeHtml(keyDate.notes)}</div>`
           : ''}
-      </div>
-
-      <div style="text-align:center; margin:24px 0 10px;">
-        <a href="${escapeHtml(shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 15, borderRadiusPx: 10 })}">
-          ${escapeHtml(primaryActionLabel || (hasProject ? 'View Project' : 'View Dashboard'))}
-        </a>
       </div>
     `,
   }).trim()
