@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { sendBrowserPushToSystemAdmins } from '@/lib/admin-web-push'
 
 export interface PushNotificationPayload {
   type:
@@ -33,13 +34,36 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       where: { id: 'default' },
     })
 
-    // If not enabled or not configured, skip
-    if (!settings?.enabled || !settings.webhookUrl || !settings.provider) {
-      return { success: false, message: 'Push notifications not configured' }
-    }
+    // Always attempt browser Web Push for system admins (best-effort).
+    // This is intentionally independent of Gotify configuration.
+    sendBrowserPushToSystemAdmins(payload).catch((err: any) => {
+      const code = typeof err?.code === 'string' ? err.code : ''
+      // Common when DB hasn't been migrated yet.
+      if (code === 'P2021' || code === 'P2022') {
+        console.warn('[WEB_PUSH] Web push tables/columns missing; run Prisma migrations.')
+        return
+      }
+      console.warn('[WEB_PUSH] Failed to send browser push:', err?.message ?? err)
+    })
 
     // Check if this event type is enabled
-    const eventToggleMap: Record<string, keyof Omit<typeof settings, 'id' | 'enabled' | 'provider' | 'webhookUrl' | 'title' | 'createdAt' | 'updatedAt'>> = {
+    type ToggleKey =
+      | 'notifyUnauthorizedOTP'
+      | 'notifyFailedAdminLogin'
+      | 'notifySuccessfulAdminLogin'
+      | 'notifyFailedSharePasswordAttempt'
+      | 'notifySuccessfulShareAccess'
+      | 'notifyGuestVideoLinkAccess'
+      | 'notifyClientComments'
+      | 'notifyVideoApproval'
+      | 'notifySalesQuoteViewed'
+      | 'notifySalesQuoteAccepted'
+      | 'notifySalesInvoiceViewed'
+      | 'notifySalesInvoicePaid'
+      | 'notifyPasswordResetRequested'
+      | 'notifyPasswordResetSuccess'
+
+    const eventToggleMap: Record<string, ToggleKey> = {
       'UNAUTHORIZED_OTP': 'notifyUnauthorizedOTP',
       'FAILED_LOGIN': 'notifyFailedAdminLogin',
       'SUCCESSFUL_ADMIN_LOGIN': 'notifySuccessfulAdminLogin',
@@ -57,8 +81,13 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
     }
 
     const toggleKey = eventToggleMap[payload.type]
-    if (toggleKey && !settings[toggleKey]) {
+    if (settings && toggleKey && !settings[toggleKey]) {
       return { success: false, message: 'This notification type is disabled' }
+    }
+
+    // If not enabled or not configured, skip Gotify/webhook provider.
+    if (!settings?.enabled || !settings.webhookUrl || !settings.provider) {
+      return { success: false, message: 'Push notifications not configured' }
     }
 
     // Build notification based on provider

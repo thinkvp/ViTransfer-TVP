@@ -12,6 +12,7 @@ import { ProjectBehaviorSection } from '@/components/settings/ProjectBehaviorSec
 import { DeveloperToolsSection } from '@/components/settings/DeveloperToolsSection'
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
+import { AdminBrowserPushSection } from '@/components/settings/AdminBrowserPushSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 
 interface Settings {
@@ -225,6 +226,7 @@ export default function GlobalSettingsPage() {
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
+  const [showBrowserPush, setShowBrowserPush] = useState(false)
 
   const [recalcProjectDataLoading, setRecalcProjectDataLoading] = useState(false)
   const [recalcProjectDataResult, setRecalcProjectDataResult] = useState<string | null>(null)
@@ -905,6 +907,8 @@ export default function GlobalSettingsPage() {
             show={showPushNotifications}
             setShow={setShowPushNotifications}
           />
+
+          <AdminBrowserPushSection show={showBrowserPush} setShow={setShowBrowserPush} />
 
           <SecuritySettingsSection
             showSecuritySettings={showSecuritySettings}

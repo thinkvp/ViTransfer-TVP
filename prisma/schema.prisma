@@ -39,6 +39,8 @@ model User {
 
   salesQuoteRevisions   SalesQuoteRevision[]
   salesInvoiceRevisions SalesInvoiceRevision[]
+
+  webPushSubscriptions WebPushSubscription[]
 }
 
 model Role {
@@ -739,6 +741,10 @@ model Settings {
   // Domain Configuration
   appDomain String? // e.g., "https://yourdomain.com"
 
+  // Browser Web Push (admin-only)
+  webPushVapidPublicKey          String?
+  webPushVapidPrivateKeyEncrypted String?
+
   // Upload Settings
   maxUploadSizeGB Int @default(1) // Max upload size in GB
 
@@ -772,6 +778,25 @@ model Settings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model WebPushSubscription {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  endpoint String @unique
+  p256dh   String
+  auth     String
+
+  deviceName String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model QuickBooksIntegration {

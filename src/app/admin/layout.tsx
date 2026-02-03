@@ -6,6 +6,27 @@ import AdminMenuAccessGuard from '@/components/AdminMenuAccessGuard'
 import SessionMonitor from '@/components/SessionMonitor'
 import { useEffect, useRef } from 'react'
 
+function registerAdminPwa() {
+  if (typeof window === 'undefined') return
+
+  // Add manifest link only while in /admin so Share pages are unaffected.
+  const manifestHref = '/admin/manifest.webmanifest'
+  const existingManifest = document.querySelector(`link[rel="manifest"][href="${manifestHref}"]`)
+  if (!existingManifest) {
+    const link = document.createElement('link')
+    link.rel = 'manifest'
+    link.href = manifestHref
+    document.head.appendChild(link)
+  }
+
+  // Register admin-scoped service worker (push only; no caching).
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('/admin/sw.js', { scope: '/admin/' })
+      .catch((err) => console.warn('[PWA] Admin service worker registration failed:', err))
+  }
+}
+
 export default function AdminLayout({
   children,
 }: {
@@ -33,6 +54,10 @@ export default function AdminLayout({
       metaExpires.content = '0'
       document.head.appendChild(metaExpires)
     }
+  }, [])
+
+  useEffect(() => {
+    registerAdminPwa()
   }, [])
 
   // Allow components (e.g. share sidebar) to size to viewport minus header.
