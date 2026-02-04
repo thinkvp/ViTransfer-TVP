@@ -27,6 +27,7 @@ export default function PublicSalesDocActions(props: Props) {
   const router = useRouter()
   const [downloading, setDownloading] = useState(false)
   const [accepting, setAccepting] = useState(false)
+  const [acceptedLocal, setAcceptedLocal] = useState(false)
   const [paying, setPaying] = useState(false)
 
   const info = useMemo(
@@ -61,7 +62,7 @@ export default function PublicSalesDocActions(props: Props) {
   }, [downloading, info, props.doc, props.settings, props.type])
 
   const onAccept = useCallback(async () => {
-    if (!props.canAcceptQuote || accepting) return
+    if (!props.canAcceptQuote || acceptedLocal || accepting) return
     setAccepting(true)
     try {
       const res = await fetch(`/api/sales/view/${encodeURIComponent(props.token)}/accept`, {
@@ -77,11 +78,12 @@ export default function PublicSalesDocActions(props: Props) {
         return
       }
 
+      setAcceptedLocal(true)
       router.refresh()
     } finally {
       setAccepting(false)
     }
-  }, [accepting, props.canAcceptQuote, props.token, router])
+  }, [accepting, acceptedLocal, props.canAcceptQuote, props.token, router])
 
   const onPay = useCallback(async () => {
     if (!props.canPayInvoice || paying) return
@@ -135,15 +137,22 @@ export default function PublicSalesDocActions(props: Props) {
         )}
 
         {props.type === 'QUOTE' && props.canAcceptQuote && (
-          <Button
-            type="button"
-            onClick={() => void onAccept()}
-            disabled={accepting}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
-          >
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            {accepting ? 'Accepting…' : 'Accept Quote'}
-          </Button>
+          acceptedLocal ? (
+            <div className="inline-flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              Accepted
+            </div>
+          ) : (
+            <Button
+              type="button"
+              onClick={() => void onAccept()}
+              disabled={accepting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              {accepting ? 'Accepting…' : 'Accept Quote'}
+            </Button>
+          )
         )}
 
         <Button

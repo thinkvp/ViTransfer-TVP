@@ -4,9 +4,23 @@ import { rateLimit } from '@/lib/rate-limit'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { sendAdminQuoteAcceptedEmail } from '@/lib/email'
 import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
+import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+type AcceptResult =
+  | { ok: true; acceptedNow: boolean; quoteId: string; quoteNumber: string; clientName: string | null; projectTitle: string | null }
+  | { ok: false; status: number; error: string }
+
+function acceptOk(payload: Omit<Extract<AcceptResult, { ok: true }>, 'ok'>): AcceptResult {
+  return { ok: true as const, ...payload }
+}
+
+function acceptErr(status: number, error: string): AcceptResult {
+  return { ok: false as const, status, error }
+}
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
@@ -22,144 +36,181 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   )
   if (rateLimitResult) return rateLimitResult
 
-  // Ensure it exists, isn't revoked/expired, and is a QUOTE.
-  const shares = await prisma.$queryRaw<any[]>`
-    SELECT *
-    FROM "SalesDocumentShare"
-    WHERE "token" = ${token}
-      AND "type" = 'QUOTE'
-      AND "revokedAt" IS NULL
-      AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-    LIMIT 1
-  `
+  const share = await prisma.salesDocumentShare.findFirst({
+    where: {
+      token,
+      type: 'QUOTE',
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    select: { token: true, docId: true, docNumber: true, clientName: true, projectTitle: true },
+  }).catch(() => null)
 
-  const share = shares?.[0]
-  if (!share) {
-    return NextResponse.json({ error: 'Link unavailable' }, { status: 404 })
-  }
+  if (!share) return NextResponse.json({ error: 'Link unavailable' }, { status: 404 })
 
-  const doc = (share.docJson ?? {}) as any
-  const status = typeof doc?.status === 'string' ? doc.status.toUpperCase() : ''
+  const quoteId = String(share.docId || '')
+  if (!quoteId) return NextResponse.json({ error: 'Link unavailable' }, { status: 404 })
 
-  if (status === 'ACCEPTED') {
-    return NextResponse.json({ ok: true })
-  }
+  const acceptResult: AcceptResult = await (async () => {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const current = await tx.salesQuote.findUnique({ where: { id: quoteId } }).catch(() => null)
+        if (!current) return acceptErr(404, 'Quote not found')
 
-  if (status && status !== 'OPEN' && status !== 'SENT') {
-    return NextResponse.json({ error: 'Quote cannot be accepted in its current status' }, { status: 400 })
-  }
+        const currentStatus = String((current as any).status || '').toUpperCase()
+        if (currentStatus === 'ACCEPTED') {
+          return acceptOk({
+            acceptedNow: false,
+            quoteId,
+            quoteNumber: String((current as any).quoteNumber || share.docNumber || ''),
+            clientName: typeof share.clientName === 'string' ? share.clientName : null,
+            projectTitle: typeof share.projectTitle === 'string' ? share.projectTitle : null,
+          })
+        }
 
-  const nextDoc = {
-    ...doc,
-    status: 'ACCEPTED',
-    acceptedAt: new Date().toISOString(),
-  }
+        if (currentStatus !== 'OPEN' && currentStatus !== 'SENT') {
+          return acceptErr(400, 'Quote cannot be accepted in its current status')
+        }
 
-  const quoteNumber = typeof doc?.quoteNumber === 'string'
-    ? doc.quoteNumber
-    : (typeof share?.docNumber === 'string' ? share.docNumber : undefined)
-  const clientName = typeof share?.clientName === 'string' ? share.clientName : undefined
-
-  // Idempotency: only transition to ACCEPTED once.
-  const updated = await prisma.$queryRaw<any[]>`
-    UPDATE "SalesDocumentShare"
-    SET "docJson" = ${nextDoc}::jsonb
-    WHERE "token" = ${token}
-      AND "type" = 'QUOTE'
-      AND "revokedAt" IS NULL
-      AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-      AND COALESCE(UPPER("docJson"->>'status'), '') <> 'ACCEPTED'
-    RETURNING "token", "docId", "docNumber", "clientName", "projectTitle"
-  `
-
-  if (!updated?.length) {
-    // If another request won the race and accepted it first, treat as OK.
-    const sharesNow = await prisma.$queryRaw<any[]>`
-      SELECT *
-      FROM "SalesDocumentShare"
-      WHERE "token" = ${token}
-        AND "type" = 'QUOTE'
-        AND "revokedAt" IS NULL
-        AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-      LIMIT 1
-    `
-    const shareNow = sharesNow?.[0]
-    const docNow = (shareNow?.docJson ?? {}) as any
-    const statusNow = typeof docNow?.status === 'string' ? docNow.status.toUpperCase() : ''
-    if (statusNow === 'ACCEPTED') {
-      return NextResponse.json({ ok: true })
-    }
-    return NextResponse.json({ error: 'Quote cannot be accepted in its current status' }, { status: 400 })
-  }
-
-  const updatedShare = updated[0]
-
-  try {
-    const viewUrl = `/sales/view/${encodeURIComponent(token)}`
-    const title = quoteNumber ? `Quote accepted: ${quoteNumber}` : 'Quote accepted'
-    const message = clientName ? `${clientName} accepted a quote.` : 'A quote was accepted.'
-
-    await sendPushNotification({
-      type: 'SALES_QUOTE_ACCEPTED',
-      title,
-      message,
-      details: {
-        quoteNumber,
-        clientName,
-        viewUrl,
-        ...(typeof (updatedShare as any)?.docId === 'string'
-          ? {
-              salesQuoteId: String((updatedShare as any).docId),
-              __link: { href: `/admin/sales/quotes/${encodeURIComponent(String((updatedShare as any).docId))}` },
-            }
-          : {}),
-      },
-    })
-  } catch {
-    // best-effort
-  }
-
-  try {
-    const users = await prisma.user.findMany({
-      select: {
-        email: true,
-        appRole: { select: { isSystemAdmin: true, permissions: true } },
-      },
-    })
-
-    const adminEmails = Array.from(new Set(
-      (users || [])
-        .filter((u: any) => u && typeof u.email === 'string' && u.email.trim())
-        .filter((u: any) => {
-          const isSystemAdmin = u?.appRole?.isSystemAdmin === true
-          const perms = isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(u?.appRole?.permissions)
-          return canSeeMenu(perms, 'sales')
+        const nextVersion = Number((current as any).version) + 1
+        const updatedCount = await tx.salesQuote.updateMany({
+          where: { id: quoteId, status: { in: ['OPEN', 'SENT'] as any } },
+          data: { status: 'ACCEPTED' as any, acceptedFromStatus: (current as any).status as any, version: nextVersion },
         })
-        .map((u: any) => u.email.trim())
-        .filter(Boolean)
-    ))
 
-    const appDomain = (process.env.APP_DOMAIN || '').trim()
-    const publicQuoteUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/sales/view/${encodeURIComponent(token)}` : null
-    const docId = typeof updatedShare?.docId === 'string' ? updatedShare.docId : null
-    const adminQuoteUrl = (appDomain && docId)
-      ? `${appDomain.replace(/\/$/, '')}/admin/sales/quotes/${encodeURIComponent(docId)}`
-      : null
+        if (updatedCount.count !== 1) {
+          const now = await tx.salesQuote.findUnique({ where: { id: quoteId } }).catch(() => null)
+          const nowStatus = String((now as any)?.status || '').toUpperCase()
+          if (nowStatus === 'ACCEPTED') {
+            return acceptOk({
+              acceptedNow: false,
+              quoteId,
+              quoteNumber: String((now as any)?.quoteNumber || share.docNumber || ''),
+              clientName: typeof share.clientName === 'string' ? share.clientName : null,
+              projectTitle: typeof share.projectTitle === 'string' ? share.projectTitle : null,
+            })
+          }
+          return acceptErr(400, 'Quote cannot be accepted in its current status')
+        }
 
-    if (adminEmails.length > 0) {
-      await sendAdminQuoteAcceptedEmail({
-        adminEmails,
-        quoteNumber: quoteNumber || (typeof updatedShare?.docNumber === 'string' ? updatedShare.docNumber : null),
-        clientName: clientName || (typeof updatedShare?.clientName === 'string' ? updatedShare.clientName : null),
-        projectTitle: typeof updatedShare?.projectTitle === 'string' ? updatedShare.projectTitle : null,
-        acceptedAtYmd: new Date().toISOString().slice(0, 10),
-        publicQuoteUrl,
-        adminQuoteUrl,
+      const updated = await tx.salesQuote.findUnique({ where: { id: quoteId } }).catch(() => null)
+      if (!updated) return acceptErr(500, 'Unable to accept quote')
+
+      const doc = salesQuoteFromDb(updated as any)
+
+        await tx.salesQuoteRevision.create({
+          data: {
+            quoteId,
+            version: Number((updated as any).version) || nextVersion,
+            docJson: doc as any,
+            createdByUserId: null,
+          },
+        }).catch(() => null)
+
+        // Keep the public share snapshot in sync with canonical status.
+        try {
+          await upsertSalesDocumentShareForDoc(tx as any, {
+            type: 'QUOTE',
+            doc,
+            clientId: String((updated as any).clientId || ''),
+            projectId: (updated as any).projectId ?? null,
+            quoteValidUntilYmd: (updated as any).validUntil ?? null,
+          })
+        } catch {
+          // best-effort
+        }
+
+        return acceptOk({
+          acceptedNow: true,
+          quoteId,
+          quoteNumber: String((updated as any).quoteNumber || share.docNumber || ''),
+          clientName: typeof share.clientName === 'string' ? share.clientName : null,
+          projectTitle: typeof share.projectTitle === 'string' ? share.projectTitle : null,
+        })
       })
+    } catch {
+      return acceptErr(500, 'Unable to accept quote')
     }
-  } catch {
-    // best-effort
+  })()
+
+  if (!acceptResult.ok) {
+    return NextResponse.json({ error: acceptResult.error }, { status: acceptResult.status })
   }
 
-  return NextResponse.json({ ok: true })
+  // Kick off best-effort notifications without blocking the response.
+  if (acceptResult.acceptedNow) {
+    const quoteNumber = acceptResult.quoteNumber
+    const clientName = acceptResult.clientName ?? undefined
+    const quoteIdForLinks = acceptResult.quoteId
+
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const viewUrl = `/sales/view/${encodeURIComponent(token)}`
+          const title = quoteNumber ? `Quote accepted: ${quoteNumber}` : 'Quote accepted'
+          const message = clientName ? `${clientName} accepted a quote.` : 'A quote was accepted.'
+
+          await sendPushNotification({
+            type: 'SALES_QUOTE_ACCEPTED',
+            title,
+            message,
+            details: {
+              quoteNumber,
+              clientName,
+              viewUrl,
+              salesQuoteId: quoteIdForLinks,
+              __link: { href: `/admin/sales/quotes/${encodeURIComponent(quoteIdForLinks)}` },
+            },
+          })
+        } catch {
+          // best-effort
+        }
+
+        try {
+          const users = await prisma.user.findMany({
+            select: {
+              email: true,
+              appRole: { select: { isSystemAdmin: true, permissions: true } },
+            },
+          })
+
+          const adminEmails = Array.from(new Set(
+            (users || [])
+              .filter((u: any) => u && typeof u.email === 'string' && u.email.trim())
+              .filter((u: any) => {
+                const isSystemAdmin = u?.appRole?.isSystemAdmin === true
+                const perms = isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(u?.appRole?.permissions)
+                return canSeeMenu(perms, 'sales')
+              })
+              .map((u: any) => u.email.trim())
+              .filter(Boolean)
+          ))
+
+          const appDomain = (process.env.APP_DOMAIN || '').trim()
+          const publicQuoteUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/sales/view/${encodeURIComponent(token)}` : null
+          const adminQuoteUrl = appDomain
+            ? `${appDomain.replace(/\/$/, '')}/admin/sales/quotes/${encodeURIComponent(quoteIdForLinks)}`
+            : null
+
+          if (adminEmails.length > 0) {
+            await sendAdminQuoteAcceptedEmail({
+              adminEmails,
+              quoteNumber: quoteNumber || null,
+              clientName: clientName || null,
+              projectTitle: acceptResult.projectTitle ?? null,
+              acceptedAtYmd: new Date().toISOString().slice(0, 10),
+              publicQuoteUrl,
+              adminQuoteUrl,
+            })
+          }
+        } catch {
+          // best-effort
+        }
+      })().catch(() => {})
+    }, 0)
+  }
+
+  const res = NextResponse.json({ ok: true })
+  res.headers.set('Cache-Control', 'no-store')
+  return res
 }
