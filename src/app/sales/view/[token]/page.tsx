@@ -319,7 +319,8 @@ export default async function SalesDocPublicViewPage(
   // Prefer the current client address; fall back to any snapshot value if needed.
   const clientAddress = (liveClientAddress || safeString(doc?.clientAddress)).trim()
 
-  const canAcceptQuote = type === 'QUOTE' && effectiveStatus === 'OPEN'
+  // Allow accepting quotes that are OPEN or SENT (not CLOSED, ACCEPTED, or expired)
+  const canAcceptQuote = type === 'QUOTE' && (effectiveStatus === 'OPEN' || effectiveStatus === 'SENT')
   const canPayInvoice = type === 'INVOICE'
     && Boolean(stripeGateway?.enabled)
     && effectiveStatus !== 'PAID'

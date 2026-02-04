@@ -125,10 +125,14 @@ export async function GET(request: NextRequest) {
 
   const localPayments = paymentRows.map((r) => salesPaymentFromDb(r as any))
 
+  const allowUnscopedStripePayments = !clientId && !projectId && invoiceIds.length === 0
+  const stripeInvoiceIds = invoiceIds.length ? invoiceIds : invoiceIdList
+  const shouldQueryStripePayments = includePayments && (allowUnscopedStripePayments || stripeInvoiceIds.length > 0)
+
   const [stripePaymentsRaw, localAgg, stripeAgg] = await Promise.all([
-    includePayments
+    shouldQueryStripePayments
       ? prisma.salesInvoiceStripePayment.findMany({
-          where: invoiceIdList.length ? { invoiceDocId: { in: invoiceIdList } } : undefined,
+          where: stripeInvoiceIds.length ? { invoiceDocId: { in: stripeInvoiceIds } } : undefined,
           orderBy: { createdAt: 'desc' },
           take: stripePaymentsLimit,
           select: {

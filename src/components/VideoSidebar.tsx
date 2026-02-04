@@ -136,8 +136,6 @@ export default function VideoSidebar({
     setThumbnailDimensions(dims)
   }, [sidebarWidth, videosByName])
 
-  const hasExplicitHeightClass = /\b(?:h|max-h)-/.test(className ?? '')
-
   // Handle mouse move for resizing
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -187,22 +185,22 @@ export default function VideoSidebar({
         style={{ width: `${sidebarWidth}px` }}
         className={cn(
           'hidden lg:block bg-card border border-border relative rounded-lg',
-          'overflow-y-auto overflow-x-hidden self-stretch min-h-0',
-          'sidebar-scrollbar',
-          // Default to full viewport height (minus admin header), but allow override via className
-          !hasExplicitHeightClass && 'h-[calc(100dvh-var(--admin-header-height,0px))]',
+          'overflow-hidden min-h-0 flex flex-col',
+          // Default to full viewport height (minus admin header). Callers can override via className.
+          'h-[calc(100dvh-var(--admin-header-height,0px))]',
           className
         )}
       >
-        {heading && (
-          <div className="p-4 border-b border-border">
-            <h2 className="text-base font-semibold text-foreground truncate" title={heading}>
-              {heading}
-            </h2>
-          </div>
-        )}
+        <div className="flex-1 min-h-0 max-h-full overflow-y-auto overflow-x-hidden sidebar-scrollbar">
+          {heading && (
+            <div className="p-4 border-b border-border">
+              <h2 className="text-base font-semibold text-foreground truncate" title={heading}>
+                {heading}
+              </h2>
+            </div>
+          )}
 
-        <nav className="p-3">
+          <nav className="p-3">
           {(() => {
             // Split videos into For Review and Approved groups.
             // Note: on some share modes (e.g. guest), approval flags may be hidden; allow callers to disable grouping.
@@ -380,7 +378,8 @@ export default function VideoSidebar({
               </>
             )
           })()}
-        </nav>
+          </nav>
+        </div>
 
         {/* Resize Handle */}
         <div

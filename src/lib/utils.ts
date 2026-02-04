@@ -170,12 +170,129 @@ export async function generateUniqueSlug(
   throw new Error('Unable to generate a unique share link. Please try again.')
 }
 
+// Cache parsed trusted proxies across requests (per Node process).
+// Keyed by the raw env var value so changes cause a re-parse.
+let trustedProxiesCache: { raw: string; matchers: unknown[] } | null = null
+
 export function getClientIpAddress(request: NextRequest): string {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown'
-  )
+  const normalizeIp = (raw: string | null | undefined): string | null => {
+    if (!raw) return null
+    let s = String(raw).trim()
+    if (!s) return null
+    if (s.toLowerCase() === 'unknown') return null
+
+    // Handle IPv6-with-port like "[::1]:1234"
+    if (s.startsWith('[')) {
+      const end = s.indexOf(']')
+      if (end > 0) s = s.slice(1, end)
+    } else {
+      // Handle IPv4-with-port like "1.2.3.4:1234". Avoid breaking plain IPv6.
+      const colonCount = (s.match(/:/g) || []).length
+      if (colonCount === 1 && s.includes('.')) {
+        s = s.split(':')[0].trim()
+      }
+    }
+
+    // Normalize IPv4-mapped IPv6 (::ffff:192.168.0.1)
+    const v4Mapped = s.toLowerCase().startsWith('::ffff:') ? s.slice(7) : null
+    if (v4Mapped && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(v4Mapped)) {
+      s = v4Mapped
+    }
+
+    return s || null
+  }
+
+  const parseXForwardedFor = (xff: string | null): string[] => {
+    if (!xff) return []
+    return xff
+      .split(',')
+      .map((p) => normalizeIp(p))
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+  }
+
+  const isIpv4 = (ip: string): boolean => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)
+
+  const ipv4ToInt = (ip: string): number | null => {
+    if (!isIpv4(ip)) return null
+    const parts = ip.split('.').map((x) => Number(x))
+    if (parts.length !== 4) return null
+    for (const n of parts) {
+      if (!Number.isFinite(n) || n < 0 || n > 255) return null
+    }
+    // >>> 0 forces unsigned.
+    return (((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0)
+  }
+
+  type TrustedProxyMatcher =
+    | { kind: 'ipv4-cidr'; network: number; mask: number }
+    | { kind: 'ip-exact'; ip: string; ipV4Int?: number }
+  const getTrusted = (): TrustedProxyMatcher[] => {
+    const raw = (process.env.TRUSTED_PROXIES || '').trim()
+    if (trustedProxiesCache && trustedProxiesCache.raw === raw) {
+      return trustedProxiesCache.matchers as TrustedProxyMatcher[]
+    }
+
+    const entries = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    const matchers: TrustedProxyMatcher[] = []
+    for (const e of entries) {
+      if (e.includes('/')) {
+        const [ipRaw, bitsRaw] = e.split('/')
+        const ip = normalizeIp(ipRaw)
+        const bits = Number(bitsRaw)
+        const ipInt = ip ? ipv4ToInt(ip) : null
+        if (ipInt == null) continue
+        if (!Number.isFinite(bits) || bits < 0 || bits > 32) continue
+        const mask = bits === 0 ? 0 : ((0xffffffff << (32 - bits)) >>> 0)
+        matchers.push({ kind: 'ipv4-cidr', network: (ipInt & mask) >>> 0, mask })
+      } else {
+        const ip = normalizeIp(e)
+        if (!ip) continue
+        const ipV4Int = ipv4ToInt(ip) ?? undefined
+        matchers.push({ kind: 'ip-exact', ip, ipV4Int })
+      }
+    }
+
+    trustedProxiesCache = { raw, matchers }
+    return matchers
+  }
+
+  const isTrustedProxy = (ip: string, matchers: TrustedProxyMatcher[]): boolean => {
+    if (!ip || matchers.length === 0) return false
+    const ipInt = ipv4ToInt(ip)
+    for (const m of matchers) {
+      if (m.kind === 'ip-exact') {
+        if (m.ip === ip) return true
+        if (ipInt != null && m.ipV4Int != null && m.ipV4Int === ipInt) return true
+      } else {
+        if (ipInt == null) continue
+        if (((ipInt & m.mask) >>> 0) === m.network) return true
+      }
+    }
+    return false
+  }
+
+  const xff = request.headers.get('x-forwarded-for')
+  const chain = parseXForwardedFor(xff)
+  const realIp = normalizeIp(request.headers.get('x-real-ip'))
+
+  const trusted = getTrusted()
+  if (trusted.length > 0 && chain.length > 0) {
+    // XFF is client,proxy1,proxy2,... (each proxy appends). With a trust list,
+    // peel trusted proxies from the right and take the first non-trusted.
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const ip = chain[i]
+      if (isTrustedProxy(ip, trusted)) continue
+      return ip
+    }
+    // All entries are trusted proxies; fall back to left-most.
+    return chain[0] || realIp || 'unknown'
+  }
+
+  return chain[0] || realIp || 'unknown'
 }
 
 /**

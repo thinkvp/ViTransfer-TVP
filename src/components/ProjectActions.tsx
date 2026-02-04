@@ -269,7 +269,16 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       const available = projectRecipientsWithEmail.map((r) => String(r.id))
       const availableSet = new Set(available)
       const filtered = prev.filter((id) => availableSet.has(id))
-      return filtered.length > 0 ? filtered : available
+
+      if (filtered.length > 0) return filtered
+
+      // If the user hasn't made a selection yet, default to recipients who have
+      // notifications enabled for this project.
+      const defaults = projectRecipientsWithEmail
+        .filter((r) => (r as any)?.receiveNotifications !== false)
+        .map((r) => String(r.id))
+
+      return defaults
     })
   }, [notificationType, projectRecipientsWithEmail, showNotificationModal])
 
