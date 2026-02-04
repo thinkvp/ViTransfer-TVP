@@ -2,6 +2,7 @@ import * as webpush from 'web-push'
 import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/encryption'
 import type { PushNotificationPayload } from '@/lib/push-notifications'
+import { buildAdminWebPushNotification } from '@/lib/admin-web-push-templates'
 
 type VapidKeys = { publicKey: string; privateKey: string }
 
@@ -158,16 +159,6 @@ export async function listWebPushSubscriptionsForUser(userId: string) {
   })
 }
 
-function buildNotification(payload: PushNotificationPayload): { title: string; body: string; url: string } {
-  const title = payload.title
-  const body = payload.message
-
-  // Keep URLs inside /admin only.
-  const url = payload.projectId ? `/admin/projects/${payload.projectId}` : '/admin'
-
-  return { title, body, url }
-}
-
 async function sendToSubscription(sub: { endpoint: string; p256dh: string; auth: string }, notification: { title: string; body: string; url: string }) {
   await ensureConfigured()
 
@@ -189,7 +180,7 @@ async function sendToSubscription(sub: { endpoint: string; p256dh: string; auth:
 }
 
 export async function sendBrowserPushToSystemAdmins(payload: PushNotificationPayload): Promise<void> {
-  const notification = buildNotification(payload)
+  const notification = buildAdminWebPushNotification(payload)
 
   const subs = await prisma.webPushSubscription.findMany({
     where: {

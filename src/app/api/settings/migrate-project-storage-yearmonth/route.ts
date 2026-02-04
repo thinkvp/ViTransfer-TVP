@@ -21,6 +21,8 @@ type Result = {
   sample?: {
     movedProjectIds: string[]
     missingProjectIds: string[]
+    movedProjects?: Array<{ id: string; title: string }>
+    missingProjects?: Array<{ id: string; title: string }>
   }
   errors?: Array<{ projectId?: string; path?: string; error: string }>
 }
@@ -153,7 +155,7 @@ export async function POST(request: NextRequest) {
   }
 
   const projects = await prisma.project.findMany({
-    select: { id: true, createdAt: true },
+    select: { id: true, title: true, createdAt: true },
     orderBy: { createdAt: 'asc' },
   })
 
@@ -164,6 +166,9 @@ export async function POST(request: NextRequest) {
 
   const movedProjectIds: string[] = []
   const missingProjectIds: string[] = []
+
+  const movedProjects: Array<{ id: string; title: string }> = []
+  const missingProjects: Array<{ id: string; title: string }> = []
 
   for (const p of projects) {
     const ym = toYearMonthUTC(p.createdAt)
@@ -188,6 +193,7 @@ export async function POST(request: NextRequest) {
 
           if (!isPureStub) {
             movedProjectIds.push(p.id)
+            movedProjects.push({ id: p.id, title: p.title })
             movedFromLegacyRoot++
             if (!dryRun) {
               await fs.promises.mkdir(path.dirname(targetAbs), { recursive: true })
@@ -201,6 +207,7 @@ export async function POST(request: NextRequest) {
           const closed = closedMap.get(p.id)
           if (closed) {
             movedProjectIds.push(p.id)
+            movedProjects.push({ id: p.id, title: p.title })
             movedFromClosedFolder++
             if (!dryRun) {
               await fs.promises.mkdir(path.dirname(targetAbs), { recursive: true })
@@ -208,6 +215,7 @@ export async function POST(request: NextRequest) {
             }
           } else {
             missingProjectIds.push(p.id)
+            missingProjects.push({ id: p.id, title: p.title })
           }
         }
       }
@@ -242,6 +250,8 @@ export async function POST(request: NextRequest) {
     sample: {
       movedProjectIds: movedProjectIds.slice(0, 10),
       missingProjectIds: missingProjectIds.slice(0, 10),
+      movedProjects: movedProjects.slice(0, 10),
+      missingProjects: missingProjects.slice(0, 10),
     },
     errors: errors.length ? errors.slice(0, 50) : undefined,
   }

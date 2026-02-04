@@ -208,7 +208,7 @@ export function CommentSectionView({
   const [projectGuestLinkCopied, setProjectGuestLinkCopied] = useState(false)
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
-  const [downloading, setDownloading] = useState(false)
+  
   const [exportingSrt, setExportingSrt] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [videoNotesOpen, setVideoNotesOpen] = useState(true)
@@ -785,77 +785,11 @@ export function CommentSectionView({
     setShowApproveConfirm(false)
   }
 
-  const triggerDownload = (url: string) => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = ''
-    link.rel = 'noopener'
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
-  const handleDownloadSelected = async () => {
+  const handleDownloadSelected = () => {
     const video = headerVideo
     if (!video) return
     if (!(video as any).approved) return
-    if (downloading) return
-
-    // If this video has additional assets, show the download options modal.
-    // Otherwise, keep the one-click direct download behavior.
-    try {
-      const headers = isAdminView
-        ? undefined
-        : shareToken
-          ? { Authorization: `Bearer ${shareToken}` }
-          : undefined
-
-      const res = await fetch(`/api/videos/${video.id}/assets`, { headers })
-      if (res.ok) {
-        const data = await res.json().catch(() => null)
-        const assets = Array.isArray(data?.assets) ? data.assets : []
-        if (assets.length > 0) {
-          setShowDownloadOptions(true)
-          return
-        }
-      }
-      // If assets fetch fails, fall back to direct download.
-    } catch {
-      // ignore
-    }
-
-    setDownloading(true)
-    try {
-      const url = `/api/videos/${video.id}/download-token`
-      const response = isAdminView
-        ? await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-        : shareToken
-          ? await fetch(url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${shareToken}`,
-              },
-              body: '{}',
-            })
-          : await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        throw new Error(err.error || 'Failed to generate download link')
-      }
-
-      const data = await response.json()
-      if (!data?.url) {
-        throw new Error('Download link missing')
-      }
-      triggerDownload(data.url)
-    } catch (error) {
-      alert(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    } finally {
-      setDownloading(false)
-    }
+    setShowDownloadOptions(true)
   }
 
   const handleApproveSelected = async () => {
@@ -1277,9 +1211,8 @@ export function CommentSectionView({
                     variant="default"
                     size="sm"
                     onClick={handleDownloadSelected}
-                    disabled={downloading}
                   >
-                    {downloading ? 'Preparing...' : 'Download'}
+                    Download
                   </Button>
                 </div>
               ) : null}

@@ -11,6 +11,7 @@ import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewin
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import {
   Dialog,
   DialogContent,
@@ -115,6 +116,8 @@ export default function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false)
   const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
+
+  const [showApprovedDownloadOptions, setShowApprovedDownloadOptions] = useState(false)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
 
@@ -576,6 +579,18 @@ export default function VideoPlayer({
   const approvedDownloadUrl = (selectedVideo as any)?.downloadUrl as string | null | undefined
   const canShowApprovedDownload =
     !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && Boolean(approvedDownloadUrl)
+
+  const approvedVideoName = String((selectedVideo as any)?.name || 'Video')
+  const approvedVideoVersionLabel = String((selectedVideo as any)?.versionLabel || (selectedVideo as any)?.version || '')
+
+  const handleApprovedDownloadClick = async () => {
+    const video = selectedVideo
+    if (!video?.id) return
+    if (!approvedDownloadUrl) return
+
+    // Always show the modal so clients can clearly choose video-only vs assets.
+    setShowApprovedDownloadOptions(true)
+  }
 
   // Speed controls should be hidden only when an approved video is selected in the client view.
   // This keeps the mobile controls row from getting too cramped once Download is shown.
@@ -1601,10 +1616,15 @@ export default function VideoPlayer({
               </Button>
 
               {canShowApprovedDownload && approvedDownloadUrl && (
-                <Button asChild type="button" variant="default" size="sm" aria-label="Download approved video" title="Download approved video">
-                  <a href={approvedDownloadUrl} download>
-                    Download
-                  </a>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  aria-label="Download approved video"
+                  title="Download approved video"
+                  onClick={() => void handleApprovedDownloadClick()}
+                >
+                  Download
                 </Button>
               )}
             </div>
@@ -1691,17 +1711,15 @@ export default function VideoPlayer({
 
                 {canShowApprovedDownload && approvedDownloadUrl && (
                   <Button
-                    asChild
                     type="button"
                     variant="outline"
                     size="icon"
                     aria-label="Download approved video"
                     title="Download approved video"
                     className="h-8 w-8"
+                    onClick={() => void handleApprovedDownloadClick()}
                   >
-                    <a href={approvedDownloadUrl} download>
-                      <Download className="w-4 h-4" />
-                    </a>
+                    <Download className="w-4 h-4" />
                   </Button>
                 )}
               </div>
@@ -1753,6 +1771,18 @@ export default function VideoPlayer({
           </div>
         </DialogContent>
       </Dialog>
+
+      {canShowApprovedDownload && selectedVideo?.id ? (
+        <VideoAssetDownloadModal
+          videoId={String(selectedVideo.id)}
+          videoName={approvedVideoName}
+          versionLabel={approvedVideoVersionLabel}
+          isOpen={showApprovedDownloadOptions}
+          onClose={() => setShowApprovedDownloadOptions(false)}
+          shareToken={shareToken}
+          isAdmin={isAdmin}
+        />
+      ) : null}
     </div>
   )
 }

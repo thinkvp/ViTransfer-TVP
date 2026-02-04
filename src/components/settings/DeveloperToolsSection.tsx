@@ -38,6 +38,8 @@ type ProjectStorageYearMonthMigrationResult = {
   sample?: {
     movedProjectIds: string[]
     missingProjectIds: string[]
+    movedProjects?: Array<{ id: string; title: string }>
+    missingProjects?: Array<{ id: string; title: string }>
   }
   errors?: Array<{ projectId?: string; path?: string; error: string }>
 }
@@ -292,19 +294,25 @@ export function DeveloperToolsSection({
                     {projectStorageMigrationResult.sample ? (
                       <details className="mt-2">
                         <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          Show sample project IDs
+                          Show sample projects
                         </summary>
                         <div className="mt-2 space-y-2">
                           <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Moved project IDs (first 10)</div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Moved projects (first 10)</div>
                             <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {projectStorageMigrationResult.sample.movedProjectIds.join('\n')}
+                              {(projectStorageMigrationResult.sample.movedProjects?.length
+                                ? projectStorageMigrationResult.sample.movedProjects.map((p) => `${p.id}\t${p.title}`)
+                                : projectStorageMigrationResult.sample.movedProjectIds
+                              ).join('\n')}
                             </pre>
                           </div>
                           <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Missing project IDs (first 10)</div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Missing projects (first 10)</div>
                             <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {projectStorageMigrationResult.sample.missingProjectIds.join('\n')}
+                              {(projectStorageMigrationResult.sample.missingProjects?.length
+                                ? projectStorageMigrationResult.sample.missingProjects.map((p) => `${p.id}\t${p.title}`)
+                                : projectStorageMigrationResult.sample.missingProjectIds
+                              ).join('\n')}
                             </pre>
                           </div>
 
