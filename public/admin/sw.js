@@ -23,8 +23,8 @@ self.addEventListener('push', event => {
       .showNotification(title, {
         body,
         data: { url },
-        badge: '/icon.svg',
-        icon: '/icon.svg',
+        badge: '/admin/icons/badge-96.png',
+        icon: '/admin/icons/icon-192.png',
       })
       .catch(() => {})
   )
