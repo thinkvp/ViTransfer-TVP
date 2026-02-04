@@ -33,6 +33,79 @@ type CachedTokenEntry = CachedValue<VideoAccessToken>
 const tokenVerificationCache = new Map<string, CachedTokenEntry>()
 const TOKEN_REV_VERSION_KEY = 'video_token_rev_version'
 
+// Cache parsed trusted proxies for TOKEN_IP_MISMATCH handling.
+// Keyed by raw env var so changes are picked up automatically.
+type TrustedProxyMatcher =
+  | { kind: 'ipv4-cidr'; network: number; mask: number }
+  | { kind: 'ip-exact'; ip: string; ipV4Int?: number }
+let trustedProxiesCache: { raw: string; matchers: TrustedProxyMatcher[] } | null = null
+
+function isIpv4(ip: string): boolean {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)
+}
+
+function ipv4ToInt(ip: string): number | null {
+  if (!isIpv4(ip)) return null
+  const parts = ip.split('.').map((x) => Number(x))
+  if (parts.length !== 4) return null
+  for (const n of parts) {
+    if (!Number.isFinite(n) || n < 0 || n > 255) return null
+  }
+  return (((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0)
+}
+
+function getTrustedProxyMatchers(): TrustedProxyMatcher[] {
+  const raw = (process.env.TRUSTED_PROXIES || '').trim()
+  if (trustedProxiesCache && trustedProxiesCache.raw === raw) return trustedProxiesCache.matchers
+
+  const entries = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  const matchers: TrustedProxyMatcher[] = []
+  for (const e of entries) {
+    if (e.includes('/')) {
+      const [ipRaw, bitsRaw] = e.split('/')
+      const ip = (ipRaw || '').trim()
+      const bits = Number(bitsRaw)
+      const ipInt = ipv4ToInt(ip)
+      if (ipInt == null) continue
+      if (!Number.isFinite(bits) || bits < 0 || bits > 32) continue
+      const mask = bits === 0 ? 0 : ((0xffffffff << (32 - bits)) >>> 0)
+      matchers.push({ kind: 'ipv4-cidr', network: (ipInt & mask) >>> 0, mask })
+    } else {
+      const ip = e.trim()
+      if (!ip) continue
+      matchers.push({ kind: 'ip-exact', ip, ipV4Int: ipv4ToInt(ip) ?? undefined })
+    }
+  }
+
+  trustedProxiesCache = { raw, matchers }
+  return matchers
+}
+
+function isTrustedProxyIp(ip: string | null | undefined): boolean {
+  if (!ip) return false
+  const matchers = getTrustedProxyMatchers()
+  if (matchers.length === 0) return false
+
+  const ipStr = String(ip).trim()
+  if (!ipStr) return false
+
+  const ipInt = ipv4ToInt(ipStr)
+  for (const m of matchers) {
+    if (m.kind === 'ip-exact') {
+      if (m.ip === ipStr) return true
+      if (ipInt != null && m.ipV4Int != null && m.ipV4Int === ipInt) return true
+    } else {
+      if (ipInt == null) continue
+      if (((ipInt & m.mask) >>> 0) === m.network) return true
+    }
+  }
+  return false
+}
+
 interface VideoAccessToken {
   videoId: string
   projectId: string
@@ -180,20 +253,98 @@ export async function verifyVideoAccessToken(
     // Optional defense-in-depth: token is bound to the original request IP.
     // Only enforce in BLOCK_STRICT mode to avoid breaking legitimate sessions on IP churn.
     const requestIp = getClientIpAddress(request)
-    if (tokenData.ipAddress && requestIp && tokenData.ipAddress !== requestIp) {
-      await logSecurityEvent({
-        type: 'TOKEN_IP_MISMATCH',
-        severity: 'WARNING',
-        projectId: tokenData.projectId,
-        videoId: tokenData.videoId,
-        sessionId,
-        ipAddress: requestIp,
-        details: { expectedIp: tokenData.ipAddress }
-      })
+    const expectedIp = tokenData.ipAddress
+    if (expectedIp && requestIp && expectedIp !== requestIp) {
+      const normalizeIp = (raw: string | null | undefined): string | null => {
+        if (!raw) return null
+        let s = String(raw).trim()
+        if (!s) return null
+        if (s.toLowerCase() === 'unknown') return null
+
+        // Handle IPv6-with-port like "[::1]:1234"
+        if (s.startsWith('[')) {
+          const end = s.indexOf(']')
+          if (end > 0) s = s.slice(1, end)
+        } else {
+          // Handle IPv4-with-port like "1.2.3.4:1234". Avoid breaking plain IPv6.
+          const colonCount = (s.match(/:/g) || []).length
+          if (colonCount === 1 && s.includes('.')) {
+            s = s.split(':')[0].trim()
+          }
+        }
+
+        // Normalize IPv4-mapped IPv6 (::ffff:192.168.0.1)
+        const v4Mapped = s.toLowerCase().startsWith('::ffff:') ? s.slice(7) : null
+        if (v4Mapped && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(v4Mapped)) {
+          s = v4Mapped
+        }
+
+        return s || null
+      }
+
+      const parseXForwardedFor = (xff: string | null): string[] => {
+        if (!xff) return []
+        return xff
+          .split(',')
+          .map((p) => normalizeIp(p))
+          .filter((p): p is string => typeof p === 'string' && p.length > 0)
+      }
+
+      // If TRUSTED_PROXIES is configured, tolerate situations where our chosen IP
+      // differs but both addresses are present in the same forwarded chain.
+      const trustedConfigured = (process.env.TRUSTED_PROXIES || '').trim().length > 0
+      const xffChain = parseXForwardedFor(request.headers.get('x-forwarded-for'))
+      const realIp = normalizeIp(request.headers.get('x-real-ip'))
+      const forwardedSet = new Set<string>([...xffChain, realIp].filter((x): x is string => typeof x === 'string' && x.length > 0))
+      const expectedNorm = normalizeIp(expectedIp)
+      const requestNorm = normalizeIp(requestIp)
+      const isBenignProxyChainVariation =
+        trustedConfigured
+        && forwardedSet.size > 0
+        && Boolean(expectedNorm && requestNorm)
+        && forwardedSet.has(expectedNorm!)
+        && forwardedSet.has(requestNorm!)
 
       const settings = await getSecuritySettings()
-      if (settings.hotlinkProtection === 'BLOCK_STRICT') {
-        return null
+
+      // If our detected IP is actually one of the trusted proxies, it's a strong signal
+      // that forwarded headers were missing/altered for this request path. In non-strict
+      // mode, suppress mismatch logging to avoid noisy false positives.
+      if (settings.hotlinkProtection !== 'BLOCK_STRICT' && isTrustedProxyIp(requestNorm)) {
+        // Treat as benign; skip logging and do not block.
+        // (Still enforced in strict mode so misconfigurations are caught.)
+      } else if (!isBenignProxyChainVariation) {
+        // Rate-limit mismatch warnings in non-strict mode to avoid log spam on mobile/VPN IP churn.
+        let shouldLog = settings.hotlinkProtection === 'BLOCK_STRICT'
+        if (!shouldLog) {
+          try {
+            const mismatchKey = `security:token_ip_mismatch:${sessionId}:${tokenData.videoId}:${expectedIp}:${requestIp}`
+            const already = await redis.get(mismatchKey)
+            if (!already) {
+              await redis.setex(mismatchKey, 300, '1')
+              shouldLog = true
+            }
+          } catch {
+            // best-effort; fall back to logging
+            shouldLog = true
+          }
+        }
+
+        if (shouldLog) {
+          await logSecurityEvent({
+            type: 'TOKEN_IP_MISMATCH',
+            severity: 'WARNING',
+            projectId: tokenData.projectId,
+            videoId: tokenData.videoId,
+            sessionId,
+            ipAddress: requestIp,
+            details: { expectedIp }
+          })
+        }
+
+        if (settings.hotlinkProtection === 'BLOCK_STRICT') {
+          return null
+        }
       }
     }
   }

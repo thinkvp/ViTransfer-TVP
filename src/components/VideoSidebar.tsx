@@ -184,11 +184,13 @@ export default function VideoSidebar({
         ref={sidebarRef}
         style={{ width: `${sidebarWidth}px` }}
         className={cn(
-          'hidden lg:block bg-card border border-border relative rounded-lg',
-          'overflow-hidden min-h-0 flex flex-col',
+          'bg-card border border-border relative rounded-lg',
+          'overflow-hidden min-h-0',
           // Default to full viewport height (minus admin header). Callers can override via className.
           'h-[calc(100dvh-var(--admin-header-height,0px))]',
-          className
+          className,
+          // Enforce desktop-only visibility regardless of caller classes.
+          'hidden lg:flex lg:flex-col'
         )}
       >
         <div className="flex-1 min-h-0 max-h-full overflow-y-auto overflow-x-hidden sidebar-scrollbar">
