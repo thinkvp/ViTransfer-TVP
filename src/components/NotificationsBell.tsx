@@ -46,12 +46,18 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
   const payloadMessage = typeof payload?.message === 'string' ? payload.message : undefined
   const projectName = typeof payload?.projectName === 'string' ? payload.projectName : undefined
 
+  function isHiddenDetailKey(key: string): boolean {
+    if (key === '__payload' || key === '__link' || key === '__delivery') return true
+    const normalizedKey = key.toLowerCase().replace(/[_\-\s]/g, '')
+    return normalizedKey === 'salesdocid' || normalizedKey === 'salesdoctype'
+  }
+
   const entries: Array<[string, any]> = details && typeof details === 'object'
     ? (Object.entries(details as Record<string, any>) as Array<[string, any]>)
     : []
 
   const lines: Array<[string, string]> = entries
-    .filter(([key]) => key !== '__payload' && key !== '__link' && key !== '__delivery')
+    .filter(([key]) => !isHiddenDetailKey(key))
     .map(([key, value]): [string, string] => {
       if (value === null || value === undefined) return [key, '']
       if (typeof value === 'string') return [key, value]
