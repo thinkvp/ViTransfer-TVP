@@ -51,7 +51,7 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
     : []
 
   const lines: Array<[string, string]> = entries
-    .filter(([key]) => key !== '__payload' && key !== '__link')
+    .filter(([key]) => key !== '__payload' && key !== '__link' && key !== '__delivery')
     .map(([key, value]): [string, string] => {
       if (value === null || value === undefined) return [key, '']
       if (typeof value === 'string') return [key, value]
