@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X, Download, FileIcon, Loader2 } from 'lucide-react'
 import { Button } from './ui/button'
+import { Checkbox } from './ui/checkbox'
 import { formatFileSize } from '@/lib/utils'
 import { getAccessToken } from '@/lib/token-store'
 
@@ -46,12 +47,30 @@ export function VideoAssetDownloadModal({
       setLoading(true)
       setError(null)
 
+      if (!isAdmin && !shareToken) {
+        setAssets([])
+        setError('Authentication required')
+        return
+      }
+
       const headers = buildAuthHeaders(shareToken, isAdmin)
       const response = await fetch(`/api/videos/${videoId}/assets`, {
         headers,
       })
       if (!response.ok) {
-        throw new Error('Failed to fetch assets')
+        const bodyText = await response.text().catch(() => '')
+        let details = ''
+        try {
+          const parsed = bodyText ? JSON.parse(bodyText) : null
+          if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+            details = String((parsed as any).error || '')
+          }
+        } catch {
+          // ignore
+        }
+
+        const statusHint = `HTTP ${response.status}`
+        throw new Error(details ? `${details} (${statusHint})` : `Failed to fetch assets (${statusHint})`)
       }
 
       const data = await response.json()
@@ -201,8 +220,8 @@ export function VideoAssetDownloadModal({
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-[1px]" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[200] w-[calc(100vw-2rem)] max-w-3xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-background dark:bg-card border border-border rounded-lg flex flex-col">
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[2147483646] bg-black/40 backdrop-blur-[1px]" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[2147483647] w-[calc(100vw-2rem)] max-w-3xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-background dark:bg-card border border-border rounded-lg flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-border">
             <div>
@@ -273,11 +292,10 @@ export function VideoAssetDownloadModal({
                     key={asset.id}
                     className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selectedAssets.has(asset.id)}
-                      onChange={() => toggleAsset(asset.id)}
-                      className="h-4 w-4 rounded border-input"
+                      onCheckedChange={() => toggleAsset(asset.id)}
+                      aria-label={`Select ${asset.fileName}`}
                     />
                     <FileIcon className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                     <div className="flex-1 min-w-0">

@@ -216,7 +216,11 @@ export default function VideoSidebar({
               const latestVideo = group.videos[0]
               const thumbnailUrl = latestVideo?.thumbnailUrl
               const dims = thumbnailDimensions[group.name]
-              const containerWidth = sidebarWidth - 48 // Account for nav + button padding
+              // Account for nav + button padding, plus a small inset so the thumbnail
+              // isn't visually hard up against the selected-state highlight on desktop.
+              const availableContentWidth = sidebarWidth - 48
+              // Empirically, an extra ~8px total inset looks more balanced on desktop.
+              const containerWidth = Math.max(120, availableContentWidth - 16)
               const containerHeight = Math.round(containerWidth * 9 / 16)
 
               return (
@@ -234,7 +238,7 @@ export default function VideoSidebar({
                   {/* Thumbnail */}
                   {thumbnailUrl && dims && (
                     <div
-                      className="bg-black rounded overflow-hidden flex items-center justify-center"
+                      className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto"
                       style={{
                         width: containerWidth,
                         height: containerHeight,
@@ -326,7 +330,8 @@ export default function VideoSidebar({
                       {albumsList.map((a) => {
                         const isActive = activeAlbumId === a.id
                         const previewUrl = (a as any)?.previewPhotoUrl as string | null | undefined
-                        const containerWidth = sidebarWidth - 48
+                        const availableContentWidth = sidebarWidth - 48
+                        const containerWidth = Math.max(120, availableContentWidth - 16)
                         const containerHeight = Math.round(containerWidth * 9 / 16)
                         return (
                           <button
@@ -342,7 +347,7 @@ export default function VideoSidebar({
                           >
                             {previewUrl ? (
                               <div
-                                className="bg-black rounded overflow-hidden relative"
+                                className="bg-black rounded overflow-hidden relative mx-auto"
                                 style={{ width: containerWidth, height: containerHeight }}
                               >
                                 <Image
@@ -356,7 +361,7 @@ export default function VideoSidebar({
                               </div>
                             ) : (
                               <div
-                                className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
+                                className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center mx-auto"
                                 style={{ width: containerWidth, height: containerHeight }}
                               >
                                 <Images className="w-6 h-6 text-muted-foreground" />

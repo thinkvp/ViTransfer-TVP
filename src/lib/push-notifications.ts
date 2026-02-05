@@ -34,6 +34,15 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       where: { id: 'default' },
     })
 
+    const baseDetails = {
+      ...(payload.details ?? {}),
+      __payload: {
+        title: payload.title,
+        message: payload.message,
+        projectName: payload.projectName,
+      },
+    }
+
     // Always attempt browser Web Push for system admins (best-effort).
     // This is intentionally independent of Gotify configuration.
     sendBrowserPushToSystemAdmins(payload).catch((err: any) => {
@@ -87,7 +96,28 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
 
     // If not enabled or not configured, skip Gotify/webhook provider.
     if (!settings?.enabled || !settings.webhookUrl || !settings.provider) {
-      return { success: false, message: 'Push notifications not configured' }
+      // IMPORTANT: The admin UI notification bell is backed by PushNotificationLog.
+      // Disabling Gotify/webhook delivery should not disable in-app notification visibility.
+      await prisma.pushNotificationLog.create({
+        data: {
+          type: payload.type,
+          projectId: payload.projectId,
+          success: true,
+          statusCode: null,
+          message: 'Push delivery skipped (provider disabled or not configured)',
+          details: {
+            ...baseDetails,
+            __delivery: {
+              attempted: false,
+              provider: settings?.provider ?? null,
+              enabled: Boolean(settings?.enabled),
+              webhookConfigured: Boolean(settings?.webhookUrl),
+            },
+          },
+        },
+      })
+
+      return { success: true, message: 'Push delivery skipped (provider disabled or not configured)' }
     }
 
     // Build notification based on provider
@@ -102,11 +132,12 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
         statusCode: result.statusCode,
         message: result.message,
         details: {
-          ...(payload.details ?? {}),
-          __payload: {
-            title: payload.title,
-            message: payload.message,
-            projectName: payload.projectName,
+          ...baseDetails,
+          __delivery: {
+            attempted: true,
+            provider: settings.provider,
+            enabled: true,
+            webhookConfigured: true,
           },
         },
       },

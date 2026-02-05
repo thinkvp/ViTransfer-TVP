@@ -116,12 +116,27 @@ export default function SharePage() {
     if (!token) return
     if (!isAdminSession && !authToken) return
 
+    const handleUnauthorized = async (response: Response) => {
+      // Some endpoints include extra context on 401 (authMode, guestMode, etc.)
+      const data = await response.json().catch(() => null)
+      saveShareToken(storageKey, null)
+      setShareToken(null)
+      setIsPasswordProtected(true)
+      setIsAuthenticated(false)
+      setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+      setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+    }
+
     setCommentsLoading(true)
     try {
       const response = await apiFetch(`/api/share/${token}/comments`, {
         cache: 'no-store',
         headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
+      if (response.status === 401 && !isAdminSession) {
+        await handleUnauthorized(response)
+        return
+      }
       if (response.ok) {
         const commentsData = await response.json()
         setComments(commentsData)
@@ -131,7 +146,7 @@ export default function SharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }, [token, shareToken, isAdminSession])
+  }, [token, shareToken, isAdminSession, storageKey])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -209,6 +224,18 @@ export default function SharePage() {
         cache: 'no-store',
         headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
+
+      if (projectResponse.status === 401 && !isAdminSession) {
+        const data = await projectResponse.json().catch(() => null)
+        saveShareToken(storageKey, null)
+        setShareToken(null)
+        setIsPasswordProtected(true)
+        setIsAuthenticated(false)
+        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        return
+      }
+
       if (projectResponse.ok) {
         const projectData = await projectResponse.json()
 
@@ -249,6 +276,16 @@ export default function SharePage() {
         cache: 'no-store',
         headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
+      if (response.status === 401 && !isAdminSession) {
+        const data = await response.json().catch(() => null)
+        saveShareToken(storageKey, null)
+        setShareToken(null)
+        setIsPasswordProtected(true)
+        setIsAuthenticated(false)
+        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        return
+      }
       if (response.ok) {
         const data = await response.json()
         const albumsRaw = Array.isArray(data?.albums) ? data.albums : []
@@ -262,7 +299,7 @@ export default function SharePage() {
     } finally {
       setAlbumsLoading(false)
     }
-  }, [token, shareToken, isAdminSession, project])
+  }, [token, shareToken, isAdminSession, project, storageKey])
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
@@ -455,10 +492,20 @@ export default function SharePage() {
         Authorization: `Bearer ${shareToken}`,
       }
     })
+    if (response.status === 401) {
+      const data = await response.json().catch(() => null)
+      saveShareToken(storageKey, null)
+      setShareToken(null)
+      setIsPasswordProtected(true)
+      setIsAuthenticated(false)
+      setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+      setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+      return ''
+    }
     if (!response.ok) return ''
     const data = await response.json()
     return data.token || ''
-  }, [token, shareToken])
+  }, [token, shareToken, storageKey])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (project?.enableVideos === false) return videos
@@ -1436,7 +1483,7 @@ function ShareFeedbackGrid({
           className="flex-1 min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
         >
           <div
-            className="flex-1 min-h-0 overflow-hidden"
+            className="flex-1 min-h-0 lg:overflow-hidden"
           >
             <VideoPlayer
               videos={readyVideos}

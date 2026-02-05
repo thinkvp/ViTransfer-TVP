@@ -507,7 +507,7 @@ export default function AdminSharePage() {
   })()
 
   return (
-    <div className="flex-1 min-h-0 bg-background flex flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 bg-background flex flex-col overflow-y-auto lg:overflow-hidden">
       {/* Subheader (match Project page back-row styling) */}
       <div className="flex-shrink-0">
         <div className="max-w-screen-2xl mx-auto w-full px-3 sm:px-4 lg:px-6 pt-3 sm:pt-6">
@@ -548,7 +548,7 @@ export default function AdminSharePage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         {/* Video Sidebar */}
         <VideoSidebar
           videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
@@ -916,7 +916,7 @@ function AdminShareFeedbackGrid({
           className="flex-1 min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
         >
           <div
-            className="flex-1 min-h-0 overflow-hidden"
+            className="flex-1 min-h-0 lg:overflow-hidden"
           >
             <VideoPlayer
               videos={readyVideos}

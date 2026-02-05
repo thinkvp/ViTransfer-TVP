@@ -427,15 +427,16 @@ export default async function SalesDocPublicViewPage(
               </div>
             </div>
 
-            <div className="rounded-lg border overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="rounded-lg border">
+              <div className="w-full overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-foreground text-background">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-semibold">Item</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold">Qty</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold">Rate</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold">Tax</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold">Amount</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold min-w-[280px]">Item</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[72px]">Qty</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[104px]">Rate</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[104px]">Tax</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[116px]">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -477,24 +478,25 @@ export default async function SalesDocPublicViewPage(
 
                       return (
                         <tr key={key} className="border-t">
-                          <td className="px-3 py-2 align-top">
-                            <div className="font-medium break-words">{safeString(it?.description) || '—'}</div>
+                          <td className="px-3 py-2 align-top min-w-[280px]">
+                            <div className="font-medium whitespace-normal break-words">{safeString(it?.description) || '—'}</div>
                             {safeString(it?.details).trim() && (
                               <div className="text-xs text-muted-foreground whitespace-pre-wrap break-words mt-1">
                                 {safeString(it?.details)}
                               </div>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top">{Number.isFinite(qty) ? qty : 0}</td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top">${centsToDollars(Number.isFinite(unit) ? unit : 0)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top">${centsToDollars(lineTax)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top font-medium">${centsToDollars(lineTotal)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[72px]">{Number.isFinite(qty) ? qty : 0}</td>
+                          <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[104px]">${centsToDollars(Number.isFinite(unit) ? unit : 0)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[104px]">${centsToDollars(lineTax)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums align-top font-medium whitespace-nowrap min-w-[116px]">${centsToDollars(lineTotal)}</td>
                         </tr>
                       )
                     })
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
 
             <div className="flex justify-end">

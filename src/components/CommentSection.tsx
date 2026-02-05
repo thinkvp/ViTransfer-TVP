@@ -211,6 +211,7 @@ export function CommentSectionView({
   
   const [exportingSrt, setExportingSrt] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
+  const [openDownloadAfterApprove, setOpenDownloadAfterApprove] = useState(false)
   const [videoNotesOpen, setVideoNotesOpen] = useState(true)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
@@ -774,6 +775,30 @@ export function CommentSectionView({
   const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
   const approvalEnabledForHeaderVideo = Boolean((headerVideo as any)?.allowApproval)
 
+  const showOlderVersionNote = Boolean(
+    !restrictToLatestVersion &&
+      sortedVideoVersions.length > 1 &&
+      selectedVideoId &&
+      latestSelectableVideo &&
+      selectedVideoId !== latestSelectableVideo.id
+  )
+
+  useEffect(() => {
+    if (!openDownloadAfterApprove) return
+
+    // Only auto-open in the client/share view.
+    if (isAdminView) {
+      setOpenDownloadAfterApprove(false)
+      return
+    }
+
+    if (!headerVideo) return
+    if (!(headerVideo as any).approved) return
+
+    setShowDownloadOptions(true)
+    setOpenDownloadAfterApprove(false)
+  }, [openDownloadAfterApprove, headerVideo, isAdminView])
+
   const handleSelectVideoVersion = (videoId: string) => {
     // Update comments immediately
     window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
@@ -828,6 +853,12 @@ export function CommentSectionView({
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
         throw new Error(err.error || 'Failed to approve video')
+      }
+
+      // After approve, open the download modal (share/client view).
+      // router.refresh() will deliver updated approved state; the effect above waits for it.
+      if (!isAdminView) {
+        setOpenDownloadAfterApprove(true)
       }
 
       window.dispatchEvent(new CustomEvent('videoApprovalChanged'))
@@ -1146,6 +1177,24 @@ export function CommentSectionView({
           </div>
         </div>
 
+        {showOlderVersionNote ? (
+          <div className="mt-2 mb-2">
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+              <span>Note: Newer version available.</span>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 rounded-sm"
+                onClick={() => {
+                  if (!latestSelectableVideo) return
+                  handleSelectVideoVersion(latestSelectableVideo.id)
+                }}
+              >
+                Click here to view.
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {showVideoNotes && headerVideo?.videoNotes ? (
           <div className="border border-border rounded-lg bg-muted/20 overflow-hidden">
             <button
@@ -1197,7 +1246,7 @@ export function CommentSectionView({
                   </h3>
                   <p className="text-sm text-muted-foreground">
                     {isApproved
-                      ? 'The final version is ready for download without watermarks.'
+                      ? 'The final version is ready for download.'
                       : approvedVideo
                       ? `${approvedVideo.versionLabel} of this video has been approved and is ready for download.`
                       : 'A version of this video has been approved and is ready for download.'}
