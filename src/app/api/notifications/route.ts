@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { Prisma } from '@prisma/client'
 import { requireApiSystemAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 
@@ -59,12 +60,16 @@ export async function GET(request: NextRequest) {
 
     // Hide self-authored collaboration signals.
     // PushNotificationLog is global (not per-user), so we filter based on JSON metadata.
-    where.NOT = {
-      details: {
-        path: ['__meta', 'authorUserId'],
-        equals: authResult.id,
+    // Keep rows with no authorUserId metadata.
+    where.AND = [
+      {
+        OR: [
+          { details: { path: ['__meta', 'authorUserId'], equals: Prisma.JsonNull } },
+          { details: { path: ['__meta', 'authorUserId'], equals: Prisma.DbNull } },
+          { details: { path: ['__meta', 'authorUserId'], not: authResult.id } },
+        ],
       },
-    }
+    ]
 
     const readState = await prisma.notificationReadState.findUnique({
       where: { userId: authResult.id },
@@ -100,12 +105,15 @@ export async function GET(request: NextRequest) {
       unreadCount = await prisma.pushNotificationLog.count({
         where: {
           ...(successOnly ? { success: true } : {}),
-          NOT: {
-            details: {
-              path: ['__meta', 'authorUserId'],
-              equals: authResult.id,
+          AND: [
+            {
+              OR: [
+                { details: { path: ['__meta', 'authorUserId'], equals: Prisma.JsonNull } },
+                { details: { path: ['__meta', 'authorUserId'], equals: Prisma.DbNull } },
+                { details: { path: ['__meta', 'authorUserId'], not: authResult.id } },
+              ],
             },
-          },
+          ],
           sentAt: { gt: lastSeenAt },
         },
       })
