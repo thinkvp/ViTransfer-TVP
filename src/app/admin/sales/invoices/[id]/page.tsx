@@ -418,10 +418,6 @@ export default function InvoiceDetailPage() {
   }, [paidOnYmd])
 
   const effectiveStatus = useMemo((): InvoiceStatus => {
-    const rollupStatus = salesRollup?.invoiceRollupById?.[id]?.effectiveStatus
-    if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
-      return rollupStatus
-    }
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
     return computeInvoiceEffectiveStatus(
       {
@@ -433,7 +429,7 @@ export default function InvoiceDetailPage() {
       },
       nowMs
     )
-  }, [dueDate, id, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, salesRollup?.invoiceRollupById, status, totalCents])
+  }, [dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
 
   const invoiceStatusDisplay = useMemo((): string => {
     if (effectiveStatus !== 'PAID') return statusLabel(effectiveStatus)
@@ -941,24 +937,13 @@ export default function InvoiceDetailPage() {
         onSent={({ shareToken: token }) => {
           ;(async () => {
             try {
-              const updates: any = { sentAt: new Date().toISOString() }
-              if (invoice.status === 'OPEN') updates.status = 'SENT'
-              const next = await patchSalesInvoice(invoice.id, {
-                version: invoice.version,
-                ...updates,
-              })
+              const next = await fetchSalesInvoice(invoice.id)
               setInvoice(next)
               setStatus(next.status)
               setShareToken(token)
               setTrackingRefreshKey((v) => v + 1)
             } catch (e) {
-              const msg = e instanceof Error ? e.message : 'Failed to update invoice'
-              if (msg === 'Conflict') {
-                alert('This invoice was updated in another session. Reloading.')
-                window.location.reload()
-                return
-              }
-              alert(msg)
+              alert(e instanceof Error ? e.message : 'Failed to refresh invoice')
             }
           })()
         }}

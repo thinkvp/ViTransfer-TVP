@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn, formatFileSize } from '@/lib/utils'
-import { apiDelete, apiPost } from '@/lib/api-client'
+import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import {
   clearFileContext,
@@ -198,11 +198,27 @@ export default function MultiVideoUploadModal({
     ensureFreshUploadOnContextChange(file, contextKey)
 
     const existingMetadata = getUploadMetadata(file)
-    const canResumeExisting =
+    let canResumeExisting =
       existingMetadata?.projectId === projectId &&
       !!existingMetadata.videoId &&
       existingMetadata?.targetName === trimmedVideoName &&
       (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
+
+    // Verify the server-side record still exists before resuming
+    if (canResumeExisting) {
+      try {
+        const checkRes = await apiFetch(`/api/videos/${existingMetadata!.videoId}`)
+        if (!checkRes.ok) {
+          clearUploadMetadata(file)
+          clearTUSFingerprint(file)
+          canResumeExisting = false
+        }
+      } catch {
+        clearUploadMetadata(file)
+        clearTUSFingerprint(file)
+        canResumeExisting = false
+      }
+    }
 
     let createdVideoRecord = false
     let videoId: string

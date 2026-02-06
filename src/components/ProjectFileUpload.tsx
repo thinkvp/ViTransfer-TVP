@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Upload, Trash2, Pause, Play, X, CheckCircle2, AlertCircle, Loader2, RotateCw } from 'lucide-react'
 import * as tus from 'tus-js-client'
-import { apiDelete, apiPost } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
+import { apiDelete, apiPost, attemptRefresh } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
 import { formatFileSize } from '@/lib/utils'
 import { validateAssetExtension } from '@/lib/asset-validation'
 
@@ -45,7 +45,6 @@ export function ProjectFileUpload({
   const hasDescription = String(description || '').trim().length > 0
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<QueuedProjectFileUpload[]>([])
-  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
@@ -61,48 +60,6 @@ export function ProjectFileUpload({
   useEffect(() => {
     queueRef.current = queue
   }, [queue])
-
-  const attemptRefresh = useCallback(async (): Promise<boolean> => {
-    if (refreshInFlightRef.current) return refreshInFlightRef.current
-
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) return false
-
-    refreshInFlightRef.current = (async () => {
-      try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${refreshToken}`,
-          },
-        })
-
-        if (!response.ok) {
-          clearTokens()
-          return false
-        }
-
-        const data = await response.json()
-        if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-          setTokens({
-            accessToken: data.tokens.accessToken,
-            refreshToken: data.tokens.refreshToken,
-          })
-          return true
-        }
-
-        clearTokens()
-        return false
-      } catch {
-        clearTokens()
-        return false
-      } finally {
-        refreshInFlightRef.current = null
-      }
-    })()
-
-    return refreshInFlightRef.current
-  }, [])
 
   const handleFileSelect = (files: FileList | File[] | null) => {
     if (!files || files.length === 0) {
@@ -315,7 +272,7 @@ export function ProjectFileUpload({
         refreshAttemptsRef.current.delete(id)
       }
     },
-    [attemptRefresh, onUploadComplete, projectId]
+    [onUploadComplete, projectId]
   )
 
   useEffect(() => {

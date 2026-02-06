@@ -57,6 +57,15 @@ export async function GET(request: NextRequest) {
       where.sentAt = { lt: before }
     }
 
+    // Hide self-authored collaboration signals.
+    // PushNotificationLog is global (not per-user), so we filter based on JSON metadata.
+    where.NOT = {
+      details: {
+        path: ['__meta', 'authorUserId'],
+        equals: authResult.id,
+      },
+    }
+
     const readState = await prisma.notificationReadState.findUnique({
       where: { userId: authResult.id },
       select: { lastSeenAt: true },
@@ -91,6 +100,12 @@ export async function GET(request: NextRequest) {
       unreadCount = await prisma.pushNotificationLog.count({
         where: {
           ...(successOnly ? { success: true } : {}),
+          NOT: {
+            details: {
+              path: ['__meta', 'authorUserId'],
+              equals: authResult.id,
+            },
+          },
           sentAt: { gt: lastSeenAt },
         },
       })

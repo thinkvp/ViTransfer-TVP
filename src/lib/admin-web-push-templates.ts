@@ -84,6 +84,24 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
       return { title, body: body || payload.message, url }
     }
 
+    case 'ADMIN_SHARE_COMMENT': {
+      const video = getDetail(payload.details, ['Video', 'videoName'])
+      const author = getDetail(payload.details, ['Author', 'authorName'])
+      const timecode = getDetail(payload.details, ['Timecode', 'timecode'])
+      const comment = getDetail(payload.details, ['Comment', 'comment'])
+
+      const title = 'New admin comment'
+      const body = joinParts([
+        projectTitle ? `Project: ${projectTitle}` : null,
+        video ? `Video: ${video}` : null,
+        author ? `By: ${author}` : null,
+        timecode ? `At: ${timecode}` : null,
+        comment ? `"${excerpt(comment, 140)}"` : null,
+      ])
+
+      return { title, body: body || payload.message, url }
+    }
+
     case 'VIDEO_APPROVAL': {
       const videos = getDetail(payload.details, ['Video(s)', 'Video', 'videoName'])
       const author = getDetail(payload.details, ['Author', 'authorName'])

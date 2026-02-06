@@ -182,6 +182,10 @@ async function sendToSubscription(sub: { endpoint: string; p256dh: string; auth:
 export async function sendBrowserPushToSystemAdmins(payload: PushNotificationPayload): Promise<void> {
   const notification = buildAdminWebPushNotification(payload)
 
+  const authorUserId = (payload.details && typeof (payload.details as any)?.__meta?.authorUserId === 'string')
+    ? String((payload.details as any).__meta.authorUserId)
+    : null
+
   const subs = await prisma.webPushSubscription.findMany({
     where: {
       user: {
@@ -190,15 +194,19 @@ export async function sendBrowserPushToSystemAdmins(payload: PushNotificationPay
         },
       },
     },
-    select: { id: true, endpoint: true, p256dh: true, auth: true },
+    select: { id: true, userId: true, endpoint: true, p256dh: true, auth: true },
   })
 
-  if (subs.length === 0) return
+  const filteredSubs = authorUserId
+    ? subs.filter((s) => s.userId !== authorUserId)
+    : subs
+
+  if (filteredSubs.length === 0) return
 
   await ensureConfigured()
 
   await Promise.all(
-    subs.map(async (s) => {
+    filteredSubs.map(async (s) => {
       try {
         await sendToSubscription(s, notification)
       } catch (err: any) {

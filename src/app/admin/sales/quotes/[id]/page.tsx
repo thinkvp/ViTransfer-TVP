@@ -711,25 +711,13 @@ export default function QuoteDetailPage() {
         onSent={({ shareToken: token }) => {
           ;(async () => {
             try {
-              const updates: any = { sentAt: new Date().toISOString() }
-              if (quote.status === 'OPEN') updates.status = 'SENT'
-
-              const next = await patchSalesQuote(quote.id, {
-                version: quote.version,
-                ...updates,
-              })
+              const next = await fetchSalesQuote(quote.id)
               setQuote(next)
               setStatus(next.status)
               setShareToken(token)
               setTrackingRefreshKey((v) => v + 1)
             } catch (e) {
-              const msg = e instanceof Error ? e.message : 'Failed to update quote'
-              if (msg === 'Conflict') {
-                alert('This quote was updated in another session. Reloading.')
-                window.location.reload()
-                return
-              }
-              alert(msg)
+              alert(e instanceof Error ? e.message : 'Failed to refresh quote')
             }
           })()
         }}

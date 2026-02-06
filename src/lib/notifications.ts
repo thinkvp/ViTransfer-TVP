@@ -36,6 +36,12 @@ interface ApprovalNotificationContext {
 export async function sendImmediateNotification(context: NotificationContext) {
   const { comment, project, video } = context
 
+  // IMPORTANT: author identity is not the same as visibility.
+  // Internal users can create share-visible comments (isInternal === false).
+  // For notification routing, any authenticated internal-user-authored comment
+  // should be treated as admin activity.
+  const authoredByInternalUser = !!comment.userId
+
   // Check if notification was cancelled before sending
   const redis = getRedis()
   const notificationData = await redis.get(`comment_notification:${comment.id}`)
@@ -78,7 +84,7 @@ export async function sendImmediateNotification(context: NotificationContext) {
   const videoName = video?.name || 'Unknown Video'
   const versionLabel = video?.versionLabel || 'Unknown Version'
 
-  if (comment.isInternal) {
+  if (authoredByInternalUser || comment.isInternal) {
     // Admin commented/replied → notify clients IMMEDIATELY
     if (recipients.length === 0) {
       console.log(`[IMMEDIATE→CLIENT] Skipped - no recipients for project "${project.title}"`)
@@ -223,7 +229,11 @@ export async function sendImmediateNotification(context: NotificationContext) {
 export async function queueNotification(context: NotificationContext) {
   const { comment, project, video, isReply } = context
 
-  const type = comment.isInternal ? 'ADMIN_REPLY' : 'CLIENT_COMMENT'
+  // IMPORTANT: author identity is not the same as visibility.
+  // Treat any authenticated internal-user-authored comment as admin activity,
+  // even if isInternal is false (share-visible admin reply).
+  const authoredByInternalUser = !!comment.userId
+  const type = (authoredByInternalUser || comment.isInternal) ? 'ADMIN_REPLY' : 'CLIENT_COMMENT'
 
   console.log(`[QUEUE] Adding ${type} to queue for "${project.title}"`)
   console.log(`[QUEUE]   Video: ${video?.name || 'N/A'} (${video?.versionLabel || 'N/A'})`)

@@ -104,23 +104,56 @@ function withAuthHeader(init?: RequestInit): RequestInit {
   return { ...init, headers }
 }
 
-async function attemptRefresh(): Promise<boolean> {
+export async function attemptRefresh(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight
 
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) return false
+  const presentedRefreshToken = getRefreshToken()
+  if (!presentedRefreshToken) return false
 
   refreshInFlight = (async () => {
     try {
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${refreshToken}`,
+          Authorization: `Bearer ${presentedRefreshToken}`,
         },
       })
 
       if (!response.ok) {
-        clearTokens()
+        // Token rotation can race across concurrent refresh attempts.
+        // If another refresh already succeeded and updated the token store,
+        // try again with the latest refresh token before clearing.
+        const currentRefreshToken = getRefreshToken()
+        const currentAccessToken = getAccessToken()
+        const refreshWasRotatedElsewhere = !!(currentRefreshToken && currentRefreshToken !== presentedRefreshToken)
+        if (currentAccessToken && refreshWasRotatedElsewhere) {
+          try {
+            const retryResponse = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${currentRefreshToken}`,
+              },
+            })
+
+            if (retryResponse.ok) {
+              const retryData = await retryResponse.json()
+              if (retryData?.tokens?.accessToken && retryData?.tokens?.refreshToken) {
+                setTokens({
+                  accessToken: retryData.tokens.accessToken,
+                  refreshToken: retryData.tokens.refreshToken,
+                })
+                return true
+              }
+            }
+          } catch {
+            // Ignore retry errors and fall through to normal handling.
+          }
+        }
+
+        // Only clear tokens when the refresh token is truly invalid.
+        if (response.status === 401 || response.status === 403) {
+          clearTokens()
+        }
         return false
       }
 
@@ -137,7 +170,16 @@ async function attemptRefresh(): Promise<boolean> {
       return false
     } catch (error) {
       console.error('[API] Failed to refresh token:', error)
-      clearTokens()
+
+      // If another refresh already succeeded, keep the session.
+      const currentRefreshToken = getRefreshToken()
+      const currentAccessToken = getAccessToken()
+      const refreshWasRotatedElsewhere = !!(currentRefreshToken && currentRefreshToken !== presentedRefreshToken)
+      if (currentAccessToken && refreshWasRotatedElsewhere) {
+        return true
+      }
+
+      // Network errors should not immediately wipe tokens.
       return false
     } finally {
       refreshInFlight = null

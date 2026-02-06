@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import * as tus from 'tus-js-client'
-import { apiPost, apiDelete } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
+import { apiPost, apiDelete, attemptRefresh } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
 import {
   ensureFreshUploadOnContextChange,
   clearFileContext,
@@ -47,7 +47,6 @@ export function useAssetUploadQueue({
   const [queue, setQueue] = useState<QueuedUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
   const assetIdsMap = useRef<Map<string, string>>(new Map())
-  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queueRef = useRef(queue)
 
@@ -55,48 +54,6 @@ export function useAssetUploadQueue({
   useEffect(() => {
     queueRef.current = queue
   }, [queue])
-
-  const attemptRefresh = useCallback(async (): Promise<boolean> => {
-    if (refreshInFlightRef.current) return refreshInFlightRef.current
-
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) return false
-
-    refreshInFlightRef.current = (async () => {
-      try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${refreshToken}`,
-          },
-        })
-
-        if (!response.ok) {
-          clearTokens()
-          return false
-        }
-
-        const data = await response.json()
-        if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-          setTokens({
-            accessToken: data.tokens.accessToken,
-            refreshToken: data.tokens.refreshToken,
-          })
-          return true
-        }
-
-        clearTokens()
-        return false
-      } catch {
-        clearTokens()
-        return false
-      } finally {
-        refreshInFlightRef.current = null
-      }
-    })()
-
-    return refreshInFlightRef.current
-  }, [])
 
   const generateUploadId = useCallback((): string => {
     const cryptoObj: Crypto | undefined = (globalThis as any).crypto
@@ -363,7 +320,7 @@ export function useAssetUploadQueue({
       ))
       refreshAttemptsRef.current.delete(uploadId)
     }
-  }, [videoId, onUploadComplete, attemptRefresh])
+  }, [videoId, onUploadComplete])
 
   // Auto-start queued uploads when slots are available
   useEffect(() => {

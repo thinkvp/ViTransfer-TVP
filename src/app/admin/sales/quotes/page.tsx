@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { deleteSalesQuote, fetchSalesSettings, listSalesQuotes, patchSalesQuote } from '@/lib/sales/admin-api'
+import { deleteSalesQuote, fetchSalesQuote, fetchSalesSettings, listSalesQuotes, patchSalesQuote } from '@/lib/sales/admin-api'
 import type { SalesQuoteWithVersion } from '@/lib/sales/admin-api'
 import type { QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
@@ -622,21 +622,11 @@ export default function SalesQuotesPage() {
           onSent={() => {
             ;(async () => {
               try {
-                const next = await patchSalesQuote(sendTarget.id, {
-                  status: 'SENT',
-                  sentAt: new Date().toISOString(),
-                  version: sendTarget.version,
-                })
+                const next = await fetchSalesQuote(sendTarget.id)
                 setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
                 setSendTarget(next)
               } catch (e) {
-                const msg = e instanceof Error ? e.message : 'Failed to update quote'
-                if (msg === 'Conflict') {
-                  alert('This quote was updated in another session. Reloading.')
-                  setTick((v) => v + 1)
-                  return
-                }
-                alert(msg)
+                alert(e instanceof Error ? e.message : 'Failed to refresh quote')
               }
             })()
           }}

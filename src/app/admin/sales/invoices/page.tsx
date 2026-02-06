@@ -14,6 +14,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   deleteSalesInvoice,
+  fetchSalesInvoice,
   fetchSalesRollup,
   fetchSalesSettings,
   patchSalesInvoice,
@@ -275,16 +276,12 @@ export default function SalesInvoicesPage() {
 
   const getInvoiceEffectiveStatus = useCallback(
     (inv: SalesInvoiceWithVersion): InvoiceStatus => {
-      const st = rollup?.invoiceRollupById?.[inv.id]?.effectiveStatus
-      if (st === 'OPEN' || st === 'SENT' || st === 'OVERDUE' || st === 'PARTIALLY_PAID' || st === 'PAID') return st
-
-      // Fallback (should be rare): compute locally.
       const total = invoiceTotalCents(inv)
       const paid = invoicePaidCents(inv)
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
       return computeInvoiceEffectiveStatus({ status: inv.status, sentAt: inv.sentAt, dueDate: inv.dueDate, totalCents: total, paidCents: paid }, nowMs)
     },
-    [invoicePaidCents, invoiceTotalCents, nowIso, rollup?.invoiceRollupById]
+    [invoicePaidCents, invoiceTotalCents, nowIso]
   )
 
   useEffect(() => {
@@ -636,22 +633,11 @@ export default function SalesInvoicesPage() {
           onSent={() => {
             ;(async () => {
               try {
-                const updates: any = { sentAt: new Date().toISOString() }
-                if (sendTarget.status === 'OPEN') updates.status = 'SENT'
-                const next = await patchSalesInvoice(sendTarget.id, {
-                  version: sendTarget.version,
-                  ...updates,
-                })
+                const next = await fetchSalesInvoice(sendTarget.id)
                 setInvoices((prev) => prev.map((x) => (x.id === next.id ? next : x)))
                 setSendTarget(next)
               } catch (e) {
-                const msg = e instanceof Error ? e.message : 'Failed to update invoice'
-                if (msg === 'Conflict') {
-                  alert('This invoice was updated in another session. Reloading.')
-                  setTick((v) => v + 1)
-                  return
-                }
-                alert(msg)
+                alert(e instanceof Error ? e.message : 'Failed to refresh invoice')
               }
             })()
           }}

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import * as tus from 'tus-js-client'
-import { apiPost } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
+import { apiFetch, apiPost, attemptRefresh } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
 import {
   ensureFreshUploadOnContextChange,
   clearFileContext,
@@ -45,53 +45,12 @@ export function useAlbumPhotoUploadQueue({
   const [queue, setQueue] = useState<QueuedAlbumPhotoUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
   const photoIdsMap = useRef<Map<string, string>>(new Map())
-  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queueRef = useRef(queue)
 
   useEffect(() => {
     queueRef.current = queue
   }, [queue])
-
-  const attemptRefresh = useCallback(async (): Promise<boolean> => {
-    if (refreshInFlightRef.current) return refreshInFlightRef.current
-
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) return false
-
-    refreshInFlightRef.current = (async () => {
-      try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${refreshToken}` },
-        })
-
-        if (!response.ok) {
-          clearTokens()
-          return false
-        }
-
-        const data = await response.json()
-        if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-          setTokens({
-            accessToken: data.tokens.accessToken,
-            refreshToken: data.tokens.refreshToken,
-          })
-          return true
-        }
-
-        clearTokens()
-        return false
-      } catch {
-        clearTokens()
-        return false
-      } finally {
-        refreshInFlightRef.current = null
-      }
-    })()
-
-    return refreshInFlightRef.current
-  }, [])
 
   const generateUploadId = useCallback((): string => {
     const cryptoObj: Crypto | undefined = (globalThis as any).crypto
@@ -145,10 +104,26 @@ export function useAlbumPhotoUploadQueue({
         ensureFreshUploadOnContextChange(upload.file, `album:${albumId}`)
 
         const existingMetadata = getAlbumPhotoUploadMetadata(upload.file)
-        const canResumeExisting =
+        let canResumeExisting =
           existingMetadata?.albumId === albumId &&
           typeof existingMetadata?.photoId === 'string' &&
           existingMetadata.photoId.length > 0
+
+        // Verify the server-side record still exists before resuming
+        if (canResumeExisting) {
+          try {
+            const checkRes = await apiFetch(`/api/albums/${albumId}/photos/${existingMetadata!.photoId}`)
+            if (!checkRes.ok) {
+              clearAlbumPhotoUploadMetadata(upload.file)
+              clearTUSFingerprint(upload.file)
+              canResumeExisting = false
+            }
+          } catch {
+            clearAlbumPhotoUploadMetadata(upload.file)
+            clearTUSFingerprint(upload.file)
+            canResumeExisting = false
+          }
+        }
 
         setQueue((prev) =>
           prev.map((u) =>
@@ -284,7 +259,7 @@ export function useAlbumPhotoUploadQueue({
         refreshAttemptsRef.current.delete(uploadId)
       }
     },
-    [albumId, attemptRefresh, onUploadComplete]
+    [albumId, onUploadComplete]
   )
 
   useEffect(() => {

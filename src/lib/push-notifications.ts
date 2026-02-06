@@ -10,6 +10,7 @@ export interface PushNotificationPayload {
     | 'SHARE_ACCESS'
     | 'GUEST_VIDEO_LINK_ACCESS'
     | 'CLIENT_COMMENT'
+    | 'ADMIN_SHARE_COMMENT'
     | 'VIDEO_APPROVAL'
     | 'SALES_QUOTE_VIEWED'
     | 'SALES_QUOTE_ACCEPTED'
@@ -80,6 +81,8 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'SHARE_ACCESS': 'notifySuccessfulShareAccess',
       'GUEST_VIDEO_LINK_ACCESS': 'notifyGuestVideoLinkAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
+      // Treat share-visible admin comments as part of the "comments" category.
+      'ADMIN_SHARE_COMMENT': 'notifyClientComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',
       'SALES_QUOTE_VIEWED': 'notifySalesQuoteViewed',
       'SALES_QUOTE_ACCEPTED': 'notifySalesQuoteAccepted',
@@ -243,6 +246,8 @@ function getPriorityForType(type: string): number {
       return 5 // Medium - informational
     case 'CLIENT_COMMENT':
       return 5 // Medium
+    case 'ADMIN_SHARE_COMMENT':
+      return 3 // Low-Medium (collaboration signal)
     case 'SUCCESSFUL_ADMIN_LOGIN':
       return 3 // Low
     case 'SHARE_ACCESS':

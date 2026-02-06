@@ -15,7 +15,8 @@ import {
   renderEmailShell,
   sendEmail,
 } from '@/lib/email'
-import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
+import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '@/lib/sales/db-mappers'
+import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 import { renderInvoicePdfBytes, renderQuotePdfBytes } from '@/lib/sales/pdf'
 import type { PdfPartyInfo } from '@/lib/sales/pdf'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
@@ -50,6 +51,35 @@ function firstCurrencyFromCsv(value: unknown): string {
   const raw = typeof value === 'string' ? value : ''
   const first = raw.split(',')[0]?.trim().toUpperCase()
   return first && /^[A-Z]{3}$/.test(first) ? first : 'AUD'
+}
+
+async function computeInvoicePaidAtYmdForExpiry(tx: typeof prisma, invoiceId: string): Promise<string | null> {
+  const id = String(invoiceId || '').trim()
+  if (!id) return null
+
+  const paymentsAgg = await (tx as any).salesPayment.aggregate({
+    where: { invoiceId: id, excludeFromInvoiceBalance: false },
+    _max: { paymentDate: true },
+  }).catch(() => null)
+
+  const stripeAgg = await (tx as any).salesInvoiceStripePayment.aggregate({
+    where: { invoiceDocId: id },
+    _max: { createdAt: true },
+  }).catch(() => null)
+
+  const latestLocalYmd = typeof paymentsAgg?._max?.paymentDate === 'string' ? paymentsAgg._max.paymentDate : null
+
+  const stripeCreatedAt = stripeAgg?._max?.createdAt
+  const stripeIso = typeof stripeCreatedAt === 'string'
+    ? stripeCreatedAt
+    : (stripeCreatedAt && typeof (stripeCreatedAt as any).toISOString === 'function' ? (stripeCreatedAt as any).toISOString() : null)
+  const latestStripeYmd = typeof stripeIso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(stripeIso) ? stripeIso.slice(0, 10) : null
+
+  return [latestLocalYmd, latestStripeYmd]
+    .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+    .sort()
+    .at(-1)
+    ?? null
 }
 
 export async function POST(request: NextRequest) {
@@ -321,6 +351,109 @@ export async function POST(request: NextRequest) {
         if (e?.code === 'P2002') continue
         throw e
       }
+    }
+  }
+
+  // If we successfully sent at least one email, mark the document as sent server-side.
+  // This ensures the UI can refresh from the server and see the correct status.
+  if (sentCount > 0) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const now = new Date()
+
+        if (share.type === 'QUOTE') {
+          const current = await (tx as any).salesQuote.findUnique({ where: { id: share.docId } })
+          if (!current) return
+
+          const nextSentAt = current.sentAt ?? now
+          const nextStatus = current.status === 'OPEN' ? 'SENT' : current.status
+          const shouldUpdate = nextStatus !== current.status || Number(nextSentAt?.getTime?.()) !== Number(current.sentAt?.getTime?.())
+
+          if (!shouldUpdate) return
+
+          const nextVersion = Number(current.version) + 1
+          const next = await (tx as any).salesQuote.update({
+            where: { id: share.docId },
+            data: {
+              status: nextStatus,
+              sentAt: nextSentAt,
+              version: nextVersion,
+            },
+          })
+
+          await (tx as any).salesQuoteRevision.create({
+            data: {
+              quoteId: next.id,
+              version: next.version,
+              docJson: salesQuoteFromDb(next as any),
+              createdByUserId: authResult.id,
+            },
+          })
+
+          // Best-effort sync for the public share snapshot.
+          try {
+            await upsertSalesDocumentShareForDoc(tx as any, {
+              type: 'QUOTE',
+              doc: salesQuoteFromDb(next as any),
+              clientId: next.clientId,
+              projectId: next.projectId,
+              quoteValidUntilYmd: next.validUntil,
+            })
+          } catch {
+            // ignore
+          }
+        }
+
+        if (share.type === 'INVOICE') {
+          const current = await (tx as any).salesInvoice.findUnique({ where: { id: share.docId } })
+          if (!current) return
+
+          const nextSentAt = current.sentAt ?? now
+          const nextStatus = current.status === 'OPEN' ? 'SENT' : current.status
+          const shouldUpdate = nextStatus !== current.status || Number(nextSentAt?.getTime?.()) !== Number(current.sentAt?.getTime?.())
+
+          if (!shouldUpdate) return
+
+          const nextVersion = Number(current.version) + 1
+          const next = await (tx as any).salesInvoice.update({
+            where: { id: share.docId },
+            data: {
+              status: nextStatus,
+              sentAt: nextSentAt,
+              version: nextVersion,
+            },
+          })
+
+          await (tx as any).salesInvoiceRevision.create({
+            data: {
+              invoiceId: next.id,
+              version: next.version,
+              docJson: salesInvoiceFromDb(next as any),
+              createdByUserId: authResult.id,
+            },
+          })
+
+          // Best-effort sync for the public share snapshot.
+          try {
+            const invoicePaidAtYmd = next.status === 'PAID'
+              ? await computeInvoicePaidAtYmdForExpiry(tx as any, next.id)
+              : null
+
+            await upsertSalesDocumentShareForDoc(tx as any, {
+              type: 'INVOICE',
+              doc: salesInvoiceFromDb(next as any),
+              clientId: next.clientId,
+              projectId: next.projectId,
+              invoicePaidAtYmd,
+            })
+          } catch {
+            // ignore
+          }
+        }
+      })
+    } catch (e) {
+      console.error('Failed to mark sales doc as sent:', e)
+      // Best-effort; do not fail the email send.
     }
   }
 

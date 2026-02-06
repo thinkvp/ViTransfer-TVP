@@ -416,13 +416,16 @@ export async function handleCommentNotifications(params: {
       select: { adminNotificationSchedule: true }
     })
 
-    // Determine which schedule to use
-    const isAdminComment = comment.isInternal
-    const schedule = isAdminComment
-      ? project.clientNotificationSchedule // Admin replies use client schedule
-      : (settings?.adminNotificationSchedule || 'IMMEDIATE') // Client comments use admin schedule
+    // Determine which schedule to use.
+    // IMPORTANT: author identity is not the same as visibility.
+    // Internal users can create share-visible comments (isInternal === false).
+    // For notifications, any internal-user-authored comment should use the client schedule.
+    const isAdminAuthored = !!comment?.userId || comment.isInternal
+    const schedule = isAdminAuthored
+      ? project.clientNotificationSchedule // Admin activity uses client schedule
+      : (settings?.adminNotificationSchedule || 'IMMEDIATE') // Client activity uses admin schedule
 
-    console.log(`[COMMENT-NOTIFICATION] Comment type: ${isAdminComment ? 'ADMIN' : 'CLIENT'}, Schedule: ${schedule}`)
+    console.log(`[COMMENT-NOTIFICATION] Comment type: ${isAdminAuthored ? 'ADMIN' : 'CLIENT'}, Schedule: ${schedule}`)
 
     const context = {
       comment,
@@ -440,8 +443,39 @@ export async function handleCommentNotifications(params: {
       await queueNotification(context)
     }
 
-    // Send push notification for client comments only (not admin replies)
-    if (!isAdminComment) {
+    // Collaboration signal: share-visible admin comment (authored by an internal user).
+    // This feeds the admin header notification bell (PushNotificationLog).
+    // Exclude internal-only comments (`isInternal === true`).
+    if (isAdminAuthored && comment?.isInternal === false && comment?.userId) {
+      try {
+        await sendPushNotification({
+          type: 'ADMIN_SHARE_COMMENT',
+          projectId: project.id,
+          projectName: project.title,
+          title: 'New admin comment',
+          message: 'New admin comment on project',
+          details: {
+            __meta: {
+              authorUserId: String(comment.userId),
+              commentId: String(comment.id),
+            },
+            __link: {
+              href: `/admin/projects/${encodeURIComponent(project.id)}`,
+            },
+            'Project': project.title,
+            'Video': video?.name || 'N/A',
+            'Timecode': comment.timecode,
+            'Author': comment.authorName || 'Admin',
+            'Comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
+          },
+        })
+      } catch (e) {
+        console.warn('[COMMENT-NOTIFICATION] Failed to emit admin share-comment push event')
+      }
+    }
+
+    // Send push notification for client comments only (not admin activity)
+    if (!isAdminAuthored) {
       await sendPushNotification({
         type: 'CLIENT_COMMENT',
         projectId: project.id,

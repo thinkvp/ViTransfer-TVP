@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { AlertCircle, CheckCircle2, Loader2, Pause, Play, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react'
 import * as tus from 'tus-js-client'
-import { apiDelete, apiPost } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
+import { apiDelete, apiPost, attemptRefresh } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
 import { formatFileSize } from '@/lib/utils'
 
 interface ProjectEmailUploadProps {
@@ -65,7 +65,6 @@ export function ProjectEmailUpload({
 }: ProjectEmailUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<QueuedProjectEmailUpload[]>([])
-  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
@@ -76,48 +75,6 @@ export function ProjectEmailUpload({
   useEffect(() => {
     queueRef.current = queue
   }, [queue])
-
-  const attemptRefresh = useCallback(async (): Promise<boolean> => {
-    if (refreshInFlightRef.current) return refreshInFlightRef.current
-
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) return false
-
-    refreshInFlightRef.current = (async () => {
-      try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${refreshToken}`,
-          },
-        })
-
-        if (!response.ok) {
-          clearTokens()
-          return false
-        }
-
-        const data = await response.json()
-        if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-          setTokens({
-            accessToken: data.tokens.accessToken,
-            refreshToken: data.tokens.refreshToken,
-          })
-          return true
-        }
-
-        clearTokens()
-        return false
-      } catch {
-        clearTokens()
-        return false
-      } finally {
-        refreshInFlightRef.current = null
-      }
-    })()
-
-    return refreshInFlightRef.current
-  }, [])
 
   const generateUploadId = (): string => {
     const cryptoObj: Crypto | undefined = (globalThis as any).crypto
@@ -336,7 +293,7 @@ export function ProjectEmailUpload({
         updateUpload(id, { status: 'error', error: e?.message || 'Upload failed', tusUpload: null })
       }
     },
-    [attemptRefresh, onUploadComplete, projectId]
+    [onUploadComplete, projectId]
   )
 
   const pauseUpload = (id: string) => {

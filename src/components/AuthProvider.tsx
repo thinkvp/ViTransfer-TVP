@@ -93,8 +93,42 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
           Authorization: `Bearer ${refreshToken}`,
         },
       })
+
       if (!response.ok) {
-        clearTokens()
+        // Token rotation can race across concurrent refresh attempts.
+        // If another refresh already succeeded and updated the token store,
+        // try again with the latest refresh token before clearing.
+        const currentRefreshToken = getRefreshToken()
+        const currentAccessToken = getAccessToken()
+        const refreshWasRotatedElsewhere = !!(currentRefreshToken && currentRefreshToken !== refreshToken)
+        if (currentAccessToken && refreshWasRotatedElsewhere) {
+          try {
+            const retryResponse = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${currentRefreshToken}`,
+              },
+            })
+
+            if (retryResponse.ok) {
+              const retryData = await retryResponse.json()
+              if (retryData?.tokens?.accessToken && retryData?.tokens?.refreshToken) {
+                setTokens({
+                  accessToken: retryData.tokens.accessToken,
+                  refreshToken: retryData.tokens.refreshToken,
+                })
+                return true
+              }
+            }
+          } catch {
+            // Ignore retry errors and fall through to normal handling.
+          }
+        }
+
+        // Only clear tokens when we know the presented refresh token is invalid.
+        if (response.status === 401 || response.status === 403) {
+          clearTokens()
+        }
         return false
       }
 
@@ -109,7 +143,15 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
       clearTokens()
       return false
     } catch (error) {
-      clearTokens()
+      // If another refresh already succeeded, keep the session.
+      const currentRefreshToken = getRefreshToken()
+      const currentAccessToken = getAccessToken()
+      const refreshWasRotatedElsewhere = !!(currentRefreshToken && currentRefreshToken !== refreshToken)
+      if (currentAccessToken && refreshWasRotatedElsewhere) {
+        return true
+      }
+
+      // Network errors should not immediately wipe tokens.
       return false
     }
   }

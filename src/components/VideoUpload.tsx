@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation'
 import { Upload, Pause, Play, X } from 'lucide-react'
 import * as tus from 'tus-js-client'
 import { formatFileSize } from '@/lib/utils'
-import { apiPost, apiDelete } from '@/lib/api-client'
+import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import {
   ensureFreshUploadOnContextChange,
@@ -183,11 +183,29 @@ export default function VideoUpload({
       ensureFreshUploadOnContextChange(file, contextKey)
 
       const existingMetadata = getUploadMetadata(file)
-      const canResumeExisting =
+      let canResumeExisting =
         existingMetadata?.projectId === projectId &&
         !!existingMetadata.videoId &&
         existingMetadata?.targetName === trimmedVideoName &&
         (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
+
+      // Verify the server-side record still exists before resuming
+      if (canResumeExisting) {
+        try {
+          const checkRes = await apiFetch(`/api/videos/${existingMetadata!.videoId}`)
+          if (!checkRes.ok) {
+            // Record was deleted (e.g., cleanup worker, another device) — start fresh
+            clearUploadMetadata(file)
+            clearTUSFingerprint(file)
+            canResumeExisting = false
+          }
+        } catch {
+          clearUploadMetadata(file)
+          clearTUSFingerprint(file)
+          canResumeExisting = false
+        }
+      }
+
       let createdVideoRecord = false
 
       // Step 1: Reuse existing video record if we have metadata, otherwise create a new one

@@ -3,9 +3,58 @@ let cachedRefreshToken: string | null = null
 
 const REFRESH_TOKEN_KEY = 'vitransfer_refresh_token'
 const REMEMBER_DEVICE_KEY = 'vitransfer_remember_device'
+const TOKEN_CHANNEL_NAME = 'vitransfer_auth_tokens'
 
 type TokenChangeListener = (tokens: { accessToken: string | null; refreshToken: string | null }) => void
 const listeners = new Set<TokenChangeListener>()
+let tokenChannel: BroadcastChannel | null = null
+let tokenChannelInitialized = false
+
+function ensureTokenChannel(): BroadcastChannel | null {
+  if (tokenChannelInitialized) return tokenChannel
+  tokenChannelInitialized = true
+
+  if (typeof window === 'undefined') return null
+  if (typeof (window as any).BroadcastChannel !== 'function') return null
+
+  try {
+    tokenChannel = new BroadcastChannel(TOKEN_CHANNEL_NAME)
+    tokenChannel.onmessage = (event) => {
+      const data = event?.data as any
+      if (!data || typeof data !== 'object') return
+
+      if (data.type === 'tokens') {
+        if (Object.prototype.hasOwnProperty.call(data, 'accessToken')) {
+          inMemoryAccessToken = typeof data.accessToken === 'string' ? data.accessToken : null
+        }
+        if (Object.prototype.hasOwnProperty.call(data, 'refreshToken')) {
+          cachedRefreshToken = typeof data.refreshToken === 'string' ? data.refreshToken : null
+        }
+        notifyListeners()
+      }
+
+      if (data.type === 'clear') {
+        inMemoryAccessToken = null
+        cachedRefreshToken = null
+        notifyListeners()
+      }
+    }
+  } catch {
+    tokenChannel = null
+  }
+
+  return tokenChannel
+}
+
+function broadcastTokens(payload: { type: 'tokens' | 'clear'; accessToken?: string | null; refreshToken?: string | null }) {
+  const channel = ensureTokenChannel()
+  if (!channel) return
+  try {
+    channel.postMessage(payload)
+  } catch {
+    // ignore
+  }
+}
 
 function getRememberDeviceEnabledUnsafe(): boolean {
   if (typeof window === 'undefined') return false
@@ -27,15 +76,18 @@ function getPreferredRefreshStorage(): Storage | null {
 
 function syncRefreshFromStorage(): string | null {
   if (typeof window === 'undefined') return null
-  if (cachedRefreshToken) return cachedRefreshToken
 
-  // Preferred storage first, then fallback to sessionStorage (helps if the preference was toggled).
-  const preferred = getPreferredRefreshStorage()
-  const preferredToken = preferred?.getItem(REFRESH_TOKEN_KEY) ?? null
-  const sessionToken = window.sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  try {
+    // Preferred storage first, then fallback to sessionStorage (helps if the preference was toggled).
+    const preferred = getPreferredRefreshStorage()
+    const preferredToken = preferred?.getItem(REFRESH_TOKEN_KEY) ?? null
+    const sessionToken = window.sessionStorage.getItem(REFRESH_TOKEN_KEY)
 
-  cachedRefreshToken = preferredToken || sessionToken || null
-  return cachedRefreshToken
+    cachedRefreshToken = preferredToken || sessionToken || null
+    return cachedRefreshToken
+  } catch {
+    return cachedRefreshToken
+  }
 }
 
 export function getRememberDeviceEnabled(): boolean {
@@ -77,7 +129,7 @@ export function getAccessToken(): string | null {
 }
 
 export function getRefreshToken(): string | null {
-  return cachedRefreshToken || syncRefreshFromStorage()
+  return syncRefreshFromStorage()
 }
 
 export function setTokens(tokens: { accessToken: string; refreshToken: string }) {
@@ -101,11 +153,21 @@ export function setTokens(tokens: { accessToken: string; refreshToken: string })
   }
 
   notifyListeners()
+  broadcastTokens({
+    type: 'tokens',
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+  })
 }
 
 export function updateAccessToken(accessToken: string) {
   inMemoryAccessToken = accessToken
   notifyListeners()
+  broadcastTokens({
+    type: 'tokens',
+    accessToken,
+    refreshToken: cachedRefreshToken,
+  })
 }
 
 export function clearTokens() {
@@ -122,6 +184,7 @@ export function clearTokens() {
   }
 
   notifyListeners()
+  broadcastTokens({ type: 'clear' })
 }
 
 export function subscribe(listener: TokenChangeListener): () => void {

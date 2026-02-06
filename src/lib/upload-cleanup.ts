@@ -58,33 +58,63 @@ export async function cleanupOrphanedUploads() {
 
 /**
  * Clean up failed/stuck uploads from database
- * Marks videos as ERROR if they've been in UPLOADING state for too long
+ * Marks videos as ERROR if they've been in UPLOADING state for too long,
+ * and deletes truly orphaned records (created but never received any data).
  */
 export async function cleanupStuckUploads() {
   try {
-    // Find videos stuck in UPLOADING state for more than 24 hours
     const cutoffDate = new Date(Date.now() - 24 * 60 * 60 * 1000)
 
+    // --- Videos ---
     const stuckVideos = await prisma.video.findMany({
       where: {
         status: 'UPLOADING',
-        createdAt: {
-          lt: cutoffDate
-        }
-      }
+        createdAt: { lt: cutoffDate },
+      },
+      select: {
+        id: true,
+        uploadProgress: true,
+        projectId: true,
+      },
     })
 
-    if (stuckVideos.length === 0) {
-      return
+    for (const video of stuckVideos) {
+      if (video.uploadProgress === 0) {
+        // Never received any data — delete the orphaned record entirely.
+        // Cascade will also remove any VideoAsset children.
+        await prisma.video.delete({ where: { id: video.id } }).catch(() => {})
+        console.log(`[Upload Cleanup] Deleted orphaned video ${video.id} (0% progress, >24h old)`)
+      } else {
+        // Partial upload — mark as ERROR so the admin can see it and decide.
+        await prisma.video.update({
+          where: { id: video.id },
+          data: { status: 'ERROR' },
+        })
+        console.log(`[Upload Cleanup] Marked video ${video.id} as ERROR (${video.uploadProgress}% progress, >24h old)`)
+      }
     }
 
-    // Mark them as ERROR
-    for (const video of stuckVideos) {
-      await prisma.video.update({
-        where: { id: video.id },
-        data: { status: 'ERROR' }
-      })
+    // --- Album Photos ---
+    const stuckPhotos = await prisma.albumPhoto.findMany({
+      where: {
+        status: 'UPLOADING',
+        createdAt: { lt: cutoffDate },
+      },
+      select: { id: true, albumId: true },
+    })
+
+    for (const photo of stuckPhotos) {
+      // Album photos have no partial-progress tracking; if still UPLOADING after 24h
+      // the upload was abandoned. Delete the orphaned record.
+      await prisma.albumPhoto.delete({ where: { id: photo.id } }).catch(() => {})
+      console.log(`[Upload Cleanup] Deleted orphaned album photo ${photo.id} (>24h old)`)
     }
+
+    // --- Video Assets (no status field — check for empty storage) ---
+    // VideoAssets are cascade-deleted with their parent video, but assets attached
+    // to a READY video that were never uploaded will have fileSize > 0 in DB but
+    // no actual file. These are caught by the TUS file cleanup above (no matching
+    // upload file on disk) and are rare. The cascade on Video delete handles most.
   } catch (error) {
     console.error('[Upload Cleanup] Error during stuck upload cleanup:', error)
   }

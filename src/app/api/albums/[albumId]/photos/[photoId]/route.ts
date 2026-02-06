@@ -11,6 +11,25 @@ import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// GET /api/albums/[albumId]/photos/[photoId] - check if photo exists (admin)
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ albumId: string; photoId: string }> }
+) {
+  const auth = await requireApiUser(request)
+  if (auth instanceof Response) return auth
+
+  const { albumId, photoId } = await params
+
+  const photo = await prisma.albumPhoto.findFirst({
+    where: { id: photoId, albumId },
+    select: { id: true, status: true },
+  })
+
+  if (!photo) return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
+  return NextResponse.json({ id: photo.id, status: photo.status })
+}
+
 // DELETE /api/albums/[albumId]/photos/[photoId] - delete photo (admin)
 export async function DELETE(
   request: NextRequest,
