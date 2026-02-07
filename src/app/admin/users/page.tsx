@@ -24,6 +24,7 @@ interface User {
   appRole: { id: string; name: string; isSystemAdmin: boolean }
   createdAt: string
   updatedAt: string
+  lastLoginAt?: string | null
 }
 
 interface Role {
@@ -87,6 +88,19 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     actions: [],
   },
 ]
+
+function formatLastLogin(value?: string | null): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+  const y = d.getFullYear()
+  const m = pad2(d.getMonth() + 1)
+  const day = pad2(d.getDate())
+  const hh = pad2(d.getHours())
+  const mm = pad2(d.getMinutes())
+  return `${y}-${m}-${day} ${hh}:${mm}`
+}
 
 export default function UsersPage() {
   const router = useRouter()
@@ -280,6 +294,7 @@ export default function UsersPage() {
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px] hidden md:table-cell">Username</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[180px] hidden md:table-cell">Email</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[100px] sm:min-w-[140px]">Role</th>
+                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[160px] hidden md:table-cell">Last Login</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[80px] hidden md:table-cell">Colour</th>
                         <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[50px] sm:w-[64px] whitespace-nowrap">Actions</th>
                       </tr>
@@ -318,6 +333,9 @@ export default function UsersPage() {
                               {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3 flex-shrink-0" /> : <ShieldOff className="h-3 w-3 flex-shrink-0" />}
                               <span className="truncate max-w-[80px] sm:max-w-[120px] md:max-w-[180px]">{user.appRole?.name || '—'}</span>
                             </span>
+                          </td>
+                          <td className="px-3 py-2 hidden md:table-cell text-muted-foreground whitespace-nowrap">
+                            {formatLastLogin(user.lastLoginAt)}
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell">
                             <div className="flex items-center gap-2">

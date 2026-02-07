@@ -57,7 +57,28 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const response = NextResponse.json({ users })
+    const lastLoginByUserIdEntries = await Promise.all(
+      users.map(async (user) => {
+        const lastLogin = await prisma.securityEvent.findFirst({
+          where: {
+            type: { in: ['ADMIN_PASSWORD_LOGIN_SUCCESS', 'PASSKEY_LOGIN_SUCCESS'] },
+            details: { path: ['userId'], equals: user.id },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        })
+        return [user.id, lastLogin?.createdAt ?? null] as const
+      })
+    )
+
+    const lastLoginByUserId = Object.fromEntries(lastLoginByUserIdEntries)
+
+    const usersWithLastLogin = users.map((user) => ({
+      ...user,
+      lastLoginAt: lastLoginByUserId[user.id] ?? null,
+    }))
+
+    const response = NextResponse.json({ users: usersWithLastLogin })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response
