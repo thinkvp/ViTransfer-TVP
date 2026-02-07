@@ -200,7 +200,6 @@ export default function GlobalSettingsPage() {
   // Form state for push notifications
   const [pushNotificationSettings, setPushNotificationSettings] = useState<PushNotificationSettings | null>(null)
   const [pushEnabled, setPushEnabled] = useState(false)
-  const [pushProvider, setPushProvider] = useState('')
   const [pushWebhookUrl, setPushWebhookUrl] = useState('')
   const [pushTitlePrefix, setPushTitlePrefix] = useState('')
   const [pushNotifyUnauthorizedOTP, setPushNotifyUnauthorizedOTP] = useState(true)
@@ -318,7 +317,6 @@ export default function GlobalSettingsPage() {
 
           // Set push notification form values
           setPushEnabled(pushData.enabled ?? false)
-          setPushProvider(pushData.provider || '')
           setPushWebhookUrl(pushData.webhookUrl || '')
           setPushTitlePrefix(pushData.title || '')
           setPushNotifyUnauthorizedOTP(pushData.notifyUnauthorizedOTP ?? true)
@@ -525,7 +523,7 @@ export default function GlobalSettingsPage() {
       // Save push notification settings
       const pushUpdates = {
         enabled: pushEnabled,
-        provider: pushProvider || null,
+        provider: pushEnabled ? 'GOTIFY' : null,
         webhookUrl: pushWebhookUrl || null,
         title: pushTitlePrefix || null,
         notifyUnauthorizedOTP: pushNotifyUnauthorizedOTP,
@@ -870,8 +868,6 @@ export default function GlobalSettingsPage() {
           <PushNotificationsSection
             enabled={pushEnabled}
             setEnabled={setPushEnabled}
-            provider={pushProvider}
-            setProvider={setPushProvider}
             webhookUrl={pushWebhookUrl}
             setWebhookUrl={setPushWebhookUrl}
             titlePrefix={pushTitlePrefix}

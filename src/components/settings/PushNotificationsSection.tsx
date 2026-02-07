@@ -9,8 +9,6 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 interface PushNotificationsSectionProps {
   enabled: boolean
   setEnabled: (value: boolean) => void
-  provider: string
-  setProvider: (value: string) => void
   webhookUrl: string
   setWebhookUrl: (value: string) => void
   titlePrefix: string
@@ -50,8 +48,6 @@ interface PushNotificationsSectionProps {
 export function PushNotificationsSection({
   enabled,
   setEnabled,
-  provider,
-  setProvider,
   webhookUrl,
   setWebhookUrl,
   titlePrefix,
@@ -95,9 +91,9 @@ export function PushNotificationsSection({
       >
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Push Notifications</CardTitle>
+            <CardTitle>Gotify Notifications</CardTitle>
             <CardDescription>
-              Configure push notifications to Gotify or other services
+              Configure push notifications to Gotify
             </CardDescription>
           </div>
           {show ? (
@@ -114,7 +110,7 @@ export function PushNotificationsSection({
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label htmlFor="enablePushNotifications">Enable Push Notifications</Label>
+                <Label htmlFor="enablePushNotifications">Enable Gotify Notifications</Label>
                 <p className="text-xs text-muted-foreground">
                   Send real-time push notifications for important events
                 </p>
@@ -129,66 +125,42 @@ export function PushNotificationsSection({
 
           {enabled && (
             <>
-              {/* Provider Selection */}
+              {/* Webhook URL */}
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <Label htmlFor="provider">Provider</Label>
-                <select
-                  id="provider"
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  className="w-full px-3 py-2 bg-card border border-border rounded-md"
-                >
-                  <option value="">-- Select a provider --</option>
-                  <option value="GOTIFY">Gotify</option>
-                </select>
+                <Label htmlFor="webhookUrl">Webhook URL</Label>
+                <Input
+                  id="webhookUrl"
+                  type="url"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  placeholder="https://your-gotify-instance.com/message?token=YOUR_TOKEN"
+                  className="font-mono text-sm"
+                />
                 <p className="text-xs text-muted-foreground">
-                  Choose the service to receive push notifications
+                  Full webhook URL including your app token. Get this from your Gotify instance.
                 </p>
               </div>
 
-              {provider && (
-                <>
-                  {/* Webhook URL */}
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <Label htmlFor="webhookUrl">Webhook URL</Label>
-                    <Input
-                      id="webhookUrl"
-                      type="url"
-                      value={webhookUrl}
-                      onChange={(e) => setWebhookUrl(e.target.value)}
-                      placeholder={
-                        provider === 'GOTIFY'
-                          ? 'https://your-gotify-instance.com/message?token=YOUR_TOKEN'
-                          : 'https://...'
-                      }
-                      className="font-mono text-sm"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {provider === 'GOTIFY' &&
-                        'Full webhook URL including your app token. Get this from your Gotify instance.'}
-                    </p>
-                  </div>
+              {/* Title Prefix */}
+              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                <Label htmlFor="titlePrefix">Notification Title Prefix (Optional)</Label>
+                <Input
+                  id="titlePrefix"
+                  type="text"
+                  value={titlePrefix}
+                  onChange={(e) => setTitlePrefix(e.target.value)}
+                  placeholder="e.g., ViTransfer"
+                  maxLength={50}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Custom prefix for notification titles. Leave empty to use default formatting.
+                </p>
+              </div>
 
-                  {/* Title Prefix */}
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <Label htmlFor="titlePrefix">Notification Title Prefix (Optional)</Label>
-                    <Input
-                      id="titlePrefix"
-                      type="text"
-                      value={titlePrefix}
-                      onChange={(e) => setTitlePrefix(e.target.value)}
-                      placeholder="e.g., ViTransfer"
-                      maxLength={50}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Custom prefix for notification titles. Leave empty to use default formatting.
-                    </p>
-                  </div>
-
-                  {/* Event Toggles */}
-                  <div className="space-y-3 border-2 border-border p-4 rounded-lg bg-accent/5">
-                    <h4 className="font-semibold text-sm">Enable Notifications For:</h4>
-                    <div className="space-y-3">
+              {/* Event Toggles */}
+              <div className="space-y-3 border-2 border-border p-4 rounded-lg bg-accent/5">
+                <h4 className="font-semibold text-sm">Enable Notifications For:</h4>
+                <div className="space-y-3">
                       {/* Failed Admin Login */}
                         <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
@@ -428,8 +400,6 @@ export function PushNotificationsSection({
                       </div>
                     </div>
                   </div>
-                </>
-              )}
             </>
           )}
         </CardContent>
