@@ -308,7 +308,7 @@ export default function SalesDashboardPage() {
                 <CreditCard className="w-4 h-4 text-primary" />
               </div>
               <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">Paid &lt;30days</p>
+                <p className="text-xs text-muted-foreground">Paid &lt;30 days</p>
                 <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.recentPaymentsTotalCents)}</p>
               </div>
             </div>

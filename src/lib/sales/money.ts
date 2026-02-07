@@ -10,7 +10,10 @@ export function dollarsToCents(input: string): MoneyCents {
 export function centsToDollars(cents: MoneyCents): string {
   const sign = cents < 0 ? '-' : ''
   const abs = Math.abs(cents)
-  const dollars = (abs / 100).toFixed(2)
+  const dollars = (abs / 100).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
   return `${sign}${dollars}`
 }
 
