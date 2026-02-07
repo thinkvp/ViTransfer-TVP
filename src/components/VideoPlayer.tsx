@@ -1211,7 +1211,28 @@ export default function VideoPlayer({
                   el.muted = isMuted
                   el.volume = Math.min(1, Math.max(0, volume))
                 }}
-                onPlay={() => setIsPlaying(true)}
+                onPlay={() => {
+                  setIsPlaying(true)
+
+                  // Track a video view (play) for share-token sessions only.
+                  // Guest-video-link views are tracked server-side (with IP dedupe).
+                  try {
+                    if (isAdmin) return
+                    if (!shareToken) return
+                    const videoId = (selectedVideo as any)?.id
+                    if (!videoId) return
+                    void fetch('/api/track/video-view', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${shareToken}`,
+                      },
+                      body: JSON.stringify({ videoId }),
+                    }).catch(() => {})
+                  } catch {
+                    // best-effort
+                  }
+                }}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
                 onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}

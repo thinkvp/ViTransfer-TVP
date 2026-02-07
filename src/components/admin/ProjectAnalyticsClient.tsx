@@ -14,10 +14,12 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 interface VideoStats {
   videoName: string
+  totalViews: number
   totalDownloads: number
   versions: Array<{
     id: string
     versionLabel: string
+    views: number
     downloads: number
   }>
 }
@@ -94,6 +96,7 @@ interface AnalyticsData {
   stats: {
     totalVisits: number
     uniqueVisits: number
+    guestVisits: number
     accessByMethod: {
       OTP: number
       PASSWORD: number
@@ -101,6 +104,7 @@ interface AnalyticsData {
       NONE: number
     }
     totalDownloads: number
+    totalVideoViews: number
     videoCount: number
   }
   videoStats: VideoStats[]
@@ -208,6 +212,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   }
 
   const { project, stats, videoStats, activity } = data
+  const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
+  const metricIconClassName = 'w-4 h-4 text-primary'
 
   return (
     <div className="flex-1 min-h-0 bg-background">
@@ -226,48 +232,52 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-4 mb-6 sm:mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Visits</CardTitle>
-              <Eye className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalVisits.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground mt-1">{stats.uniqueVisits} unique sessions</p>
-            </CardContent>
-          </Card>
+        <Card className="mb-4 sm:mb-6">
+          <CardContent className="p-3 sm:p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="flex items-center gap-2">
+                <div className={metricIconWrapperClassName}>
+                  <Eye className={metricIconClassName} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Total Visits</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{stats.totalVisits.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">{stats.guestVisits} guest visits</p>
+                </div>
+              </div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Unique Visitors</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.uniqueVisits.toLocaleString()}</div>
-            </CardContent>
-          </Card>
+              <div className="flex items-center gap-2">
+                <div className={metricIconWrapperClassName}>
+                  <Video className={metricIconClassName} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Videos</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{stats.videoCount}</p>
+                </div>
+              </div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Downloads</CardTitle>
-              <Download className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalDownloads.toLocaleString()}</div>
-            </CardContent>
-          </Card>
+              <div className="flex items-center gap-2">
+                <div className={metricIconWrapperClassName}>
+                  <Users className={metricIconClassName} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Video Views</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{stats.totalVideoViews.toLocaleString()}</p>
+                </div>
+              </div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Videos</CardTitle>
-              <Video className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.videoCount}</div>
-            </CardContent>
-          </Card>
-        </div>
+              <div className="flex items-center gap-2">
+                <div className={metricIconWrapperClassName}>
+                  <Download className={metricIconClassName} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Downloads</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{stats.totalDownloads.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="grid gap-4 sm:gap-6 lg:grid-cols-2 overflow-hidden">
           <Card className="overflow-hidden">
@@ -291,16 +301,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                         </div>
                       </div>
 
-                      <div className="mb-3">
-                        <div className="text-sm">
-                          <div className="text-xs text-muted-foreground mb-1">Total Downloads</div>
-                          <div className="font-medium text-base sm:text-lg">{video.totalDownloads}</div>
-                        </div>
-                      </div>
-
                       {video.versions.length > 0 && (
                         <div className="mt-3 pt-3 border-t">
-                          <div className="text-xs text-muted-foreground mb-2">Per-version breakdown:</div>
                           <div className="space-y-1.5">
                             {video.versions.map((version) => (
                               <div
@@ -309,7 +311,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                               >
                                 <span className="text-muted-foreground truncate">{version.versionLabel}</span>
                                 <span className="font-medium whitespace-nowrap flex-shrink-0">
-                                  {version.downloads} download{version.downloads !== 1 ? 's' : ''}
+                                  {version.views} view{version.views !== 1 ? 's' : ''} / {version.downloads} download{version.downloads !== 1 ? 's' : ''}
                                 </span>
                               </div>
                             ))}

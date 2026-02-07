@@ -53,7 +53,7 @@ export async function GET(
           orderBy: { createdAt: 'desc' },
         },
         analytics: {
-          where: { eventType: { in: ['DOWNLOAD_COMPLETE', 'VIDEO_VIEW'] } },
+          where: { eventType: { in: ['DOWNLOAD_COMPLETE', 'VIDEO_VIEW', 'VIDEO_PLAY'] } },
           orderBy: { createdAt: 'desc' },
           include: {
             video: {
@@ -142,7 +142,9 @@ export async function GET(
     }, {} as Record<string, typeof project.videos>)
 
     const downloadAnalytics = project.analytics.filter(a => a.eventType === 'DOWNLOAD_COMPLETE')
-    const viewAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_VIEW')
+    const guestLinkViewAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_VIEW')
+    const sharePlayAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_PLAY')
+    const allViewAnalytics = [...guestLinkViewAnalytics, ...sharePlayAnalytics]
 
     // Create stats grouped by video name
     const videoStats = Object.entries(videosByName).map(([videoName, versions]) => {
@@ -153,19 +155,24 @@ export async function GET(
       const videoAnalytics = downloadAnalytics.filter(a => videoIds.includes(a.videoId))
       const totalDownloads = videoAnalytics.length
 
+      const viewsForVideoName = allViewAnalytics.filter(a => videoIds.includes(a.videoId)).length
+
       // Per-version breakdown
       const versionStats = versions.map(version => {
         const versionAnalytics = downloadAnalytics.filter(a => a.videoId === version.id)
+        const versionViews = allViewAnalytics.filter(a => a.videoId === version.id)
         const downloads = versionAnalytics.length
         return {
           id: version.id,
           versionLabel: version.versionLabel,
+          views: versionViews.length,
           downloads,
         }
       })
 
       return {
         videoName,
+        totalViews: viewsForVideoName,
         totalDownloads,
         versions: versionStats,
       }
@@ -182,6 +189,7 @@ export async function GET(
     }
 
     const totalDownloads = downloadAnalytics.length
+    const totalVideoViews = allViewAnalytics.length
 
     // Combine authentication events and download events into single activity feed
     const authEvents = project.sharePageAccesses.map(access => ({
@@ -221,7 +229,8 @@ export async function GET(
       }
     })
 
-    const viewEvents = viewAnalytics.map(view => {
+    // Keep guest video-link views in Project Activity; share-page plays are not shown here.
+    const viewEvents = guestLinkViewAnalytics.map(view => {
       return {
         id: view.id,
         type: 'VIEW' as const,
@@ -297,8 +306,10 @@ export async function GET(
       stats: {
         totalVisits: project.sharePageAccesses.length,
         uniqueVisits: uniqueSessions,
+        guestVisits: accessByMethod.GUEST,
         accessByMethod,
         totalDownloads,
+        totalVideoViews,
         videoCount: project.videos.length,
       },
       videoStats,

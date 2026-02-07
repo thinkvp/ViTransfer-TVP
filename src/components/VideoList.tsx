@@ -512,7 +512,7 @@ export default function VideoList({
 
           {video.status === 'READY' && (
             isExpanded && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 text-xs sm:text-sm">
                 <div>
                   <p className="text-muted-foreground">Duration</p>
                   <p className="font-medium">{formatDuration(video.duration)}</p>
@@ -530,6 +530,10 @@ export default function VideoList({
                 <div>
                   <p className="text-muted-foreground">Size</p>
                   <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
+                </div>
+                <div className="hidden sm:block">
+                  <p className="text-muted-foreground">Views</p>
+                  <p className="font-medium">{Number((video as any).viewCount || 0).toLocaleString()}</p>
                 </div>
               </div>
             )

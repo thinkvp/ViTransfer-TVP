@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { AlertTriangle, BarChart3, CreditCard, DollarSign, FileText, Receipt } from 'lucide-react'
 import {
   fetchSalesRollup,
   fetchSalesSettings,
@@ -154,6 +155,54 @@ export default function SalesDashboardPage() {
     }
   }, [rollup?.stats])
 
+  const salesOverview = useMemo(() => {
+    const now = nowIso ? new Date(nowIso) : new Date()
+    const fyStartYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
+    const fyStart = new Date(fyStartYear, 6, 1)
+    const fyEnd = new Date(fyStartYear + 1, 5, 30, 23, 59, 59, 999)
+    const financialYearLabel = `${String(fyStartYear).slice(-2)}-${String(fyStartYear + 1).slice(-2)}`
+
+    const invoices = rollup?.invoices ?? []
+    const invoiceRollupById = rollup?.invoiceRollupById ?? {}
+    const payments = rollup?.payments ?? []
+
+    const overdueBalanceCents = invoices.reduce((acc, inv) => {
+      const r = invoiceRollupById[inv.id]
+      const effectiveStatus = (r?.effectiveStatus as InvoiceStatus) ?? inv.status
+      if (effectiveStatus !== 'OVERDUE') return acc
+      const balance = Number.isFinite(Number(r?.balanceCents)) ? Number(r!.balanceCents) : 0
+      return acc + Math.max(0, Math.trunc(balance))
+    }, 0)
+
+    const recentPaymentsThresholdMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30).getTime()
+    const recentPaymentsTotalCents = payments.reduce((acc, p) => {
+      if (p.excludeFromInvoiceBalance) return acc
+      if (p.source === 'STRIPE') return acc
+      const d = parseDateOnlyLocal(p.paymentDate)
+      if (!d || (d as Date).getTime() < recentPaymentsThresholdMs) return acc
+      return acc + Math.max(0, Math.trunc(p.amountCents))
+    }, 0)
+
+    const totalSalesCents = invoices.reduce((acc, inv) => {
+      const issueDate = parseDateOnlyLocal(inv.issueDate)
+      if (!issueDate) return acc
+      const issuedAt = (issueDate as Date).getTime()
+      if (issuedAt < fyStart.getTime() || issuedAt > fyEnd.getTime()) return acc
+      const r = invoiceRollupById[inv.id]
+      const total = Number.isFinite(Number(r?.totalCents))
+        ? Number(r!.totalCents)
+        : sumLineItemsSubtotal(inv.items) + sumLineItemsTax(inv.items, settings.taxRatePercent)
+      return acc + Math.max(0, Math.trunc(total))
+    }, 0)
+
+    return {
+      overdueBalanceCents,
+      recentPaymentsTotalCents,
+      totalSalesCents,
+      financialYearLabel,
+    }
+  }, [nowIso, rollup, settings.taxRatePercent])
+
   const dashboardData = useMemo(() => {
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
 
@@ -211,37 +260,71 @@ export default function SalesDashboardPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Open quotes</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.openQuotes}</div>
-            <div className="text-xs text-muted-foreground mt-1">{stats.openQuoteDrafts} draft</div>
-          </CardContent>
-        </Card>
+      <Card>
+        <CardContent className="p-3 sm:p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+            <div className="flex items-center gap-2">
+              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
+                <FileText className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Open quotes</p>
+                <p className="text-base font-semibold tabular-nums truncate">{stats.openQuotes}</p>
+              </div>
+            </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Open invoices</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.openInvoices}</div>
-            <div className="text-xs text-muted-foreground mt-1">{stats.overdueInvoices} overdue</div>
-          </CardContent>
-        </Card>
+            <div className="flex items-center gap-2">
+              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
+                <Receipt className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Open invoices</p>
+                <p className="text-base font-semibold tabular-nums truncate">{stats.openInvoices}</p>
+              </div>
+            </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Outstanding balance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${centsToDollars(stats.openBalanceCents)}</div>
-            <div className="text-xs text-muted-foreground mt-1">Across open/sent/overdue invoices</div>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="flex items-center gap-2">
+              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
+                <DollarSign className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Awaiting payment</p>
+                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(stats.openBalanceCents)}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
+                <AlertTriangle className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Overdue</p>
+                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.overdueBalanceCents)}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
+                <CreditCard className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Paid &lt;30days</p>
+                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.recentPaymentsTotalCents)}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
+                <BarChart3 className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Sales FY{salesOverview.financialYearLabel}</p>
+                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.totalSalesCents)}</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <Card>

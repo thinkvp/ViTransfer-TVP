@@ -216,6 +216,24 @@ export async function GET(
       }
     }
 
+    const videoIds = project.videos.map((video) => video.id)
+    const viewCountsByVideoId = new Map<string, number>()
+
+    if (videoIds.length > 0) {
+      const viewCounts = await prisma.videoAnalytics.groupBy({
+        by: ['videoId'],
+        where: {
+          videoId: { in: videoIds },
+          eventType: { in: ['VIDEO_VIEW', 'VIDEO_PLAY'] },
+        },
+        _count: { _all: true },
+      })
+
+      for (const row of viewCounts) {
+        viewCountsByVideoId.set(row.videoId, row._count._all)
+      }
+    }
+
     // Convert BigInt fields to strings for JSON serialization
     const projectData = {
       ...project,
@@ -224,6 +242,7 @@ export async function GET(
       videos: project.videos.map((video: any) => ({
         ...video,
         originalFileSize: video.originalFileSize.toString(),
+        viewCount: viewCountsByVideoId.get(video.id) ?? 0,
       })),
       comments: sanitizedComments,
       sharePassword: decryptedPassword,

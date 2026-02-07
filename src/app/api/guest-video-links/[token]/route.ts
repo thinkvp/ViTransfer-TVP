@@ -4,6 +4,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { generateVideoAccessToken, logSecurityEvent, trackVideoAccess } from '@/lib/video-access'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { getClientIpAddress } from '@/lib/utils'
+import { getRedis } from '@/lib/redis'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -106,15 +107,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   }).catch(() => {})
 
-  // Track a view event in analytics + send push notification (best-effort).
-  await trackVideoAccess({
-    videoId: link.video.id,
-    projectId: link.project.id,
-    sessionId,
-    request,
-    quality: 'guest-video-link',
-    eventType: 'VIDEO_VIEW',
-  }).catch(() => {})
+  // Track a view event in analytics (best-effort) with IP-based dedupe.
+  // Guest-video links share a sessionId across viewers, so dedupe must not be session-based.
+  const ipAddress = getClientIpAddress(request)
+  const redis = getRedis()
+  const dedupeKey = `analytics:guest_video_view:${link.project.id}:${link.video.id}:${ipAddress || 'unknown'}`
+  const alreadyTracked = await redis.get(dedupeKey).catch(() => null)
+  if (!alreadyTracked) {
+    await redis.setex(dedupeKey, 6 * 60 * 60, '1').catch(() => {})
+    await trackVideoAccess({
+      videoId: link.video.id,
+      projectId: link.project.id,
+      sessionId,
+      request,
+      quality: 'guest-video-link',
+      eventType: 'VIDEO_VIEW',
+    }).catch(() => {})
+  }
 
   await sendPushNotification({
     type: 'GUEST_VIDEO_LINK_ACCESS',
@@ -125,7 +134,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     details: {
       Project: link.project.title,
       Video: `${link.video.name ?? 'Video'} (${link.video.versionLabel ?? '—'})`,
-      IP: getClientIpAddress(request),
+      IP: ipAddress,
     },
   }).catch(() => {})
 

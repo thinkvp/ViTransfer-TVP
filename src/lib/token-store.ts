@@ -125,10 +125,13 @@ export function setRememberDeviceEnabled(enabled: boolean) {
 }
 
 export function getAccessToken(): string | null {
+  ensureTokenChannel()
   return inMemoryAccessToken
 }
 
 export function getRefreshToken(): string | null {
+  ensureTokenChannel()
+  if (cachedRefreshToken) return cachedRefreshToken
   return syncRefreshFromStorage()
 }
 
