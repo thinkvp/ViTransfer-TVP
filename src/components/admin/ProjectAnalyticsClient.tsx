@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Video, Eye, Download, ArrowLeft, Mail, Users } from 'lucide-react'
+import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
@@ -585,19 +585,31 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     }`}
                                   >
                                   {event.type === 'AUTH' ? (
-                                    (event as AuthActivity).accessMethod === 'OTP'
-                                      ? 'Email OTP'
-                                      : (event as AuthActivity).accessMethod === 'PASSWORD'
-                                        ? 'Password'
-                                        : (event as AuthActivity).accessMethod === 'GUEST'
-                                          ? 'Guest Access'
-                                          : 'Public Access'
+                                    <>
+                                      <KeyRound className="w-3 h-3 inline mr-1" />
+                                      {(event as AuthActivity).accessMethod === 'OTP'
+                                        ? 'Email OTP'
+                                        : (event as AuthActivity).accessMethod === 'PASSWORD'
+                                          ? 'Password'
+                                          : (event as AuthActivity).accessMethod === 'GUEST'
+                                            ? 'Guest Access'
+                                            : 'Public Access'}
+                                    </>
                                   ) : event.type === 'VIEW' ? (
-                                    'Video View'
+                                    <>
+                                      <Play className="w-3 h-3 inline mr-1" />
+                                      Video View
+                                    </>
                                   ) : event.type === 'VIDEO_APPROVED' ? (
-                                    'Video Approved'
+                                    <>
+                                      <Play className="w-3 h-3 inline mr-1" />
+                                      Video Approved
+                                    </>
                                   ) : event.type === 'VIDEO_UNAPPROVED' ? (
-                                    'Video Unapproved'
+                                    <>
+                                      <Play className="w-3 h-3 inline mr-1" />
+                                      Video Unapproved
+                                    </>
                                   ) : event.type === 'EMAIL' ? (
                                     <>
                                       <Mail className="w-3 h-3 inline mr-1" />
