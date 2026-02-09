@@ -2,7 +2,8 @@ param(
   [int]$MaxAttempts = 4,
   [int]$SleepSeconds = 8,
   [string]$Version = $(if (Test-Path -LiteralPath "VERSION") { ((Get-Content -LiteralPath "VERSION" | Select-Object -First 1) -as [string]).Trim() } else { "latest" }),
-  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' })
+  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' }),
+  [switch]$NoCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +19,8 @@ try {
 for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
   Write-Host "`nPublish attempt $attempt/$MaxAttempts" -ForegroundColor Cyan
   try {
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-docker.ps1 -DockerHubUser $DockerHubUser -Version $Version
+    $noCacheArg = if ($NoCache) { '-NoCache' } else { '' }
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\publish-docker.ps1 -DockerHubUser $DockerHubUser -Version $Version $noCacheArg
     if ($LASTEXITCODE -ne 0) {
       throw "publish-docker.ps1 failed (exit code $LASTEXITCODE)"
     }
