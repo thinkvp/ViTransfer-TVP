@@ -91,6 +91,28 @@ const nextConfig = {
       return header;
     });
 
+    // Default: prevent browsers/CDNs from caching HTML/data responses.
+    // NOTE: we still allow immutable caching for Next.js hashed static assets.
+    const noCacheHeaders = [
+      {
+        key: 'Cache-Control',
+        value: 'no-store, max-age=0, must-revalidate'
+      },
+      {
+        key: 'Pragma',
+        value: 'no-cache'
+      },
+      {
+        key: 'Expires',
+        value: '0'
+      },
+      {
+        // Helps some CDNs/proxies respect no-store
+        key: 'Surrogate-Control',
+        value: 'no-store'
+      }
+    ]
+
     // Only add HSTS when HTTPS is enabled
     if (isHttpsEnabled) {
       securityHeaders.push({
@@ -101,18 +123,21 @@ const nextConfig = {
 
     return [
       {
+        // Default policy: do not cache application responses.
         source: '/:path*',
-        headers: securityHeaders,
+        headers: [...securityHeaders, ...noCacheHeaders],
       },
       {
-        // Share links - still deny framing for security
-        source: '/share/:path*',
+        // Preserve aggressive caching for hashed Next.js build assets.
+        // These are content-addressed and safe to cache long-term.
+        source: '/_next/static/:path*',
         headers: [
+          ...securityHeaders,
           {
-            key: 'X-Frame-Options',
-            value: 'DENY'
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable'
           }
-        ]
+        ],
       }
     ]
   }
