@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic'
 
 const VIEW_DEDUPE_TTL_SECONDS = 6 * 60 * 60 // 6 hours
 
-// POST /api/track/video-view
-// Logs a single "video view" (play) for the currently-authenticated share session.
+  // POST /api/track/video-view
+  // Logs a single "video view" (play) for the currently-authenticated share session.
 export async function POST(request: NextRequest) {
   try {
     const shareContext = await getShareContext(request)
@@ -19,6 +19,11 @@ export async function POST(request: NextRequest) {
     // Only share-token sessions should count toward client analytics.
     if (!shareContext?.projectId || !shareContext.sessionId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Internal/admin-override share tokens should not count toward client analytics.
+    if (shareContext.adminOverride === true) {
+      return NextResponse.json({ tracked: false })
     }
 
     const body = await request.json().catch(() => null)
@@ -39,7 +44,7 @@ export async function POST(request: NextRequest) {
 
     const redis = getRedis()
     const viewerKey = shareContext.sessionId || getClientIpAddress(request) || 'unknown'
-    const dedupeKey = `analytics:video_play:${video.projectId}:${video.id}:${viewerKey}`
+    const dedupeKey = `analytics:video_view:${video.projectId}:${video.id}:${viewerKey}`
 
     const already = await redis.get(dedupeKey)
     if (already) {
@@ -54,7 +59,7 @@ export async function POST(request: NextRequest) {
       sessionId: shareContext.sessionId,
       request,
       quality: 'share-play',
-      eventType: 'VIDEO_PLAY',
+      eventType: 'VIDEO_VIEW',
     }).catch(() => {})
 
     return NextResponse.json({ tracked: true })

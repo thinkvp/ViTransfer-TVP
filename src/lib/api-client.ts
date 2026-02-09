@@ -25,7 +25,9 @@ export async function apiFetch(
       const isSharePage = typeof window !== 'undefined' && window.location.pathname.startsWith('/share/')
       const isAuthEndpoint = url.includes('/api/auth')
       if (!isSharePage && !isAuthEndpoint && !isRedirecting) {
-        handleSessionExpired()
+        if (!getAccessToken() && !getRefreshToken()) {
+          handleSessionExpired()
+        }
       }
     }
 
@@ -124,9 +126,8 @@ export async function attemptRefresh(): Promise<boolean> {
         // If another refresh already succeeded and updated the token store,
         // try again with the latest refresh token before clearing.
         const currentRefreshToken = getRefreshToken()
-        const currentAccessToken = getAccessToken()
         const refreshWasRotatedElsewhere = !!(currentRefreshToken && currentRefreshToken !== presentedRefreshToken)
-        if (currentAccessToken && refreshWasRotatedElsewhere) {
+        if (refreshWasRotatedElsewhere) {
           try {
             const retryResponse = await fetch('/api/auth/refresh', {
               method: 'POST',
@@ -152,7 +153,10 @@ export async function attemptRefresh(): Promise<boolean> {
 
         // Only clear tokens when the refresh token is truly invalid.
         if (response.status === 401 || response.status === 403) {
-          clearTokens()
+          const latestRefreshToken = getRefreshToken()
+          if (!latestRefreshToken || latestRefreshToken === presentedRefreshToken) {
+            clearTokens()
+          }
         }
         return false
       }

@@ -9,7 +9,7 @@ import { Checkbox } from './ui/checkbox'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -467,6 +467,18 @@ export default function VideoList({
               )}
 
               <div className="flex items-center gap-2 flex-shrink-0">
+                {video.status === 'READY' && (
+                  <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1">
+                      {Number((video as any).viewCount || 0).toLocaleString()}
+                      <Eye className="w-3 h-3" />
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      {Number((video as any).downloadCount || 0).toLocaleString()}
+                      <Download className="w-3 h-3" />
+                    </span>
+                  </div>
+                )}
                 {(video as any).approved && (
                   <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-success-visible text-success border-2 border-success-visible">
                     Approved
@@ -512,7 +524,7 @@ export default function VideoList({
 
           {video.status === 'READY' && (
             isExpanded && (
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 text-xs sm:text-sm">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
                 <div>
                   <p className="text-muted-foreground">Duration</p>
                   <p className="font-medium">{formatDuration(video.duration)}</p>
@@ -520,6 +532,13 @@ export default function VideoList({
                 <div>
                   <p className="text-muted-foreground">FPS</p>
                   <p className="font-medium">{video.fps ? `${video.fps.toFixed(2)}` : 'N/A'}</p>
+                </div>
+                <div className="sm:hidden">
+                  <p className="text-muted-foreground">Views</p>
+                  <p className="font-medium inline-flex items-center gap-1">
+                    {Number((video as any).viewCount || 0).toLocaleString()}
+                    <Eye className="w-3 h-3 text-muted-foreground" />
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Resolution</p>
@@ -531,9 +550,12 @@ export default function VideoList({
                   <p className="text-muted-foreground">Size</p>
                   <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
                 </div>
-                <div className="hidden sm:block">
-                  <p className="text-muted-foreground">Views</p>
-                  <p className="font-medium">{Number((video as any).viewCount || 0).toLocaleString()}</p>
+                <div className="sm:hidden">
+                  <p className="text-muted-foreground">Downloads</p>
+                  <p className="font-medium inline-flex items-center gap-1">
+                    {Number((video as any).downloadCount || 0).toLocaleString()}
+                    <Download className="w-3 h-3 text-muted-foreground" />
+                  </p>
                 </div>
               </div>
             )

@@ -4,6 +4,8 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteFile } from '@/lib/storage'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
+import { getSecuritySettings } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
@@ -281,8 +283,21 @@ export async function PATCH(
       if (forbidden) return forbidden
     }
 
+    let autoUnapprovedIds: string[] = []
+
     // If approving this video, unapprove all other versions of the SAME video
     if (approved) {
+      const autoUnapproved = await prisma.video.findMany({
+        where: {
+          projectId: video.projectId,
+          name: video.name,
+          id: { not: id },
+          approved: true,
+        },
+        select: { id: true },
+      })
+      autoUnapprovedIds = autoUnapproved.map((row) => row.id)
+
       await prisma.video.updateMany({
         where: {
           projectId: video.projectId,
@@ -329,6 +344,35 @@ export async function PATCH(
 
     // Update project status if approval changed
     if (approved !== undefined) {
+      try {
+        const settings = await getSecuritySettings()
+        if (settings.trackAnalytics) {
+          await prisma.videoAnalytics.create({
+            data: {
+              videoId: id,
+              projectId: video.projectId,
+              eventType: approved ? 'VIDEO_APPROVED' : 'VIDEO_UNAPPROVED',
+              sessionId: `admin:${admin.id}`,
+              ipAddress: getClientIpAddress(request) || null,
+            },
+          })
+
+          if (approved && autoUnapprovedIds.length > 0) {
+            await prisma.videoAnalytics.createMany({
+              data: autoUnapprovedIds.map((videoId) => ({
+                videoId,
+                projectId: video.projectId,
+                eventType: 'VIDEO_UNAPPROVED',
+                sessionId: `admin:${admin.id}`,
+                ipAddress: getClientIpAddress(request) || null,
+              }))
+            })
+          }
+        }
+      } catch (error) {
+        console.warn('[VIDEO-APPROVAL] Failed to log approval analytics:', error)
+      }
+
       console.log(`[VIDEO-APPROVAL] Admin toggled approval for video ${id} to ${approved}`)
       await updateProjectStatus(video.projectId, id, approved, video.project.status, admin.id)
 

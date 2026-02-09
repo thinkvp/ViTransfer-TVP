@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { X, Download, FileIcon, Loader2 } from 'lucide-react'
+import { X, Download, FileIcon, Loader2, CheckCircle, FileVideo, Image, Music, FileText, FileArchive } from 'lucide-react'
 import { Button } from './ui/button'
-import { Checkbox } from './ui/checkbox'
 import { formatFileSize } from '@/lib/utils'
 import { getAccessToken } from '@/lib/token-store'
 
@@ -37,10 +36,14 @@ export function VideoAssetDownloadModal({
   isAdmin = false,
 }: VideoAssetDownloadModalProps) {
   const [assets, setAssets] = useState<VideoAsset[]>([])
-  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
-  const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [downloadedVideo, setDownloadedVideo] = useState(false)
+  const [downloadedAssets, setDownloadedAssets] = useState<Record<string, boolean>>({})
+
+  const downloadStateKey = useMemo(() => {
+    return `download-modal:${videoId}:${versionLabel}`
+  }, [videoId, versionLabel])
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -88,21 +91,39 @@ export function VideoAssetDownloadModal({
     }
   }, [isOpen, fetchAssets])
 
-  const toggleAsset = (assetId: string) => {
-    const newSelected = new Set(selectedAssets)
-    if (newSelected.has(assetId)) {
-      newSelected.delete(assetId)
-    } else {
-      newSelected.add(assetId)
-    }
-    setSelectedAssets(newSelected)
-  }
+  useEffect(() => {
+    if (!isOpen) return
+    try {
+      const stored = sessionStorage.getItem(downloadStateKey)
+      if (!stored) {
+        setDownloadedVideo(false)
+        setDownloadedAssets({})
+        return
+      }
 
-  const selectAll = () => {
-    if (selectedAssets.size === assets.length) {
-      setSelectedAssets(new Set())
-    } else {
-      setSelectedAssets(new Set(assets.map((a) => a.id)))
+      const parsed = JSON.parse(stored) as {
+        video?: boolean
+        assets?: Record<string, boolean>
+      }
+      setDownloadedVideo(Boolean(parsed.video))
+      setDownloadedAssets(parsed.assets || {})
+    } catch {
+      setDownloadedVideo(false)
+      setDownloadedAssets({})
+    }
+  }, [isOpen, downloadStateKey])
+
+
+  const persistDownloadState = (nextVideo: boolean, nextAssets: Record<string, boolean>) => {
+    setDownloadedVideo(nextVideo)
+    setDownloadedAssets(nextAssets)
+    try {
+      sessionStorage.setItem(downloadStateKey, JSON.stringify({
+        video: nextVideo,
+        assets: nextAssets,
+      }))
+    } catch {
+      // ignore
     }
   }
 
@@ -123,6 +144,10 @@ export function VideoAssetDownloadModal({
 
       const { url: downloadUrl } = await response.json()
       triggerDownload(downloadUrl)
+      persistDownloadState(downloadedVideo, {
+        ...downloadedAssets,
+        [assetId]: true,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed')
     }
@@ -145,50 +170,12 @@ export function VideoAssetDownloadModal({
 
       const { url: downloadUrl } = await response.json()
       triggerDownload(downloadUrl)
+      persistDownloadState(true, downloadedAssets)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed')
     }
   }
 
-  const downloadSelectedAsZip = async () => {
-    if (selectedAssets.size === 0 || downloading) return
-
-    try {
-      setDownloading(true)
-      setError(null)
-
-      // Generate download token for ZIP (non-blocking, no memory loading)
-      const response = await fetch(`/api/videos/${videoId}/assets/download-zip-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...buildAuthHeaders(shareToken, isAdmin),
-        },
-        body: JSON.stringify({
-          assetIds: Array.from(selectedAssets),
-        }),
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Download failed')
-      }
-
-      const { url: downloadUrl } = await response.json()
-
-      // Direct download via window.open (streaming, non-blocking, supports multiple simultaneous downloads)
-      triggerDownload(downloadUrl)
-
-      // Close modal shortly after initiating download
-      setTimeout(() => {
-        onClose()
-      }, 500)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Download failed')
-    } finally {
-      setDownloading(false)
-    }
-  }
 
   const formatFileSizeBigInt = (bytes: string) => {
     return formatFileSize(Number(bytes))
@@ -197,6 +184,15 @@ export function VideoAssetDownloadModal({
   const getCategoryLabel = (category: string | null) => {
     if (!category) return 'Other'
     return category.charAt(0).toUpperCase() + category.slice(1)
+  }
+
+  const getAssetIcon = (asset: VideoAsset) => {
+    if (asset.category === 'image' || asset.fileType.startsWith('image/')) return Image
+    if (asset.category === 'audio' || asset.fileType.startsWith('audio/')) return Music
+    if (asset.fileType.startsWith('video/')) return FileVideo
+    if (asset.fileType === 'application/pdf') return FileText
+    if (asset.fileType.includes('zip') || asset.fileType.includes('compressed')) return FileArchive
+    return FileIcon
   }
 
   const triggerDownload = (url: string) => {
@@ -245,19 +241,23 @@ export function VideoAssetDownloadModal({
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Quick actions */}
           <div className="space-y-3">
-            <h3 className="font-medium text-sm">Quick Download</h3>
             <button
               onClick={downloadVideoOnly}
               className="w-full p-4 border-2 border-border rounded-lg hover:border-primary transition-colors text-left"
             >
               <div className="flex items-center gap-3">
-                <Download className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="font-medium">Download Video Only</p>
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Download className="h-5 w-5" />
+                </span>
+                <div className="flex-1">
+                  <p className="font-medium">Download Video</p>
                   <p className="text-sm text-muted-foreground">
                     Download the approved video file
                   </p>
                 </div>
+                {downloadedVideo && (
+                  <CheckCircle className="h-5 w-5 text-green-600" aria-hidden="true" />
+                )}
               </div>
             </button>
           </div>
@@ -277,27 +277,30 @@ export function VideoAssetDownloadModal({
                 <h3 className="font-medium text-sm">
                   Additional Assets ({assets.length})
                 </h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={selectAll}
-                >
-                  {selectedAssets.size === assets.length ? 'Deselect All' : 'Select All'}
-                </Button>
               </div>
 
               <div className="space-y-2">
-                {assets.map((asset) => (
+                {assets.map((asset) => {
+                  const AssetIcon = getAssetIcon(asset)
+                  const isDownloaded = Boolean(downloadedAssets[asset.id])
+                  return (
                   <div
                     key={asset.id}
-                    className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => downloadSingleAsset(asset.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        downloadSingleAsset(asset.id)
+                      }
+                    }}
+                    className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors cursor-pointer"
+                    aria-label={`Download ${asset.fileName}`}
                   >
-                    <Checkbox
-                      checked={selectedAssets.has(asset.id)}
-                      onCheckedChange={() => toggleAsset(asset.id)}
-                      aria-label={`Select ${asset.fileName}`}
-                    />
-                    <FileIcon className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                      <AssetIcon className="h-5 w-5" />
+                    </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{asset.fileName}</p>
                       <div className="flex gap-3 text-xs text-muted-foreground">
@@ -306,38 +309,12 @@ export function VideoAssetDownloadModal({
                         <span>{getCategoryLabel(asset.category)}</span>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => downloadSingleAsset(asset.id)}
-                      title="Download this file"
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
+                    {isDownloaded && (
+                      <CheckCircle className="h-5 w-5 text-green-600" aria-hidden="true" />
+                    )}
                   </div>
-                ))}
+                )})}
               </div>
-
-              {/* Download selected button */}
-              {selectedAssets.size > 0 && (
-                <Button
-                  onClick={downloadSelectedAsZip}
-                  disabled={downloading}
-                  className="w-full"
-                >
-                  {downloading ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                      Preparing download...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-5 w-5 mr-2" />
-                      Download {selectedAssets.size} selected as ZIP
-                    </>
-                  )}
-                </Button>
-              )}
             </div>
           )}
 

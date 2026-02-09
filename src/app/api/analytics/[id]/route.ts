@@ -53,7 +53,7 @@ export async function GET(
           orderBy: { createdAt: 'desc' },
         },
         analytics: {
-          where: { eventType: { in: ['DOWNLOAD_COMPLETE', 'VIDEO_VIEW', 'VIDEO_PLAY'] } },
+          where: { eventType: { in: ['DOWNLOAD_COMPLETE', 'VIDEO_VIEW', 'VIDEO_PLAY', 'VIDEO_APPROVED', 'VIDEO_UNAPPROVED'] } },
           orderBy: { createdAt: 'desc' },
           include: {
             video: {
@@ -144,6 +144,7 @@ export async function GET(
     const downloadAnalytics = project.analytics.filter(a => a.eventType === 'DOWNLOAD_COMPLETE')
     const guestLinkViewAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_VIEW')
     const sharePlayAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_PLAY')
+    const approvalAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_APPROVED' || a.eventType === 'VIDEO_UNAPPROVED')
     const allViewAnalytics = [...guestLinkViewAnalytics, ...sharePlayAnalytics]
 
     // Create stats grouped by video name
@@ -188,6 +189,26 @@ export async function GET(
       NONE: project.sharePageAccesses.filter(a => a.accessMethod === 'NONE').length,
     }
 
+    const accessBySessionId = new Map(
+      project.sharePageAccesses.map(access => [access.sessionId, access])
+    )
+
+    const adminUserIds = new Set<string>()
+    approvalAnalytics.forEach(event => {
+      if (event.sessionId?.startsWith('admin:')) {
+        adminUserIds.add(event.sessionId.slice('admin:'.length))
+      }
+    })
+
+    const adminUsers = adminUserIds.size
+      ? await prisma.user.findMany({
+        where: { id: { in: Array.from(adminUserIds) } },
+        select: { id: true, email: true },
+      })
+      : []
+
+    const adminEmailById = new Map(adminUsers.map(user => [user.id, user.email]))
+
     const totalDownloads = downloadAnalytics.length
     const totalVideoViews = allViewAnalytics.length
 
@@ -197,10 +218,12 @@ export async function GET(
       type: 'AUTH' as const,
       accessMethod: access.accessMethod,
       email: access.email,
+      ipAddress: access.ipAddress || null,
       createdAt: access.createdAt,
     }))
 
     const downloadEvents = downloadAnalytics.map(download => {
+      const access = download.sessionId ? accessBySessionId.get(download.sessionId) : undefined
       let assetFileName: string | undefined
       let assetFileNames: string[] | undefined
 
@@ -225,18 +248,44 @@ export async function GET(
         assetIds: download.assetIds ? JSON.parse(download.assetIds) : undefined,
         assetFileName,
         assetFileNames,
+        email: access?.accessMethod === 'OTP' ? access.email || null : null,
+        accessMethod: access?.accessMethod || null,
+        ipAddress: download.ipAddress || null,
         createdAt: download.createdAt,
       }
     })
 
     // Keep guest video-link views in Project Activity; share-page plays are not shown here.
     const viewEvents = guestLinkViewAnalytics.map(view => {
+      const access = view.sessionId ? accessBySessionId.get(view.sessionId) : undefined
       return {
         id: view.id,
         type: 'VIEW' as const,
         videoName: view.video.name,
         versionLabel: view.video.versionLabel,
+        email: access?.email || null,
+        accessMethod: access?.accessMethod || null,
+        ipAddress: view.ipAddress || null,
         createdAt: view.createdAt,
+      }
+    })
+
+    const approvalEvents = approvalAnalytics.map((event) => {
+      const access = event.sessionId ? accessBySessionId.get(event.sessionId) : undefined
+      const adminEmail = event.sessionId?.startsWith('admin:')
+        ? adminEmailById.get(event.sessionId.slice('admin:'.length)) || null
+        : null
+      const clientEmail = access?.accessMethod === 'OTP' ? access.email || null : null
+
+      return {
+        id: event.id,
+        type: event.eventType === 'VIDEO_APPROVED' ? 'VIDEO_APPROVED' as const : 'VIDEO_UNAPPROVED' as const,
+        videoName: event.video.name,
+        versionLabel: event.video.versionLabel,
+        email: adminEmail || clientEmail,
+        accessMethod: adminEmail ? null : (access?.accessMethod || null),
+        ipAddress: event.ipAddress || null,
+        createdAt: event.createdAt,
       }
     })
 
@@ -289,7 +338,7 @@ export async function GET(
     }))
 
     // Merge and sort all activity by timestamp (newest first)
-    const allActivity = [...authEvents, ...viewEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents, ...statusChangeEvents].sort(
+    const allActivity = [...authEvents, ...viewEvents, ...approvalEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents, ...statusChangeEvents].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 

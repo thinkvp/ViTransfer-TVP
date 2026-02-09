@@ -218,6 +218,7 @@ export async function GET(
 
     const videoIds = project.videos.map((video) => video.id)
     const viewCountsByVideoId = new Map<string, number>()
+    const downloadCountsByVideoId = new Map<string, number>()
 
     if (videoIds.length > 0) {
       const viewCounts = await prisma.videoAnalytics.groupBy({
@@ -229,8 +230,21 @@ export async function GET(
         _count: { _all: true },
       })
 
+      const downloadCounts = await prisma.videoAnalytics.groupBy({
+        by: ['videoId'],
+        where: {
+          videoId: { in: videoIds },
+          eventType: 'DOWNLOAD_COMPLETE',
+        },
+        _count: { _all: true },
+      })
+
       for (const row of viewCounts) {
         viewCountsByVideoId.set(row.videoId, row._count._all)
+      }
+
+      for (const row of downloadCounts) {
+        downloadCountsByVideoId.set(row.videoId, row._count._all)
       }
     }
 
@@ -243,6 +257,7 @@ export async function GET(
         ...video,
         originalFileSize: video.originalFileSize.toString(),
         viewCount: viewCountsByVideoId.get(video.id) ?? 0,
+        downloadCount: downloadCountsByVideoId.get(video.id) ?? 0,
       })),
       comments: sanitizedComments,
       sharePassword: decryptedPassword,

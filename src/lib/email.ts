@@ -527,7 +527,7 @@ export async function renderNewVersionEmail({
 }): Promise<RenderedEmail> {
   const resolved = await resolveEmailBranding(branding)
 
-  const subject = `New Version Available: ${projectTitle}`
+  const subject = `Video For Review: ${videoName} (${versionLabel})`
 
   const headerGradient = EMAIL_THEME.headerBackground
   const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
@@ -538,7 +538,7 @@ export async function renderNewVersionEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
-    title: 'New Version Available',
+    title: 'New Video Version',
     subtitle: 'Ready for your review',
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { isSmtpConfigured, sendProjectApprovedEmail, sendAdminProjectApprovedEmail } from '@/lib/email'
 import { handleApprovalNotification } from '@/lib/notifications'
+import { getSecuritySettings } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 import { getProjectRecipients, getPrimaryRecipient } from '@/lib/recipients'
 import { generateShareUrl } from '@/lib/url'
 import { getAutoApproveProject } from '@/lib/settings'
@@ -104,6 +106,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         approvedAt: new Date(),
       },
     })
+
+    try {
+      const settings = await getSecuritySettings()
+      if (settings.trackAnalytics) {
+        await prisma.videoAnalytics.create({
+          data: {
+            videoId: selectedVideoId,
+            projectId,
+            eventType: 'VIDEO_APPROVED',
+            sessionId: accessCheck.shareTokenSessionId || null,
+            ipAddress: getClientIpAddress(request) || null,
+          },
+        })
+      }
+    } catch (error) {
+      console.warn('[APPROVAL] Failed to log video approval analytics:', error)
+    }
 
     // Check if all UNIQUE videos have at least one approved version
     const allVideos = await prisma.video.findMany({

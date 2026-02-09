@@ -41,7 +41,7 @@ export function projectStatusBadgeClass(status: string): string {
     case 'NOT_STARTED':
       return 'bg-pending text-pending-visible border-2 border-pending-visible dark:bg-pending/20 dark:text-pending dark:border-pending/40'
     case 'CLOSED':
-      return 'bg-muted text-muted-foreground border border-border'
+      return 'bg-muted text-muted-foreground border-2 border-muted-foreground'
     default:
       return 'bg-muted text-muted-foreground border border-border'
   }

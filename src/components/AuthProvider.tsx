@@ -99,9 +99,8 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
         // If another refresh already succeeded and updated the token store,
         // try again with the latest refresh token before clearing.
         const currentRefreshToken = getRefreshToken()
-        const currentAccessToken = getAccessToken()
         const refreshWasRotatedElsewhere = !!(currentRefreshToken && currentRefreshToken !== refreshToken)
-        if (currentAccessToken && refreshWasRotatedElsewhere) {
+        if (refreshWasRotatedElsewhere) {
           try {
             const retryResponse = await fetch('/api/auth/refresh', {
               method: 'POST',
@@ -127,7 +126,10 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
 
         // Only clear tokens when we know the presented refresh token is invalid.
         if (response.status === 401 || response.status === 403) {
-          clearTokens()
+          const latestRefreshToken = getRefreshToken()
+          if (!latestRefreshToken || latestRefreshToken === refreshToken) {
+            clearTokens()
+          }
         }
         return false
       }

@@ -1418,12 +1418,20 @@ model VideoAnalytics {
   // Optional: Multiple asset IDs for ZIP downloads (JSON array)
   assetIds String?
 
+  // Viewer IP (best-effort; may be null for older records)
+  ipAddress String?
+
+  // Share session ID for mapping to a recipient (best-effort)
+  sessionId String?
+
   createdAt DateTime @default(now())
 
   @@index([projectId, createdAt])
   @@index([videoId, createdAt])
   @@index([eventType])
   @@index([assetId])
+  @@index([ipAddress])
+  @@index([sessionId])
 }
 
 model ProjectEmailEvent {

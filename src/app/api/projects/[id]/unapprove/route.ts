@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getSecuritySettings } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -55,7 +57,7 @@ export async function POST(
       where: { id: projectId },
       include: {
         videos: {
-          select: { id: true, approved: true }
+          select: { id: true, approved: true, name: true, versionLabel: true }
         }
       }
     })
@@ -70,6 +72,8 @@ export async function POST(
 
     let unapprovedCount = 0
 
+    const approvedVideos = project.videos.filter(v => v.approved)
+
     // Conditionally unapprove videos based on the parameter
     if (unapproveVideos) {
       // Unapprove ALL videos in the project
@@ -81,7 +85,25 @@ export async function POST(
         }
       })
 
-      unapprovedCount = project.videos.filter(v => v.approved).length
+      unapprovedCount = approvedVideos.length
+
+      try {
+        const settings = await getSecuritySettings()
+        if (settings.trackAnalytics && approvedVideos.length > 0) {
+          const ipAddress = getClientIpAddress(request) || null
+          await prisma.videoAnalytics.createMany({
+            data: approvedVideos.map(video => ({
+              videoId: video.id,
+              projectId,
+              eventType: 'VIDEO_UNAPPROVED',
+              sessionId: `admin:${admin.id}`,
+              ipAddress,
+            }))
+          })
+        }
+      } catch (error) {
+        console.warn('[APPROVAL] Failed to log video unapproval analytics:', error)
+      }
     }
 
     // Always unapprove the project

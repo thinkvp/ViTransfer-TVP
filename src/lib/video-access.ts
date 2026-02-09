@@ -497,6 +497,8 @@ export async function trackVideoAccess(params: {
     return
   }
 
+  const ipAddress = getClientIpAddress(params.request) || undefined
+
   await prisma.videoAnalytics.create({
     data: {
       videoId,
@@ -504,6 +506,8 @@ export async function trackVideoAccess(params: {
       eventType,
       assetId,
       assetIds: assetIds ? JSON.stringify(assetIds) : undefined,
+      sessionId,
+      ipAddress,
     }
   })
 }
