@@ -421,10 +421,10 @@ export function ProjectEmailUpload({
                   ? 'opacity-50 cursor-not-allowed'
                   : (isDragging ? 'border-primary bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/50'))
               }
-              aria-label={hasActiveUploads ? 'Uploading…' : '+ Add Email'}
+              aria-label={hasActiveUploads ? 'Uploading…' : 'Add Email'}
             >
               <Plus className="w-4 h-4 mr-2" />
-              + Add Email
+              Add Email
             </button>
           </div>
         </div>
