@@ -208,11 +208,22 @@ export function ShareAlbumViewer({
 
       const data = await res.json()
       if (data?.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer')
+        triggerDownload(data.url)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
     }
+  }
+
+  const triggerDownload = (url: string) => {
+    const link = document.createElement('a')
+    link.href = url
+    link.rel = 'noopener'
+    link.download = ''
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   const viewerIndex = useMemo(() => {
@@ -362,7 +373,7 @@ export function ShareAlbumViewer({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => window.open(viewerPhoto.socialDownloadUrl, '_blank', 'noopener,noreferrer')}
+                    onClick={() => triggerDownload(viewerPhoto.socialDownloadUrl)}
                     disabled={!viewerPhoto.socialReady}
                     className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                   >
@@ -372,7 +383,7 @@ export function ShareAlbumViewer({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => window.open(viewerPhoto.downloadUrl, '_blank', 'noopener,noreferrer')}
+                    onClick={() => triggerDownload(viewerPhoto.downloadUrl)}
                     className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                   >
                     <Download className="w-4 h-4 mr-2" />
