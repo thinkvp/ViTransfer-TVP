@@ -21,6 +21,11 @@ interface VideoStats {
     versionLabel: string
     views: number
     downloads: number
+    assets?: Array<{
+      id: string
+      fileName: string
+      downloads: number
+    }>
   }>
 }
 
@@ -42,6 +47,29 @@ interface DownloadActivity {
   assetIds?: string[]
   assetFileName?: string
   assetFileNames?: string[]
+  email?: string | null
+  accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
+  ipAddress: string | null
+  createdAt: Date
+}
+
+interface AlbumDownloadActivity {
+  id: string
+  type: 'ALBUM_DOWNLOAD'
+  albumName: string
+  variant: string | null
+  email?: string | null
+  accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
+  ipAddress: string | null
+  createdAt: Date
+}
+
+interface PhotoDownloadActivity {
+  id: string
+  type: 'PHOTO_DOWNLOAD'
+  albumName: string
+  photoFileName: string | null
+  variant: string | null
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   ipAddress: string | null
@@ -101,7 +129,7 @@ interface StatusChangeActivity {
 }
 
 type Activity = AuthActivity | DownloadActivity | EmailActivity | EmailOpenActivity | StatusChangeActivity
-  | ViewActivity | ApprovalActivity
+  | ViewActivity | ApprovalActivity | AlbumDownloadActivity | PhotoDownloadActivity
 
 function getAuthVisitorLabel(event: AuthActivity): string {
   if (event.email) return event.email
@@ -124,7 +152,12 @@ function getEventMetaValue(event: Activity): string {
   if (event.type === 'EMAIL_OPEN') return event.recipientEmail
   if (event.type === 'AUTH') return event.ipAddress || '—'
   if (event.type === 'DOWNLOAD') return event.email || event.ipAddress || '—'
-  if (event.type === 'VIEW') return event.ipAddress || '—'
+  if (event.type === 'ALBUM_DOWNLOAD') return event.email || event.ipAddress || '—'
+  if (event.type === 'PHOTO_DOWNLOAD') return event.email || event.ipAddress || '—'
+  if (event.type === 'VIEW') {
+    if (event.accessMethod === 'OTP' && event.email) return event.email
+    return event.ipAddress || '—'
+  }
   if (event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED') {
     return event.email || event.ipAddress || '—'
   }
@@ -145,12 +178,15 @@ function hasExpandableDetails(event: Activity): boolean {
   if (event.type === 'AUTH') return false
   if (event.type === 'STATUS_CHANGE') return false
   if (event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED') return false
-  if (event.type === 'DOWNLOAD') return Boolean(event.assetFileNames && event.assetFileNames.length > 0)
+  if (event.type === 'ALBUM_DOWNLOAD' || event.type === 'PHOTO_DOWNLOAD') return false
+  if (event.type === 'DOWNLOAD') {
+    return Boolean(event.assetFileNames && event.assetFileNames.length > 0)
+  }
   if (event.type === 'EMAIL') {
     return Boolean(event.videoName) || Boolean(event.recipients && event.recipients.length > 0)
   }
   if (event.type === 'EMAIL_OPEN') return Boolean(event.videoName)
-  if (event.type === 'VIEW') return Boolean(event.email)
+  if (event.type === 'VIEW') return Boolean(event.email) && event.accessMethod !== 'OTP'
   return true
 }
 
@@ -161,6 +197,10 @@ function getViewVisitorLabel(event: ViewActivity): string {
   if (event.accessMethod === 'OTP') return 'Email OTP User'
   if (event.accessMethod === 'NONE') return 'Public User'
   return 'Guest User'
+}
+
+function getPhotoVariantLabel(variant?: string | null): string {
+  return variant === 'social' ? 'Social Media Sized' : 'Full Resolution'
 }
 
 interface AnalyticsData {
@@ -386,7 +426,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                   <Download className={metricIconClassName} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Downloads</p>
+                  <p className="text-xs text-muted-foreground">Video Downloads</p>
                   <p className="text-base font-semibold tabular-nums truncate">{stats.totalDownloads.toLocaleString()}</p>
                 </div>
               </div>
@@ -419,21 +459,43 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                         <div className="mt-3 pt-3 border-t">
                           <div className="space-y-1.5">
                             {video.versions.map((version) => (
-                              <div
-                                key={version.id}
-                                className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5"
-                              >
-                                <span className="text-muted-foreground truncate">{version.versionLabel}</span>
-                                <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2">
-                                  <span className="inline-flex items-center gap-1">
-                                    <Eye className="w-3 h-3 text-muted-foreground" />
-                                    {version.views}
+                              <div key={version.id} className="space-y-1.5">
+                                <div
+                                  className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5"
+                                >
+                                  <span className="text-muted-foreground truncate">{version.versionLabel}</span>
+                                  <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1">
+                                      <Eye className="w-3 h-3 text-muted-foreground" />
+                                      {version.views}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1">
+                                      <Download className="w-3 h-3 text-muted-foreground" />
+                                      {version.downloads}
+                                    </span>
                                   </span>
-                                  <span className="inline-flex items-center gap-1">
-                                    <Download className="w-3 h-3 text-muted-foreground" />
-                                    {version.downloads}
-                                  </span>
-                                </span>
+                                </div>
+                                {version.assets && version.assets.length > 0 && (
+                                  <div className="ml-4 space-y-1">
+                                    {version.assets.map((asset) => (
+                                      <div
+                                        key={asset.id}
+                                        className="flex items-center justify-between gap-2 text-[11px] sm:text-xs bg-background/60 rounded px-2 py-1"
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <TruncatedText
+                                            text={asset.fileName}
+                                            className="text-muted-foreground truncate block"
+                                          />
+                                        </div>
+                                        <span className="inline-flex items-center gap-1 text-muted-foreground whitespace-nowrap">
+                                          <Download className="w-3 h-3 text-muted-foreground" />
+                                          {asset.downloads}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -474,19 +536,25 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                           ? `${getAuthVisitorLabel(event as AuthActivity)} accessed project`
                           : event.type === 'VIEW'
                             ? `${getViewVisitorLabel(event as ViewActivity)} viewed "${(event as ViewActivity).videoName} (${(event as ViewActivity).versionLabel})"`
-                            : event.type === 'VIDEO_APPROVED'
-                              ? `Video approved "${(event as ApprovalActivity).videoName} (${(event as ApprovalActivity).versionLabel})"`
-                              : event.type === 'VIDEO_UNAPPROVED'
-                                ? `Video unapproved "${(event as ApprovalActivity).videoName} (${(event as ApprovalActivity).versionLabel})"`
-                            : event.type === 'EMAIL'
-                              ? getEmailActionLabel((event as EmailActivity).description, 'sent')
-                              : event.type === 'EMAIL_OPEN'
-                                ? getEmailActionLabel((event as EmailOpenActivity).description, 'opened')
-                                : event.type === 'STATUS_CHANGE'
-                                  ? `Status changed from ${projectStatusLabel((event as StatusChangeActivity).previousStatus)} to ${
-                                    projectStatusLabel((event as StatusChangeActivity).currentStatus)
-                                  }`
-                                  : `${(event as DownloadActivity).videoName} (${(event as DownloadActivity).versionLabel})`
+                            : event.type === 'ALBUM_DOWNLOAD'
+                              ? `${(event as AlbumDownloadActivity).albumName} - ${getPhotoVariantLabel((event as AlbumDownloadActivity).variant)}`
+                              : event.type === 'PHOTO_DOWNLOAD'
+                                ? `${(event as PhotoDownloadActivity).photoFileName || 'Photo'} from ${(event as PhotoDownloadActivity).albumName} - ${getPhotoVariantLabel((event as PhotoDownloadActivity).variant)}`
+                                : event.type === 'VIDEO_APPROVED'
+                                  ? `Video approved "${(event as ApprovalActivity).videoName} (${(event as ApprovalActivity).versionLabel})"`
+                                  : event.type === 'VIDEO_UNAPPROVED'
+                                    ? `Video unapproved "${(event as ApprovalActivity).videoName} (${(event as ApprovalActivity).versionLabel})"`
+                                    : event.type === 'EMAIL'
+                                      ? getEmailActionLabel((event as EmailActivity).description, 'sent')
+                                      : event.type === 'EMAIL_OPEN'
+                                        ? getEmailActionLabel((event as EmailOpenActivity).description, 'opened')
+                                        : event.type === 'STATUS_CHANGE'
+                                          ? `Status changed from ${projectStatusLabel((event as StatusChangeActivity).previousStatus)} to ${
+                                            projectStatusLabel((event as StatusChangeActivity).currentStatus)
+                                          }`
+                                              : (event as DownloadActivity).assetFileName
+                                                ? `${(event as DownloadActivity).assetFileName} from ${(event as DownloadActivity).videoName} (${(event as DownloadActivity).versionLabel})`
+                                                : `${(event as DownloadActivity).videoName} (${(event as DownloadActivity).versionLabel})`
                         const metaValue = getEventMetaValue(event)
                         const showMeta = metaValue !== '—'
                         const metaLabel = isIpAddress(metaValue) ? 'IP' : 'By'
@@ -499,7 +567,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                               </div>
                             )}
                           </div>
-                        ) : event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED' ? null
+                        ) : event.type === 'ALBUM_DOWNLOAD' || event.type === 'PHOTO_DOWNLOAD' ? null
+                        : event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED' ? null
                         : event.type === 'EMAIL' ? (
                           <div className="space-y-2">
                             {(event as EmailActivity).videoName && (
@@ -599,6 +668,16 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     <>
                                       <Play className="w-3 h-3 inline mr-1" />
                                       Video View
+                                    </>
+                                  ) : event.type === 'ALBUM_DOWNLOAD' ? (
+                                    <>
+                                      <Download className="w-3 h-3 inline mr-1" />
+                                      Album
+                                    </>
+                                  ) : event.type === 'PHOTO_DOWNLOAD' ? (
+                                    <>
+                                      <Download className="w-3 h-3 inline mr-1" />
+                                      Photo
                                     </>
                                   ) : event.type === 'VIDEO_APPROVED' ? (
                                     <>

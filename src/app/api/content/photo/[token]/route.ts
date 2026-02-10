@@ -6,6 +6,7 @@ import { getClientIpAddress } from '@/lib/utils'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getAuthContext } from '@/lib/auth'
+import { getSecuritySettings } from '@/lib/video-access'
 import { verifyAlbumPhotoAccessToken } from '@/lib/photo-access'
 
 export const runtime = 'nodejs'
@@ -88,6 +89,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const readableStream = createWebReadableStream(fileStream)
 
   const filename = sanitizeFilenameForHeader(photo.fileName || 'photo.jpg')
+
+  if (isDownload) {
+    const settings = await getSecuritySettings()
+    if (settings.trackAnalytics && sessionId && !sessionId.startsWith('admin:')) {
+      const downloadVariant = variant === 'social' ? 'social' : 'full'
+      await prisma.albumAnalytics.create({
+        data: {
+          projectId: verified.projectId,
+          albumId: verified.albumId,
+          photoId: verified.photoId,
+          eventType: 'PHOTO_DOWNLOAD',
+          variant: downloadVariant,
+          sessionId,
+          ipAddress: getClientIpAddress(request) || undefined,
+        },
+      }).catch(() => {})
+    }
+  }
 
   return new NextResponse(readableStream, {
     headers: {

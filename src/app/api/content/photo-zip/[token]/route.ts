@@ -6,6 +6,8 @@ import { getRedis } from '@/lib/redis'
 import { Readable } from 'stream'
 import { existsSync, statSync } from 'fs'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { getClientIpAddress } from '@/lib/utils'
+import { getSecuritySettings } from '@/lib/video-access'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,6 +40,7 @@ export async function GET(
       projectId: string
       albumId: string
       variant?: 'full' | 'social'
+      sessionId?: string
     }
 
     const variant: 'full' | 'social' = tokenData.variant || 'full'
@@ -55,6 +58,20 @@ export async function GET(
     const zipFullPath = getFilePath(zipStoragePath)
     if (!existsSync(zipFullPath)) {
       return NextResponse.json({ error: 'ZIP not ready yet' }, { status: 409 })
+    }
+
+    const settings = await getSecuritySettings()
+    if (settings.trackAnalytics && tokenData.sessionId && !tokenData.sessionId.startsWith('admin:')) {
+      await prisma.albumAnalytics.create({
+        data: {
+          projectId: album.projectId,
+          albumId: album.id,
+          eventType: 'ALBUM_DOWNLOAD',
+          variant,
+          sessionId: tokenData.sessionId,
+          ipAddress: getClientIpAddress(request) || undefined,
+        },
+      }).catch(() => {})
     }
 
     const stat = statSync(zipFullPath)

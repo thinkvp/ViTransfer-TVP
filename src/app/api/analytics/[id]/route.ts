@@ -44,6 +44,15 @@ export async function GET(
             { name: 'asc' },
             { version: 'desc' },
           ],
+          include: {
+            assets: {
+              select: {
+                id: true,
+                fileName: true,
+                category: true,
+              },
+            },
+          },
         },
         recipients: {
           where: { isPrimary: true },
@@ -142,10 +151,34 @@ export async function GET(
     }, {} as Record<string, typeof project.videos>)
 
     const downloadAnalytics = project.analytics.filter(a => a.eventType === 'DOWNLOAD_COMPLETE')
+    const videoDownloadAnalytics = downloadAnalytics.filter(a => !a.assetId && !a.assetIds)
     const guestLinkViewAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_VIEW')
     const sharePlayAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_PLAY')
     const approvalAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_APPROVED' || a.eventType === 'VIDEO_UNAPPROVED')
     const allViewAnalytics = [...guestLinkViewAnalytics, ...sharePlayAnalytics]
+
+    const assetDownloadCountsByVideoId = new Map<string, Map<string, number>>()
+    for (const download of downloadAnalytics) {
+      const videoId = download.videoId
+      if (!videoId) continue
+
+      let perVideo = assetDownloadCountsByVideoId.get(videoId)
+      if (!perVideo) {
+        perVideo = new Map()
+        assetDownloadCountsByVideoId.set(videoId, perVideo)
+      }
+
+      if (download.assetId) {
+        perVideo.set(download.assetId, (perVideo.get(download.assetId) ?? 0) + 1)
+      }
+
+      if (download.assetIds) {
+        const assetIdArray = JSON.parse(download.assetIds) as string[]
+        for (const assetId of assetIdArray) {
+          perVideo.set(assetId, (perVideo.get(assetId) ?? 0) + 1)
+        }
+      }
+    }
 
     // Create stats grouped by video name
     const videoStats = Object.entries(videosByName).map(([videoName, versions]) => {
@@ -153,21 +186,30 @@ export async function GET(
       const videoIds = versions.map(v => v.id)
 
       // Get all analytics for these video IDs
-      const videoAnalytics = downloadAnalytics.filter(a => videoIds.includes(a.videoId))
+      const videoAnalytics = videoDownloadAnalytics.filter(a => videoIds.includes(a.videoId))
       const totalDownloads = videoAnalytics.length
 
       const viewsForVideoName = allViewAnalytics.filter(a => videoIds.includes(a.videoId)).length
 
       // Per-version breakdown
       const versionStats = versions.map(version => {
-        const versionAnalytics = downloadAnalytics.filter(a => a.videoId === version.id)
+        const versionAnalytics = videoDownloadAnalytics.filter(a => a.videoId === version.id)
         const versionViews = allViewAnalytics.filter(a => a.videoId === version.id)
         const downloads = versionAnalytics.length
+        const assetDownloads = assetDownloadCountsByVideoId.get(version.id) ?? new Map()
+        const assets = (version.assets ?? [])
+          .map(asset => ({
+            id: asset.id,
+            fileName: asset.fileName,
+            downloads: assetDownloads.get(asset.id) ?? 0,
+          }))
+          .sort((a, b) => a.fileName.localeCompare(b.fileName))
         return {
           id: version.id,
           versionLabel: version.versionLabel,
           views: versionViews.length,
           downloads,
+          assets,
         }
       })
 
@@ -193,6 +235,15 @@ export async function GET(
       project.sharePageAccesses.map(access => [access.sessionId, access])
     )
 
+    const albumAnalytics = await prisma.albumAnalytics.findMany({
+      where: { projectId: project.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        album: { select: { id: true, name: true } },
+        photo: { select: { id: true, fileName: true } },
+      },
+    })
+
     const adminUserIds = new Set<string>()
     approvalAnalytics.forEach(event => {
       if (event.sessionId?.startsWith('admin:')) {
@@ -209,7 +260,7 @@ export async function GET(
 
     const adminEmailById = new Map(adminUsers.map(user => [user.id, user.email]))
 
-    const totalDownloads = downloadAnalytics.length
+    const totalDownloads = videoDownloadAnalytics.length
     const totalVideoViews = allViewAnalytics.length
 
     // Combine authentication events and download events into single activity feed
@@ -337,8 +388,32 @@ export async function GET(
       createdAt: chg.createdAt,
     }))
 
+    const albumDownloadEvents = albumAnalytics.map((event) => {
+      const access = event.sessionId ? accessBySessionId.get(event.sessionId) : undefined
+      return {
+        id: event.id,
+        type: event.eventType === 'PHOTO_DOWNLOAD' ? 'PHOTO_DOWNLOAD' as const : 'ALBUM_DOWNLOAD' as const,
+        albumName: event.album?.name || 'Album',
+        photoFileName: event.photo?.fileName || null,
+        variant: event.variant || 'full',
+        email: access?.accessMethod === 'OTP' ? access.email || null : null,
+        accessMethod: access?.accessMethod || null,
+        ipAddress: event.ipAddress || null,
+        createdAt: event.createdAt,
+      }
+    })
+
     // Merge and sort all activity by timestamp (newest first)
-    const allActivity = [...authEvents, ...viewEvents, ...approvalEvents, ...downloadEvents, ...emailEvents, ...emailOpenEvents, ...statusChangeEvents].sort(
+    const allActivity = [
+      ...authEvents,
+      ...viewEvents,
+      ...approvalEvents,
+      ...downloadEvents,
+      ...albumDownloadEvents,
+      ...emailEvents,
+      ...emailOpenEvents,
+      ...statusChangeEvents,
+    ].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 
