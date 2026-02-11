@@ -71,6 +71,22 @@ interface VideoPlayerProps {
   // Optional: when true, VideoPlayer will fill its parent height (non-fullscreen)
   // and allow the video area to flex/shrink to fit available space.
   fitToContainerHeight?: boolean
+
+  // Optional: reduce max viewport height (desktop only) to keep controls/input visible.
+  viewportHeightOffsetPx?: number
+
+  // Optional: extra spacing under controls (non-fullscreen only).
+  controlsBottomPaddingPx?: number
+
+  // Optional: fill the parent container height, centering the video vertically
+  // with controls at the bottom. Uses pure CSS flex layout — no viewport-based
+  // pixel math. Ideal when the parent already has an explicit height.
+  fillContainer?: boolean
+
+  // Optional (fillContainer only): when true, controls pin to the bottom of
+  // the container (video fills remaining space). When false/omitted, the video
+  // and controls are vertically centered as a group.
+  pinControlsToBottom?: boolean
 }
 
 export default function VideoPlayer({
@@ -93,6 +109,10 @@ export default function VideoPlayer({
   commentsForTimeline = [],
   disableCommentsUI = false,
   fitToContainerHeight = false,
+  viewportHeightOffsetPx,
+  controlsBottomPaddingPx,
+  fillContainer = false,
+  pinControlsToBottom = false,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
@@ -296,6 +316,32 @@ export default function VideoPlayer({
   const selectedVideoTimelineVttUrl = (selectedVideo as any)?.timelineVttUrl as string | null | undefined
   const selectedVideoTimelineSpriteUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
   const selectedVideoTimelinePreviewsReady = (selectedVideo as any)?.timelinePreviewsReady === true
+
+  const desktopOffsetPx =
+    typeof viewportHeightOffsetPx === 'number' && Number.isFinite(viewportHeightOffsetPx)
+      ? Math.max(0, Math.round(viewportHeightOffsetPx))
+      : null
+
+  const controlsBottomPadding =
+    typeof controlsBottomPaddingPx === 'number' && Number.isFinite(controlsBottomPaddingPx)
+      ? Math.max(0, Math.round(controlsBottomPaddingPx))
+      : 0
+
+  const nonFitMaxHeight = isMobileViewport
+    ? '70vh'
+    : desktopOffsetPx
+      ? `calc(100vh - var(--admin-header-height,0px) - ${desktopOffsetPx}px)`
+      : '95vh'
+
+  const nonFitMaxHeightDvh = isMobileViewport
+    ? '70dvh'
+    : desktopOffsetPx
+      ? `calc(100dvh - var(--admin-header-height,0px) - ${desktopOffsetPx}px)`
+      : '95dvh'
+
+  const fitMaxHeightDvh = !isMobileViewport && desktopOffsetPx
+    ? `calc(100dvh - var(--admin-header-height,0px) - ${desktopOffsetPx}px)`
+    : undefined
 
   // When switching videos, the new <video> element will start paused.
   // If we were playing previously, React state can get "stuck" because the old
@@ -1129,8 +1175,17 @@ export default function VideoPlayer({
     <div
       className={cn(
         'flex flex-col',
-        fitToContainerHeight ? 'gap-4 min-h-0 h-full' : 'space-y-4 max-h-full'
+        fillContainer
+          ? 'h-full min-h-0 max-h-[100dvh] lg:max-h-none'
+          : fitToContainerHeight
+            ? 'gap-4 min-h-0 h-full'
+            : 'space-y-4 max-h-full'
       )}
+      style={
+        !isInFullscreen && fitToContainerHeight && fitMaxHeightDvh
+          ? { maxHeight: fitMaxHeightDvh }
+          : undefined
+      }
     >
       <div
         ref={playerContainerRef}
@@ -1141,7 +1196,11 @@ export default function VideoPlayer({
             ? 'fixed inset-0 z-50 bg-background flex flex-col p-3'
             : cn(
               'flex flex-col',
-              fitToContainerHeight ? 'gap-4 min-h-0 h-full' : 'space-y-4'
+              fillContainer
+                ? `flex-1 min-h-0 gap-3${pinControlsToBottom ? '' : ' justify-center'}`
+                : fitToContainerHeight
+                  ? 'gap-4 min-h-0 h-full'
+                  : 'space-y-4'
             )
         }
       >
@@ -1151,9 +1210,22 @@ export default function VideoPlayer({
             isInFullscreen
               ? 'relative bg-background overflow-hidden flex-1 min-h-0'
               : cn(
-                'bg-background min-h-0 flex items-center justify-center',
-                fitToContainerHeight ? 'relative overflow-hidden flex-1' : 'flex-shrink'
+                'bg-background min-h-0',
+                fillContainer
+                  ? `relative overflow-hidden flex items-center justify-center${pinControlsToBottom ? ' flex-1' : ' w-full min-h-0'}`
+                  : 'flex items-center justify-center',
+                !fillContainer && (fitToContainerHeight
+                  ? 'relative overflow-hidden flex-1'
+                  : 'flex-shrink')
               )
+          }
+          style={
+            !isInFullscreen && fillContainer
+              ? {
+                  containerType: 'size',
+                  ...(!pinControlsToBottom ? { aspectRatio: videoAspectRatio } : {}),
+                } as React.CSSProperties
+              : undefined
           }
         >
           <div
@@ -1161,21 +1233,36 @@ export default function VideoPlayer({
               isInFullscreen
                 ? 'relative w-full h-full'
                 : cn(
-                  'relative bg-background rounded-lg overflow-hidden',
-                  fitToContainerHeight ? 'w-full h-full' : 'max-h-[70vh] max-h-[70dvh]'
+                    'relative bg-background overflow-hidden',
+                    fillContainer
+                      ? 'rounded-lg'
+                      : cn('rounded-lg', fitToContainerHeight ? 'w-full h-full' : '')
                 )
             }
             style={
               isInFullscreen
                 ? undefined
-                : fitToContainerHeight
-                  ? undefined
-                  : {
-                    // Keep the correct aspect ratio but ensure portrait videos never exceed the viewport.
-                    // If the video is taller than the available height, shrink the width to match.
-                    width: `min(100%, calc(70vh * ${videoAspectRatio}))`,
-                    aspectRatio: videoAspectRatio,
-                  }
+                : fillContainer
+                  ? {
+                      width: `min(100cqw, calc(100cqh * ${videoAspectRatio}))`,
+                      height: `min(100cqh, calc(100cqw / ${videoAspectRatio}))`,
+                    }
+                  : fitToContainerHeight
+                    ? (videoAspectRatio < 1
+                      ? {
+                        height: '100%',
+                        width: 'auto',
+                        maxWidth: '100%',
+                        aspectRatio: videoAspectRatio,
+                      }
+                      : undefined)
+                    : {
+                      maxHeight: nonFitMaxHeightDvh,
+                      // Keep the correct aspect ratio but ensure portrait videos never exceed the viewport.
+                      // If the video is taller than the available height, shrink the width to match.
+                      width: `min(100%, calc(${nonFitMaxHeight} * ${videoAspectRatio}))`,
+                      aspectRatio: videoAspectRatio,
+                    }
             }
           >
             {videoUrl ? (
@@ -1275,13 +1362,16 @@ export default function VideoPlayer({
         </div>
 
         {/* Custom Controls + Timeline (enables hover thumbnails) */}
-        <div className="relative flex-shrink-0 pl-[calc(env(safe-area-inset-left)+0.5rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:px-0">
+        <div
+          className="relative flex-shrink-0 pl-[calc(env(safe-area-inset-left)+0.5rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] lg:px-0"
+          style={!isInFullscreen && controlsBottomPadding ? { paddingBottom: controlsBottomPadding } : undefined}
+        >
           <div
-            className="flex flex-col gap-2 pt-4 sm:pt-0 sm:flex-row sm:items-center sm:gap-3"
+            className="flex flex-col gap-2 pt-4 lg:pt-0 lg:flex-row lg:items-center lg:gap-3"
             onPointerDownCapture={handleControlsPointerDownCapture}
           >
             {/* Desktop/tablet: left controls */}
-            <div className="hidden sm:flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-3">
               <Button
                 type="button"
                 variant="outline"
@@ -1526,7 +1616,7 @@ export default function VideoPlayer({
             </div>
 
             {/* Desktop/tablet: right controls */}
-            <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+            <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
               <div
                 className="relative flex-shrink-0"
                 data-volume-control="true"
@@ -1651,7 +1741,7 @@ export default function VideoPlayer({
             </div>
 
             {/* Mobile: row 2 controls (left: play/time, right: volume/speed/fullscreen) */}
-            <div className="sm:hidden flex items-center gap-2 w-full min-w-0">
+            <div className="lg:hidden flex items-center gap-2 w-full min-w-0">
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <Button
                   type="button"

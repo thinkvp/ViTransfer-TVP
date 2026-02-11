@@ -480,7 +480,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     {version.assets.map((asset) => (
                                       <div
                                         key={asset.id}
-                                        className="flex items-center justify-between gap-2 text-[11px] sm:text-xs bg-background/60 rounded px-2 py-1"
+                                        className="flex items-center justify-between gap-2 text-[11px] sm:text-xs bg-muted/60 dark:bg-accent/30 rounded px-2 py-1"
                                       >
                                         <div className="min-w-0 flex-1">
                                           <TruncatedText

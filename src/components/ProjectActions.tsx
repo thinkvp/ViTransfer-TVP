@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent } from './ui/card'
@@ -58,7 +58,8 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
-  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'specific-album' | 'internal-invite'>('entire-project')
+  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'comment-summary' | 'specific-album' | 'internal-invite'>('entire-project')
+  const [notificationTypeOpen, setNotificationTypeOpen] = useState(false)
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
@@ -160,7 +161,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const hasAnyReadyForEntireProject = readyVideos.length > 0 || (photosEnabled && albumCount > 0)
 
   // Reset selections when notification type changes
-  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'specific-album' | 'internal-invite') => {
+  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'comment-summary' | 'specific-album' | 'internal-invite') => {
     setNotificationType(type)
     setSelectedVideoName('')
     setSelectedVideoId('')
@@ -170,6 +171,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setSelectedRecipientIds([])
     setSelectedInternalUserIds([])
     setSelectedProjectFileIds([])
+    setSendPasswordSeparately(false)
   }
 
   // Reset version selection when video name changes
@@ -259,28 +261,47 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     })
   }, [assignedUsersWithEmail, notificationType, showNotificationModal])
 
+  const notificationModalOpenRef = useRef(false)
+  const notificationTypeRef = useRef(notificationType)
+  const notificationTypeTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const notificationTypeContentRef = useRef<HTMLDivElement | null>(null)
+
   useEffect(() => {
-    if (!showNotificationModal) return
-    if (notificationType === 'internal-invite') return
+    if (!showNotificationModal) {
+      notificationModalOpenRef.current = false
+      notificationTypeRef.current = notificationType
+      return
+    }
 
-    // Default: select all project recipients with email.
-    // Preserve an explicit user selection across refreshes (e.g. after sending).
-    setSelectedRecipientIds((prev) => {
-      const available = projectRecipientsWithEmail.map((r) => String(r.id))
-      const availableSet = new Set(available)
-      const filtered = prev.filter((id) => availableSet.has(id))
+    const justOpened = !notificationModalOpenRef.current
+    const typeChanged = notificationTypeRef.current !== notificationType
 
-      if (filtered.length > 0) return filtered
-
-      // If the user hasn't made a selection yet, default to recipients who have
-      // notifications enabled for this project.
+    if (notificationType !== 'internal-invite' && (justOpened || typeChanged)) {
       const defaults = projectRecipientsWithEmail
         .filter((r) => (r as any)?.receiveNotifications !== false)
         .map((r) => String(r.id))
 
-      return defaults
-    })
+      setSelectedRecipientIds(defaults)
+    }
+
+    notificationModalOpenRef.current = true
+    notificationTypeRef.current = notificationType
   }, [notificationType, projectRecipientsWithEmail, showNotificationModal])
+
+  useEffect(() => {
+    if (notificationType !== 'comment-summary') return
+    if (!sendPasswordSeparately) return
+    setSendPasswordSeparately(false)
+  }, [notificationType, sendPasswordSeparately])
+
+  const handleNotificationTypePointerDownCapture = (e: React.PointerEvent) => {
+    if (!notificationTypeOpen) return
+    const target = e.target as Node | null
+    if (!target) return
+    if (notificationTypeTriggerRef.current?.contains(target)) return
+    if (notificationTypeContentRef.current?.contains(target)) return
+    setNotificationTypeOpen(false)
+  }
 
   const selectedAttachmentsMeta = projectFiles
     .filter((f) => selectedProjectFileIds.includes(f.id))
@@ -623,7 +644,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       {/* Notification Modal */}
       {canSendNotifications && (
       <Dialog open={showNotificationModal} onOpenChange={setShowNotificationModal}>
-        <DialogContent className="max-w-[95vw] sm:max-w-md">
+        <DialogContent
+          className="max-w-[95vw] sm:max-w-md"
+          onPointerDownCapture={handleNotificationTypePointerDownCapture}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Send className="w-5 h-5" />
@@ -637,16 +661,24 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               <label className="text-sm font-medium mb-2 block">
                 Notification Type
               </label>
-              <Select value={notificationType} onValueChange={handleNotificationTypeChange}>
-                <SelectTrigger>
+              <Select
+                value={notificationType}
+                onValueChange={handleNotificationTypeChange}
+                open={notificationTypeOpen}
+                onOpenChange={setNotificationTypeOpen}
+              >
+                <SelectTrigger ref={notificationTypeTriggerRef}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent ref={notificationTypeContentRef}>
                   <SelectItem value="entire-project">
                     Entire Project (All Ready Videos)
                   </SelectItem>
                   <SelectItem value="specific-video">
                     Specific Video & Version
+                  </SelectItem>
+                  <SelectItem value="comment-summary">
+                    Comment Summary
                   </SelectItem>
                   {(project as any)?.enablePhotos !== false && (
                     <SelectItem value="specific-album">
@@ -673,8 +705,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                     projectRecipientsWithEmail.map((r) => {
                       const checked = selectedRecipientIds.includes(String(r.id))
                       const label = (r.name || r.email) as string
+                      const recipientsReadOnly = notificationType === 'comment-summary'
                       return (
-                        <label key={String(r.id)} className="flex items-start gap-2 cursor-pointer">
+                        <label
+                          key={String(r.id)}
+                          className={`flex items-start gap-2 ${recipientsReadOnly ? 'cursor-default' : 'cursor-pointer'}`}
+                        >
                           <input
                             type="checkbox"
                             className="h-4 w-4 mt-0.5"
@@ -685,7 +721,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                                 e.target.checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id)
                               )
                             }}
-                            disabled={loading}
+                            disabled={loading || recipientsReadOnly}
                           />
                           <span className="min-w-0">
                             <span className="block text-sm font-medium truncate">{label}</span>
@@ -701,6 +737,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                     })
                   )}
                 </div>
+                {notificationType === 'comment-summary' && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Manually send the Comment Summary email to project recipients.
+                  </p>
+                )}
               </div>
             )}
 
@@ -898,7 +939,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             {/* Select Recipients is rendered above for client notifications */}
 
             {/* Password checkbox - only show if project is password protected */}
-            {isPasswordProtected && (
+            {isPasswordProtected && notificationType !== 'comment-summary' && (
               <div className="flex items-center space-x-2 p-3 bg-muted rounded-md">
                 <input
                   type="checkbox"
@@ -916,7 +957,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </div>
             )}
 
-            {isPasswordProtected && (
+            {isPasswordProtected && notificationType !== 'comment-summary' && (
               <p className="text-xs text-muted-foreground bg-accent/50 p-3 rounded-md border border-border">
                 <strong>Note:</strong> This project is password protected. {sendPasswordSeparately ? 'The password will be sent in a separate email for enhanced security.' : 'The password will NOT be included in the email - you must share it separately.'}
               </p>
@@ -965,6 +1006,8 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 ? 'This will send an email to the selected recipients with access to all ready videos in this project.'
                 : notificationType === 'specific-album'
                 ? 'This will send an email to the selected recipients with a link to view the selected album.'
+                : notificationType === 'comment-summary'
+                ? 'This will send a comment summary email to recipients with notifications enabled.'
                 : notificationType === 'internal-invite'
                 ? 'This will send an email to the selected internal users with a link to access this project.'
                 : 'This will send an email to the selected recipients with a link to view the selected video version.'}

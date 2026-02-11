@@ -592,7 +592,7 @@ export default function AdminSharePage() {
             ) : (
               <div
                 className={`flex-1 min-h-0 ${(project.hideFeedback || project.status === 'SHARE_ONLY')
-                  ? 'flex flex-col max-w-7xl mx-auto w-full'
+                  ? 'flex flex-col w-full'
                   : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
               >
                 {(project.hideFeedback || project.status === 'SHARE_ONLY') ? (
@@ -615,6 +615,7 @@ export default function AdminSharePage() {
                       onApprove={undefined}
                       hideDownloadButton={true}
                       commentsForTimeline={filteredComments}
+                      fillContainer
                     />
                   </div>
                 ) : (
@@ -719,7 +720,7 @@ function AdminShareFeedbackGrid({
       const needed = Math.round(el.scrollWidth)
 
       if (Number.isFinite(available) && Number.isFinite(needed) && needed > available + 1) {
-        setCommentInputMinWidth((prev) => Math.max(prev ?? 320, needed))
+        setCommentInputMinWidth((prev) => Math.max(prev ?? 352, needed))
       }
     })
 
@@ -750,7 +751,7 @@ function AdminShareFeedbackGrid({
     const savedWidth = localStorage.getItem('share_comments_width')
     if (savedWidth) {
       const width = parseInt(savedWidth, 10)
-      if (Number.isFinite(width) && width >= 320 && width <= window.innerWidth * 0.6) {
+      if (Number.isFinite(width) && width >= 352 && width <= window.innerWidth * 0.6) {
         setCommentsWidth(width)
       }
     }
@@ -764,7 +765,7 @@ function AdminShareFeedbackGrid({
 
       const rect = feedbackContainerRef.current.getBoundingClientRect()
       const nextWidth = rect.right - e.clientX
-      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 320
+      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 352
       const maxWidth = Math.min(rect.width * 0.6, window.innerWidth * 0.6)
 
       const clamped = Math.max(minWidth, Math.min(maxWidth, nextWidth))
@@ -936,7 +937,8 @@ function AdminShareFeedbackGrid({
               onApprove={undefined}
               hideDownloadButton={true}
               commentsForTimeline={management.comments as any}
-              fitToContainerHeight={isDesktop}
+              fillContainer
+              pinControlsToBottom={!commentInputInRightColumn && !commentsDisabled}
             />
           </div>
 
@@ -1037,7 +1039,7 @@ function AdminShareFeedbackGrid({
             />
           </div>
 
-          {commentInputInRightColumn ? (
+          {commentInputInRightColumn && !commentsDisabled ? (
             <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
