@@ -144,7 +144,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
   }
 
   return (
-    <div className="h-[100dvh] flex flex-col overflow-hidden">
+    <div className="h-[100dvh] flex flex-col overflow-y-auto lg:overflow-hidden">
       <div className="border-b border-border bg-background flex-shrink-0">
         <div className={cn('mx-auto w-full max-w-6xl px-4 py-3 flex flex-col gap-1')}>
           <div className="text-sm font-medium text-foreground">
@@ -161,7 +161,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 px-4 py-4">
+      <div className="flex-1 min-h-0 px-4 py-4 flex flex-col">
           <VideoPlayer
             videos={[videoForPlayer as any]}
             projectId={data.project.id}
@@ -173,6 +173,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
             commentsForTimeline={[]}
             disableCommentsUI={true}
             fillContainer
+            pinControlsToBottom
           />
       </div>
     </div>

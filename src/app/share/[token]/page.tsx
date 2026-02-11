@@ -1481,10 +1481,10 @@ function ShareFeedbackGrid({
       <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0">
         <div
           ref={leftPaneRef}
-          className="flex-1 min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
+          className="lg:flex-1 lg:min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
         >
           <div
-            className="flex-1 min-h-0 lg:overflow-hidden"
+            className="flex-1 lg:min-h-0 lg:overflow-hidden"
           >
             <VideoPlayer
               videos={readyVideos}
@@ -1556,7 +1556,7 @@ function ShareFeedbackGrid({
 
         <div
           className={cn(
-            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height,0px))] min-h-0 overflow-hidden flex-shrink-0',
+            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height,0px))] lg:min-h-0 lg:overflow-hidden lg:flex-shrink-0',
             'lg:flex lg:flex-col'
           )}
           style={

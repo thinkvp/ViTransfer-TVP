@@ -131,6 +131,7 @@ export default function VideoPlayer({
 
   const [canShowTimelineHover, setCanShowTimelineHover] = useState(true)
   const [isMobileViewport, setIsMobileViewport] = useState(false)
+  const [isLgViewport, setIsLgViewport] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -207,6 +208,22 @@ export default function VideoPlayer({
 
     const mql = window.matchMedia('(max-width: 639px)')
     const update = () => setIsMobileViewport(mql.matches)
+    update()
+
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', update)
+      return () => mql.removeEventListener('change', update)
+    }
+
+    mql.addListener(update)
+    return () => mql.removeListener(update)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mql = window.matchMedia('(min-width: 1024px)')
+    const update = () => setIsLgViewport(mql.matches)
     update()
 
     if (typeof mql.addEventListener === 'function') {
@@ -1197,7 +1214,7 @@ export default function VideoPlayer({
             : cn(
               'flex flex-col',
               fillContainer
-                ? `flex-1 min-h-0 gap-3${pinControlsToBottom ? '' : ' justify-center'}`
+                ? `flex-1 min-h-0 gap-3${pinControlsToBottom ? '' : ' lg:justify-center'}`
                 : fitToContainerHeight
                   ? 'gap-4 min-h-0 h-full'
                   : 'space-y-4'
@@ -1212,7 +1229,7 @@ export default function VideoPlayer({
               : cn(
                 'bg-background min-h-0',
                 fillContainer
-                  ? `relative overflow-hidden flex items-center justify-center${pinControlsToBottom ? ' flex-1' : ' w-full min-h-0'}`
+                  ? `relative overflow-hidden flex items-center justify-center${pinControlsToBottom ? ' lg:flex-1 w-full min-h-0' : ' w-full min-h-0'}`
                   : 'flex items-center justify-center',
                 !fillContainer && (fitToContainerHeight
                   ? 'relative overflow-hidden flex-1'
@@ -1222,8 +1239,8 @@ export default function VideoPlayer({
           style={
             !isInFullscreen && fillContainer
               ? {
-                  containerType: 'size',
-                  ...(!pinControlsToBottom ? { aspectRatio: videoAspectRatio } : {}),
+                  ...(isLgViewport ? { containerType: 'size' } : {}),
+                  aspectRatio: videoAspectRatio,
                 } as React.CSSProperties
               : undefined
           }
@@ -1243,10 +1260,12 @@ export default function VideoPlayer({
               isInFullscreen
                 ? undefined
                 : fillContainer
-                  ? {
-                      width: `min(100cqw, calc(100cqh * ${videoAspectRatio}))`,
-                      height: `min(100cqh, calc(100cqw / ${videoAspectRatio}))`,
-                    }
+                  ? isLgViewport
+                    ? {
+                        width: `min(100cqw, calc(100cqh * ${videoAspectRatio}))`,
+                        height: `min(100cqh, calc(100cqw / ${videoAspectRatio}))`,
+                      }
+                    : { width: '100%', height: '100%' }
                   : fitToContainerHeight
                     ? (videoAspectRatio < 1
                       ? {
