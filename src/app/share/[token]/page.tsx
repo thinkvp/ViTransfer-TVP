@@ -1074,8 +1074,16 @@ export default function SharePage() {
     return !comment.videoId || activeVideoIds.has(comment.videoId)
   })
 
+  // Video-only mode: guest, share-only, or hidden feedback (no scrollable comments below).
+  // Use overflow-hidden on mobile so the flex layout constrains the video within the
+  // viewport minus the mobile sidebar height, preventing the bottom from being clipped.
+  const isVideoOnlyShareMode = (project.hideFeedback || shareOnlyMode) || isGuest
+
   return (
-    <div className="h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+    <div className={cn(
+      'h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row lg:overflow-hidden',
+      isVideoOnlyShareMode ? 'overflow-hidden' : 'overflow-y-auto',
+    )}>
       {/* Video Sidebar - contains both desktop and mobile versions internally */}
       <VideoSidebar
         videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
@@ -1097,7 +1105,7 @@ export default function SharePage() {
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 ${activeAlbumId ? 'overflow-hidden' : 'lg:overflow-y-auto'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${activeAlbumId ? 'overflow-hidden' : 'lg:overflow-y-auto'}`}>
         {/* Content Area */}
         <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
           {/* Content Area */}
@@ -1115,10 +1123,10 @@ export default function SharePage() {
               </CardContent>
             </Card>
           ) : readyVideos.length === 0 ? (
-            <Card className="bg-card border-border">
-              <CardContent className="py-12 text-center">
+            <Card className="bg-card border-border flex-1 flex">
+              <CardContent className="flex-1 flex items-center justify-center text-center px-6 py-12">
                 <p className="text-muted-foreground">
-                  {tokensLoading ? 'Loading video...' : 'No videos are ready for review yet. Please check back later.'}
+                  {tokensLoading ? 'Loading video...' : 'No content is ready for review yet. Please check back later.'}
                 </p>
               </CardContent>
             </Card>
@@ -1274,6 +1282,11 @@ function ShareFeedbackGrid({
     if (!isDesktop) return
     const onResize = () => {
       setCommentInputMinWidth(null)
+      // Clamp comments width so it never exceeds 60% of the viewport on resize.
+      setCommentsWidth((prev) => {
+        const max = Math.floor(window.innerWidth * 0.6)
+        return prev > max ? max : prev
+      })
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
@@ -1478,7 +1491,7 @@ function ShareFeedbackGrid({
 
   return (
     <>
-      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0">
+      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0 lg:overflow-hidden">
         <div
           ref={leftPaneRef}
           className="lg:flex-1 lg:min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
@@ -1563,6 +1576,7 @@ function ShareFeedbackGrid({
             isDesktop
               ? {
                   width: `${Math.round(commentsWidth)}px`,
+                  maxWidth: '60%',
                   minWidth:
                     commentInputInRightColumn && commentInputMinWidth
                       ? `${Math.round(commentInputMinWidth)}px`

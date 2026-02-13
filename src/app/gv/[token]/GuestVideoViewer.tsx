@@ -174,6 +174,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
             disableCommentsUI={true}
             fillContainer
             pinControlsToBottom
+            mobileFullHeight
           />
       </div>
     </div>

@@ -401,6 +401,7 @@ export function ShareAlbumViewer({
                     sizes="(min-width: 1024px) 1024px, 100vw"
                     className="object-contain"
                     priority
+                    onContextMenu={(e) => e.preventDefault()}
                   />
 
                   {viewerIndex > 0 && (

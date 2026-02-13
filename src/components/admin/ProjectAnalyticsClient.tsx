@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play } from 'lucide-react'
+import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play, ArrowUpDown, Images } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
@@ -27,6 +27,13 @@ interface VideoStats {
       downloads: number
     }>
   }>
+}
+
+interface AlbumStats {
+  albumName: string
+  photoCount: number
+  fullResDownloads: number
+  socialDownloads: number
 }
 
 interface AuthActivity {
@@ -203,6 +210,23 @@ function getPhotoVariantLabel(variant?: string | null): string {
   return variant === 'social' ? 'Social Media Sized' : 'Full Resolution'
 }
 
+function getMainText(event: Activity): string {
+  if (event.type === 'AUTH') return `${getAuthVisitorLabel(event)} accessed project`
+  if (event.type === 'VIEW') return `${getViewVisitorLabel(event)} viewed "${event.videoName} (${event.versionLabel})"`
+  if (event.type === 'ALBUM_DOWNLOAD') return `${event.albumName} - ${getPhotoVariantLabel(event.variant)}`
+  if (event.type === 'PHOTO_DOWNLOAD') return `${event.photoFileName || 'Photo'} from ${event.albumName} - ${getPhotoVariantLabel(event.variant)}`
+  if (event.type === 'VIDEO_APPROVED') return `Video approved "${event.videoName} (${event.versionLabel})"`
+  if (event.type === 'VIDEO_UNAPPROVED') return `Video unapproved "${event.videoName} (${event.versionLabel})"`
+  if (event.type === 'EMAIL') return getEmailActionLabel(event.description, 'sent')
+  if (event.type === 'EMAIL_OPEN') return getEmailActionLabel(event.description, 'opened')
+  if (event.type === 'STATUS_CHANGE') return `Status changed from ${projectStatusLabel(event.previousStatus)} to ${projectStatusLabel(event.currentStatus)}`
+  // DOWNLOAD
+  const dl = event as DownloadActivity
+  return dl.assetFileName
+    ? `${dl.assetFileName} from ${dl.videoName} (${dl.versionLabel})`
+    : `${dl.videoName} (${dl.versionLabel})`
+}
+
 interface AnalyticsData {
   project: {
     id: string
@@ -224,8 +248,10 @@ interface AnalyticsData {
     totalDownloads: number
     totalVideoViews: number
     videoCount: number
+    albumCount: number
   }
   videoStats: VideoStats[]
+  albumStats: AlbumStats[]
   activity: Activity[]
 }
 
@@ -284,6 +310,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   const [error, setError] = useState(false)
   const [activityPage, setActivityPage] = useState(1)
   const activityScrollRef = useRef<HTMLDivElement>(null)
+  const [activitySortKey, setActivitySortKey] = useState<'event' | 'description' | 'by' | 'date'>('date')
+  const [activitySortAsc, setActivitySortAsc] = useState(false)
 
   const permissions = useMemo(() => normalizeRolePermissions(user?.permissions), [user?.permissions])
   const canViewAnalytics = canDoAction(permissions, 'viewAnalytics')
@@ -317,8 +345,30 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
 
   const pageSize = 50
   const activity = useMemo(() => data?.activity ?? [], [data?.activity])
-  const totalPages = Math.max(1, Math.ceil(activity.length / pageSize))
-  const pagedActivity = activity.slice((activityPage - 1) * pageSize, activityPage * pageSize)
+  const sortedActivity = useMemo(() => {
+    const sorted = [...activity]
+    sorted.sort((a, b) => {
+      let cmp = 0
+      switch (activitySortKey) {
+        case 'event':
+          cmp = a.type.localeCompare(b.type)
+          break
+        case 'description':
+          cmp = getMainText(a).localeCompare(getMainText(b))
+          break
+        case 'by':
+          cmp = getEventMetaValue(a).localeCompare(getEventMetaValue(b))
+          break
+        case 'date':
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          break
+      }
+      return activitySortAsc ? cmp : -cmp
+    })
+    return sorted
+  }, [activity, activitySortKey, activitySortAsc])
+  const totalPages = Math.max(1, Math.ceil(sortedActivity.length / pageSize))
+  const pagedActivity = sortedActivity.slice((activityPage - 1) * pageSize, activityPage * pageSize)
   useEffect(() => {
     if (!data) return
     if (activityPage > totalPages) {
@@ -366,9 +416,17 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
     )
   }
 
-  const { project, stats, videoStats } = data
+  const { project, stats, videoStats, albumStats } = data
   const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const metricIconClassName = 'w-4 h-4 text-primary'
+
+  const hasVideos = videoStats.length > 0
+  const hasAlbums = albumStats.length > 0
+  const contentHeading = hasVideos && hasAlbums
+    ? 'Videos & Albums'
+    : hasAlbums
+      ? 'Albums'
+      : 'Videos'
 
   return (
     <div className="flex-1 sm:min-h-[calc(100dvh-var(--admin-header-height,0px))] bg-background">
@@ -437,11 +495,11 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
         <div className="grid gap-4 sm:gap-6 lg:grid-cols-[30fr_70fr] sm:overflow-hidden flex-1 min-h-0">
           <Card className="overflow-hidden max-h-none sm:max-h-[calc(100dvh-var(--admin-header-height,0px))] flex flex-col">
             <CardHeader>
-              <CardTitle>Videos in this Project</CardTitle>
+              <CardTitle>{contentHeading} in this Project</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-hidden flex-1 min-h-0 flex flex-col">
-              {videoStats.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No videos available</p>
+              {!hasVideos && !hasAlbums ? (
+                <p className="text-center text-muted-foreground py-8">No videos or albums available</p>
               ) : (
                   <div className="space-y-4 overflow-y-auto min-h-0 flex-1 pr-1 sidebar-scrollbar">
                   {videoStats.map((video) => (
@@ -503,6 +561,40 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                       )}
                     </div>
                   ))}
+
+                  {albumStats.map((album) => (
+                    <div key={album.albumName} className="border border-border rounded-lg bg-muted/40 p-3 sm:p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-sm sm:text-base break-words inline-flex items-center gap-2">
+                            <Images className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                            {album.albumName}
+                          </h4>
+                          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                            {album.photoCount} photo{album.photoCount !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5">
+                            <span className="text-muted-foreground truncate">Full Resolution ZIP</span>
+                            <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-1">
+                              <Download className="w-3 h-3 text-muted-foreground" />
+                              {album.fullResDownloads}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5">
+                            <span className="text-muted-foreground truncate">Social Media Sized ZIP</span>
+                            <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-1">
+                              <Download className="w-3 h-3 text-muted-foreground" />
+                              {album.socialDownloads}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
@@ -523,38 +615,40 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                     <table className="w-full min-w-full text-sm table-auto">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
-                          <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Event</th>
-                          <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2">Description</th>
-                          <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 hidden sm:table-cell whitespace-nowrap">By</th>
-                          <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 hidden sm:table-cell whitespace-nowrap">Date</th>
+                          {([
+                            { key: 'event' as const, label: 'Event', className: 'whitespace-nowrap' },
+                            { key: 'description' as const, label: 'Description', className: '' },
+                            { key: 'by' as const, label: 'By', className: 'hidden sm:table-cell whitespace-nowrap' },
+                            { key: 'date' as const, label: 'Date', className: 'hidden sm:table-cell whitespace-nowrap' },
+                          ]).map((col) => (
+                            <th
+                              key={col.key}
+                              className={cn(
+                                'text-left text-xs font-medium text-muted-foreground px-3 py-2 cursor-pointer select-none hover:text-foreground transition-colors',
+                                col.className
+                              )}
+                              onClick={() => {
+                                if (activitySortKey === col.key) {
+                                  setActivitySortAsc((prev) => !prev)
+                                } else {
+                                  setActivitySortKey(col.key)
+                                  setActivitySortAsc(col.key === 'date' ? false : true)
+                                }
+                                setActivityPage(1)
+                              }}
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                {col.label}
+                                <ArrowUpDown className={cn('w-3 h-3', activitySortKey === col.key ? 'text-foreground' : 'text-muted-foreground/40')} />
+                              </span>
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
                         {pagedActivity.map((event) => {
                         const hasDetails = hasExpandableDetails(event)
-                        const mainText = event.type === 'AUTH'
-                          ? `${getAuthVisitorLabel(event as AuthActivity)} accessed project`
-                          : event.type === 'VIEW'
-                            ? `${getViewVisitorLabel(event as ViewActivity)} viewed "${(event as ViewActivity).videoName} (${(event as ViewActivity).versionLabel})"`
-                            : event.type === 'ALBUM_DOWNLOAD'
-                              ? `${(event as AlbumDownloadActivity).albumName} - ${getPhotoVariantLabel((event as AlbumDownloadActivity).variant)}`
-                              : event.type === 'PHOTO_DOWNLOAD'
-                                ? `${(event as PhotoDownloadActivity).photoFileName || 'Photo'} from ${(event as PhotoDownloadActivity).albumName} - ${getPhotoVariantLabel((event as PhotoDownloadActivity).variant)}`
-                                : event.type === 'VIDEO_APPROVED'
-                                  ? `Video approved "${(event as ApprovalActivity).videoName} (${(event as ApprovalActivity).versionLabel})"`
-                                  : event.type === 'VIDEO_UNAPPROVED'
-                                    ? `Video unapproved "${(event as ApprovalActivity).videoName} (${(event as ApprovalActivity).versionLabel})"`
-                                    : event.type === 'EMAIL'
-                                      ? getEmailActionLabel((event as EmailActivity).description, 'sent')
-                                      : event.type === 'EMAIL_OPEN'
-                                        ? getEmailActionLabel((event as EmailOpenActivity).description, 'opened')
-                                        : event.type === 'STATUS_CHANGE'
-                                          ? `Status changed from ${projectStatusLabel((event as StatusChangeActivity).previousStatus)} to ${
-                                            projectStatusLabel((event as StatusChangeActivity).currentStatus)
-                                          }`
-                                              : (event as DownloadActivity).assetFileName
-                                                ? `${(event as DownloadActivity).assetFileName} from ${(event as DownloadActivity).videoName} (${(event as DownloadActivity).versionLabel})`
-                                                : `${(event as DownloadActivity).videoName} (${(event as DownloadActivity).versionLabel})`
+                        const mainText = getMainText(event)
                         const metaValue = getEventMetaValue(event)
                         const showMeta = metaValue !== '—'
                         const metaLabel = isIpAddress(metaValue) ? 'IP' : 'By'

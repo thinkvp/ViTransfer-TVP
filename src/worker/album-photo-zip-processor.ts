@@ -110,7 +110,15 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
         return
       }
 
-      if (fullExists && socialExists) {
+      // Only require a social ZIP when at least one usable social derivative exists.
+      // If all social derivatives errored, the social ZIP will never be created —
+      // don't let that block the album from becoming READY.
+      const socialUsableCount = await prisma.albumPhoto.count({
+        where: { albumId, status: 'READY', socialStatus: 'READY', NOT: { socialStoragePath: null } },
+      })
+      const needSocialZip = socialUsableCount > 0
+
+      if (fullExists && (!needSocialZip || socialExists)) {
         await prisma.album.update({ where: { id: albumRowId }, data: { status: 'READY' } })
       }
     } catch {
@@ -140,7 +148,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     return
   }
 
-  const photos = await prisma.albumPhoto.findMany({
+  let photos = await prisma.albumPhoto.findMany({
     where: {
       albumId,
       status: 'READY',
@@ -182,12 +190,12 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
   const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant })
 
   if (variant === 'social') {
-    const notReady = photos.filter((p) => p.socialStatus !== 'READY' || !p.socialStoragePath)
-    if (notReady.length > 0) {
-      // Social zips require social derivatives; do nothing for now.
-      // Re-schedule so we eventually generate even if no later trigger fires.
+    // Separate photos still being processed (wait for them) from permanently failed ones (skip them).
+    const stillProcessing = photos.filter((p) => p.socialStatus === 'PENDING' || p.socialStatus === 'PROCESSING')
+    if (stillProcessing.length > 0) {
+      // Social derivatives still in progress — reschedule and wait.
       if (DEBUG) {
-        console.log(`[WORKER DEBUG] Social ZIP not ready; ${notReady.length} photos missing social derivatives for album ${albumId}`)
+        console.log(`[WORKER DEBUG] Social ZIP waiting; ${stillProcessing.length} photos still processing social derivatives for album ${albumId}`)
       }
 
       try {
@@ -200,6 +208,17 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       }
       return
     }
+
+    // Only include photos with a usable social derivative; skip errored ones.
+    const socialReady = photos.filter((p) => p.socialStatus === 'READY' && p.socialStoragePath)
+    if (socialReady.length === 0) {
+      // All social derivatives failed — no ZIP to create, but still evaluate readiness.
+      await maybeMarkAlbumReady()
+      return
+    }
+
+    // Build ZIP from only the social-ready subset.
+    photos = socialReady
   }
 
   const entries = photos.map((p) => {

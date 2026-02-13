@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect, useRef } from 'react'
-import { Play, ChevronDown, ChevronUp, GripVertical, CheckCircle2, Images, Check } from 'lucide-react'
+import { Play, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, GripVertical, CheckCircle2, Images, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
 
@@ -75,6 +75,7 @@ export default function VideoSidebar({
   initialCollapsed = true,
 }: VideoSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(initialCollapsed)
+  const [isMobileCollapsed, setIsMobileCollapsed] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(256) // Default 256px (w-64)
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
@@ -94,6 +95,8 @@ export default function VideoSidebar({
 
   const shouldShowVideos = showVideos
   const shouldShowAlbums = showAlbums && albumsList.length > 0
+  const hasVideos = shouldShowVideos && videoGroups.length > 0
+  const hasAlbums = shouldShowAlbums && albumsList.length > 0
 
   const activeAlbum = useMemo(() => {
     if (!activeAlbumId) return null
@@ -404,17 +407,95 @@ export default function VideoSidebar({
       </aside>
 
       {/* Mobile Horizontal Scrollable Row */}
-      <div className="lg:hidden">
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-accent/30">
-            {shouldShowVideos && videoGroups.length > 0 && shouldShowAlbums && albumsList.length > 0
-              ? 'Videos & Albums'
-              : shouldShowVideos && videoGroups.length > 0
-              ? 'Videos'
-              : 'Albums'}
+      <div className="lg:hidden sticky top-0 z-30">
+        <div className="bg-card border-y border-border overflow-hidden">
+          {/* Always-visible heading row */}
+          <div className="px-4 py-2 flex items-center justify-between bg-accent/30">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {hasVideos && hasAlbums
+                  ? 'Videos & Albums'
+                  : hasVideos
+                  ? 'Videos'
+                  : hasAlbums
+                  ? 'Albums'
+                  : 'No Content Ready'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsMobileCollapsed((prev) => !prev)}
+                className="flex items-center justify-center w-5 h-5 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                aria-label={isMobileCollapsed ? 'Show video selector' : 'Hide video selector'}
+              >
+                {isMobileCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+            {/* X of Y counter with prev/next arrows */}
+            {(() => {
+              const sortedGroups = sortedVideoGroups(videoGroups)
+              const allItems: Array<{ type: 'video'; name: string } | { type: 'album'; id: string; name: string }> = []
+              if (shouldShowVideos) {
+                sortedGroups.forEach((g) => allItems.push({ type: 'video', name: g.name }))
+              }
+              if (shouldShowAlbums) {
+                albumsList.forEach((a) => allItems.push({ type: 'album', id: a.id, name: a.name }))
+              }
+              if (allItems.length <= 1) return null
+
+              const currentIndex = allItems.findIndex((item) =>
+                item.type === 'video'
+                  ? (!activeAlbumId && activeVideoName === item.name)
+                  : (activeAlbumId === (item as any).id)
+              )
+              const displayIndex = currentIndex >= 0 ? currentIndex + 1 : 1
+
+              const goPrev = () => {
+                const prevIdx = (currentIndex - 1 + allItems.length) % allItems.length
+                const prev = allItems[prevIdx]
+                if (prev.type === 'video') onVideoSelect(prev.name)
+                else onAlbumSelect?.((prev as any).id)
+              }
+              const goNext = () => {
+                const nextIdx = (currentIndex + 1) % allItems.length
+                const next = allItems[nextIdx]
+                if (next.type === 'video') onVideoSelect(next.name)
+                else onAlbumSelect?.((next as any).id)
+              }
+
+              return (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={goPrev}
+                    className="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Previous"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {displayIndex} of {allItems.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    className="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Next"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
+            })()}
           </div>
-          <div className="overflow-x-auto mobile-scrollbar">
-            <div className="flex gap-3 p-3">
+
+          {/* Collapsible thumbnails area */}
+          <div className={cn(
+            'overflow-hidden transition-all duration-200',
+            isMobileCollapsed ? 'max-h-0 opacity-0' : 'max-h-[500px] opacity-100'
+          )}>
+            <div className="overflow-x-auto mobile-scrollbar">
+              <div className="flex gap-3 p-3">
               {/* Videos */}
               {shouldShowVideos && sortedVideoGroups(videoGroups).map((group) => {
                 const isActive = !activeAlbumId && activeVideoName === group.name
@@ -540,6 +621,7 @@ export default function VideoSidebar({
                 )
               })}
             </div>
+          </div>
           </div>
         </div>
       </div>

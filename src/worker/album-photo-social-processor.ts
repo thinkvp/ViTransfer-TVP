@@ -168,6 +168,24 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       },
     })
 
+    // Enqueue a social ZIP job so the zip processor can re-evaluate album readiness.
+    // Without this, the album stays PROCESSING forever when the last derivative errors.
+    try {
+      const album = await prisma.album.findUnique({
+        where: { id: photo.albumId },
+        select: { projectId: true },
+      })
+      if (album) {
+        const { getAlbumPhotoZipQueue } = await import('../lib/queue')
+        const q = getAlbumPhotoZipQueue()
+        const jobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'social' })
+        await q.remove(jobId).catch(() => {})
+        await q.add('generate-album-zip', { albumId: photo.albumId, variant: 'social' }, { jobId, delay: 10_000 }).catch(() => {})
+      }
+    } catch {
+      // best-effort
+    }
+
     console.error(`[WORKER ERROR] Social derivative failed for ${photoId}:`, error)
     throw error
   }

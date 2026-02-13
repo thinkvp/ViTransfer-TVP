@@ -36,6 +36,7 @@ type AlbumPhoto = {
 }
 
 type AlbumZipStatus = {
+  album?: { status?: string }
   zip: { fullReady: boolean; socialReady: boolean }
   counts: {
     uploading: number
@@ -234,6 +235,12 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     try {
       const data = await apiJson<AlbumZipStatus>(`/api/albums/${albumId}/zip-status`)
       setZipStatusByAlbumId((prev) => ({ ...prev, [albumId]: data }))
+
+      // If the endpoint reports the album status (e.g. after self-healing),
+      // update the local album list so the header pill reflects reality.
+      if (data?.album?.status) {
+        setAlbums((prev) => prev.map((a) => (a.id === albumId ? { ...a, status: data.album!.status as any } : a)))
+      }
 
       // Poll while work is still in progress so the admin can see progress.
       const shouldPoll =

@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const album = await prisma.album.findUnique({
     where: { id: albumId },
-    select: { id: true, projectId: true },
+    select: { id: true, projectId: true, status: true },
   })
 
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
@@ -67,10 +67,31 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const fullZipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'full' })
   const socialZipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'social' })
 
+  const fullReady = albumZipExists(fullZipStoragePath)
+  const socialReady = albumZipExists(socialZipStoragePath)
+
+  // Self-healing: if the album is stuck in a non-READY state but all work is actually
+  // done, correct the status. This catches albums that were stuck before the worker
+  // bug fixes were deployed.
+  let albumStatus = album.status
+  if (album.status !== 'READY' && album.status !== 'ERROR') {
+    const socialZipRequired = socialReadyCount > 0
+    const allDone =
+      uploadingCount === 0 &&
+      socialPendingCount === 0 &&
+      (readyCount === 0 || fullReady) &&
+      (!socialZipRequired || socialReady)
+    if (allDone) {
+      await prisma.album.update({ where: { id: albumId }, data: { status: 'READY' } }).catch(() => {})
+      albumStatus = 'READY'
+    }
+  }
+
   return NextResponse.json({
+    album: { status: albumStatus },
     zip: {
-      fullReady: albumZipExists(fullZipStoragePath),
-      socialReady: albumZipExists(socialZipStoragePath),
+      fullReady,
+      socialReady,
     },
     counts: {
       uploading: uploadingCount,

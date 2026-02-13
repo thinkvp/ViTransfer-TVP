@@ -87,6 +87,11 @@ interface VideoPlayerProps {
   // the container (video fills remaining space). When false/omitted, the video
   // and controls are vertically centered as a group.
   pinControlsToBottom?: boolean
+
+  // Optional (fillContainer only): when true, the mobile max-height stays at
+  // 100dvh instead of the default 60dvh. Useful when the player is the only
+  // content on the page (e.g. Guest Video Link).
+  mobileFullHeight?: boolean
 }
 
 export default function VideoPlayer({
@@ -113,6 +118,7 @@ export default function VideoPlayer({
   controlsBottomPaddingPx,
   fillContainer = false,
   pinControlsToBottom = false,
+  mobileFullHeight = false,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
@@ -1193,7 +1199,7 @@ export default function VideoPlayer({
       className={cn(
         'flex flex-col',
         fillContainer
-          ? 'h-full min-h-0 max-h-[100dvh] lg:max-h-none'
+          ? `h-full min-h-0 ${mobileFullHeight ? 'max-h-[100dvh]' : 'max-h-[90dvh]'} lg:max-h-none`
           : fitToContainerHeight
             ? 'gap-4 min-h-0 h-full'
             : 'space-y-4 max-h-full'
@@ -1210,7 +1216,7 @@ export default function VideoPlayer({
         className={
 
           isInFullscreen
-            ? 'fixed inset-0 z-50 bg-background flex flex-col p-3'
+            ? 'fixed inset-0 z-50 bg-black flex flex-col p-3'
             : cn(
               'flex flex-col',
               fillContainer
@@ -1225,11 +1231,11 @@ export default function VideoPlayer({
         <div
           className={
             isInFullscreen
-              ? 'relative bg-background overflow-hidden flex-1 min-h-0'
+              ? 'relative bg-black overflow-hidden flex-1 min-h-0'
               : cn(
                 'bg-background min-h-0',
                 fillContainer
-                  ? `relative overflow-hidden flex items-center justify-center${pinControlsToBottom ? ' lg:flex-1 w-full min-h-0' : ' w-full min-h-0'}`
+                  ? `relative overflow-hidden flex items-center justify-center flex-1 w-full min-h-0${pinControlsToBottom ? '' : ' lg:flex-initial'}`
                   : 'flex items-center justify-center',
                 !fillContainer && (fitToContainerHeight
                   ? 'relative overflow-hidden flex-1'
@@ -1239,7 +1245,7 @@ export default function VideoPlayer({
           style={
             !isInFullscreen && fillContainer
               ? {
-                  ...(isLgViewport ? { containerType: 'size' } : {}),
+                  containerType: 'size',
                   aspectRatio: videoAspectRatio,
                 } as React.CSSProperties
               : undefined
@@ -1260,12 +1266,10 @@ export default function VideoPlayer({
               isInFullscreen
                 ? undefined
                 : fillContainer
-                  ? isLgViewport
-                    ? {
-                        width: `min(100cqw, calc(100cqh * ${videoAspectRatio}))`,
-                        height: `min(100cqh, calc(100cqw / ${videoAspectRatio}))`,
-                      }
-                    : { width: '100%', height: '100%' }
+                  ? {
+                      width: `min(100cqw, calc(100cqh * ${videoAspectRatio}))`,
+                      height: `min(100cqh, calc(100cqw / ${videoAspectRatio}))`,
+                    }
                   : fitToContainerHeight
                     ? (videoAspectRatio < 1
                       ? {
@@ -1348,7 +1352,7 @@ export default function VideoPlayer({
                 onClick={togglePlayPause}
                 style={{
                   objectFit: 'contain',
-                  backgroundColor: '#000',
+                  backgroundColor: isLgViewport ? '#000' : 'transparent',
                 }}
               />
             ) : (
@@ -1366,7 +1370,7 @@ export default function VideoPlayer({
                 className="absolute inset-0 w-full h-full pointer-events-none"
                 style={{
                   objectFit: 'contain',
-                  backgroundColor: '#000',
+                  backgroundColor: isLgViewport ? '#000' : 'transparent',
                 }}
               />
             ) : null}
@@ -1699,7 +1703,7 @@ export default function VideoPlayer({
                     size="sm"
                     onClick={handleDecreaseSpeed}
                     aria-label="Decrease playback speed"
-                    className={cn(playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                    className={cn(playbackSpeed !== 1.0 && playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                   >
                     <Rewind className="w-4 h-4" />
                   </Button>
@@ -1710,14 +1714,14 @@ export default function VideoPlayer({
                     size="sm"
                     onClick={handleIncreaseSpeed}
                     aria-label="Increase playback speed"
-                    className={cn(playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                    className={cn(playbackSpeed !== 1.0 && playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                   >
                     <FastForward className="w-4 h-4" />
                   </Button>
                 </>
               )}
 
-              {isInFullscreen && canShowTimelineHover && !disableCommentsUI && (
+              {isInFullscreen && canShowTimelineHover && !disableCommentsUI && !isGuest && (
                 <Button
                   type="button"
                   variant={isFullscreenChatOpen ? 'default' : 'outline'}

@@ -940,7 +940,7 @@ export function CommentSectionView({
   return (
     <>
       {fullscreenChatOverlay}
-      <Card className="bg-card border border-border flex flex-col h-full flex-1 min-h-0 max-h-[70vh] lg:max-h-none rounded-lg overflow-hidden" data-comment-section>
+      <Card className="bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden" data-comment-section>
         <CardHeader className="border-b border-border flex-shrink-0 space-y-1">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 w-full">

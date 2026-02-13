@@ -244,6 +244,17 @@ export async function GET(
       },
     })
 
+    // Fetch albums with photo counts
+    const projectAlbums = await prisma.album.findMany({
+      where: { projectId: project.id, status: 'READY' },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { photos: true } },
+      },
+    })
+
     const adminUserIds = new Set<string>()
     approvalAnalytics.forEach(event => {
       if (event.sessionId?.startsWith('admin:')) {
@@ -403,6 +414,21 @@ export async function GET(
       }
     })
 
+    // Build album stats: per-album photo count + download counts per variant
+    const albumStats = projectAlbums.map((album) => {
+      const albumEvents = albumAnalytics.filter(
+        (e) => e.albumId === album.id && e.eventType === 'ALBUM_DOWNLOAD'
+      )
+      const fullResDownloads = albumEvents.filter((e) => e.variant !== 'social').length
+      const socialDownloads = albumEvents.filter((e) => e.variant === 'social').length
+      return {
+        albumName: album.name,
+        photoCount: album._count.photos,
+        fullResDownloads,
+        socialDownloads,
+      }
+    })
+
     // Merge and sort all activity by timestamp (newest first)
     const allActivity = [
       ...authEvents,
@@ -435,8 +461,10 @@ export async function GET(
         totalDownloads,
         totalVideoViews,
         videoCount: project.videos.length,
+        albumCount: projectAlbums.length,
       },
       videoStats,
+      albumStats,
       activity: allActivity,
     })
   } catch (error) {

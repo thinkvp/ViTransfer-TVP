@@ -582,10 +582,10 @@ export default function AdminSharePage() {
                 </CardContent>
               </Card>
             ) : readyVideos.length === 0 ? (
-              <Card className="bg-card border-border rounded-lg">
-                <CardContent className="py-12 text-center">
+              <Card className="bg-card border-border rounded-lg flex-1 flex">
+                <CardContent className="flex-1 flex items-center justify-center text-center px-6 py-12">
                   <p className="text-muted-foreground">
-                    {tokensLoading ? 'Loading video...' : 'No videos are ready for review yet. Please check back later.'}
+                    {tokensLoading ? 'Loading video...' : 'No content is ready for review yet. Please check back later.'}
                   </p>
                 </CardContent>
               </Card>
@@ -731,6 +731,11 @@ function AdminShareFeedbackGrid({
     if (!isDesktop) return
     const onResize = () => {
       setCommentInputMinWidth(null)
+      // Clamp comments width so it never exceeds 60% of the viewport on resize.
+      setCommentsWidth((prev) => {
+        const max = Math.floor(window.innerWidth * 0.6)
+        return prev > max ? max : prev
+      })
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
@@ -911,7 +916,7 @@ function AdminShareFeedbackGrid({
 
   return (
     <>
-      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0">
+      <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0 lg:overflow-hidden">
         <div
           ref={leftPaneRef}
           className="lg:flex-1 lg:min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
@@ -987,6 +992,7 @@ function AdminShareFeedbackGrid({
             isDesktop
               ? {
                   width: `${Math.round(commentsWidth)}px`,
+                  maxWidth: '60%',
                   minWidth:
                     commentInputInRightColumn && commentInputMinWidth
                       ? `${Math.round(commentInputMinWidth)}px`
