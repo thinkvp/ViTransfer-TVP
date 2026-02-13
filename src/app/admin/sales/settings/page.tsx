@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi } from '@/lib/sales/admin-api'
 import { apiFetch } from '@/lib/api-client'
+import { formatDateTime } from '@/lib/utils'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
@@ -854,7 +855,7 @@ export default function SalesSettingsPage() {
                 <div className="text-xs text-muted-foreground">No attempts yet.</div>
               ) : (
                 <div className="text-xs text-muted-foreground">
-                  {new Date(qbLastAttempt.attemptedAt).toLocaleString()} — {qbLastAttempt.succeeded ? 'Success' : 'Error'}
+                  {formatDateTime(qbLastAttempt.attemptedAt)} — {qbLastAttempt.succeeded ? 'Success' : 'Error'}
                   {qbLastAttempt.message ? ` — ${qbLastAttempt.message}` : ''}
                 </div>
               )}

@@ -41,6 +41,8 @@ model User {
   salesInvoiceRevisions SalesInvoiceRevision[]
 
   webPushSubscriptions WebPushSubscription[]
+
+  projectViewSettings UserProjectViewSettings[]
 }
 
 model Role {
@@ -230,6 +232,8 @@ model Project {
 
   salesQuotes   SalesQuote[]
   salesInvoices SalesInvoice[]
+
+  viewSettings UserProjectViewSettings[]
 }
 
 enum ProjectKeyDateType {
@@ -1612,4 +1616,24 @@ model CommentFile {
   @@index([commentId])
   @@index([projectId])
   @@index([projectId, createdAt])
+}
+
+model UserProjectViewSettings {
+  id       String  @id @default(cuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // JSON object with section visibility settings
+  // When projectId is null, this is the default for all projects
+  // When projectId is set, this is the setting for a specific project
+  visibleSections Json @default("{\"sales\":true,\"keyDates\":true,\"externalCommunication\":true,\"users\":true,\"projectFiles\":true,\"projectData\":true}")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, projectId])
+  @@index([userId])
+  @@index([projectId])
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import VideoPlayer from '@/components/VideoPlayer'
-import { cn } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 
 type ResolvePayload = {
   expiresAt: string
@@ -36,13 +36,7 @@ function formatExpiry(expiresAtIso: string): { when: string; isExpired: boolean 
 
   const isExpired = date.getTime() <= Date.now()
   return {
-    when: date.toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
+    when: formatDateTime(expiresAtIso),
     isExpired,
   }
 }

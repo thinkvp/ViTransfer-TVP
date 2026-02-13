@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { formatFileSize } from '@/lib/utils'
+import { formatFileSize, formatDateTime } from '@/lib/utils'
 import { ArrowDown, ArrowUp, Loader2, Paperclip, Trash2, Download, ChevronDown, ChevronRight } from 'lucide-react'
 
 type SortKey = 'sentAt' | 'subject' | 'from' | 'attachments'
@@ -54,13 +54,6 @@ interface ProjectEmailTableProps {
   refreshTrigger?: number
   canDelete?: boolean
   onExternalFilesChanged?: () => void
-}
-
-function formatEmailDate(value: string | null): string {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 function displayFrom(row: { fromName: string | null; fromEmail: string | null }) {
@@ -323,7 +316,7 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
                         <span className="font-medium text-foreground">From:</span> {displayFrom(row)}
                       </div>
                       <div>
-                        <span className="font-medium text-foreground">Date:</span> {formatEmailDate(row.sentAt || row.createdAt)}
+                        <span className="font-medium text-foreground">Date:</span> {formatDateTime(row.sentAt || row.createdAt)}
                       </div>
                     </div>
                   )}
@@ -391,7 +384,7 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
                       )}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground truncate max-w-full">{displayFrom(row)}</td>
-                    <td className="px-3 py-2 text-muted-foreground tabular-nums">{formatEmailDate(row.sentAt || row.createdAt)}</td>
+                    <td className="px-3 py-2 text-muted-foreground tabular-nums">{formatDateTime(row.sentAt || row.createdAt)}</td>
                     {canDelete && (
                       <td className="py-2 pl-3 pr-4" onClick={(e) => e.stopPropagation()}>
                         <Button type="button" variant="outline" size="sm" onClick={() => void handleDelete(row.id)}>
@@ -441,7 +434,7 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
               <div className="space-y-1">
                 <div className="text-base font-semibold break-words">{detail.subject?.trim() ? detail.subject : '(no subject)'}</div>
                 <div className="text-sm text-muted-foreground break-words">From: {displayFrom(detail)}</div>
-                <div className="text-sm text-muted-foreground">Date: {formatEmailDate(detail.sentAt || detail.createdAt)}</div>
+                <div className="text-sm text-muted-foreground">Date: {formatDateTime(detail.sentAt || detail.createdAt)}</div>
               </div>
 
               {detail.status !== 'READY' && (

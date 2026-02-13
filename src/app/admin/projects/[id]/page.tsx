@@ -22,6 +22,7 @@ import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 import { ProjectKeyDates } from '@/components/ProjectKeyDates'
+import { ProjectSectionVisibilityToggle, useProjectSectionVisibility } from '@/components/ProjectSectionVisibilityToggle'
 import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
 import { fetchSalesRollup } from '@/lib/sales/admin-api'
@@ -67,6 +68,8 @@ export default function ProjectPage() {
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
   const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
   const [projectClientName, setProjectClientName] = useState<string | null>(null)
+
+  const { visibility: sectionVisibility, setVisibility: setSectionVisibility, isLoading: sectionVisibilityLoading } = useProjectSectionVisibility(id)
 
   const permissions = useMemo(() => normalizeRolePermissions(adminUser?.permissions), [adminUser?.permissions])
   const canAccessProjectSettings = canDoAction(permissions, 'accessProjectSettings')
@@ -528,14 +531,23 @@ export default function ProjectPage() {
               <span className="sm:hidden">Back</span>
             </Button>
           </Link>
-          {canAccessProjectSettings && (
-            <Link href={`/admin/projects/${id}/settings`}>
-              <Button variant="outline" size="default">
-                <Settings className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Project Settings</span>
-              </Button>
-            </Link>
-          )}
+          <div className="flex items-center gap-2">
+            {canAccessProjectSettings && !sectionVisibilityLoading && (
+              <ProjectSectionVisibilityToggle
+                projectId={id}
+                value={sectionVisibility}
+                onChange={setSectionVisibility}
+              />
+            )}
+            {canAccessProjectSettings && (
+              <Link href={`/admin/projects/${id}/settings`}>
+                <Button variant="outline" size="default">
+                  <Settings className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Project Settings</span>
+                </Button>
+              </Link>
+            )}
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -626,7 +638,7 @@ export default function ProjectPage() {
               </CardContent>
             </Card>
 
-            {(projectQuotes.length > 0 || projectInvoices.length > 0) && (
+            {(projectQuotes.length > 0 || projectInvoices.length > 0) && sectionVisibility.sales && (
               <Card>
                 <CardContent className="pt-6 max-sm:pt-3 space-y-4">
                   {salesLoading && projectQuotes.length === 0 && projectInvoices.length === 0 ? (
@@ -730,9 +742,11 @@ export default function ProjectPage() {
               </Card>
             )}
 
-            <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />
+            {sectionVisibility.keyDates && (
+              <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />
+            )}
 
-            {canDeleteInternalFiles && (
+            {sectionVisibility.externalCommunication && canDeleteInternalFiles && (
               <div className="border rounded-lg p-4 bg-card space-y-4">
                 {canUploadFilesToProjectInternal ? (
                   <ProjectEmailUpload
@@ -843,7 +857,7 @@ export default function ProjectPage() {
               canDeleteAll={adminUser?.appRoleIsSystemAdmin === true}
             />
 
-            {canDeleteInternalFiles && (
+            {sectionVisibility.users && canDeleteInternalFiles && (
               <Card>
                 <CardContent className="pt-6 max-sm:pt-3">
                   <ProjectUsersEditor
@@ -864,7 +878,8 @@ export default function ProjectPage() {
               </Card>
             )}
 
-            <div className="border rounded-lg p-4 bg-card space-y-4">
+            {sectionVisibility.projectFiles && (
+              <div className="border rounded-lg p-4 bg-card space-y-4">
               {canUploadFilesToProjectInternal ? (
                 <ProjectFileUpload
                   title="Project Files"
@@ -889,9 +904,10 @@ export default function ProjectPage() {
                 canDelete={canDeleteInternalFiles}
                 onFilesChanged={bumpProjectStorageRefresh}
               />
-            </div>
+              </div>
+            )}
 
-            {canDeleteInternalFiles && (
+            {sectionVisibility.projectData && canDeleteInternalFiles && (
               <ProjectStorageUsage projectId={project.id} refreshTrigger={projectStorageRefresh} />
             )}
           </div>

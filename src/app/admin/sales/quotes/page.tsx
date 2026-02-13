@@ -19,7 +19,7 @@ import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/l
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
@@ -478,8 +478,8 @@ export default function SalesQuotesPage() {
                               {row.quote.quoteNumber}
                             </Link>
                           </td>
-                          <td className="px-3 py-2 tabular-nums">{row.quote.issueDate}</td>
-                          <td className="px-3 py-2 tabular-nums">{row.quote.validUntil ?? '—'}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatDate(row.quote.issueDate)}</td>
+                          <td className="px-3 py-2 tabular-nums">{row.quote.validUntil ? formatDate(row.quote.validUntil) : '—'}</td>
                           <td className="px-3 py-2">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${statusBadgeClass(row.effectiveStatus)}`}>
                               {statusLabel(row.effectiveStatus)}

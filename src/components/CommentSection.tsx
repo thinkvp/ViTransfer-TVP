@@ -12,7 +12,7 @@ import CommentInput from './CommentInput'
 import ThemeToggle from './ThemeToggle'
 import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
-import { formatDate, formatTimestamp } from '@/lib/utils'
+import { formatDate, formatTimestamp, formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -1080,7 +1080,7 @@ export function CommentSectionView({
                                   <div className="text-sm break-all font-mono">{guestLinkUrl}</div>
                                   {guestLinkExpiresAt ? (
                                     <div className="mt-2 text-xs text-muted-foreground">
-                                      Expires: {new Date(guestLinkExpiresAt).toLocaleString()}
+                                      Expires: {formatDateTime(guestLinkExpiresAt)}
                                     </div>
                                   ) : null}
                                 </div>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { apiDelete, apiJson, apiPost } from '@/lib/api-client'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import { formatDateTime } from '@/lib/utils'
 
 type InternalComment = {
   id: string
@@ -32,16 +33,8 @@ type InternalComment = {
 
 function formatMessageTime(dateLike: string) {
   const date = new Date(dateLike)
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date)
-  } catch {
-    return date.toLocaleString()
-  }
+  if (Number.isNaN(date.getTime())) return dateLike
+  return formatDateTime(dateLike)
 }
 
 function stripHtmlToPlainText(html: string) {

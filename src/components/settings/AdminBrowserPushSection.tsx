@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { apiJson, apiPost } from '@/lib/api-client'
 import { getRememberDeviceEnabled, setRememberDeviceEnabled } from '@/lib/token-store'
 import { ChevronDown, ChevronUp, Wrench, X } from 'lucide-react'
+import { formatDateTime } from '@/lib/utils'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -32,14 +33,6 @@ type ServerSubscription = {
 interface AdminBrowserPushSectionProps {
   show: boolean
   setShow: (value: boolean) => void
-}
-
-function formatDate(value: string) {
-  try {
-    return new Date(value).toLocaleString()
-  } catch {
-    return value
-  }
 }
 
 export function AdminBrowserPushSection({ show, setShow }: AdminBrowserPushSectionProps) {
@@ -395,7 +388,7 @@ export function AdminBrowserPushSection({ show, setShow }: AdminBrowserPushSecti
                         <div className="text-sm font-medium truncate">{label}</div>
                         <div className="text-xs text-muted-foreground">
                           {isThisDevice ? 'This device · ' : ''}
-                          Added {formatDate(s.createdAt)}
+                          Added {formatDateTime(s.createdAt)}
                         </div>
                       </div>
                       <Button

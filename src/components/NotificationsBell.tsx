@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { apiFetch } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
+import { formatDateTime } from '@/lib/utils'
 
 type NotificationRow = {
   id: string
@@ -32,12 +33,6 @@ function normalizeText(value: string): string {
     .replace(/\s+/g, ' ')
     .replace(/[^a-z0-9 ]/g, '')
     .trim()
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage?: string; projectName?: string; lines: Array<[string, string]> } {
@@ -293,7 +288,7 @@ export default function NotificationsBell() {
                           <div className="text-sm font-medium text-foreground truncate">{title}</div>
                           {projectName ? <div className="text-xs text-muted-foreground truncate">{projectName}</div> : null}
                         </div>
-                        <div className="text-[11px] text-muted-foreground whitespace-nowrap">{formatTime(n.sentAt)}</div>
+                        <div className="text-[11px] text-muted-foreground whitespace-nowrap">{formatDateTime(n.sentAt)}</div>
                       </div>
                       {lines.length > 0 ? (
                         <div className="mt-2 space-y-1">

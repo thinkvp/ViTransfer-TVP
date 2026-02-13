@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer'
 import { prisma } from './db'
 import { decrypt } from './encryption'
 import { normalizeHexDisplayColor } from './display-color'
+import { formatDate } from './utils'
 
 export const EMAIL_THEME = {
   headerBackground: '#1F1F1F',
@@ -1909,7 +1910,7 @@ export async function renderSalesInvoiceOverdueReminderEmail({
           <strong>Invoice ${escapeHtml(invoiceNumber)}</strong>
         </div>
         ${projectTitle ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
-        <div style="font-size: 14px; color: #374151; padding: 2px 0;">Due date: ${escapeHtml(dueDateYmd)}</div>
+        <div style="font-size: 14px; color: #374151; padding: 2px 0;">Due date: ${escapeHtml(formatDate(dueDateYmd))}</div>
       </div>
 
       <div style="text-align: center; margin: 28px 0;">
@@ -1967,7 +1968,7 @@ export async function renderSalesQuoteExpiryReminderEmail({
       </p>
 
       <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-        Just a friendly reminder that <strong>Quote ${escapeHtml(quoteNumber)}</strong> expires on <strong>${escapeHtml(validUntilYmd)}</strong>.
+        Just a friendly reminder that <strong>Quote ${escapeHtml(quoteNumber)}</strong> expires on <strong>${escapeHtml(formatDate(validUntilYmd))}</strong>.
       </p>
 
       <div style="${cardStyle}">
@@ -1975,7 +1976,7 @@ export async function renderSalesQuoteExpiryReminderEmail({
           <strong>Quote ${escapeHtml(quoteNumber)}</strong>
         </div>
         ${projectTitle ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
-        <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(validUntilYmd)}</div>
+        <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(formatDate(validUntilYmd))}</div>
       </div>
 
       <div style="text-align: center; margin: 28px 0;">

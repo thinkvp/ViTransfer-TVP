@@ -8,6 +8,7 @@ import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { formatDate } from '@/lib/utils'
 import {
   invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
   quoteEffectiveStatus as computeQuoteEffectiveStatus,
@@ -215,8 +216,10 @@ export default async function SalesDocPublicViewPage(
   const taxCents = sumLineItemsTax(items, defaultTaxRatePercent)
   const totalCents = subtotalCents + taxCents
 
-  const issueDate = safeString(doc?.issueDate)
-  const dueOrExpiry = type === 'INVOICE' ? safeString(doc?.dueDate) : safeString(doc?.validUntil)
+  const issueDate = safeString(doc?.issueDate) ? formatDate(safeString(doc?.issueDate)) : ''
+  const dueOrExpiry = type === 'INVOICE' 
+    ? (safeString(doc?.dueDate) ? formatDate(safeString(doc?.dueDate)) : '')
+    : (safeString(doc?.validUntil) ? formatDate(safeString(doc?.validUntil)) : '')
 
   const title = type === 'INVOICE' ? 'INVOICE' : 'QUOTE'
   const numberLabel = type === 'INVOICE' ? 'Invoice #' : 'Quote #'

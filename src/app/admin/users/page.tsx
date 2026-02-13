@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { defaultRolePermissions, normalizeRolePermissions, type RolePermissions } from '@/lib/rbac'
 import { PROJECT_STATUS_OPTIONS, projectStatusBadgeClass, type ProjectStatus } from '@/lib/project-status'
-import { cn } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 
 interface User {
   id: string
@@ -91,15 +91,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
 
 function formatLastLogin(value?: string | null): string {
   if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  const pad2 = (n: number) => String(n).padStart(2, '0')
-  const y = d.getFullYear()
-  const m = pad2(d.getMonth() + 1)
-  const day = pad2(d.getDate())
-  const hh = pad2(d.getHours())
-  const mm = pad2(d.getMinutes())
-  return `${y}-${m}-${day} ${hh}:${mm}`
+  return formatDateTime(value)
 }
 
 export default function UsersPage() {

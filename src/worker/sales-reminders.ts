@@ -17,6 +17,7 @@ import type { SalesInvoice, SalesQuote, SalesSettings } from '../lib/sales/types
 import { sumLineItemsSubtotal, sumLineItemsTax } from '../lib/sales/money'
 import { calcStripeGrossUpCents } from '../lib/sales/stripe-fees'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '../lib/sales/db-mappers'
+import { formatDate } from '../lib/utils'
 
 const DEBUG_SALES_REMINDERS = process.env.DEBUG_SALES_REMINDERS === 'true'
 
@@ -478,7 +479,7 @@ export async function processSalesReminders() {
               <strong>Invoice ${escapeHtml(String(inv.invoiceNumber || ''))}</strong>
             </div>
             ${project?.title ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(project.title)}</div>` : ''}
-            <div style="font-size: 14px; color: #374151; padding: 2px 0;">Due date: ${escapeHtml(String(dueYmd))}</div>
+            <div style="font-size: 14px; color: #374151; padding: 2px 0;">Due date: ${escapeHtml(formatDate(dueYmd))}</div>
           </div>
 
           <div style="text-align: center; margin: 28px 0;">
@@ -691,7 +692,7 @@ export async function processSalesReminders() {
             </p>
 
             <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-              Just a friendly reminder that <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong> expires on <strong>${escapeHtml(String(validUntil))}</strong>.
+              Just a friendly reminder that <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong> expires on <strong>${escapeHtml(formatDate(validUntil))}</strong>.
             </p>
 
             <div style="${cardStyle}">
@@ -699,7 +700,7 @@ export async function processSalesReminders() {
                 <strong>Quote ${escapeHtml(String(q.quoteNumber || ''))}</strong>
               </div>
               ${project?.title ? `<div style="font-size: 14px; color: #374151; padding: 2px 0;">Project: ${escapeHtml(project.title)}</div>` : ''}
-              <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(String(validUntil))}</div>
+              <div style="font-size: 14px; color: #374151; padding: 2px 0;">Valid until: ${escapeHtml(formatDate(validUntil))}</div>
             </div>
 
             <div style="text-align: center; margin: 28px 0;">
@@ -715,7 +716,7 @@ export async function processSalesReminders() {
 
         const sendResult = await sendEmail({
           to: toEmail,
-          subject: `Quote ${String(q.quoteNumber || '')} expires on ${String(validUntil)}`,
+          subject: `Quote ${String(q.quoteNumber || '')} expires on ${formatDate(validUntil)}`,
           html: htmlTracked,
           attachments: [attachment],
         })

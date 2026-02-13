@@ -11,6 +11,7 @@ import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiPatch, apiPost, apiDelete, apiFetch } from '@/lib/api-client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/components/AuthProvider'
+import { formatDate } from '@/lib/utils'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
 
@@ -564,7 +565,7 @@ export default function EditUserPage() {
                             <p className="font-medium">{pk.credentialName || 'Unnamed PassKey'}</p>
                             <p className="text-xs text-muted-foreground">
                               {pk.deviceType === 'multiDevice' ? 'Multi-device' : 'Single device'} •
-                              Last used: {new Date(pk.lastUsedAt).toLocaleDateString()}
+                              Last used: {formatDate(pk.lastUsedAt)}
                             </p>
                           </div>
                           <Button

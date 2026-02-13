@@ -6,6 +6,7 @@ import {
   sumLineItemsSubtotal,
   sumLineItemsTax,
 } from '@/lib/sales/money'
+import { formatDate } from '@/lib/utils'
 
 export type PdfPartyInfo = {
   clientName?: string
@@ -359,8 +360,8 @@ async function buildQuotePdfBytes(
 
   const metaLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
   metaLines.push({ text: `Quote #: ${quote.quoteNumber}`, size: 11, bold: true })
-  metaLines.push({ text: `Issue date: ${quote.issueDate}`, size: 10 })
-  if (quote.validUntil) metaLines.push({ text: `Valid until: ${quote.validUntil}`, size: 10 })
+  metaLines.push({ text: `Issue date: ${formatDate(quote.issueDate)}`, size: 10 })
+  if (quote.validUntil) metaLines.push({ text: `Valid until: ${formatDate(quote.validUntil)}`, size: 10 })
 
   const afterCompanyY = drawLeftBlock(companyLines, left, headerRowStartY)
   const afterMetaY = drawRightBlock(metaLines, right, headerRowStartY)
@@ -742,8 +743,8 @@ async function buildInvoicePdfBytes(
 
   const metaLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
   metaLines.push({ text: `Invoice #: ${invoice.invoiceNumber}`, size: 11, bold: true })
-  metaLines.push({ text: `Issue date: ${invoice.issueDate}`, size: 10 })
-  if (invoice.dueDate) metaLines.push({ text: `Due date: ${invoice.dueDate}`, size: 10 })
+  metaLines.push({ text: `Issue date: ${formatDate(invoice.issueDate)}`, size: 10 })
+  if (invoice.dueDate) metaLines.push({ text: `Due date: ${formatDate(invoice.dueDate)}`, size: 10 })
 
   const afterCompanyY = drawLeftBlock(companyLines, left, headerRowStartY)
   const afterMetaY = drawRightBlock(metaLines, right, headerRowStartY)

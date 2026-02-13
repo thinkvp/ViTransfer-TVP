@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Shield, AlertTriangle, Info, XCircle, Trash2, RefreshCw, ChevronRight, Unlock, Tag, ArrowUp, ArrowDown } from 'lucide-react'
 import { apiDelete, apiFetch } from '@/lib/api-client'
+import { formatDateTime } from '@/lib/utils'
 import {
   formatSecurityEventType,
   formatSecurityEventTypeWithDetails,
@@ -101,15 +102,11 @@ function getEmailFromSecurityEvent(event: SecurityEvent): string | null {
 }
 
 function formatEventDateTime24(isoString: string): string {
-  const d = new Date(isoString)
-  if (Number.isNaN(d.getTime())) return isoString
-  const pad2 = (n: number) => String(n).padStart(2, '0')
-  const y = d.getFullYear()
-  const m = pad2(d.getMonth() + 1)
-  const day = pad2(d.getDate())
-  const hh = pad2(d.getHours())
-  const mm = pad2(d.getMinutes())
-  return `${y}-${m}-${day} ${hh}:${mm}`
+  try {
+    return formatDateTime(isoString)
+  } catch {
+    return isoString
+  }
 }
 
 export default function SecurityEventsClient() {
@@ -443,7 +440,7 @@ export default function SecurityEventsClient() {
                             Failed attempts: {entry.count}
                           </div>
                           <div className="text-sm text-muted-foreground break-words">
-                            Locked until: {new Date(entry.lockoutUntil).toLocaleString()}
+                            Locked until: {formatDateTime(new Date(entry.lockoutUntil).toISOString())}
                           </div>
                         </div>
                         {entry.lockoutUntil > Date.now() ? (

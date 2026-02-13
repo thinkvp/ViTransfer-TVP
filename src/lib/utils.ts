@@ -78,8 +78,8 @@ export function formatDate(date: Date | string): string {
     return `${month}-${day}-${year}`
   }
 
-  // European format (dd-MM-yyyy)
-  if (timezone.startsWith('Europe/') || timezone.startsWith('Africa/')) {
+  // European/Australian format (dd-MM-yyyy)
+  if (timezone.startsWith('Europe/') || timezone.startsWith('Africa/') || timezone.startsWith('Australia/')) {
     return `${day}-${month}-${year}`
   }
 

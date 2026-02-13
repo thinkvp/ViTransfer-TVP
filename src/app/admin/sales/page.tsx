@@ -14,6 +14,7 @@ import type { InvoiceStatus, QuoteStatus, SalesSettings } from '@/lib/sales/type
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
+import { formatDate } from '@/lib/utils'
 
 function quoteStatusBadgeClass(status: QuoteStatus): string {
   switch (status) {
@@ -366,7 +367,7 @@ export default function SalesDashboardPage() {
                             '—'
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">{r.quote.issueDate}</td>
+                        <td className="py-2 pr-3 text-muted-foreground">{formatDate(r.quote.issueDate)}</td>
                         <td className="py-2 pr-3">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${quoteStatusBadgeClass(r.effectiveStatus)}`}>
                             {quoteStatusLabel(r.effectiveStatus)}
@@ -425,7 +426,7 @@ export default function SalesDashboardPage() {
                             '—'
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">{r.invoice.dueDate ?? '—'}</td>
+                        <td className="py-2 pr-3 text-muted-foreground">{r.invoice.dueDate ? formatDate(r.invoice.dueDate) : '—'}</td>
                         <td className="py-2 pr-3">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${invoiceStatusBadgeClass(r.effectiveStatus)}`}>
                             {invoiceStatusLabel(r.effectiveStatus)}
@@ -472,7 +473,7 @@ export default function SalesDashboardPage() {
                 <tbody>
                   {dashboardData.recentPayments.map((p) => (
                     <tr key={p.id} className="border-b border-border/60 last:border-b-0">
-                      <td className="py-2 pr-3 text-muted-foreground">{p.paymentDate}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">{formatDate(p.paymentDate)}</td>
                       <td className="py-2 pr-3 font-medium">${centsToDollars(p.amountCents)}</td>
                       <td className="py-2 pr-3 text-muted-foreground">
                         {p.clientId ? (

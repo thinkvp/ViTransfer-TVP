@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
 import { Plus, ArrowUp, ArrowDown, ChevronRight, Filter, Table2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { apiPatch } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { PROJECT_STATUS_OPTIONS, projectStatusDotClass, projectStatusLabel, type ProjectStatus } from '@/lib/project-status'
@@ -203,11 +203,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
 
   const formatProjectDate = (date: string | Date) => {
     try {
-      const d = new Date(date)
-      const yyyy = d.getFullYear()
-      const mm = String(d.getMonth() + 1).padStart(2, '0')
-      const dd = String(d.getDate()).padStart(2, '0')
-      return `${yyyy}-${mm}-${dd}`
+      return formatDate(date)
     } catch {
       return ''
     }

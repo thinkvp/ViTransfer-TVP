@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, T
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { useAuth } from '@/components/AuthProvider'
 import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { formatDate } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
@@ -87,7 +88,7 @@ function parseYmdToDateLocal(ymd: string): Date {
 
 function formatHumanDate(ymd: string): string {
   const dt = parseYmdToDateLocal(ymd)
-  return dt.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+  return formatDate(dt.toISOString())
 }
 
 function typeLabel(type: string): string {

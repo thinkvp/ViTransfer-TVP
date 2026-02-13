@@ -25,7 +25,7 @@ import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sal
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadInvoicePdf } from '@/lib/sales/pdf'
 import { ArrowDown, ArrowUp, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
 import { apiFetch } from '@/lib/api-client'
@@ -502,8 +502,8 @@ export default function SalesInvoicesPage() {
                               {row.invoice.invoiceNumber}
                             </Link>
                           </td>
-                          <td className="px-3 py-2 tabular-nums">{row.invoice.issueDate}</td>
-                          <td className="px-3 py-2 tabular-nums">{row.invoice.dueDate ?? '—'}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatDate(row.invoice.issueDate)}</td>
+                          <td className="px-3 py-2 tabular-nums">{row.invoice.dueDate ? formatDate(row.invoice.dueDate) : '—'}</td>
                           <td className="px-3 py-2">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${statusBadgeClass(row.effectiveStatus)}`}>
                               {statusLabel(row.effectiveStatus)}

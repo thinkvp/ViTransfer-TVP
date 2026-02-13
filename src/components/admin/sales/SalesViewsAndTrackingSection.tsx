@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api-client'
+import { formatDateTime } from '@/lib/utils'
 
 const MAX_ENTRIES = 30
 const PAGE_SIZE = 10
@@ -30,13 +31,6 @@ type TrackingPayload = {
     sentAt: string
     openedAt: string | null
   }>
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString()
 }
 
 export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { shareToken?: string | null; refreshKey?: unknown }) {
@@ -231,7 +225,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                       <tr key={e.id} className="border-b last:border-0">
                         <td className="py-2 pr-3 whitespace-nowrap">{e.recipientEmail}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(e.sentAt)}</td>
-                        <td className="py-2 whitespace-nowrap">{formatDateTime(e.openedAt)}</td>
+                        <td className="py-2 whitespace-nowrap">{e.openedAt ? formatDateTime(e.openedAt) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>

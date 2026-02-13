@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { apiFetch, apiPatch } from '@/lib/api-client'
+import { formatDate } from '@/lib/utils'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ClientFileUpload } from '@/components/ClientFileUpload'
 import { ClientFileList } from '@/components/ClientFileList'
@@ -891,7 +892,7 @@ export default function ClientDetailPage() {
                                   {q.quoteNumber}
                                 </Link>
                               </td>
-                              <td className="px-3 py-2 tabular-nums">{q.issueDate}</td>
+                              <td className="px-3 py-2 tabular-nums">{formatDate(q.issueDate)}</td>
                               <td className="px-3 py-2 text-muted-foreground">
                                 {q.projectId ? (
                                   <Link href={`/admin/projects/${q.projectId}`} className="hover:underline">
@@ -949,8 +950,8 @@ export default function ClientDetailPage() {
                                 {inv.invoiceNumber}
                               </Link>
                             </td>
-                            <td className="px-3 py-2 tabular-nums">{inv.issueDate}</td>
-                            <td className="px-3 py-2 tabular-nums">{inv.dueDate ?? '—'}</td>
+                            <td className="px-3 py-2 tabular-nums">{formatDate(inv.issueDate)}</td>
+                            <td className="px-3 py-2 tabular-nums">{inv.dueDate ? formatDate(inv.dueDate) : '—'}</td>
                             <td className="px-3 py-2 text-muted-foreground">
                               {inv.projectId ? (
                                 <Link href={`/admin/projects/${inv.projectId}`} className="hover:underline">
@@ -1000,7 +1001,7 @@ export default function ClientDetailPage() {
                       <tbody>
                         {sales.payments.slice(0, 10).map((p) => (
                           <tr key={p.id} className="border-b border-border/60 last:border-b-0">
-                            <td className="px-3 py-2 tabular-nums">{p.paymentDate}</td>
+                            <td className="px-3 py-2 tabular-nums">{formatDate(p.paymentDate)}</td>
                             <td className="px-3 py-2 font-medium">${centsToDollars(p.amountCents)}</td>
                             <td className="px-3 py-2 text-muted-foreground">{p.method || '—'}</td>
                             <td className="px-3 py-2 text-muted-foreground">
