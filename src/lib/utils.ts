@@ -74,16 +74,29 @@ export function formatDate(date: Date | string): string {
   const day = parts.find(p => p.type === 'day')?.value || ''
 
   // US/Americas format (MM-dd-yyyy)
+  // Covers: North/South America, Caribbean
   if (timezone.startsWith('America/') || timezone.startsWith('US/')) {
     return `${month}-${day}-${year}`
   }
 
-  // European/Australian format (dd-MM-yyyy)
-  if (timezone.startsWith('Europe/') || timezone.startsWith('Africa/') || timezone.startsWith('Australia/')) {
+  // European/Day-first format (dd-MM-yyyy)
+  // Covers: Europe, Africa, Australia, Pacific (NZ, Fiji, etc.), 
+  // Indian Ocean territories, Arctic (Svalbard), and most Atlantic islands
+  if (
+    timezone.startsWith('Europe/') || 
+    timezone.startsWith('Africa/') || 
+    timezone.startsWith('Australia/') ||
+    timezone.startsWith('Pacific/') ||
+    timezone.startsWith('Indian/') ||
+    timezone.startsWith('Arctic/') ||
+    timezone.startsWith('Atlantic/')
+  ) {
     return `${day}-${month}-${year}`
   }
 
-  // Asian/ISO format (yyyy-MM-dd) - also default
+  // Asian/ISO format (yyyy-MM-dd)
+  // Covers: Asia, Antarctica, and default for any other regions
+  // ISO 8601 format is widely used in East Asia and technical contexts
   return `${year}-${month}-${day}`
 }
 
