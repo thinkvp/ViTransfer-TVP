@@ -17,7 +17,7 @@ import { ClientFileList } from '@/components/ClientFileList'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
-import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
+import { centsToDollars, formatMoney, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
 import { fetchSalesRollup } from '@/lib/sales/admin-api'
 import type { SalesRollupPaymentRow, SalesRollupResponse } from '@/lib/sales/admin-api'
@@ -1002,7 +1002,7 @@ export default function ClientDetailPage() {
                         {sales.payments.slice(0, 10).map((p) => (
                           <tr key={p.id} className="border-b border-border/60 last:border-b-0">
                             <td className="px-3 py-2 tabular-nums">{formatDate(p.paymentDate)}</td>
-                            <td className="px-3 py-2 font-medium">${centsToDollars(p.amountCents)}</td>
+                            <td className="px-3 py-2 font-medium">{formatMoney(p.amountCents)}</td>
                             <td className="px-3 py-2 text-muted-foreground">{p.method || '—'}</td>
                             <td className="px-3 py-2 text-muted-foreground">
                               {p.invoiceId ? (

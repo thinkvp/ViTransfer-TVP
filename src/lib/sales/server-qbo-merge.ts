@@ -42,13 +42,19 @@ function stableLineItemId(prefix: string, index: number): string {
 
 function buildLineItems(input: unknown, opts: { idPrefix: string; taxRatePercent: number }): SalesLineItem[] {
   const lines = Array.isArray(input) ? input : []
-  return lines.map((ln: any, idx: number) => ({
-    id: stableLineItemId(opts.idPrefix, idx),
-    description: String(ln?.description || '').trim() || 'Line item',
-    quantity: Number.isFinite(Number(ln?.quantity)) && Number(ln?.quantity) > 0 ? Number(ln.quantity) : 1,
-    unitPriceCents: Number.isFinite(Number(ln?.unitPriceCents)) ? Math.round(Number(ln.unitPriceCents)) : 0,
-    taxRatePercent: opts.taxRatePercent,
-  }))
+  return lines.map((ln: any, idx: number) => {
+    // Use per-line taxable flag from QBO when available:
+    // taxable === false → 0% (non-taxable line)
+    // taxable === true / undefined → use the provided rate
+    const lineTaxRate = ln?.taxable === false ? 0 : opts.taxRatePercent
+    return {
+      id: stableLineItemId(opts.idPrefix, idx),
+      description: String(ln?.description || '').trim() || 'Line item',
+      quantity: Number.isFinite(Number(ln?.quantity)) && Number(ln?.quantity) > 0 ? Number(ln.quantity) : 1,
+      unitPriceCents: Number.isFinite(Number(ln?.unitPriceCents)) ? Math.round(Number(ln.unitPriceCents)) : 0,
+      taxRatePercent: lineTaxRate,
+    }
+  })
 }
 
 function coerceNonEmptyString(value: unknown): string | null {
@@ -90,7 +96,13 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
       const rawDocNumber = typeof q?.docNumber === 'string' && q.docNumber.trim() ? q.docNumber.trim() : `QBO-EST-${qboId}`
       const docNumber = ensurePrefix(rawDocNumber, 'EST-')
 
-      const itemsJson = buildLineItems(q?.lines, { idPrefix: `qbo-${qboId}`, taxRatePercent: (settings as any).taxRatePercent })
+      const qboRate = typeof q?.qboTaxRatePercent === 'number' && Number.isFinite(q.qboTaxRatePercent) ? q.qboTaxRatePercent : null
+      const effectiveTaxRate = qboRate ?? (settings as any).taxRatePercent
+      const itemsJson = buildLineItems(q?.lines, { idPrefix: `qbo-${qboId}`, taxRatePercent: effectiveTaxRate })
+      // If QBO doc has no tax rate at all and some lines are explicitly non-taxable,
+      // or if the global setting has tax disabled, mark as tax-disabled.
+      const qboHasTax = qboRate !== null && qboRate > 0
+      const docTaxEnabled = qboRate !== null ? qboHasTax : ((settings as any).taxEnabled !== false)
       const terms = coerceNonEmptyString(q?.customerMemo) ?? (settings as any).defaultTerms
 
       const existing = await (tx as any).salesQuote.findUnique({ where: { qboId } })
@@ -110,6 +122,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
             sentAt: null,
             remindersEnabled: true,
             lastExpiryReminderSentYmd: null,
+            taxEnabled: docTaxEnabled,
             qboId,
             version: 1,
           },
@@ -171,7 +184,11 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
       const rawDocNumber = typeof inv?.docNumber === 'string' && inv.docNumber.trim() ? inv.docNumber.trim() : `QBO-INV-${qboId}`
       const docNumber = ensurePrefix(rawDocNumber, 'INV-')
 
-      const itemsJson = buildLineItems(inv?.lines, { idPrefix: `qbo-inv-${qboId}`, taxRatePercent: (settings as any).taxRatePercent })
+      const qboRate = typeof inv?.qboTaxRatePercent === 'number' && Number.isFinite(inv.qboTaxRatePercent) ? inv.qboTaxRatePercent : null
+      const effectiveTaxRate = qboRate ?? (settings as any).taxRatePercent
+      const itemsJson = buildLineItems(inv?.lines, { idPrefix: `qbo-inv-${qboId}`, taxRatePercent: effectiveTaxRate })
+      const qboHasTax = qboRate !== null && qboRate > 0
+      const docTaxEnabled = qboRate !== null ? qboHasTax : ((settings as any).taxEnabled !== false)
       const terms = coerceNonEmptyString(inv?.customerMemo) ?? (settings as any).defaultTerms
 
       const existing = await (tx as any).salesInvoice.findUnique({ where: { qboId } })
@@ -190,6 +207,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
             sentAt: null,
             remindersEnabled: true,
             lastOverdueReminderSentYmd: null,
+            taxEnabled: docTaxEnabled,
             qboId,
             version: 1,
           },

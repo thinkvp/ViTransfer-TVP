@@ -1,5 +1,6 @@
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
-import type { SalesInvoice, SalesPayment, SalesQuote, SalesSettings } from '@/lib/sales/types'
+import type { SalesInvoice, SalesPayment, SalesQuote, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
+import { apiFetch } from '@/lib/api-client'
 
 export type SalesQuoteWithVersion = SalesQuote & { version: number }
 export type SalesInvoiceWithVersion = SalesInvoice & { version: number }
@@ -11,6 +12,22 @@ export async function fetchSalesSettings(): Promise<SalesSettings> {
 export async function saveSalesSettings(settings: SalesSettings): Promise<SalesSettings> {
   const res = await apiPost<{ ok: boolean; settings: SalesSettings }>('/api/admin/sales/settings', settings)
   return res.settings
+}
+
+export async function fetchTaxRates(): Promise<SalesTaxRate[]> {
+  const res = await apiJson<{ rates: SalesTaxRate[] }>('/api/admin/sales/tax-rates', { cache: 'no-store' })
+  return Array.isArray(res.rates) ? res.rates : []
+}
+
+export async function saveTaxRatesBulk(rates: SalesTaxRate[]): Promise<SalesTaxRate[]> {
+  const res = await apiFetch('/api/admin/sales/tax-rates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rates }),
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to save tax rates')
+  return Array.isArray(json?.rates) ? json.rates : []
 }
 
 export async function listSalesQuotes(input?: { projectId?: string; clientId?: string; limit?: number }): Promise<SalesQuoteWithVersion[]> {

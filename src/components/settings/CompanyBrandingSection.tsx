@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
@@ -16,6 +17,15 @@ interface CompanyBrandingSectionProps {
   companyLogoConfigured: boolean
   companyLogoUrl: string | null
   onCompanyLogoUploaded: () => void
+  darkLogoEnabled: boolean
+  setDarkLogoEnabled: (value: boolean) => void
+  darkLogoMode: 'NONE' | 'UPLOAD' | 'LINK'
+  setDarkLogoMode: (value: 'NONE' | 'UPLOAD' | 'LINK') => void
+  darkLogoLinkUrl: string
+  setDarkLogoLinkUrl: (value: string) => void
+  darkLogoConfigured: boolean
+  darkLogoUrl: string | null
+  onDarkLogoUploaded: () => void
   companyFaviconMode: 'NONE' | 'UPLOAD' | 'LINK'
   setCompanyFaviconMode: (value: 'NONE' | 'UPLOAD' | 'LINK') => void
   companyFaviconLinkUrl: string
@@ -23,12 +33,14 @@ interface CompanyBrandingSectionProps {
   companyFaviconConfigured: boolean
   companyFaviconUrl: string | null
   onCompanyFaviconUploaded: () => void
+  accentColor: string
+  setAccentColor: (value: string) => void
   show: boolean
   setShow: (value: boolean) => void
 }
 
-const COMPANY_LOGO_MAX_WIDTH = 300
-const COMPANY_LOGO_MAX_HEIGHT = 300
+const COMPANY_LOGO_MAX_WIDTH = 800
+const COMPANY_LOGO_MAX_HEIGHT = 800
 
 const FAVICON_MAX_WIDTH = 512
 const FAVICON_MAX_HEIGHT = 512
@@ -43,6 +55,15 @@ export function CompanyBrandingSection({
   companyLogoConfigured,
   companyLogoUrl,
   onCompanyLogoUploaded,
+  darkLogoEnabled,
+  setDarkLogoEnabled,
+  darkLogoMode,
+  setDarkLogoMode,
+  darkLogoLinkUrl,
+  setDarkLogoLinkUrl,
+  darkLogoConfigured,
+  darkLogoUrl,
+  onDarkLogoUploaded,
   companyFaviconMode,
   setCompanyFaviconMode,
   companyFaviconLinkUrl,
@@ -50,12 +71,18 @@ export function CompanyBrandingSection({
   companyFaviconConfigured,
   companyFaviconUrl,
   onCompanyFaviconUploaded,
+  accentColor,
+  setAccentColor,
   show,
   setShow,
 }: CompanyBrandingSectionProps) {
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
   const [logoSuccess, setLogoSuccess] = useState<string | null>(null)
+
+  const [darkLogoUploading, setDarkLogoUploading] = useState(false)
+  const [darkLogoError, setDarkLogoError] = useState<string | null>(null)
+  const [darkLogoSuccess, setDarkLogoSuccess] = useState<string | null>(null)
 
   const [faviconUploading, setFaviconUploading] = useState(false)
   const [faviconError, setFaviconError] = useState<string | null>(null)
@@ -70,7 +97,7 @@ export function CompanyBrandingSection({
   }, [])
 
   const linkHelpText = useMemo(() => {
-    return `Link directly to a PNG or JPG image (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px, <= 1MB). Use an https:// URL that is publicly accessible.`
+    return `Link directly to a PNG or JPG image (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px, <= 2MB). Use an https:// URL that is publicly accessible.`
   }, [])
 
   const faviconHelpText = useMemo(() => {
@@ -147,6 +174,48 @@ export function CompanyBrandingSection({
       setLogoError('Failed to upload logo')
     } finally {
       setLogoUploading(false)
+    }
+  }
+
+  async function handleDarkLogoSelected(file: File | null) {
+    setDarkLogoError(null)
+    setDarkLogoSuccess(null)
+    if (!file) return
+
+    const type = (file.type || '').toLowerCase()
+    if (type !== 'image/png' && type !== 'image/jpeg') {
+      setDarkLogoError('Invalid file type. Please upload a PNG or JPG.')
+      return
+    }
+
+    const dimCheck = await validateDimensions(file)
+    if (!dimCheck.ok) {
+      setDarkLogoError(dimCheck.error || 'Invalid image dimensions.')
+      return
+    }
+
+    try {
+      setDarkLogoUploading(true)
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await apiFetch('/api/settings/dark-logo', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setDarkLogoError(data?.error || 'Failed to upload dark logo')
+        return
+      }
+
+      setDarkLogoSuccess('Dark logo uploaded successfully.')
+      onDarkLogoUploaded()
+    } catch {
+      setDarkLogoError('Failed to upload dark logo')
+    } finally {
+      setDarkLogoUploading(false)
     }
   }
 
@@ -304,7 +373,7 @@ export function CompanyBrandingSection({
                   <img
                     src={companyLogoUrl}
                     alt="Company logo"
-                    style={{ width: 'auto', height: 'auto', maxWidth: 300 }}
+                    style={{ width: 'auto', height: 'auto', maxWidth: 300, maxHeight: 120 }}
                   />
                 </div>
               ) : null}
@@ -319,6 +388,95 @@ export function CompanyBrandingSection({
                   </Button>
                   {logoUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
                 </div>
+              ) : null}
+            </div>
+
+            <div className="pt-3 border-t space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="darkLogoToggle">Use separate Company Logo for Dark Mode</Label>
+                <Switch
+                  id="darkLogoToggle"
+                  checked={darkLogoEnabled}
+                  onCheckedChange={(checked) => {
+                    setDarkLogoEnabled(checked)
+                    setDarkLogoError(null)
+                    setDarkLogoSuccess(null)
+                  }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                When enabled, a separate logo will be used when the application is in dark mode. The Company Logo above will still be used for light mode and email communications.
+              </p>
+
+              {darkLogoEnabled ? (
+                <>
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={darkLogoMode}
+                    onChange={(e) => {
+                      setDarkLogoError(null)
+                      setDarkLogoSuccess(null)
+                      const value = e.target.value
+                      if (value === 'NONE' || value === 'UPLOAD' || value === 'LINK') {
+                        setDarkLogoMode(value)
+                      }
+                    }}
+                  >
+                    <option value="NONE">None</option>
+                    <option value="UPLOAD">Upload</option>
+                    <option value="LINK">Link</option>
+                  </select>
+
+                  {darkLogoMode === 'UPLOAD' ? (
+                    <div className="space-y-2">
+                      <Input
+                        id="darkLogo"
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        disabled={darkLogoUploading}
+                        onChange={(e) => handleDarkLogoSelected(e.target.files?.[0] || null)}
+                      />
+                      <p className="text-xs text-muted-foreground">{uploadHelpText}</p>
+                    </div>
+                  ) : null}
+
+                  {darkLogoMode === 'LINK' ? (
+                    <div className="space-y-2">
+                      <Input
+                        id="darkLogoLink"
+                        type="url"
+                        value={darkLogoLinkUrl}
+                        onChange={(e) => setDarkLogoLinkUrl(e.target.value)}
+                        placeholder="https://example.com/logo-dark.png"
+                      />
+                      <p className="text-xs text-muted-foreground">{linkHelpText}</p>
+                    </div>
+                  ) : null}
+
+                  {darkLogoMode !== 'NONE' && darkLogoUrl ? (
+                    <div className="mt-2 rounded-md border bg-background p-3 dark:bg-zinc-900">
+                      <p className="text-xs text-muted-foreground mb-2">Dark logo preview</p>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={darkLogoUrl}
+                        alt="Dark mode company logo"
+                        style={{ width: 'auto', height: 'auto', maxWidth: 300, maxHeight: 120 }}
+                      />
+                    </div>
+                  ) : null}
+
+                  {darkLogoError ? <p className="text-xs text-destructive">{darkLogoError}</p> : null}
+                  {darkLogoSuccess ? <p className="text-xs text-success">{darkLogoSuccess}</p> : null}
+
+                  {darkLogoMode !== 'NONE' ? (
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="secondary" disabled={darkLogoUploading} onClick={() => onDarkLogoUploaded()}>
+                        Refresh Preview
+                      </Button>
+                      {darkLogoUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
+                    </div>
+                  ) : null}
+                </>
               ) : null}
             </div>
 
@@ -392,6 +550,32 @@ export function CompanyBrandingSection({
                   {faviconUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
                 </div>
               ) : null}
+            </div>
+
+            <div className="pt-3 border-t space-y-2">
+              <Label htmlFor="accentColor">Accent colour</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  id="accentColor"
+                  value={accentColor || '#007AFF'}
+                  onChange={(e) => setAccentColor(e.target.value)}
+                  className="h-10 w-14 rounded-md border border-input bg-background cursor-pointer p-0.5"
+                />
+                <Input
+                  value={accentColor}
+                  onChange={(e) => setAccentColor(e.target.value)}
+                  placeholder="#007AFF"
+                  className="h-9 w-32 font-mono text-sm"
+                  maxLength={7}
+                />
+                {accentColor && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setAccentColor('')}>
+                    Reset
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Custom accent colour for buttons, links, toggles, and email templates. Leave empty for default blue.</p>
             </div>
           </div>
         </CardContent>

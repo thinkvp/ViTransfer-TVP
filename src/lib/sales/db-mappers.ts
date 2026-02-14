@@ -25,6 +25,7 @@ export type DbSalesQuote = {
   sentAt: Date | null
   remindersEnabled: boolean
   lastExpiryReminderSentYmd: string | null
+  taxEnabled: boolean
   version: number
   createdAt: Date
   updatedAt: Date
@@ -44,6 +45,7 @@ export type DbSalesInvoice = {
   sentAt: Date | null
   remindersEnabled: boolean
   lastOverdueReminderSentYmd: string | null
+  taxEnabled: boolean
   version: number
   createdAt: Date
   updatedAt: Date
@@ -102,6 +104,7 @@ export function salesQuoteFromDb(row: DbSalesQuote): SalesQuoteWithVersion {
     sentAt: row.sentAt ? iso(row.sentAt) : null,
     remindersEnabled: row.remindersEnabled,
     lastExpiryReminderSentYmd: row.lastExpiryReminderSentYmd,
+    taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
     version: Number.isFinite(Number(row.version)) ? Math.max(1, Math.trunc(Number(row.version))) : 1,
   }
 }
@@ -123,6 +126,7 @@ export function salesInvoiceFromDb(row: DbSalesInvoice): SalesInvoiceWithVersion
     sentAt: row.sentAt ? iso(row.sentAt) : null,
     remindersEnabled: row.remindersEnabled,
     lastOverdueReminderSentYmd: row.lastOverdueReminderSentYmd,
+    taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
     version: Number.isFinite(Number(row.version)) ? Math.max(1, Math.trunc(Number(row.version))) : 1,
   }
 }
@@ -151,6 +155,13 @@ export function salesSettingsFromDb(row: DbSalesSettings): SalesSettings {
     phone: row.phone ?? '',
     email: row.email ?? '',
     website: row.website ?? '',
+    businessRegistrationLabel: (row as any).businessRegistrationLabel ?? 'ABN',
+    currencySymbol: (row as any).currencySymbol ?? '$',
+    currencyCode: (row as any).currencyCode ?? 'AUD',
+    quoteLabel: (row as any).quoteLabel ?? 'QUOTE',
+    invoiceLabel: (row as any).invoiceLabel ?? 'INVOICE',
+    taxLabel: (row as any).taxLabel ?? '',
+    taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
     taxRatePercent: Number(row.taxRatePercent ?? 10),
     defaultQuoteValidDays: Number(row.defaultQuoteValidDays ?? 14),
     defaultInvoiceDueDays: Number(row.defaultInvoiceDueDays ?? 7),

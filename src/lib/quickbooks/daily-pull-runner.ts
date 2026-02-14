@@ -158,9 +158,38 @@ async function ensurePrimaryRecipient(clientId: string, email: string, name: str
   }
 }
 
-function normalizeEstimateLines(raw: any): Array<{ description: string; quantity: number; unitPriceCents: number }> {
+/**
+ * Extract the document-level tax rate percentage from QBO's TxnTaxDetail.
+ * Returns the rate (e.g. 10 for 10%) or null if not determinable.
+ */
+function extractQboDocTaxRatePercent(raw: any): number | null {
+  const taxDetail = raw?.TxnTaxDetail
+  if (!taxDetail) return null
+  const taxLines = Array.isArray(taxDetail?.TaxLine) ? taxDetail.TaxLine : []
+  for (const tl of taxLines) {
+    const pct = coerceNumber(tl?.TaxLineDetail?.TaxPercent)
+    if (pct !== null && Number.isFinite(pct) && pct > 0) return pct
+  }
+  return null
+}
+
+/**
+ * Check whether a QBO line item is taxable based on its TaxCodeRef.
+ * Returns true if taxable, false if explicitly non-taxable, null if unknown.
+ */
+function isQboLineTaxable(salesDetail: any): boolean | null {
+  const taxCodeRef = salesDetail?.TaxCodeRef?.value
+  if (typeof taxCodeRef !== 'string') return null
+  const v = taxCodeRef.trim().toUpperCase()
+  if (v === 'NON') return false
+  if (v === 'TAX') return true
+  // Numeric TaxCode IDs: assume taxable (QBO default behaviour)
+  return null
+}
+
+function normalizeEstimateLines(raw: any): Array<{ description: string; quantity: number; unitPriceCents: number; taxable?: boolean }> {
   const lines = Array.isArray(raw?.Line) ? raw.Line : []
-  const out: Array<{ description: string; quantity: number; unitPriceCents: number }> = []
+  const out: Array<{ description: string; quantity: number; unitPriceCents: number; taxable?: boolean }> = []
 
   for (const line of lines) {
     if (!line) continue
@@ -182,19 +211,22 @@ function normalizeEstimateLines(raw: any): Array<{ description: string; quantity
     if (detailType === 'SubTotalLineDetail') continue
     if (!description && (!amount || amount === 0)) continue
 
+    const taxable = salesDetail ? isQboLineTaxable(salesDetail) : null
+
     out.push({
       description: description || 'Line item',
       quantity: qty,
       unitPriceCents: dollarsToCentsSafe(unitPrice),
+      ...(taxable !== null ? { taxable } : {}),
     })
   }
 
   return out
 }
 
-function normalizeInvoiceLines(raw: any): Array<{ description: string; quantity: number; unitPriceCents: number }> {
+function normalizeInvoiceLines(raw: any): Array<{ description: string; quantity: number; unitPriceCents: number; taxable?: boolean }> {
   const lines = Array.isArray(raw?.Line) ? raw.Line : []
-  const out: Array<{ description: string; quantity: number; unitPriceCents: number }> = []
+  const out: Array<{ description: string; quantity: number; unitPriceCents: number; taxable?: boolean }> = []
 
   for (const line of lines) {
     if (!line) continue
@@ -216,10 +248,13 @@ function normalizeInvoiceLines(raw: any): Array<{ description: string; quantity:
     if (detailType === 'SubTotalLineDetail') continue
     if (!description && (!amount || amount === 0)) continue
 
+    const taxable = salesDetail ? isQboLineTaxable(salesDetail) : null
+
     out.push({
       description: description || 'Line item',
       quantity: qty,
       unitPriceCents: dollarsToCentsSafe(unitPrice),
+      ...(taxable !== null ? { taxable } : {}),
     })
   }
 
@@ -486,6 +521,7 @@ async function pullQuotes(lookbackDays: number, auth: Awaited<ReturnType<typeof 
         customerMemo: typeof e?.CustomerMemo?.value === 'string' ? e.CustomerMemo.value.trim() : null,
         privateNote: typeof e?.PrivateNote === 'string' ? e.PrivateNote.trim() : null,
         lines: normalizeEstimateLines(e),
+        qboTaxRatePercent: extractQboDocTaxRatePercent(e),
       }
     })
     .filter((q) => q.qboId)
@@ -595,6 +631,7 @@ async function pullInvoices(lookbackDays: number, auth: Awaited<ReturnType<typeo
         customerMemo: typeof inv?.CustomerMemo?.value === 'string' ? inv.CustomerMemo.value.trim() : null,
         privateNote: typeof inv?.PrivateNote === 'string' ? inv.PrivateNote.trim() : null,
         lines: normalizeInvoiceLines(inv),
+        qboTaxRatePercent: extractQboDocTaxRatePercent(inv),
       }
     })
     .filter((i) => i.qboId)

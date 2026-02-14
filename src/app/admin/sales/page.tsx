@@ -12,7 +12,7 @@ import {
 import type { SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { InvoiceStatus, QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
-import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
 import { formatDate } from '@/lib/utils'
 
@@ -85,6 +85,13 @@ export default function SalesDashboardPage() {
     phone: '',
     email: '',
     website: '',
+    businessRegistrationLabel: 'ABN',
+    currencySymbol: '$',
+    currencyCode: 'AUD',
+    quoteLabel: 'QUOTE',
+    invoiceLabel: 'INVOICE',
+    taxLabel: '',
+    taxEnabled: true,
     taxRatePercent: 10,
     defaultQuoteValidDays: 14,
     defaultInvoiceDueDays: 7,
@@ -290,7 +297,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Awaiting payment</p>
-                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(stats.openBalanceCents)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(stats.openBalanceCents, settings.currencySymbol)}</p>
               </div>
             </div>
 
@@ -300,7 +307,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Overdue</p>
-                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.overdueBalanceCents)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.overdueBalanceCents, settings.currencySymbol)}</p>
               </div>
             </div>
 
@@ -310,7 +317,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Paid &lt;30 days</p>
-                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.recentPaymentsTotalCents)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.recentPaymentsTotalCents, settings.currencySymbol)}</p>
               </div>
             </div>
 
@@ -320,7 +327,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Sales FY{salesOverview.financialYearLabel}</p>
-                <p className="text-base font-semibold tabular-nums truncate">${centsToDollars(salesOverview.totalSalesCents)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.totalSalesCents, settings.currencySymbol)}</p>
               </div>
             </div>
           </div>
@@ -373,7 +380,7 @@ export default function SalesDashboardPage() {
                             {quoteStatusLabel(r.effectiveStatus)}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium">${centsToDollars(r.totalCents)}</td>
+                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.totalCents, settings.currencySymbol)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -432,7 +439,7 @@ export default function SalesDashboardPage() {
                             {invoiceStatusLabel(r.effectiveStatus)}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium">${centsToDollars(r.balanceCents)}</td>
+                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.balanceCents, settings.currencySymbol)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -474,7 +481,7 @@ export default function SalesDashboardPage() {
                   {dashboardData.recentPayments.map((p) => (
                     <tr key={p.id} className="border-b border-border/60 last:border-b-0">
                       <td className="py-2 pr-3 text-muted-foreground">{formatDate(p.paymentDate)}</td>
-                      <td className="py-2 pr-3 font-medium">${centsToDollars(p.amountCents)}</td>
+                      <td className="py-2 pr-3 font-medium">{formatMoney(p.amountCents, settings.currencySymbol)}</td>
                       <td className="py-2 pr-3 text-muted-foreground">
                         {p.clientId ? (
                           <Link href={`/admin/clients/${encodeURIComponent(p.clientId)}`} className="hover:underline">

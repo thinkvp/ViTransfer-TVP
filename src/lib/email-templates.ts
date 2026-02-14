@@ -3,7 +3,7 @@
  * Clean, minimal, and easy to scan
  */
 
-import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, escapeHtml, firstWordName, renderEmailShell } from './email'
+import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, escapeHtml, firstWordName, renderEmailShell, renderEmailFooterNotice } from './email'
 import { formatTimecodeDisplay } from './timecode'
 
 interface NotificationData {
@@ -37,7 +37,10 @@ interface NotificationSummaryData {
   trackingToken?: string
   trackingPixelsEnabled?: boolean
   appDomain?: string
+  mainCompanyDomain?: string | null
   companyLogoUrl?: string
+  emailCustomFooterText?: string | null
+  accentColor?: string
 }
 
 interface AdminSummaryData {
@@ -45,6 +48,7 @@ interface AdminSummaryData {
   adminName: string
   period: string
   companyLogoUrl?: string
+  mainCompanyDomain?: string | null
   projects: Array<{
     projectTitle: string
     useFullTimecode: boolean
@@ -88,7 +92,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     if (n.type === 'PROJECT_APPROVED') {
       return `
         <div style="padding:10px 0;">
-          <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:${EMAIL_THEME.accent}; margin-bottom:4px;">Project approved</div>
+          <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:${data.accentColor || EMAIL_THEME.accent}; margin-bottom:4px;">Project approved</div>
           <div style="font-size:14px; color:#111827;">All videos are ready for download.</div>
         </div>
       `
@@ -132,6 +136,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     trackingToken: data.trackingToken,
     trackingPixelsEnabled: data.trackingPixelsEnabled,
     appDomain: data.appDomain,
+    mainCompanyDomain: data.mainCompanyDomain,
     footerNote: data.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
@@ -142,15 +147,16 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       </p>
       ${itemsHtml}
       <div style="text-align:center; margin:32px 0;">
-        <a href="${escapeHtml(data.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
+        <a href="${escapeHtml(data.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: data.accentColor })}">
           View Project
         </a>
       </div>
       ${data.unsubscribeUrl ? `
         <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="color:${EMAIL_THEME.accent}; text-decoration:underline;">Unsubscribe</a>
+          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="color:${data.accentColor || EMAIL_THEME.accent}; text-decoration:underline;">Unsubscribe</a>
         </p>
       ` : ''}
+      ${renderEmailFooterNotice(data.emailCustomFooterText)}
     `,
   }).trim()
 }
@@ -199,6 +205,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Client Activity Summary',
     subtitle: `${totalComments} ${totalComments === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
+    mainCompanyDomain: data.mainCompanyDomain,
     footerNote: data.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
@@ -228,6 +235,7 @@ export interface InternalCommentSummaryEmailData {
   recipientName?: string
   period: string
   companyLogoUrl?: string
+  mainCompanyDomain?: string | null
   projects: InternalCommentSummaryProject[]
 }
 
@@ -269,6 +277,7 @@ export function generateInternalCommentSummaryEmail(data: InternalCommentSummary
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Internal Comments Summary',
     subtitle: `${total} ${total === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
+    mainCompanyDomain: data.mainCompanyDomain,
     footerNote: data.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
@@ -290,6 +299,7 @@ export function generateInternalCommentSummaryEmail(data: InternalCommentSummary
 export interface ProjectInviteInternalUsersEmailData {
   companyName: string
   companyLogoUrl?: string
+  mainCompanyDomain?: string | null
   recipientName?: string
   projectTitle: string
   projectAdminUrl: string
@@ -334,6 +344,7 @@ export function generateProjectInviteInternalUsersEmail(data: ProjectInviteInter
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Project Invite',
     subtitle: data.projectTitle,
+    mainCompanyDomain: data.mainCompanyDomain,
     footerNote: data.companyName,
     bodyContent: `
       <p style="margin:0 0 16px; font-size:16px;">

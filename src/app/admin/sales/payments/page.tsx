@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { ClientOption, SalesInvoice } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
-import { centsToDollars, dollarsToCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { centsToDollars, dollarsToCents, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import {
@@ -41,6 +41,7 @@ export default function SalesPaymentsPage() {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
   const [payments, setPayments] = useState<SalesRollupPaymentRow[]>([])
   const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
+  const [currencySymbol, setCurrencySymbol] = useState<string>('$')
   const [rollup, setRollup] = useState<SalesRollupResponse | null>(null)
 
   const [filterSelected, setFilterSelected] = useState<Set<PaymentFilter>>(new Set())
@@ -88,6 +89,7 @@ export default function SalesPaymentsPage() {
 
         if (cancelled) return
         setTaxRatePercent(settings.taxRatePercent)
+        setCurrencySymbol(settings.currencySymbol ?? '$')
         setInvoices(r.invoices)
         setPayments(r.payments)
         setRollup(r)
@@ -320,7 +322,7 @@ export default function SalesPaymentsPage() {
                   const bal = invoiceTotals.get(inv.id)?.balanceCents ?? 0
                   return (
                     <SelectItem key={inv.id} value={inv.id}>
-                      {inv.invoiceNumber} — ${centsToDollars(bal)}
+                      {inv.invoiceNumber} — {formatMoney(bal, currencySymbol)}
                     </SelectItem>
                   )
                 })}
@@ -485,7 +487,7 @@ export default function SalesPaymentsPage() {
                       visiblePayments.map((p) => (
                         <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                           <td className="px-3 py-2 tabular-nums">{formatDate(p.paymentDate)}</td>
-                          <td className="px-3 py-2 tabular-nums font-medium">${centsToDollars(p.amountCents)}</td>
+                          <td className="px-3 py-2 tabular-nums font-medium">{formatMoney(p.amountCents, currencySymbol)}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {p.method || '—'}{p.excludeFromInvoiceBalance ? ' (reconciled)' : ''}
                           </td>

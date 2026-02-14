@@ -203,6 +203,14 @@ export async function GET(
         select: {
           companyName: true,
           defaultPreviewResolution: true,
+          companyLogoMode: true,
+          companyLogoPath: true,
+          companyLogoUrl: true,
+          mainCompanyDomain: true,
+          darkLogoEnabled: true,
+          darkLogoMode: true,
+          darkLogoPath: true,
+          darkLogoUrl: true,
         },
       }),
       getPrimaryRecipient(project.id)
@@ -306,6 +314,19 @@ export async function GET(
       settings: {
         companyName: globalSettings?.companyName || 'Studio',
         defaultPreviewResolution: globalSettings?.defaultPreviewResolution || '720p',
+        hasLogo: globalSettings?.companyLogoMode === 'UPLOAD'
+          ? Boolean(globalSettings.companyLogoPath)
+          : globalSettings?.companyLogoMode === 'LINK'
+            ? Boolean(globalSettings.companyLogoUrl)
+            : false,
+        hasDarkLogo: globalSettings?.darkLogoEnabled
+          ? (globalSettings.darkLogoMode === 'UPLOAD'
+            ? Boolean(globalSettings.darkLogoPath)
+            : globalSettings.darkLogoMode === 'LINK'
+              ? Boolean(globalSettings.darkLogoUrl)
+              : false)
+          : false,
+        mainCompanyDomain: globalSettings?.mainCompanyDomain || null,
       },
     }
 

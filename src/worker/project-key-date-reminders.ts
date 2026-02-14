@@ -34,7 +34,6 @@ export async function processProjectKeyDateReminders() {
           slug: true,
           companyName: true,
           recipients: { select: { id: true, email: true, name: true } },
-          assignedUsers: { select: { user: { select: { id: true, email: true, name: true } } } },
         },
       },
     },
@@ -63,12 +62,17 @@ export async function processProjectKeyDateReminders() {
 
     const emails = new Set<string>()
 
-    // Assigned users
-    for (const au of kd.project.assignedUsers || []) {
-      const u = (au as any)?.user
-      if (!u?.email) continue
-      if (!userIds.includes(String(u.id))) continue
-      emails.add(String(u.email).trim())
+    // Resolve user emails directly from the User table so that ANY admin/user
+    // selected as a reminder target is included — not just users who happen to
+    // be assigned to this specific project.
+    if (userIds.length > 0) {
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { email: true },
+      })
+      for (const u of users) {
+        if (u.email) emails.add(String(u.email).trim())
+      }
     }
 
     // Project recipients

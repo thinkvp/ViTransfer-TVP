@@ -24,6 +24,10 @@ interface Settings {
   companyFaviconMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
   companyFaviconPath?: string | null
   companyFaviconUrl?: string | null
+  darkLogoEnabled?: boolean | null
+  darkLogoMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
+  darkLogoPath?: string | null
+  darkLogoUrl?: string | null
   smtpServer: string | null
   smtpPort: number | null
   smtpUsername: string | null
@@ -127,14 +131,21 @@ export default function GlobalSettingsPage() {
   const [companyFaviconVersion, setCompanyFaviconVersion] = useState(0)
   const [companyFaviconMode, setCompanyFaviconMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
   const [companyFaviconUrl, setCompanyFaviconUrl] = useState('')
+  const [darkLogoEnabled, setDarkLogoEnabled] = useState(false)
+  const [darkLogoVersion, setDarkLogoVersion] = useState(0)
+  const [darkLogoMode, setDarkLogoMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
+  const [darkLogoUrl, setDarkLogoUrl] = useState('')
+  const [accentColor, setAccentColor] = useState('')
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
   const [smtpPassword, setSmtpPassword] = useState('')
   const [emailTrackingPixelsEnabled, setEmailTrackingPixelsEnabled] = useState(true)
+  const [emailCustomFooterText, setEmailCustomFooterText] = useState<string | null>(null)
   const [smtpFromAddress, setSmtpFromAddress] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
   const [appDomain, setAppDomain] = useState('')
+  const [mainCompanyDomain, setMainCompanyDomain] = useState('')
   const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('720p')
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
   const [defaultTimelinePreviewsEnabled, setDefaultTimelinePreviewsEnabled] = useState(false)
@@ -254,14 +265,24 @@ export default function GlobalSettingsPage() {
           setCompanyFaviconMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
         }
         setCompanyFaviconUrl(data.companyFaviconUrl || '')
+        setDarkLogoEnabled(data.darkLogoEnabled || false)
+        setDarkLogoVersion(Date.now())
+        {
+          const value = data.darkLogoMode
+          setDarkLogoMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
+        }
+        setDarkLogoUrl(data.darkLogoUrl || '')
+        setAccentColor(data.accentColor || '')
         setSmtpServer(data.smtpServer || '')
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
         setSmtpPassword(data.smtpPassword || '')
         setEmailTrackingPixelsEnabled(data.emailTrackingPixelsEnabled ?? true)
+        setEmailCustomFooterText(data.emailCustomFooterText ?? null)
         setSmtpFromAddress(data.smtpFromAddress || '')
         setSmtpSecure(data.smtpSecure || 'STARTTLS')
         setAppDomain(data.appDomain || '')
+        setMainCompanyDomain(data.mainCompanyDomain || '')
         setDefaultPreviewResolution(data.defaultPreviewResolution || '720p')
         setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
         setDefaultTimelinePreviewsEnabled(data.defaultTimelinePreviewsEnabled ?? false)
@@ -468,14 +489,20 @@ export default function GlobalSettingsPage() {
         companyLogoUrl: companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null,
         companyFaviconMode: companyFaviconMode || 'NONE',
         companyFaviconUrl: companyFaviconMode === 'LINK' ? (companyFaviconUrl || null) : null,
+        darkLogoEnabled,
+        darkLogoMode: darkLogoEnabled ? (darkLogoMode || 'NONE') : 'NONE',
+        darkLogoUrl: darkLogoEnabled && darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null,
+        accentColor: accentColor.trim() || null,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
         smtpPassword: smtpPassword || null,
         emailTrackingPixelsEnabled,
+        emailCustomFooterText,
         smtpFromAddress: smtpFromAddress || null,
         smtpSecure: smtpSecure || 'STARTTLS',
         appDomain: appDomain || null,
+        mainCompanyDomain: mainCompanyDomain || null,
         defaultPreviewResolution: defaultPreviewResolution || '720p',
         defaultWatermarkEnabled: defaultWatermarkEnabled,
         defaultTimelinePreviewsEnabled: defaultTimelinePreviewsEnabled,
@@ -558,14 +585,19 @@ export default function GlobalSettingsPage() {
         setCompanyLogoUrl(refreshedData.companyLogoUrl || '')
         setCompanyFaviconMode((refreshedData.companyFaviconMode as any) || 'NONE')
         setCompanyFaviconUrl(refreshedData.companyFaviconUrl || '')
+        setDarkLogoEnabled(refreshedData.darkLogoEnabled || false)
+        setDarkLogoMode((refreshedData.darkLogoMode as any) || 'NONE')
+        setDarkLogoUrl(refreshedData.darkLogoUrl || '')
         setSmtpServer(refreshedData.smtpServer || '')
         setSmtpPort(refreshedData.smtpPort?.toString() || '587')
         setSmtpUsername(refreshedData.smtpUsername || '')
         setSmtpPassword(refreshedData.smtpPassword || '')
         setEmailTrackingPixelsEnabled(refreshedData.emailTrackingPixelsEnabled ?? true)
+        setEmailCustomFooterText(refreshedData.emailCustomFooterText ?? null)
         setSmtpFromAddress(refreshedData.smtpFromAddress || '')
         setSmtpSecure(refreshedData.smtpSecure || 'STARTTLS')
         setAppDomain(refreshedData.appDomain || '')
+        setMainCompanyDomain(refreshedData.mainCompanyDomain || '')
         setDefaultPreviewResolution(refreshedData.defaultPreviewResolution || '720p')
         setDefaultWatermarkEnabled(refreshedData.defaultWatermarkEnabled ?? true)
         setDefaultTimelinePreviewsEnabled(refreshedData.defaultTimelinePreviewsEnabled ?? false)
@@ -747,6 +779,31 @@ export default function GlobalSettingsPage() {
                 ? (settings?.companyLogoPath ? `/api/branding/logo?v=${companyLogoVersion}` : null)
                 : (companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null)
             }
+            darkLogoEnabled={darkLogoEnabled}
+            setDarkLogoEnabled={setDarkLogoEnabled}
+            darkLogoMode={darkLogoMode}
+            setDarkLogoMode={setDarkLogoMode}
+            darkLogoLinkUrl={darkLogoUrl}
+            setDarkLogoLinkUrl={setDarkLogoUrl}
+            darkLogoConfigured={darkLogoMode === 'UPLOAD' && !!settings?.darkLogoPath}
+            darkLogoUrl={
+              darkLogoMode === 'UPLOAD'
+                ? (settings?.darkLogoPath ? `/api/branding/dark-logo?v=${darkLogoVersion}` : null)
+                : (darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null)
+            }
+            onDarkLogoUploaded={() => {
+              setDarkLogoVersion(Date.now())
+              apiFetch('/api/settings')
+                .then((r) => r.ok ? r.json() : null)
+                .then((d) => {
+                  if (!d) return
+                  setSettings(d)
+                  setDarkLogoEnabled(!!d.darkLogoEnabled)
+                  setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
+                  setDarkLogoUrl(d.darkLogoUrl || '')
+                })
+                .catch(() => {})
+            }}
             companyFaviconMode={companyFaviconMode}
             setCompanyFaviconMode={setCompanyFaviconMode}
             companyFaviconLinkUrl={companyFaviconUrl}
@@ -770,6 +827,9 @@ export default function GlobalSettingsPage() {
                   setCompanyLogoUrl(d.companyLogoUrl || '')
                   setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
                   setCompanyFaviconUrl(d.companyFaviconUrl || '')
+                  setDarkLogoEnabled(!!d.darkLogoEnabled)
+                  setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
+                  setDarkLogoUrl(d.darkLogoUrl || '')
                 })
                 .catch(() => {})
             }}
@@ -786,6 +846,8 @@ export default function GlobalSettingsPage() {
                 })
                 .catch(() => {})
             }}
+            accentColor={accentColor}
+            setAccentColor={setAccentColor}
             show={showCompanyBranding}
             setShow={setShowCompanyBranding}
           />
@@ -793,6 +855,8 @@ export default function GlobalSettingsPage() {
           <DomainConfigurationSection
             appDomain={appDomain}
             setAppDomain={setAppDomain}
+            mainCompanyDomain={mainCompanyDomain}
+            setMainCompanyDomain={setMainCompanyDomain}
             show={showDomainConfiguration}
             setShow={setShowDomainConfiguration}
           />
@@ -808,6 +872,8 @@ export default function GlobalSettingsPage() {
             setSmtpPassword={setSmtpPassword}
             emailTrackingPixelsEnabled={emailTrackingPixelsEnabled}
             setEmailTrackingPixelsEnabled={setEmailTrackingPixelsEnabled}
+            emailCustomFooterText={emailCustomFooterText}
+            setEmailCustomFooterText={setEmailCustomFooterText}
             smtpFromAddress={smtpFromAddress}
             setSmtpFromAddress={setSmtpFromAddress}
             smtpSecure={smtpSecure}

@@ -216,6 +216,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const html = generateProjectInviteInternalUsersEmail({
           companyName: emailSettings.companyName || 'ViTransfer',
           companyLogoUrl: companyLogoUrl || undefined,
+          mainCompanyDomain: emailSettings.mainCompanyDomain,
           recipientName: recipient.name || undefined,
           projectTitle: project.title,
           projectAdminUrl,
@@ -368,6 +369,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               trackingPixelsEnabled,
               appDomain,
               companyLogoUrl: companyLogoUrl || undefined,
+              mainCompanyDomain: emailSettings.mainCompanyDomain,
+              emailCustomFooterText: emailSettings.emailCustomFooterText,
+              accentColor: emailSettings.accentColor || undefined,
             })
 
             const sendResult = await sendEmail({

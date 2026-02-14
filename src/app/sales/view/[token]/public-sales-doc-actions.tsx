@@ -21,6 +21,7 @@ type Props = {
   payLabel?: string | null
   processingFeeCents?: number | null
   processingFeeCurrency?: string | null
+  currencySymbol?: string | null
 }
 
 export default function PublicSalesDocActions(props: Props) {
@@ -116,9 +117,10 @@ export default function PublicSalesDocActions(props: Props) {
 
   const payLabel = typeof props.payLabel === 'string' && props.payLabel.trim() ? props.payLabel.trim() : null
   const feeCents = typeof props.processingFeeCents === 'number' && Number.isFinite(props.processingFeeCents) ? Math.max(0, Math.trunc(props.processingFeeCents)) : 0
-  const feeCurrency = typeof props.processingFeeCurrency === 'string' && props.processingFeeCurrency.trim() ? props.processingFeeCurrency.trim().toUpperCase() : 'AUD'
+  const feeCurrency = typeof props.processingFeeCurrency === 'string' && props.processingFeeCurrency.trim() ? props.processingFeeCurrency.trim().toUpperCase() : ''
+  const feeCurrencySymbol = typeof props.currencySymbol === 'string' && props.currencySymbol.trim() ? props.currencySymbol.trim() : '$'
   const feeText = feeCents > 0
-    ? `Attracts ${feeCurrency === 'AUD' ? 'A$' : `${feeCurrency} `}${(feeCents / 100).toFixed(2)} in card processing fees`
+    ? `Attracts ${feeCurrencySymbol}${(feeCents / 100).toFixed(2)} in card processing fees`
     : null
 
   return (
@@ -159,7 +161,7 @@ export default function PublicSalesDocActions(props: Props) {
           type="button"
           onClick={() => void onDownload()}
           disabled={downloading}
-          className="bg-blue-600 hover:bg-blue-700 text-white"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           <Download className="h-4 w-4 mr-2" />
           {downloading ? 'Preparing…' : 'Download PDF'}

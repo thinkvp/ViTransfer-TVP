@@ -377,6 +377,7 @@ async function renderPasswordResetEmail({
   const html = renderEmailShell({
     companyName,
     companyLogoUrl,
+    mainCompanyDomain: settings?.mainCompanyDomain,
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Password Reset Request',
     bodyContent: `
@@ -389,7 +390,7 @@ async function renderPasswordResetEmail({
       </p>
 
       <div style="text-align: center; margin: 0 0 24px 0;">
-        <a href="${escapeHtml(resetUrl)}" style="${emailPrimaryButtonStyle()}">
+        <a href="${escapeHtml(resetUrl)}" style="${emailPrimaryButtonStyle({ accent: settings.accentColor || undefined })}">
           Reset Password
         </a>
       </div>
@@ -408,7 +409,7 @@ async function renderPasswordResetEmail({
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textSubtle}; line-height: 1.5;">
         If the button doesn't work, copy and paste this link into your browser:<br />
-        <a href="${escapeHtml(resetUrl)}" style="color: ${EMAIL_THEME.accent}; word-break: break-all;">
+        <a href="${escapeHtml(resetUrl)}" style="color: ${settings.accentColor || EMAIL_THEME.accent}; word-break: break-all;">
           ${escapeHtml(resetUrl)}
         </a>
       </p>

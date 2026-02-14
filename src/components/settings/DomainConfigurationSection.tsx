@@ -6,11 +6,13 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 interface DomainConfigurationSectionProps {
   appDomain: string
   setAppDomain: (value: string) => void
+  mainCompanyDomain: string
+  setMainCompanyDomain: (value: string) => void
   show: boolean
   setShow: (value: boolean) => void
 }
 
-export function DomainConfigurationSection({ appDomain, setAppDomain, show, setShow }: DomainConfigurationSectionProps) {
+export function DomainConfigurationSection({ appDomain, setAppDomain, mainCompanyDomain, setMainCompanyDomain, show, setShow }: DomainConfigurationSectionProps) {
   return (
     <Card className="border-border">
       <CardHeader
@@ -45,6 +47,20 @@ export function DomainConfigurationSection({ appDomain, setAppDomain, show, setS
             />
             <p className="text-xs text-muted-foreground">
               Include protocol (https://) and no trailing slash. Used for generating share links.
+            </p>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <Label htmlFor="mainCompanyDomain">Main Company Domain</Label>
+            <Input
+              id="mainCompanyDomain"
+              type="text"
+              value={mainCompanyDomain}
+              onChange={(e) => setMainCompanyDomain(e.target.value)}
+              placeholder="e.g., https://yourcompany.com"
+            />
+            <p className="text-xs text-muted-foreground">
+              If set, your company logo will become a clickable link to this URL on share pages, login pages, and email templates.
             </p>
           </div>
         </CardContent>

@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer'
+﻿import nodemailer from 'nodemailer'
 import { prisma } from './db'
 import { decrypt } from './encryption'
 import { normalizeHexDisplayColor } from './display-color'
@@ -18,21 +18,38 @@ export const EMAIL_THEME = {
   border: '#e5e7eb',
 } as const
 
-const EMAIL_SELF_HOST_NOTICE_HTML =
+const EMAIL_SELF_HOST_NOTICE_DEFAULT =
   'We proudly self-host ViTransfer on our private server. The server may not be accessible during power or nbn outages.  If you are unable to access the server, please contact us for assistance.'
+
+/**
+ * Render the optional client-facing footer notice.
+ * - `null`  -> fall back to the built-in default text
+ * - `''`    -> hide the notice entirely
+ * - string  -> use the custom text
+ */
+export function renderEmailFooterNotice(customText: string | null | undefined): string {
+  const text = customText === null || customText === undefined
+    ? EMAIL_SELF_HOST_NOTICE_DEFAULT
+    : customText.trim()
+  if (!text) return ''
+  return `<p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">${escapeHtml(text)}</p>`
+}
 
 export function emailPrimaryButtonStyle({
   fontSizePx = 15,
   padding = '14px 32px',
   borderRadiusPx = 8,
+  accent,
 }: {
   fontSizePx?: number
   padding?: string
   borderRadiusPx?: number
+  accent?: string
 } = {}): string {
+  const bg = accent || EMAIL_THEME.accent
   return [
     'display:inline-block',
-    `background:${EMAIL_THEME.accent}`,
+    `background:${bg}`,
     'color:#ffffff',
     'text-decoration:none',
     `padding:${padding}`,
@@ -133,6 +150,7 @@ export interface EmailShellOptions {
   footerNote?: string
   headerGradient: string
   companyLogoUrl?: string | null
+  mainCompanyDomain?: string | null
   trackingToken?: string
   trackingPixelsEnabled?: boolean
   trackingPixelPath?: string
@@ -195,6 +213,7 @@ export function renderEmailShell({
   footerNote,
   headerGradient,
   companyLogoUrl,
+  mainCompanyDomain,
   trackingToken,
   trackingPixelsEnabled,
   trackingPixelPath,
@@ -241,11 +260,13 @@ export function renderEmailShell({
     ${companyLogoUrl ? `
     <!-- Logo -->
     <div style="padding: 24px 24px 0; text-align: center; background: #ffffff;">
+      ${mainCompanyDomain ? `<a href="${escapeHtml(mainCompanyDomain)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">` : ''}
       <img
         src="${escapeHtml(companyLogoUrl)}"
         alt="${escapeHtml(companyName)} logo"
         style="display:block; margin:0 auto; width:auto; max-width:300px; height:auto; border:0; outline:none; text-decoration:none;"
       />
+      ${mainCompanyDomain ? `</a>` : ''}
       <div style="height: 20px; line-height: 20px;">&nbsp;</div>
     </div>
     ` : ''}
@@ -258,7 +279,9 @@ export function renderEmailShell({
     <!-- Footer -->
     <div style="background: #f9fafb; padding: 20px 24px; border-top: 1px solid #e5e7eb; text-align: center;">
       <p style="margin: 0; font-size: 13px; color: #9ca3af;">
-        ${escapeHtml(footerNote || companyName)}
+        ${mainCompanyDomain
+          ? `<a href="${escapeHtml(mainCompanyDomain)}" target="_blank" rel="noopener noreferrer" style="color: #9ca3af; text-decoration: none;">${escapeHtml(footerNote || companyName)}</a>`
+          : escapeHtml(footerNote || companyName)}
       </p>
     </div>
 
@@ -277,11 +300,14 @@ interface EmailSettings {
   smtpFromAddress: string | null
   smtpSecure: string | null
   appDomain: string | null
+  mainCompanyDomain: string | null
   companyName: string | null
   companyLogoMode: 'NONE' | 'UPLOAD' | 'LINK' | null
   companyLogoPath: string | null
   companyLogoUrl: string | null
   emailTrackingPixelsEnabled: boolean | null
+  emailCustomFooterText: string | null
+  accentColor: string | null
   updatedAt?: Date
 }
 
@@ -303,7 +329,10 @@ async function resolveEmailBranding(
 ): Promise<{
   companyName: string
   companyLogoUrl: string | null
+  mainCompanyDomain: string | null
+  emailCustomFooterText: string | null
   trackingPixelsEnabled: boolean
+  accentColor: string
   appDomain?: string
   settings?: EmailSettings
 }> {
@@ -311,7 +340,10 @@ async function resolveEmailBranding(
     return {
       companyName: overrides.companyName,
       companyLogoUrl: overrides.companyLogoUrl ?? null,
+      mainCompanyDomain: null,
+      emailCustomFooterText: null,
       trackingPixelsEnabled: overrides.trackingPixelsEnabled,
+      accentColor: EMAIL_THEME.accent,
       appDomain: overrides.appDomain,
     }
   }
@@ -329,7 +361,10 @@ async function resolveEmailBranding(
   return {
     companyName,
     companyLogoUrl,
+    mainCompanyDomain: settings.mainCompanyDomain || null,
+    emailCustomFooterText: settings.emailCustomFooterText || null,
     trackingPixelsEnabled: overrides?.trackingPixelsEnabled ?? (settings.emailTrackingPixelsEnabled ?? true),
+    accentColor: settings.accentColor || EMAIL_THEME.accent,
     appDomain: overrides?.appDomain || settings.appDomain || undefined,
     settings,
   }
@@ -366,11 +401,14 @@ export async function getEmailSettings(): Promise<EmailSettings> {
       smtpFromAddress: true,
       smtpSecure: true,
       appDomain: true,
+      mainCompanyDomain: true,
       companyName: true,
       companyLogoMode: true,
       companyLogoPath: true,
       companyLogoUrl: true,
       emailTrackingPixelsEnabled: true,
+      emailCustomFooterText: true,
+      accentColor: true,
       updatedAt: true,
     }
   })
@@ -387,11 +425,14 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     smtpFromAddress: null,
     smtpSecure: null,
     appDomain: null,
+    mainCompanyDomain: null,
     companyName: null,
     companyLogoMode: null,
     companyLogoPath: null,
     companyLogoUrl: null,
     emailTrackingPixelsEnabled: null,
+    emailCustomFooterText: null,
+    accentColor: null,
     updatedAt: undefined,
   }
   settingsCacheTime = now
@@ -544,6 +585,7 @@ export async function renderNewVersionEmail({
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
@@ -559,7 +601,7 @@ export async function renderNewVersionEmail({
           <strong>${escapeHtml(projectTitle)}</strong>
         </div>
         <div style="font-size: 14px; color: #374151; padding: 4px 0;">
-          ${escapeHtml(videoName)} <span style="color: ${EMAIL_THEME.accent};">${escapeHtml(versionLabel)}</span>
+          ${escapeHtml(videoName)} <span style="color: ${resolved.accentColor};">${escapeHtml(versionLabel)}</span>
         </div>
       </div>
 
@@ -579,9 +621,7 @@ export async function renderNewVersionEmail({
         </a>
       </div>
 
-      <p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        ${EMAIL_SELF_HOST_NOTICE_HTML}
-      </p>
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
     `,
   })
 
@@ -654,7 +694,7 @@ export async function renderNewAlbumReadyEmail({
   const subject = `New Album Available: ${projectTitle}`
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -667,6 +707,7 @@ export async function renderNewAlbumReadyEmail({
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
@@ -702,9 +743,7 @@ export async function renderNewAlbumReadyEmail({
         </a>
       </div>
 
-      <p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        ${EMAIL_SELF_HOST_NOTICE_HTML}
-      </p>
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
     `,
   })
 
@@ -779,7 +818,7 @@ export async function renderProjectApprovedEmail({
     : `${approvedVideos[0]?.name || 'Your video'} has been approved`
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -812,6 +851,7 @@ export async function renderProjectApprovedEmail({
     subtitle: statusMessage,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
@@ -828,7 +868,7 @@ export async function renderProjectApprovedEmail({
           <div style="${cardTitleStyle}">Approved Videos</div>
           ${approvedVideos.map(v => `
             <div style="font-size: 15px; color: #374151; padding: 4px 0;">
-              <span style="display: inline-block; width: 6px; height: 6px; background: ${EMAIL_THEME.accent}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+              <span style="display: inline-block; width: 6px; height: 6px; background: ${resolved.accentColor}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
             </div>
           `).join('')}
         </div>
@@ -840,9 +880,7 @@ export async function renderProjectApprovedEmail({
         </a>
       </div>
 
-      <p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        ${EMAIL_SELF_HOST_NOTICE_HTML}
-      </p>
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
     `,
   })
 
@@ -918,10 +956,10 @@ export async function renderCommentNotificationEmail({
   const timecodeText = timecode ? `at ${timecode}` : ''
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
-  const calloutStyle = emailCalloutStyle({ borderLeftPx: 3, accentColor: displayColor || null })
+  const calloutStyle = emailCalloutStyle({ borderLeftPx: 0, accentColor: displayColor || null })
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
@@ -932,6 +970,7 @@ export async function renderCommentNotificationEmail({
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
@@ -947,7 +986,7 @@ export async function renderCommentNotificationEmail({
           <strong>${escapeHtml(projectTitle)}</strong>
         </div>
         <div style="font-size: 14px; color: #6b7280;">
-          ${escapeHtml(videoName)} <span style="color: #9ca3af;">${escapeHtml(versionLabel)}</span>${timecodeText ? ` <span style="color: #9ca3af;">• ${timecodeText}</span>` : ''}
+          ${escapeHtml(videoName)} <span style="color: #9ca3af;">${escapeHtml(versionLabel)}</span>${timecodeText ? ` <span style="color: #9ca3af;">&#8226; ${timecodeText}</span>` : ''}
         </div>
       </div>
 
@@ -964,13 +1003,11 @@ export async function renderCommentNotificationEmail({
 
       ${unsubscribeUrl ? `
         <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="color:${EMAIL_THEME.accent}; text-decoration:underline;">Unsubscribe</a>
+          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="color:${resolved.accentColor}; text-decoration:underline;">Unsubscribe</a>
         </p>
       ` : ''}
 
-      <p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        ${EMAIL_SELF_HOST_NOTICE_HTML}
-      </p>
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
     `,
   })
 
@@ -1057,10 +1094,10 @@ export async function renderAdminCommentNotificationEmail({
   const timecodeText = timecode ? `at ${timecode}` : ''
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
-  const calloutStyle = emailCalloutStyle({ borderLeftPx: 3, accentColor: displayColor || null })
+  const calloutStyle = emailCalloutStyle({ borderLeftPx: 0, accentColor: displayColor || null })
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
@@ -1070,6 +1107,7 @@ export async function renderAdminCommentNotificationEmail({
     subtitle: 'Your client left a comment',
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <div style="${cardStyle}">
         <div style="${cardTitleStyle}">Client</div>
@@ -1089,7 +1127,7 @@ export async function renderAdminCommentNotificationEmail({
           <strong>${escapeHtml(projectTitle)}</strong>
         </div>
         <div style="font-size: 14px; color: #6b7280;">
-          ${escapeHtml(videoName)} <span style="color: #9ca3af;">${escapeHtml(versionLabel)}</span>${timecodeText ? ` <span style="color: #9ca3af;">• ${timecodeText}</span>` : ''}
+          ${escapeHtml(videoName)} <span style="color: #9ca3af;">${escapeHtml(versionLabel)}</span>${timecodeText ? ` <span style="color: #9ca3af;">&#8226; ${timecodeText}</span>` : ''}
         </div>
       </div>
 
@@ -1205,7 +1243,7 @@ export async function renderAdminProjectApprovedEmail({
     : `${resolvedActionVideoName || 'A video'} has been ${isApproval ? 'approved' : 'unapproved'} by the client`
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -1231,7 +1269,7 @@ export async function renderAdminProjectApprovedEmail({
           <div style="${cardTitleStyle}">Approved Videos</div>
           ${approvedVideos.map(v => `
             <div style="font-size: 15px; color: #374151; padding: 4px 0;">
-              <span style="display: inline-block; width: 6px; height: 6px; background: ${EMAIL_THEME.accent}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+              <span style="display: inline-block; width: 6px; height: 6px; background: ${resolved.accentColor}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
             </div>
           `).join('')}
         </div>
@@ -1242,7 +1280,7 @@ export async function renderAdminProjectApprovedEmail({
         ${awaitingVideos.length > 0
           ? awaitingVideos.map(v => `
               <div style="font-size: 15px; color: #374151; padding: 4px 0;">
-                <span style="display: inline-block; width: 6px; height: 6px; background: ${EMAIL_THEME.accent}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+                <span style="display: inline-block; width: 6px; height: 6px; background: ${resolved.accentColor}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
               </div>
             `).join('')
           : `
@@ -1365,7 +1403,7 @@ export async function renderAdminInvoicePaidEmail({
   const subject = `Invoice Paid: ${invoiceNumber}`
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -1377,6 +1415,7 @@ export async function renderAdminInvoicePaidEmail({
     subtitle: 'A customer has paid an invoice',
     trackingPixelsEnabled: false,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 18px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(firstWordName(greetingName) || greetingName || 'there')}</strong>,
@@ -1386,7 +1425,7 @@ export async function renderAdminInvoicePaidEmail({
         <div style="${cardTitleStyle}">Invoice</div>
         <div style="font-size: 16px; color: #111827; margin-bottom: 6px;">
           <strong>${escapeHtml(invoiceNumber)}</strong>
-          ${paidAtYmd ? `<span style="color:#9ca3af;"> • Paid ${escapeHtml(paidAtYmd)}</span>` : ''}
+          ${paidAtYmd ? `<span style="color:#9ca3af;"> &#8226; Paid ${escapeHtml(paidAtYmd)}</span>` : ''}
         </div>
         ${clientName ? `<div style="font-size: 14px; color: #6b7280;">Client: ${escapeHtml(clientName)}</div>` : ''}
         ${projectTitle ? `<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
@@ -1404,7 +1443,7 @@ export async function renderAdminInvoicePaidEmail({
       ${(publicInvoiceUrl || projectAdminUrl) ? `
         <div style="text-align: center; margin: 28px 0;">
           ${publicInvoiceUrl ? `<a href="${escapeHtml(publicInvoiceUrl)}" style="${primaryButtonStyle}">View Paid Invoice</a>` : ''}
-          ${projectAdminUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(projectAdminUrl)}" style="font-size: 14px; color: ${EMAIL_THEME.accent}; text-decoration: none;">Open Project</a></div>` : ''}
+          ${projectAdminUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(projectAdminUrl)}" style="font-size: 14px; color: ${resolved.accentColor}; text-decoration: none;">Open Project</a></div>` : ''}
         </div>
       ` : ''}
     `,
@@ -1529,7 +1568,7 @@ export async function renderAdminQuoteAcceptedEmail({
   const subject = quoteNumber ? `Quote Accepted: ${quoteNumber}` : 'Quote Accepted'
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -1541,6 +1580,7 @@ export async function renderAdminQuoteAcceptedEmail({
     subtitle: 'A customer has accepted a quote',
     trackingPixelsEnabled: false,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 18px 0; font-size: 16px; color: #111827; line-height: 1.5;">
         Hi <strong>${escapeHtml(firstWordName(greetingName) || greetingName || 'there')}</strong>,
@@ -1550,7 +1590,7 @@ export async function renderAdminQuoteAcceptedEmail({
         <div style="${cardTitleStyle}">Quote</div>
         <div style="font-size: 16px; color: #111827; margin-bottom: 6px;">
           <strong>${escapeHtml(quoteLabel)}</strong>
-          ${acceptedAtYmd ? `<span style="color:#9ca3af;"> • Accepted ${escapeHtml(acceptedAtYmd)}</span>` : ''}
+          ${acceptedAtYmd ? `<span style="color:#9ca3af;"> &#8226; Accepted ${escapeHtml(acceptedAtYmd)}</span>` : ''}
         </div>
         ${clientName ? `<div style="font-size: 14px; color: #6b7280;">Client: ${escapeHtml(clientName)}</div>` : ''}
         ${projectTitle ? `<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Project: ${escapeHtml(projectTitle)}</div>` : ''}
@@ -1559,7 +1599,7 @@ export async function renderAdminQuoteAcceptedEmail({
       ${(publicQuoteUrl || adminQuoteUrl) ? `
         <div style="text-align: center; margin: 28px 0;">
           ${publicQuoteUrl ? `<a href="${escapeHtml(publicQuoteUrl)}" style="${primaryButtonStyle}">View Quote</a>` : ''}
-          ${adminQuoteUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(adminQuoteUrl)}" style="font-size: 14px; color: ${EMAIL_THEME.accent}; text-decoration: none;">Open in Admin</a></div>` : ''}
+          ${adminQuoteUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(adminQuoteUrl)}" style="font-size: 14px; color: ${resolved.accentColor}; text-decoration: none;">Open in Admin</a></div>` : ''}
         </div>
       ` : ''}
     `,
@@ -1660,12 +1700,12 @@ export async function renderProjectGeneralNotificationEmail({
   const videosList = readyVideos.length > 0
     ? `<div style="${emailCardStyle({ paddingPx: 14, borderRadiusPx: 10, marginBottomPx: 14 })}">
         <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-bottom:6px;">Ready to view</div>
-        ${readyVideos.map(v => `<div style="font-size:15px; color:${EMAIL_THEME.text}; padding:4px 0;">${escapeHtml(v.name)} <span style="color:${EMAIL_THEME.accent};">${escapeHtml(v.versionLabel)}</span></div>`).join('')}
+        ${readyVideos.map(v => `<div style="font-size:15px; color:${EMAIL_THEME.text}; padding:4px 0;">${escapeHtml(v.name)} <span style="color:${resolved.accentColor};">${escapeHtml(v.versionLabel)}</span></div>`).join('')}
       </div>`
     : ''
 
   const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: resolved.accentColor })
   const notesCardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const notesCardTitleStyle = emailCardTitleStyle()
 
@@ -1678,6 +1718,7 @@ export async function renderProjectGeneralNotificationEmail({
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:16px;">
         Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
@@ -1693,7 +1734,7 @@ export async function renderProjectGeneralNotificationEmail({
             <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
             ${readyVideos.map(v => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
-                • ${escapeHtml(v.name)} <span style="color:${EMAIL_THEME.accent};">${escapeHtml(v.versionLabel)}</span>
+                &#8226; ${escapeHtml(v.name)} <span style="color:${resolved.accentColor};">${escapeHtml(v.versionLabel)}</span>
               </div>
             `).join('')}
           ` : ''}
@@ -1702,7 +1743,7 @@ export async function renderProjectGeneralNotificationEmail({
             <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:${readyVideos.length > 0 ? 14 : 2}px; margin-bottom:8px;">Albums</div>
             ${readyAlbums.map(a => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
-                • ${escapeHtml(a.name)} <span style="color:${EMAIL_THEME.textMuted};">(${Number(a.photoCount) || 0} photos)</span>
+                &#8226; ${escapeHtml(a.name)} <span style="color:${EMAIL_THEME.textMuted};">(${Number(a.photoCount) || 0} photos)</span>
               </div>
             `).join('')}
           ` : ''}
@@ -1715,9 +1756,7 @@ export async function renderProjectGeneralNotificationEmail({
         </a>
       </div>
 
-      <p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        ${EMAIL_SELF_HOST_NOTICE_HTML}
-      </p>
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
     `,
   })
 
@@ -1807,7 +1846,7 @@ export async function renderProjectKeyDateReminderEmail({
   const hasProject = Boolean(projectTitle && projectTitle.trim())
 
   const subject = hasProject
-    ? `Reminder: ${projectTitle} — ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
+    ? `Reminder: ${projectTitle} \u2014 ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
     : `Reminder: ${formatProjectKeyDateTypeLabel(keyDate.type)} (${keyDate.date})`
 
   const cardStyle = emailCardStyle({ borderRadiusPx: 12, paddingPx: 14, marginBottomPx: 16 })
@@ -1816,7 +1855,7 @@ export async function renderProjectKeyDateReminderEmail({
   const timePart = keyDate.allDay
     ? 'All day'
     : keyDate.startTime && keyDate.finishTime
-      ? `${keyDate.startTime}–${keyDate.finishTime}`
+      ? `${keyDate.startTime}\u2013${keyDate.finishTime}`
       : keyDate.startTime
         ? keyDate.startTime
         : ''
@@ -1826,6 +1865,7 @@ export async function renderProjectKeyDateReminderEmail({
     companyLogoUrl: resolved.companyLogoUrl,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Key Date Reminder',
     subtitle: hasProject ? projectTitle : 'Personal',
@@ -1884,7 +1924,7 @@ export async function renderSalesInvoiceOverdueReminderEmail({
   const resolved = await resolveEmailBranding(branding)
 
   const subject = `Invoice ${escapeHtml(invoiceNumber)} is overdue`
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const html = renderEmailShell({
@@ -1896,6 +1936,7 @@ export async function renderSalesInvoiceOverdueReminderEmail({
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
         Hi,
@@ -1918,8 +1959,8 @@ export async function renderSalesInvoiceOverdueReminderEmail({
       </div>
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        If the button doesn’t work, copy and paste this link into your browser:<br />
-        <a href="${escapeHtml(shareUrl)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+        If the button doesn't work, copy and paste this link into your browser:<br />
+        <a href="${escapeHtml(shareUrl)}" style="color: ${resolved.accentColor}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,
   }).trim()
@@ -1950,7 +1991,7 @@ export async function renderSalesQuoteExpiryReminderEmail({
   const resolved = await resolveEmailBranding(branding)
 
   const subject = `Quote ${escapeHtml(quoteNumber)} expiring soon`
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const html = renderEmailShell({
@@ -1962,6 +2003,7 @@ export async function renderSalesQuoteExpiryReminderEmail({
     trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin: 0 0 16px 0; font-size: 15px; color: #111827; line-height: 1.6;">
         Hi,
@@ -1984,8 +2026,8 @@ export async function renderSalesQuoteExpiryReminderEmail({
       </div>
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        If the button doesn’t work, copy and paste this link into your browser:<br />
-        <a href="${escapeHtml(shareUrl)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+        If the button doesn't work, copy and paste this link into your browser:<br />
+        <a href="${escapeHtml(shareUrl)}" style="color: ${resolved.accentColor}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,
   }).trim()
@@ -2023,6 +2065,7 @@ export async function renderPasswordEmail({
     subtitle: projectTitle,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
     bodyContent: `
       <p style="margin:0 0 16px; font-size:15px; color:#1f2937; line-height:1.6;">
         Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
@@ -2036,7 +2079,7 @@ export async function renderPasswordEmail({
       </div>
       <div style="${emailCardStyle({ borderRadiusPx: 12, paddingPx: 16, marginBottomPx: 16 })}; text-align:center;">
         <div style="font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; font-weight:700; margin-bottom:8px;">Password</div>
-        <div style="display:inline-block; padding:10px 14px; border-radius:8px; border:1px dashed ${EMAIL_THEME.accent}; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:18px; color:${EMAIL_THEME.text}; letter-spacing:1px; word-break:break-all;">
+        <div style="display:inline-block; padding:10px 14px; border-radius:8px; border:1px dashed ${resolved.accentColor}; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:18px; color:${EMAIL_THEME.text}; letter-spacing:1px; word-break:break-all;">
           ${escapeHtml(password)}
         </div>
       </div>
@@ -2099,6 +2142,7 @@ export async function testEmailConnection(testEmail: string, customConfig?: any)
       headerGradient: EMAIL_THEME.headerBackground,
       title: 'SMTP Test Succeeded',
       subtitle: 'Email sending is working',
+      mainCompanyDomain: dbSettings.mainCompanyDomain,
       bodyContent: `
         <p style="font-size:15px; color:#1f2937; line-height:1.6; margin:0 0 12px;">
           Your SMTP configuration is working. Details below for your records.

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import { Lock, Video, LogIn, Fingerprint } from 'lucide-react'
 import { startAuthentication } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser'
 import { setTokens, clearTokens } from '@/lib/token-store'
+import { useTheme } from '@/hooks/useTheme'
 
 function LoginForm() {
   const router = useRouter()
@@ -23,6 +24,24 @@ function LoginForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [passkeyLoading, setPasskeyLoading] = useState(false)
+  const [hasLogo, setHasLogo] = useState(false)
+  const [hasDarkLogo, setHasDarkLogo] = useState(false)
+  const [mainCompanyDomain, setMainCompanyDomain] = useState<string | null>(null)
+  const { isDark } = useTheme()
+  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
+
+  useEffect(() => {
+    fetch('/api/branding/info')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) {
+          setHasLogo(data.hasLogo || false)
+          setHasDarkLogo(data.hasDarkLogo || false)
+          setMainCompanyDomain(data.mainCompanyDomain || null)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   async function handlePasskeyLogin() {
     setError('')
@@ -136,6 +155,21 @@ function LoginForm() {
         <div className="text-center mb-8" />
 
         <Card>
+          {hasLogo && (
+            <div className="p-6 pb-0 flex justify-center">
+              {mainCompanyDomain ? (
+                <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[200px]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                </a>
+              ) : (
+                <div className="max-w-[200px]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                </div>
+              )}
+            </div>
+          )}
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Lock className="w-5 h-5" />

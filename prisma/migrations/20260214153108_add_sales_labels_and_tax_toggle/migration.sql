@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "SalesSettings" ADD COLUMN "quoteLabel" TEXT NOT NULL DEFAULT 'QUOTE';
+ALTER TABLE "SalesSettings" ADD COLUMN "invoiceLabel" TEXT NOT NULL DEFAULT 'INVOICE';
+ALTER TABLE "SalesSettings" ADD COLUMN "taxLabel" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "SalesSettings" ADD COLUMN "taxEnabled" BOOLEAN NOT NULL DEFAULT true;

@@ -6,6 +6,55 @@ import { unstable_noStore as noStore } from 'next/cache'
 // Force Node.js runtime across the app to allow use of Node APIs (e.g., crypto).
 export const runtime = 'nodejs'
 
+/**
+ * Convert a hex colour (#RRGGBB) to HSL space-separated values like "210 100% 50%".
+ * Returns null for invalid input.
+ */
+function hexToHslValues(hex: string): { h: number; s: number; l: number } | null {
+  const clean = hex.replace(/^#/, '')
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return null
+  const r = parseInt(clean.slice(0, 2), 16) / 255
+  const g = parseInt(clean.slice(2, 4), 16) / 255
+  const b = parseInt(clean.slice(4, 6), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  if (max === min) return { h: 0, s: 0, l: Math.round(l * 100) }
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max - min)
+  let h = 0
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+  else if (max === g) h = ((b - r) / d + 2) / 6
+  else h = ((r - g) / d + 4) / 6
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) }
+}
+
+/**
+ * Build a CSS override block that replaces the default blue primary colour
+ * with a custom accent colour in both light and dark modes.
+ */
+function buildAccentOverrideCss(hex: string): string | null {
+  const hsl = hexToHslValues(hex)
+  if (!hsl) return null
+  const { h, s } = hsl
+  // Light mode: use the colour at 50% lightness (vibrant), dark at 60%
+  const lightL = 50, darkL = 60
+  const lightVisibleL = 95, darkVisibleL = 20
+  return `
+    :root {
+      --primary: ${h} ${s}% ${lightL}%;
+      --primary-visible: ${h} ${s}% ${lightVisibleL}%;
+      --accent-foreground: ${h} ${s}% ${lightL}%;
+      --ring: ${h} ${s}% ${lightL}%;
+    }
+    .dark {
+      --primary: ${h} ${s}% ${darkL}%;
+      --primary-visible: ${h} ${s}% ${darkVisibleL}%;
+      --accent-foreground: ${h} ${s}% ${darkL}%;
+      --ring: ${h} ${s}% ${darkL}%;
+    }
+  `
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   noStore()
 
@@ -51,14 +100,31 @@ export const viewport = {
   maximumScale: 5,
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  noStore()
+
+  // Read accent colour from database for CSS override injection.
+  const brandingSettings = await prisma.settings
+    .findUnique({
+      where: { id: 'default' },
+      select: { accentColor: true },
+    })
+    .catch(() => null)
+
+  const accentCss = brandingSettings?.accentColor
+    ? buildAccentOverrideCss(brandingSettings.accentColor)
+    : null
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {accentCss && (
+          <style dangerouslySetInnerHTML={{ __html: accentCss }} />
+        )}
         <script
           dangerouslySetInnerHTML={{
             __html: `

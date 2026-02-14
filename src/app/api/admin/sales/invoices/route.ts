@@ -90,6 +90,15 @@ export async function POST(request: NextRequest) {
   const created = await prisma.$transaction(async (tx) => {
     const invoiceNumber = input.invoiceNumber?.trim() || (await nextInvoiceNumber(tx))
 
+    // Snapshot the current taxEnabled setting so it persists with the document.
+    const settingsRow = await tx.salesSettings.upsert({
+      where: { id: 'default' },
+      create: { id: 'default' },
+      update: {},
+      select: { taxEnabled: true },
+    })
+    const taxEnabled = typeof (settingsRow as any)?.taxEnabled === 'boolean' ? (settingsRow as any).taxEnabled : true
+
     const row = await tx.salesInvoice.create({
       data: {
         invoiceNumber,
@@ -101,6 +110,7 @@ export async function POST(request: NextRequest) {
         terms: input.terms || '',
         itemsJson: input.items,
         remindersEnabled: true,
+        taxEnabled,
       },
     })
 

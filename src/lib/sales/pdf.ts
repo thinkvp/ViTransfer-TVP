@@ -3,6 +3,7 @@ import {
   calcLineSubtotalCents,
   calcLineTaxCents,
   centsToDollars,
+  formatMoney,
   sumLineItemsSubtotal,
   sumLineItemsTax,
 } from '@/lib/sales/money'
@@ -288,15 +289,20 @@ async function buildQuotePdfBytes(
   }
 
   const drawDocTitle = () => {
-    page.drawText('QUOTE', { x: right - 82, y: 800, size: 20, font: fontBold, color: textColor })
+    const label = settings.quoteLabel || 'QUOTE'
+    const labelW = fontBold.widthOfTextAtSize(label, 20)
+    page.drawText(label, { x: right - labelW, y: 800, size: 20, font: fontBold, color: textColor })
   }
+
+  // Use per-document taxEnabled (snapshot from creation); fall back to settings for legacy docs.
+  const taxEnabled = quote.taxEnabled ?? settings.taxEnabled
 
   // Table layout
   const colItemX = left
-  const colItemW = 260
+  const colItemW = taxEnabled ? 235 : 305
   const colQtyW = 40
   const colRateW = 70
-  const colTaxW = 45
+  const colTaxW = taxEnabled ? 70 : 0
   const colAmountW = (right - left) - colItemW - colQtyW - colRateW - colTaxW
 
   const itemRight = colItemX + colItemW
@@ -317,7 +323,7 @@ async function buildQuotePdfBytes(
     page.drawText('Item', { x: colItemX, y: headerTextY, size: 10, font: fontBold, color: white })
     drawRightText(page, 'Qty', qtyRight, headerTextY, 10, fontBold, white)
     drawRightText(page, 'Rate', rateRight, headerTextY, 10, fontBold, white)
-    drawRightText(page, 'Tax', taxRight, headerTextY, 10, fontBold, white)
+    if (taxEnabled) drawRightText(page, 'Tax', taxRight, headerTextY, 10, fontBold, white)
     drawRightText(page, 'Amount', colAmountRight, headerTextY, 10, fontBold, white)
     return yTop - headerHeight - 10
   }
@@ -348,7 +354,7 @@ async function buildQuotePdfBytes(
 
   const companyLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
   companyLines.push({ text: settings.businessName || 'Business', size: 13, bold: true })
-  if (settings.abn) companyLines.push({ text: `ABN: ${settings.abn}`, size: 10 })
+  if (settings.abn) companyLines.push({ text: `${settings.businessRegistrationLabel || 'ABN'}: ${settings.abn}`, size: 10 })
   if (settings.address) {
     for (const line of settings.address.split('\n')) {
       if (line.trim()) companyLines.push({ text: line.trim(), size: 10 })
@@ -417,8 +423,11 @@ async function buildQuotePdfBytes(
 
     drawRightText(page, String(item.quantity ?? 1), qtyRight, textY, 10, font, textColor)
     drawRightText(page, centsToDollars(item.unitPriceCents ?? 0), rateRight, textY, 10, font, textColor)
-    drawRightText(page, `${Number(taxRate)}%`, taxRight, textY, 10, font, textColor)
-    drawRightText(page, centsToDollars(amount), colAmountRight, textY, 10, fontBold, textColor)
+    if (taxEnabled) {
+      const taxLabel = item.taxRateName ? `${item.taxRateName} ${Number(taxRate)}%` : `${Number(taxRate)}%`
+      drawRightText(page, taxLabel, taxRight, textY, 10, font, textColor)
+    }
+    drawRightText(page, formatMoney(amount, settings.currencySymbol), colAmountRight, textY, 10, fontBold, textColor)
 
     y -= rowHeight
     page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 1, color: lineColor })
@@ -427,7 +436,7 @@ async function buildQuotePdfBytes(
 
   // Totals
   const subtotalCents = sumLineItemsSubtotal(quote.items)
-  const taxCents = sumLineItemsTax(quote.items, settings.taxRatePercent)
+  const taxCents = taxEnabled ? sumLineItemsTax(quote.items, settings.taxRatePercent) : 0
   const totalCents = subtotalCents + taxCents
 
   const totalsXRight = right
@@ -441,9 +450,12 @@ async function buildQuotePdfBytes(
 
   if (y - 80 < bottomMargin) newPage(false)
   y -= 8
-  drawTotalsLine('Subtotal', centsToDollars(subtotalCents))
-  drawTotalsLine('Tax', centsToDollars(taxCents))
-  drawTotalsLine('Total', centsToDollars(totalCents), true)
+  drawTotalsLine('Subtotal', formatMoney(subtotalCents, settings.currencySymbol))
+  if (taxEnabled) {
+    const taxTotalsLabel = settings.taxLabel ? `Tax (${settings.taxLabel})` : 'Tax'
+    drawTotalsLine(taxTotalsLabel, formatMoney(taxCents, settings.currencySymbol))
+  }
+  drawTotalsLine('Total', formatMoney(totalCents, settings.currencySymbol), true)
 
   // A little breathing room after totals.
   y -= 12
@@ -618,9 +630,10 @@ async function buildInvoicePdfBytes(
   }
 
   const formatMoneyWithCurrency = (cents: number, currency: string): string => {
-    const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : 'AUD'
+    const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : (settings.currencyCode || 'AUD').toUpperCase()
+    const sym = settings.currencySymbol || '$'
     const amount = centsToDollars(cents)
-    if (cur === 'AUD') return `A$${amount}`
+    if (cur === (settings.currencyCode || 'AUD').toUpperCase()) return `${sym}${amount}`
     return `${cur} ${amount}`
   }
 
@@ -671,15 +684,20 @@ async function buildInvoicePdfBytes(
   }
 
   const drawDocTitle = () => {
-    page.drawText('INVOICE', { x: right - 95, y: 800, size: 20, font: fontBold, color: textColor })
+    const label = settings.invoiceLabel || 'INVOICE'
+    const labelW = fontBold.widthOfTextAtSize(label, 20)
+    page.drawText(label, { x: right - labelW, y: 800, size: 20, font: fontBold, color: textColor })
   }
+
+  // Use per-document taxEnabled (snapshot from creation); fall back to settings for legacy docs.
+  const taxEnabled = invoice.taxEnabled ?? settings.taxEnabled
 
   // Table layout
   const colItemX = left
-  const colItemW = 260
+  const colItemW = taxEnabled ? 235 : 305
   const colQtyW = 40
   const colRateW = 70
-  const colTaxW = 45
+  const colTaxW = taxEnabled ? 70 : 0
   const colAmountW = (right - left) - colItemW - colQtyW - colRateW - colTaxW
 
   const itemRight = colItemX + colItemW
@@ -700,7 +718,7 @@ async function buildInvoicePdfBytes(
     page.drawText('Item', { x: colItemX, y: headerTextY, size: 10, font: fontBold, color: white })
     drawRightText(page, 'Qty', qtyRight, headerTextY, 10, fontBold, white)
     drawRightText(page, 'Rate', rateRight, headerTextY, 10, fontBold, white)
-    drawRightText(page, 'Tax', taxRight, headerTextY, 10, fontBold, white)
+    if (taxEnabled) drawRightText(page, 'Tax', taxRight, headerTextY, 10, fontBold, white)
     drawRightText(page, 'Amount', colAmountRight, headerTextY, 10, fontBold, white)
     return yTop - headerHeight - 10
   }
@@ -731,7 +749,7 @@ async function buildInvoicePdfBytes(
 
   const companyLines: Array<{ text: string; size: number; bold?: boolean; color?: any }> = []
   companyLines.push({ text: settings.businessName || 'Business', size: 13, bold: true })
-  if (settings.abn) companyLines.push({ text: `ABN: ${settings.abn}`, size: 10 })
+  if (settings.abn) companyLines.push({ text: `${settings.businessRegistrationLabel || 'ABN'}: ${settings.abn}`, size: 10 })
   if (settings.address) {
     for (const line of settings.address.split('\n')) {
       if (line.trim()) companyLines.push({ text: line.trim(), size: 10 })
@@ -814,8 +832,11 @@ async function buildInvoicePdfBytes(
 
     drawRightText(page, String(item.quantity ?? 1), qtyRight, textY, 10, font, textColor)
     drawRightText(page, centsToDollars(item.unitPriceCents ?? 0), rateRight, textY, 10, font, textColor)
-    drawRightText(page, `${Number(taxRate)}%`, taxRight, textY, 10, font, textColor)
-    drawRightText(page, centsToDollars(amount), colAmountRight, textY, 10, fontBold, textColor)
+    if (taxEnabled) {
+      const taxLabel = item.taxRateName ? `${item.taxRateName} ${Number(taxRate)}%` : `${Number(taxRate)}%`
+      drawRightText(page, taxLabel, taxRight, textY, 10, font, textColor)
+    }
+    drawRightText(page, formatMoney(amount, settings.currencySymbol), colAmountRight, textY, 10, fontBold, textColor)
 
     y -= rowHeight
 
@@ -826,7 +847,7 @@ async function buildInvoicePdfBytes(
 
   // Totals
   const subtotalCents = sumLineItemsSubtotal(invoice.items)
-  const taxCents = sumLineItemsTax(invoice.items, settings.taxRatePercent)
+  const taxCents = taxEnabled ? sumLineItemsTax(invoice.items, settings.taxRatePercent) : 0
   const totalCents = subtotalCents + taxCents
 
   const totalsXRight = right
@@ -841,9 +862,12 @@ async function buildInvoicePdfBytes(
   if (y - 80 < bottomMargin) newPage(false)
 
   y -= 8
-  drawTotalsLine('Subtotal', centsToDollars(subtotalCents))
-  drawTotalsLine('Tax', centsToDollars(taxCents))
-  drawTotalsLine('Total', centsToDollars(totalCents), true)
+  drawTotalsLine('Subtotal', formatMoney(subtotalCents, settings.currencySymbol))
+  if (taxEnabled) {
+    const taxTotalsLabel = settings.taxLabel ? `Tax (${settings.taxLabel})` : 'Tax'
+    drawTotalsLine(taxTotalsLabel, formatMoney(taxCents, settings.currencySymbol))
+  }
+  drawTotalsLine('Total', formatMoney(totalCents, settings.currencySymbol), true)
 
   // Payment section
   const paymentDetails = typeof settings.paymentDetails === 'string' ? settings.paymentDetails.trim() : ''
@@ -901,7 +925,7 @@ async function buildInvoicePdfBytes(
     if (hasPayOnline && info.publicInvoiceUrl) {
       const feeCentsRaw = typeof info.stripeProcessingFeeCents === 'number' ? info.stripeProcessingFeeCents : NaN
       const feeCents = Number.isFinite(feeCentsRaw) ? Math.max(0, Math.trunc(feeCentsRaw)) : 0
-      const feeCurrency = typeof info.stripeProcessingFeeCurrency === 'string' ? info.stripeProcessingFeeCurrency : 'AUD'
+      const feeCurrency = typeof info.stripeProcessingFeeCurrency === 'string' ? info.stripeProcessingFeeCurrency : (settings.currencyCode || 'AUD')
 
       let leftAfterHeaderY = sectionHeaderY - 18
       if (feeCents > 0) {

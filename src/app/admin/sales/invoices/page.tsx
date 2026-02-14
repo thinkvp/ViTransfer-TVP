@@ -21,7 +21,7 @@ import {
 } from '@/lib/sales/admin-api'
 import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { InvoiceStatus, SalesSettings } from '@/lib/sales/types'
-import { centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadInvoicePdf } from '@/lib/sales/pdf'
 import { ArrowDown, ArrowUp, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
@@ -81,6 +81,13 @@ export default function SalesInvoicesPage() {
     phone: '',
     email: '',
     website: '',
+    businessRegistrationLabel: 'ABN',
+    currencySymbol: '$',
+    currencyCode: 'AUD',
+    quoteLabel: 'QUOTE',
+    invoiceLabel: 'INVOICE',
+    taxLabel: '',
+    taxEnabled: true,
     taxRatePercent: 10,
     defaultQuoteValidDays: 14,
     defaultInvoiceDueDays: 7,
@@ -268,7 +275,8 @@ export default function SalesInvoicesPage() {
   const invoiceTotalCents = useCallback(
     (inv: SalesInvoiceWithVersion): number => {
       const subtotal = sumLineItemsSubtotal(inv.items)
-      const tax = sumLineItemsTax(inv.items, taxRatePercent)
+      const invTaxEnabled = typeof (inv as any)?.taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
+      const tax = invTaxEnabled ? sumLineItemsTax(inv.items, taxRatePercent) : 0
       return subtotal + tax
     },
     [taxRatePercent]
@@ -509,7 +517,7 @@ export default function SalesInvoicesPage() {
                               {statusLabel(row.effectiveStatus)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 tabular-nums">${centsToDollars(row.totalCents)}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, settings.currencySymbol)}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {row.invoice.clientId ? (
                               <Link href={`/admin/clients/${row.invoice.clientId}`} className="hover:underline">

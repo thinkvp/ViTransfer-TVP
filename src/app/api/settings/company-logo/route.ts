@@ -11,9 +11,9 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const MAX_LOGO_BYTES = 1 * 1024 * 1024 // 1MB
-const COMPANY_LOGO_MAX_WIDTH = 300
-const COMPANY_LOGO_MAX_HEIGHT = 300
+const MAX_LOGO_BYTES = 2 * 1024 * 1024 // 2MB
+const COMPANY_LOGO_MAX_WIDTH = 800
+const COMPANY_LOGO_MAX_HEIGHT = 800
 
 export async function POST(request: NextRequest) {
   const authResult = await requireApiUser(request)

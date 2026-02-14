@@ -43,11 +43,18 @@ function normalizeSettings(input: unknown): SalesSettings {
     phone: '',
     email: '',
     website: '',
+    businessRegistrationLabel: 'ABN',
+    currencySymbol: '$',
+    currencyCode: 'AUD',
     taxRatePercent: 10,
     defaultQuoteValidDays: 14,
     defaultInvoiceDueDays: 7,
     defaultTerms: 'Payment due within 7 days unless otherwise agreed.',
     paymentDetails: '',
+    quoteLabel: 'QUOTE',
+    invoiceLabel: 'INVOICE',
+    taxLabel: '',
+    taxEnabled: true,
     updatedAt: nowIso(),
   }
 

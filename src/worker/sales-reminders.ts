@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+﻿import crypto from 'crypto'
 import { prisma } from '../lib/db'
 import {
   EMAIL_THEME,
@@ -105,25 +105,27 @@ function randomToken(): string {
   return crypto.randomBytes(32).toString('base64url')
 }
 
-function firstCurrencyFromCsv(value: unknown): string {
+function firstCurrencyFromCsv(value: unknown, fallback: string = 'AUD'): string {
   const raw = typeof value === 'string' ? value : ''
   const first = raw.split(',')[0]?.trim().toUpperCase()
-  return first && /^[A-Z]{3}$/.test(first) ? first : 'AUD'
+  return first && /^[A-Z]{3}$/.test(first) ? first : fallback
 }
 
 function invoiceTotalCents(inv: SalesInvoice, settings: SalesSettings): number {
+  const invTaxEnabled = typeof (inv as any)?.taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
   const taxRatePercent = Number((settings as any)?.taxRatePercent)
   const rate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
   const subtotal = sumLineItemsSubtotal(Array.isArray((inv as any)?.items) ? (inv as any).items : [])
-  const tax = sumLineItemsTax(Array.isArray((inv as any)?.items) ? (inv as any).items : [], rate)
+  const tax = invTaxEnabled ? sumLineItemsTax(Array.isArray((inv as any)?.items) ? (inv as any).items : [], rate) : 0
   return subtotal + tax
 }
 
 function quoteTotalCents(q: SalesQuote, settings: SalesSettings): number {
+  const qTaxEnabled = typeof (q as any)?.taxEnabled === 'boolean' ? (q as any).taxEnabled : true
   const taxRatePercent = Number((settings as any)?.taxRatePercent)
   const rate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
   const subtotal = sumLineItemsSubtotal(Array.isArray((q as any)?.items) ? (q as any).items : [])
-  const tax = sumLineItemsTax(Array.isArray((q as any)?.items) ? (q as any).items : [], rate)
+  const tax = qTaxEnabled ? sumLineItemsTax(Array.isArray((q as any)?.items) ? (q as any).items : [], rate) : 0
   return subtotal + tax
 }
 
@@ -434,7 +436,7 @@ export async function processSalesReminders() {
       }
 
       if (stripeGateway?.enabled) {
-        const currency = firstCurrencyFromCsv(stripeGateway?.currencies)
+        const currency = firstCurrencyFromCsv(stripeGateway?.currencies, settings.currencyCode)
         const feePercent = Number(stripeGateway?.feePercent ?? 0)
         const feeFixedCents = Number((stripeGateway as any)?.feeFixedCents ?? 0)
         const feeCents = calcStripeGrossUpCents(totalCents, feePercent, feeFixedCents).feeCents
@@ -449,7 +451,7 @@ export async function processSalesReminders() {
         continue
       }
 
-      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined })
       const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
       const greeting = (email: string, name: string | null) => {
@@ -460,6 +462,7 @@ export async function processSalesReminders() {
       const html = renderEmailShell({
         companyName,
         companyLogoUrl,
+        mainCompanyDomain: emailSettings.mainCompanyDomain,
         headerGradient: EMAIL_THEME.headerBackground,
         title: 'Invoice overdue',
         subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
@@ -487,8 +490,8 @@ export async function processSalesReminders() {
           </div>
 
           <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-            If the button doesn’t work, copy and paste this link into your browser:<br />
-            <a href="${escapeHtml(share.url)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(share.url)}</a>
+            If the button doesn't work, copy and paste this link into your browser:<br />
+            <a href="${escapeHtml(share.url)}" style="color: ${(emailSettings.accentColor || EMAIL_THEME.accent)}; text-decoration: none;">${escapeHtml(share.url)}</a>
           </p>
         `,
       })
@@ -509,6 +512,7 @@ export async function processSalesReminders() {
         const htmlTracked = renderEmailShell({
           companyName,
           companyLogoUrl,
+          mainCompanyDomain: emailSettings.mainCompanyDomain,
           headerGradient: EMAIL_THEME.headerBackground,
           title: 'Invoice overdue',
           subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
@@ -538,8 +542,8 @@ export async function processSalesReminders() {
             </div>
 
             <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-              If the button doesn’t work, copy and paste this link into your browser:<br />
-              <a href="${escapeHtml(share.url)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(share.url)}</a>
+              If the button doesn't work, copy and paste this link into your browser:<br />
+              <a href="${escapeHtml(share.url)}" style="color: ${(emailSettings.accentColor || EMAIL_THEME.accent)}; text-decoration: none;">${escapeHtml(share.url)}</a>
             </p>
           `,
         })
@@ -657,7 +661,7 @@ export async function processSalesReminders() {
         continue
       }
 
-      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined })
       const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
       const attachment = {
         filename: `${String(q.quoteNumber || 'quote')}.pdf`,
@@ -679,6 +683,7 @@ export async function processSalesReminders() {
         const htmlTracked = renderEmailShell({
           companyName,
           companyLogoUrl,
+          mainCompanyDomain: emailSettings.mainCompanyDomain,
           headerGradient: EMAIL_THEME.headerBackground,
           title: 'Quote expiring soon',
           subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
@@ -708,8 +713,8 @@ export async function processSalesReminders() {
             </div>
 
             <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-              If the button doesn’t work, copy and paste this link into your browser:<br />
-              <a href="${escapeHtml(share.url)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(share.url)}</a>
+              If the button doesn't work, copy and paste this link into your browser:<br />
+              <a href="${escapeHtml(share.url)}" style="color: ${(emailSettings.accentColor || EMAIL_THEME.accent)}; text-decoration: none;">${escapeHtml(share.url)}</a>
             </p>
           `,
         })

@@ -197,6 +197,7 @@ export async function processAdminNotifications() {
             adminName: recipient.name || '',
             period,
             companyLogoUrl: companyLogoUrl || undefined,
+            mainCompanyDomain: emailSettings.mainCompanyDomain,
             projects: recipient.projects
           })
 

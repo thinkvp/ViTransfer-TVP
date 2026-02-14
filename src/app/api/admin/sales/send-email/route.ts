@@ -47,10 +47,10 @@ function normalizeBaseUrl(input: string | null | undefined): string | null {
   }
 }
 
-function firstCurrencyFromCsv(value: unknown): string {
+function firstCurrencyFromCsv(value: unknown, fallback: string = 'AUD'): string {
   const raw = typeof value === 'string' ? value : ''
   const first = raw.split(',')[0]?.trim().toUpperCase()
-  return first && /^[A-Z]{3}$/.test(first) ? first : 'AUD'
+  return first && /^[A-Z]{3}$/.test(first) ? first : fallback
 }
 
 async function computeInvoicePaidAtYmdForExpiry(tx: typeof prisma, invoiceId: string): Promise<string | null> {
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
   const docLabel = isQuote ? 'Quote' : 'Invoice'
   const subject = `${docLabel} ${share.docNumber}`
 
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const doc = share.docJson as unknown as SalesQuote | SalesInvoice
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
     const taxCents = sumLineItemsTax(items, defaultTaxRate)
     const totalCents = subtotalCents + taxCents
 
-    const currency = firstCurrencyFromCsv(stripeGateway?.currencies)
+    const currency = firstCurrencyFromCsv(stripeGateway?.currencies, (settings as any)?.currencyCode || 'AUD')
     const feePercent = Number(stripeGateway?.feePercent ?? 0)
     const feeFixedCents = Number(stripeGateway?.feeFixedCents ?? 0)
 
@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
         If the button doesn’t work, copy and paste this link into your browser:<br />
-        <a href="${escapeHtml(shareUrl)}" style="color: ${EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+        <a href="${escapeHtml(shareUrl)}" style="color: ${emailSettings.accentColor || EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,
     })

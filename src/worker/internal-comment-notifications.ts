@@ -139,6 +139,7 @@ export async function processInternalCommentNotifications() {
             recipientName: recipient.name || '',
             period,
             companyLogoUrl: companyLogoUrl || undefined,
+            mainCompanyDomain: emailSettings.mainCompanyDomain,
             projects: recipient.projects,
           })
 

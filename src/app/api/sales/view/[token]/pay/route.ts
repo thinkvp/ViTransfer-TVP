@@ -83,8 +83,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const taxRatePercent = Number(liveSalesSettings?.taxRatePercent)
   const defaultTaxRate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
 
+  // Use per-document taxEnabled (snapshot from creation); fall back to enabled for legacy docs.
+  const docTaxEnabled = typeof doc?.taxEnabled === 'boolean' ? doc.taxEnabled : true
+
   const subtotalCents = sumLineItemsSubtotal(items)
-  const taxCents = sumLineItemsTax(items, defaultTaxRate)
+  const taxCents = docTaxEnabled ? sumLineItemsTax(items, defaultTaxRate) : 0
   const invoiceTotalCents = subtotalCents + taxCents
 
   if (!Number.isFinite(invoiceTotalCents) || invoiceTotalCents <= 0) {
@@ -127,7 +130,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               price_data: {
                 currency,
                 product_data: {
-                  name: `Card processing fee (${feePercent.toFixed(2)}% + ${(currency || 'aud').toUpperCase()} ${(feeFixedCents / 100).toFixed(2)})`,
+                  name: `Card processing fee (${feePercent.toFixed(2)}% + ${currency.toUpperCase()} ${(feeFixedCents / 100).toFixed(2)})`,
                 },
                 unit_amount: feeCents,
               },

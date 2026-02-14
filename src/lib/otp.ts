@@ -235,6 +235,7 @@ export async function renderOTPEmail({
   const html = renderEmailShell({
     companyName,
     companyLogoUrl,
+    mainCompanyDomain: settings?.mainCompanyDomain,
     headerGradient: EMAIL_THEME.headerBackground,
     title: 'Verification Code',
     bodyContent: `

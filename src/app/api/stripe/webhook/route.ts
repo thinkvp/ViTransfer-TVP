@@ -27,10 +27,9 @@ function parseIntSafe(v: unknown): number | null {
 }
 
 function formatMoneyWithCurrency(cents: number, currency: string): string {
-  const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : 'AUD'
+  const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : ''
   const amount = (cents / 100).toFixed(2)
-  if (cur === 'AUD') return `A$${amount}`
-  return `${cur} ${amount}`
+  return cur ? `${cur} ${amount}` : amount
 }
 
 export async function POST(request: NextRequest) {

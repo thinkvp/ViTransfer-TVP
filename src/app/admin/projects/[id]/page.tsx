@@ -23,7 +23,7 @@ import { RecipientsEditor, type EditableRecipient } from '@/components/Recipient
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 import { ProjectKeyDates } from '@/components/ProjectKeyDates'
 import { ProjectSectionVisibilityToggle, useProjectSectionVisibility } from '@/components/ProjectSectionVisibilityToggle'
-import { centsToDollars, sumLineItemsTotal } from '@/lib/sales/money'
+import { centsToDollars, formatMoney, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
 import { fetchSalesRollup } from '@/lib/sales/admin-api'
 import type { SalesRollupPaymentRow, SalesRollupResponse } from '@/lib/sales/admin-api'
@@ -682,7 +682,7 @@ export default function ProjectPage() {
                                         {quoteStatusLabel(effectiveStatus)}
                                       </span>
                                     </td>
-                                    <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(totalCents)}</td>
                                   </tr>
                                 )
                               })
@@ -728,7 +728,7 @@ export default function ProjectPage() {
                                         {invoiceStatusLabel(effectiveStatus)}
                                       </span>
                                     </td>
-                                    <td className="px-3 py-2 text-right tabular-nums">${centsToDollars(totalCents)}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(totalCents)}</td>
                                   </tr>
                                 )
                               })

@@ -210,7 +210,8 @@ export async function GET(request: NextRequest) {
 
   for (const inv of invoices) {
     const subtotal = sumLineItemsSubtotal(inv.items)
-    const tax = sumLineItemsTax(inv.items, taxRatePercent)
+    const invTaxEnabled = (inv as any).taxEnabled ?? true
+    const tax = invTaxEnabled ? sumLineItemsTax(inv.items, taxRatePercent) : 0
     const total = subtotal + tax
 
     const local = paidLocalByInvoiceId[inv.id]?.paidCents ?? 0

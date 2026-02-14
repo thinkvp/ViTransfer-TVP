@@ -221,6 +221,9 @@ export async function processClientNotifications() {
               trackingPixelsEnabled,
               appDomain,
               companyLogoUrl: companyLogoUrl || undefined,
+              mainCompanyDomain: emailSettings.mainCompanyDomain,
+              emailCustomFooterText: emailSettings.emailCustomFooterText,
+              accentColor: emailSettings.accentColor || undefined,
             })
 
             const result = await sendEmail({

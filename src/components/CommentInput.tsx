@@ -384,7 +384,7 @@ export default function CommentInput({
 
       {/* Replying To Indicator */}
       {replyingToComment && (
-        <div className="mb-3 p-3 bg-gray-100 dark:bg-gray-800 border-l-2 border-blue-400 rounded-lg flex items-start justify-between gap-3">
+        <div className="mb-3 p-3 bg-gray-100 dark:bg-gray-800 border-l-2 border-primary rounded-lg flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-xs text-gray-700 dark:text-gray-300 font-semibold mb-1">
               Replying to {replyingToComment.authorName || 'Anonymous'}

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -7,9 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi } from '@/lib/sales/admin-api'
+import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi, fetchTaxRates, saveTaxRatesBulk } from '@/lib/sales/admin-api'
+import type { SalesTaxRate } from '@/lib/sales/types'
 import { apiFetch } from '@/lib/api-client'
 import { formatDateTime } from '@/lib/utils'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Pencil, Plus, Star, Trash2 } from 'lucide-react'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
@@ -37,11 +40,26 @@ export default function SalesSettingsPage() {
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [website, setWebsite] = useState('')
+  const [businessRegistrationLabel, setBusinessRegistrationLabel] = useState('ABN')
+  const [currencySymbol, setCurrencySymbol] = useState('$')
+  const [currencyCode, setCurrencyCode] = useState('AUD')
+  const [quoteLabel, setQuoteLabel] = useState('QUOTE')
+  const [invoiceLabel, setInvoiceLabel] = useState('INVOICE')
+  const [taxLabel, setTaxLabel] = useState('')
+  const [taxEnabled, setTaxEnabled] = useState(true)
   const [taxRatePercent, setTaxRatePercent] = useState('10')
   const [defaultQuoteValidDays, setDefaultQuoteValidDays] = useState('14')
   const [defaultInvoiceDueDays, setDefaultInvoiceDueDays] = useState('7')
   const [defaultTerms, setDefaultTerms] = useState('')
   const [paymentDetails, setPaymentDetails] = useState('')
+
+  // Tax rate add/edit modal
+  const [taxRateModalOpen, setTaxRateModalOpen] = useState(false)
+  const [taxRateModalSaving, setTaxRateModalSaving] = useState(false)
+  const [editingRate, setEditingRate] = useState<{ id?: string; name: string; rate: string } | null>(null)
+  const [taxRates, setTaxRates] = useState<SalesTaxRate[]>([])
+  const [taxRatesLoaded, setTaxRatesLoaded] = useState(false)
+  const [taxRatesBusy, setTaxRatesBusy] = useState(false)
 
   const [stripeLoaded, setStripeLoaded] = useState(false)
   const [stripeSaving, setStripeSaving] = useState(false)
@@ -80,11 +98,25 @@ export default function SalesSettingsPage() {
         setPhone(s.phone ?? '')
         setEmail(s.email ?? '')
         setWebsite(s.website ?? '')
+        setBusinessRegistrationLabel(s.businessRegistrationLabel || 'ABN')
+        setCurrencySymbol(s.currencySymbol || '$')
+        setCurrencyCode(s.currencyCode || 'AUD')
+        setQuoteLabel(s.quoteLabel || 'QUOTE')
+        setInvoiceLabel(s.invoiceLabel || 'INVOICE')
+        setTaxLabel(s.taxLabel || '')
+        setTaxEnabled(typeof s.taxEnabled === 'boolean' ? s.taxEnabled : true)
         setTaxRatePercent(String(s.taxRatePercent))
         setDefaultQuoteValidDays(String(s.defaultQuoteValidDays ?? 14))
         setDefaultInvoiceDueDays(String(s.defaultInvoiceDueDays ?? 7))
         setDefaultTerms(s.defaultTerms)
         setPaymentDetails(s.paymentDetails)
+
+        // Load tax rates
+        try {
+          const rates = await fetchTaxRates()
+          if (!cancelled) setTaxRates(rates)
+        } catch { /* ignore */ }
+        if (!cancelled) setTaxRatesLoaded(true)
       } catch {
         // ignore
       } finally {
@@ -386,6 +418,13 @@ export default function SalesSettingsPage() {
         phone,
         email,
         website,
+        businessRegistrationLabel: businessRegistrationLabel.trim() || 'ABN',
+        currencySymbol: currencySymbol.trim() || '$',
+        currencyCode: currencyCode.trim() || 'AUD',
+        quoteLabel: quoteLabel.trim() || 'QUOTE',
+        invoiceLabel: invoiceLabel.trim() || 'INVOICE',
+        taxLabel: taxLabel.trim(),
+        taxEnabled,
         taxRatePercent: Number.isFinite(parsedTax) ? parsedTax : 0,
         defaultQuoteValidDays: Number.isFinite(parsedQuoteDays) ? parsedQuoteDays : 14,
         defaultInvoiceDueDays: Number.isFinite(parsedInvoiceDays) ? parsedInvoiceDays : 7,
@@ -485,11 +524,6 @@ export default function SalesSettingsPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>ABN</Label>
-            <Input value={abn} onChange={(e) => setAbn(e.target.value)} className="h-9" />
-          </div>
-
-          <div className="space-y-2">
             <Label>Email</Label>
             <Input value={email} onChange={(e) => setEmail(e.target.value)} className="h-9" placeholder="accounts@" />
           </div>
@@ -499,7 +533,7 @@ export default function SalesSettingsPage() {
             <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9" />
           </div>
 
-          <div className="md:col-span-2 space-y-2">
+          <div className="space-y-2">
             <Label>Website</Label>
             <Input value={website} onChange={(e) => setWebsite(e.target.value)} className="h-9" placeholder="https://" />
           </div>
@@ -508,60 +542,230 @@ export default function SalesSettingsPage() {
             <Label>Address</Label>
             <Textarea value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street\nSuburb State Postcode" />
           </div>
+
+          <div className="space-y-2">
+            <Label>Business registration label</Label>
+            <Input value={businessRegistrationLabel} onChange={(e) => setBusinessRegistrationLabel(e.target.value)} className="h-9" placeholder="ABN, GST No, VAT No, EIN, etc" />
+            <p className="text-xs text-muted-foreground">Label shown on invoices/quotes (e.g. ABN, GST No, VAT No, EIN).</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>{businessRegistrationLabel || 'Business registration number'}</Label>
+            <Input value={abn} onChange={(e) => setAbn(e.target.value)} className="h-9" />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Currency symbol</Label>
+            <Input value={currencySymbol} onChange={(e) => setCurrencySymbol(e.target.value)} className="h-9" placeholder="$" />
+            <p className="text-xs text-muted-foreground">Displayed on invoices and quotes (e.g. $, &euro;, &pound;).</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Currency code</Label>
+            <Input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} className="h-9" placeholder="AUD" />
+            <p className="text-xs text-muted-foreground">ISO 4217 code shown in &ldquo;Amounts in&rdquo; labels (e.g. AUD, USD, EUR, GBP).</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Quote label</Label>
+            <Input value={quoteLabel} onChange={(e) => setQuoteLabel(e.target.value)} className="h-9" placeholder="QUOTE" />
+            <p className="text-xs text-muted-foreground">Title shown on PDF and public link (e.g. QUOTE, ESTIMATE, PROPOSAL).</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Default quote validity (days)</Label>
+            <Input
+              value={defaultQuoteValidDays}
+              onChange={(e) => setDefaultQuoteValidDays(e.target.value)}
+              className="h-9"
+              inputMode="numeric"
+            />
+            <p className="text-xs text-muted-foreground">Used to prefill &ldquo;Valid until&rdquo;.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Invoice label</Label>
+            <Input value={invoiceLabel} onChange={(e) => setInvoiceLabel(e.target.value)} className="h-9" placeholder="INVOICE" />
+            <p className="text-xs text-muted-foreground">Title shown on PDF and public link (e.g. INVOICE, TAX INVOICE, BILL).</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Default invoice due (days)</Label>
+            <Input
+              value={defaultInvoiceDueDays}
+              onChange={(e) => setDefaultInvoiceDueDays(e.target.value)}
+              className="h-9"
+              inputMode="numeric"
+            />
+            <p className="text-xs text-muted-foreground">Used to prefill &ldquo;Due date&rdquo;.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Payment details</Label>
+            <Textarea value={paymentDetails} onChange={(e) => setPaymentDetails(e.target.value)} placeholder="BSB / Account / PayID / etc" />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Default T&Cs</Label>
+            <Textarea value={defaultTerms} onChange={(e) => setDefaultTerms(e.target.value)} />
+          </div>
+
+          <div className="md:col-span-2 flex justify-end gap-2">
+            {saved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
+            <Button onClick={onSave} disabled={saving}>
+              {saving ? 'Saving\u2026' : 'Save settings'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label>Tax rate (%)</Label>
-              <Input value={taxRatePercent} onChange={(e) => setTaxRatePercent(e.target.value)} className="h-9" />
-              <p className="text-xs text-muted-foreground">Used to calculate totals (e.g. GST).</p>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <CardTitle className="text-base">Tax</CardTitle>
+          <Switch checked={taxEnabled} onCheckedChange={(v) => { setTaxEnabled(v); setSaved(false) }} disabled={!taxRatesLoaded} />
+        </CardHeader>
+        {taxEnabled && (
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Tax label</Label>
+                <Input value={taxLabel} onChange={(e) => setTaxLabel(e.target.value)} className="h-9" placeholder="GST, VAT, etc" />
+                <p className="text-xs text-muted-foreground">Shown in brackets next to &ldquo;Tax&rdquo; on quotes/invoices (e.g. Tax (GST)).</p>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Default quote validity (days)</Label>
-              <Input
-                value={defaultQuoteValidDays}
-                onChange={(e) => setDefaultQuoteValidDays(e.target.value)}
-                className="h-9"
-                inputMode="numeric"
-              />
-              <p className="text-xs text-muted-foreground">Used to prefill “Valid until”.</p>
+            <div className="flex items-center justify-between gap-4">
+              <h3 className="text-sm font-medium">Tax Rates</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditingRate({ name: '', rate: '' })
+                  setTaxRateModalOpen(true)
+                }}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> New Tax
+              </Button>
             </div>
 
-            <div className="space-y-2">
-              <Label>Default invoice due (days)</Label>
-              <Input
-                value={defaultInvoiceDueDays}
-                onChange={(e) => setDefaultInvoiceDueDays(e.target.value)}
-                className="h-9"
-                inputMode="numeric"
-              />
-              <p className="text-xs text-muted-foreground">Used to prefill “Due date”.</p>
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium">Tax Name</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium w-24">Rate (%)</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium w-28">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {taxRates.map((r) => (
+                    <tr key={r.id} className="border-t">
+                      <td className="px-3 py-2">
+                        <span className="text-sm">{r.name}</span>
+                        {r.isDefault && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">Primary</span>}
+                      </td>
+                      <td className="px-3 py-2 text-sm">{r.rate}%</td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setEditingRate({ id: r.id, name: r.name, rate: String(r.rate) })
+                              setTaxRateModalOpen(true)
+                            }}
+                            title="Edit"
+                            aria-label="Edit"
+                            className="h-9 w-9 p-0"
+                            disabled={taxRatesBusy}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              if (r.isDefault) return
+                              setTaxRatesBusy(true)
+                              try {
+                                const updated = taxRates.map((x) => ({
+                                  ...x,
+                                  isDefault: x.id === r.id,
+                                }))
+                                const savedRates = await saveTaxRatesBulk(updated)
+                                setTaxRates(savedRates)
+                                const def = savedRates.find((x) => x.isDefault)
+                                if (def) setTaxRatePercent(String(def.rate))
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : 'Failed to update primary rate')
+                              } finally {
+                                setTaxRatesBusy(false)
+                              }
+                            }}
+                            title={r.isDefault ? 'Primary rate' : 'Set as primary'}
+                            aria-label={r.isDefault ? 'Primary rate' : 'Set as primary'}
+                            className="h-9 w-9 p-0"
+                            disabled={taxRatesBusy || r.isDefault}
+                          >
+                            <Star className={r.isDefault ? 'w-4 h-4 text-primary' : 'w-4 h-4'} />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              if (taxRates.length <= 1) return
+                              if (!confirm(`Remove "${r.name}"?`)) return
+                              setTaxRatesBusy(true)
+                              try {
+                                const res = await apiFetch(`/api/admin/sales/tax-rates?id=${encodeURIComponent(r.id)}`, { method: 'DELETE' })
+                                if (!res.ok) {
+                                  const json = await res.json().catch(() => null)
+                                  alert(typeof json?.error === 'string' ? json.error : 'Failed to remove tax rate')
+                                  return
+                                }
+                                const rates = await fetchTaxRates()
+                                setTaxRates(rates)
+                                const def = rates.find((x) => x.isDefault)
+                                if (def) setTaxRatePercent(String(def.rate))
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : 'Failed to remove tax rate')
+                              } finally {
+                                setTaxRatesBusy(false)
+                              }
+                            }}
+                            title="Remove"
+                            aria-label="Remove"
+                            className="h-9 w-9 p-0"
+                            disabled={taxRatesBusy || taxRates.length <= 1}
+                          >
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {taxRates.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-center text-sm text-muted-foreground">
+                        No tax rates configured. Click &ldquo;+ New Tax&rdquo; to add one.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Payment details</Label>
-              <Textarea value={paymentDetails} onChange={(e) => setPaymentDetails(e.target.value)} placeholder="BSB / Account / PayID / etc" />
+            <div className="flex justify-end gap-2">
+              {saved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
+              <Button onClick={onSave} disabled={saving}>
+                {saving ? 'Saving\u2026' : 'Save tax'}
+              </Button>
             </div>
-
-            <div className="space-y-2">
-              <Label>Default T&Cs</Label>
-              <Textarea value={defaultTerms} onChange={(e) => setDefaultTerms(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            {saved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
-            <Button onClick={onSave} disabled={saving}>
-              {saving ? 'Saving…' : 'Save settings'}
-            </Button>
-          </div>
-        </CardContent>
+          </CardContent>
+        )}
       </Card>
 
       <Card>
@@ -668,7 +872,7 @@ export default function SalesSettingsPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Fixed fee (A$)</Label>
+                    <Label>Fixed fee ({currencySymbol || '$'})</Label>
                     <Input
                       value={stripeFeeFixed}
                       onChange={(e) => setStripeFeeFixed(e.target.value)}
@@ -864,6 +1068,90 @@ export default function SalesSettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Tax Rate Add/Edit Modal */}
+      <Dialog open={taxRateModalOpen} onOpenChange={setTaxRateModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingRate?.id ? 'Edit tax rate' : 'New tax rate'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Tax name</Label>
+              <Input
+                value={editingRate?.name ?? ''}
+                onChange={(e) => setEditingRate((prev) => prev ? { ...prev, name: e.target.value } : prev)}
+                className="h-9"
+                placeholder="e.g. GST, VAT"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Rate (%)</Label>
+              <Input
+                value={editingRate?.rate ?? ''}
+                onChange={(e) => setEditingRate((prev) => prev ? { ...prev, rate: e.target.value } : prev)}
+                className="h-9"
+                inputMode="decimal"
+                placeholder="10"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setTaxRateModalOpen(false)}>Cancel</Button>
+              <Button
+                disabled={taxRateModalSaving || !editingRate?.name?.trim()}
+                onClick={async () => {
+                  if (!editingRate?.name?.trim()) return
+                  setTaxRateModalSaving(true)
+                  try {
+                    const parsedRate = Number(editingRate.rate)
+                    const rate = Number.isFinite(parsedRate) && parsedRate >= 0 ? parsedRate : 0
+
+                    if (editingRate.id) {
+                      // Edit existing rate via bulk save
+                      const updated = taxRates.map((x) => x.id === editingRate.id ? { ...x, name: editingRate.name.trim(), rate } : x)
+                      const savedRates = await saveTaxRatesBulk(updated)
+                      setTaxRates(savedRates)
+                    } else {
+                      // Add new rate via bulk save
+                      const maxOrder = taxRates.reduce((m, r) => Math.max(m, r.sortOrder), 0)
+                      const isFirst = taxRates.length === 0
+                      const newRate = {
+                        id: `new-${Date.now()}`,
+                        name: editingRate.name.trim(),
+                        rate,
+                        isDefault: isFirst,
+                        sortOrder: maxOrder + 1,
+                      }
+                      const all = [...taxRates, newRate]
+                      // Ensure at least one default
+                      if (!all.some((r) => r.isDefault) && all.length > 0) all[0] = { ...all[0], isDefault: true }
+                      const cleaned = all.map((r, i) => ({
+                        id: r.id.startsWith('new-') ? undefined : r.id,
+                        name: r.name,
+                        rate: r.rate,
+                        isDefault: r.isDefault,
+                        sortOrder: i,
+                      }))
+                      const savedRates = await saveTaxRatesBulk(cleaned as SalesTaxRate[])
+                      setTaxRates(savedRates)
+                      const def = savedRates.find((r) => r.isDefault)
+                      if (def) setTaxRatePercent(String(def.rate))
+                    }
+
+                    setTaxRateModalOpen(false)
+                  } catch (e) {
+                    alert(e instanceof Error ? e.message : 'Failed to save tax rate')
+                  } finally {
+                    setTaxRateModalSaving(false)
+                  }
+                }}
+              >
+                {taxRateModalSaving ? 'Saving\u2026' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

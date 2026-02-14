@@ -18,6 +18,7 @@ import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { cn } from '@/lib/utils'
+import { useTheme } from '@/hooks/useTheme'
 
 export default function SharePage() {
   const params = useParams()
@@ -50,6 +51,9 @@ export default function SharePage() {
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [companyName, setCompanyName] = useState('Studio')
   const [defaultQuality, setDefaultQuality] = useState<'720p' | '1080p'>('720p')
+  const [hasLogo, setHasLogo] = useState(false)
+  const [hasDarkLogo, setHasDarkLogo] = useState(false)
+  const [mainCompanyDomain, setMainCompanyDomain] = useState<string | null>(null)
   const [activeVideoName, setActiveVideoName] = useState<string>('')
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
@@ -64,6 +68,8 @@ export default function SharePage() {
   const [isAdminSession, setIsAdminSession] = useState(false)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
+  const { isDark } = useTheme()
+  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
 
   const otpEmailStorageKey = token ? `share-otp-email:${token}` : null
 
@@ -97,6 +103,27 @@ export default function SharePage() {
     return () => {
       isMounted = false
     }
+  }, [])
+
+  // Fetch branding info on mount (before auth) so logo is available on the auth screen
+  useEffect(() => {
+    let isMounted = true
+    async function fetchBranding() {
+      try {
+        const res = await apiFetch('/api/branding/info', { cache: 'no-store' })
+        if (!isMounted) return
+        if (res.ok) {
+          const data = await res.json()
+          setHasLogo(data.hasLogo || false)
+          setHasDarkLogo(data.hasDarkLogo || false)
+          setMainCompanyDomain(data.mainCompanyDomain || null)
+        }
+      } catch {
+        // ignore – branding is optional
+      }
+    }
+    void fetchBranding()
+    return () => { isMounted = false }
   }, [])
 
   // Load stored token once (persist across refresh) - only for non-admin viewers.
@@ -377,6 +404,9 @@ export default function SharePage() {
             if (projectData.settings) {
               setCompanyName(projectData.settings.companyName || 'Studio')
               setDefaultQuality(projectData.settings.defaultPreviewResolution || '720p')
+              setHasLogo(projectData.settings.hasLogo || false)
+              setHasDarkLogo(projectData.settings.hasDarkLogo || false)
+              setMainCompanyDomain(projectData.settings.mainCompanyDomain || null)
             }
 
             if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
@@ -865,7 +895,27 @@ export default function SharePage() {
         <Card className="bg-card border-border w-full max-w-md">
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
-              <Lock className="w-12 h-12 text-muted-foreground" />
+              {hasLogo ? (
+                mainCompanyDomain ? (
+                  <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={logoSrc}
+                      alt="Company Logo"
+                      className="max-h-16 max-w-[200px] object-contain"
+                    />
+                  </a>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logoSrc}
+                    alt="Company Logo"
+                    className="max-h-16 max-w-[200px] object-contain"
+                  />
+                )
+              ) : (
+                <Lock className="w-12 h-12 text-muted-foreground" />
+              )}
             </div>
             <CardTitle className="text-foreground">Authentication Required</CardTitle>
             <p className="text-muted-foreground text-sm mt-2">
@@ -1102,6 +1152,9 @@ export default function SharePage() {
         showVideos={project.enableVideos !== false}
         showAlbums={project.enablePhotos !== false}
         className="w-64 flex-shrink-0"
+        hasLogo={hasLogo}
+        hasDarkLogo={hasDarkLogo}
+        mainCompanyDomain={mainCompanyDomain}
       />
 
       {/* Main Content Area */}
@@ -1137,7 +1190,23 @@ export default function SharePage() {
                 : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
             >
               {((project.hideFeedback || project.status === 'SHARE_ONLY') || isGuest) ? (
-                <div className="flex-1 min-h-0 flex flex-col">
+                <div className="flex-1 min-h-0 flex flex-col relative">
+                  {/* Company logo overlay — top-right on mobile (desktop has sidebar logo) */}
+                  {hasLogo && (
+                    <div className="absolute top-2 right-2 z-10 lg:hidden">
+                      {mainCompanyDomain ? (
+                        <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[100px] opacity-80 hover:opacity-100 transition-opacity">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                        </a>
+                      ) : (
+                        <div className="max-w-[100px] opacity-80">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <VideoPlayer
                     videos={readyVideos}
                     projectId={project.id}
@@ -1173,6 +1242,9 @@ export default function SharePage() {
                   shareToken={shareToken}
                   otpSessionEmail={otpSessionEmail}
                   companyName={companyName}
+                  hasLogo={hasLogo}
+                  hasDarkLogo={hasDarkLogo}
+                  mainCompanyDomain={mainCompanyDomain}
                   onApprove={fetchProjectData}
                 />
               )}
@@ -1198,6 +1270,9 @@ function ShareFeedbackGrid({
   shareToken,
   otpSessionEmail,
   companyName,
+  hasLogo,
+  hasDarkLogo = false,
+  mainCompanyDomain,
   onApprove,
 }: {
   project: any
@@ -1212,8 +1287,13 @@ function ShareFeedbackGrid({
   shareToken: string | null
   otpSessionEmail: string | null
   companyName: string
+  hasLogo: boolean
+  hasDarkLogo?: boolean
+  mainCompanyDomain: string | null
   onApprove: () => void
 }) {
+  const { isDark } = useTheme()
+  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
   const [isDesktop, setIsDesktop] = useState(false)
   const [commentsWidth, setCommentsWidth] = useState(420)
   const [isResizingComments, setIsResizingComments] = useState(false)
@@ -1674,6 +1754,23 @@ function ShareFeedbackGrid({
           ) : null}
         </div>
       </div>
+
+      {/* Mobile logo at the bottom of the page */}
+      {hasLogo && (
+        <div className="lg:hidden py-6 px-8 flex justify-center">
+          {mainCompanyDomain ? (
+            <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[200px]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+            </a>
+          ) : (
+            <div className="max-w-[200px]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+            </div>
+          )}
+        </div>
+      )}
     </>
   )
 }

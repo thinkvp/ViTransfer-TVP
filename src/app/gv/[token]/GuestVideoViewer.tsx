@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import VideoPlayer from '@/components/VideoPlayer'
 import { cn, formatDateTime } from '@/lib/utils'
+import { useTheme } from '@/hooks/useTheme'
 
 type ResolvePayload = {
   expiresAt: string
@@ -44,6 +45,11 @@ function formatExpiry(expiresAtIso: string): { when: string; isExpired: boolean 
 export function GuestVideoViewer({ token }: { token: string }) {
   const [data, setData] = useState<ResolvePayload | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'expired' | 'notfound' | 'error'>('loading')
+  const [hasLogo, setHasLogo] = useState(false)
+  const [hasDarkLogo, setHasDarkLogo] = useState(false)
+  const [mainCompanyDomain, setMainCompanyDomain] = useState<string | null>(null)
+  const { isDark } = useTheme()
+  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
 
   useEffect(() => {
     let cancelled = false
@@ -90,6 +96,19 @@ export function GuestVideoViewer({ token }: { token: string }) {
       cancelled = true
     }
   }, [token])
+
+  useEffect(() => {
+    fetch('/api/branding/info')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) {
+          setHasLogo(d.hasLogo || false)
+          setHasDarkLogo(d.hasDarkLogo || false)
+          setMainCompanyDomain(d.mainCompanyDomain || null)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const expiry = data?.expiresAt ? formatExpiry(data.expiresAt) : null
 
@@ -140,18 +159,41 @@ export function GuestVideoViewer({ token }: { token: string }) {
   return (
     <div className="h-[100dvh] flex flex-col overflow-y-auto lg:overflow-hidden">
       <div className="border-b border-border bg-background flex-shrink-0">
-        <div className={cn('mx-auto w-full max-w-6xl px-4 py-3 flex flex-col gap-1')}>
-          <div className="text-sm font-medium text-foreground">
-            {data.video.name ? data.video.name : 'Video'}
-            {data.video.versionLabel ? (
-              <span className="text-muted-foreground"> · {data.video.versionLabel}</span>
-            ) : null}
+        <div className={cn('mx-auto w-full max-w-6xl px-4 py-3 flex items-center gap-4')}>
+          <div className="flex-1 min-w-0 flex flex-col gap-1">
+            <div className="text-sm font-medium text-foreground truncate">
+              {data.video.name ? data.video.name : 'Video'}
+              {data.video.versionLabel ? (
+                <span className="text-muted-foreground"> · {data.video.versionLabel}</span>
+              ) : null}
+            </div>
+
+            <div className="text-xs text-muted-foreground">
+              {expiry?.when ? `This link expires: ${expiry.when}.` : 'This is a view-only link.'}
+            </div>
           </div>
 
-          <div className="text-xs text-muted-foreground">
-            This is a view-only link (no comments, approvals, or access to other videos).
-            {expiry?.when ? <span className="ml-1">Expires: {expiry.when}.</span> : null}
-          </div>
+          {hasLogo && (
+            <div className="flex-shrink-0">
+              {mainCompanyDomain ? (
+                <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={logoSrc}
+                    alt="Company logo"
+                    className="max-w-[150px] max-h-10 w-auto h-auto object-contain"
+                  />
+                </a>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoSrc}
+                  alt="Company logo"
+                  className="max-w-[150px] max-h-10 w-auto h-auto object-contain"
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
 

@@ -15,6 +15,8 @@ export type SalesLineItem = {
   quantity: number
   unitPriceCents: MoneyCents
   taxRatePercent: number
+  /** Display name of the tax rate, e.g. "GST". Stored per-item for historical accuracy. */
+  taxRateName?: string
 }
 
 export type SalesQuote = {
@@ -30,6 +32,8 @@ export type SalesQuote = {
   remindersEnabled?: boolean
   /** YYYY-MM-DD when the last expiry reminder was sent (prevents daily duplicates). */
   lastExpiryReminderSentYmd?: string | null
+  /** Whether tax was enabled at the time this document was created. */
+  taxEnabled: boolean
   notes: string
   terms: string
   items: SalesLineItem[]
@@ -50,6 +54,8 @@ export type SalesInvoice = {
   remindersEnabled?: boolean
   /** YYYY-MM-DD when the last overdue reminder was sent (prevents daily duplicates). */
   lastOverdueReminderSentYmd?: string | null
+  /** Whether tax was enabled at the time this document was created. */
+  taxEnabled: boolean
   notes: string
   terms: string
   items: SalesLineItem[]
@@ -77,12 +83,27 @@ export type SalesSettings = {
   phone: string
   email: string
   website: string
+  businessRegistrationLabel: string
+  currencySymbol: string
+  currencyCode: string
+  quoteLabel: string
+  invoiceLabel: string
+  taxLabel: string
+  taxEnabled: boolean
   taxRatePercent: number
   defaultQuoteValidDays: number
   defaultInvoiceDueDays: number
   defaultTerms: string
   paymentDetails: string
   updatedAt: string
+}
+
+export type SalesTaxRate = {
+  id: string
+  name: string
+  rate: number
+  isDefault: boolean
+  sortOrder: number
 }
 
 export type ClientOption = { id: string; name: string }

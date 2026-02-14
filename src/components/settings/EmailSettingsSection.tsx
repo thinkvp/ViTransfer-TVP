@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
 import { Send, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -19,6 +20,8 @@ interface EmailSettingsSectionProps {
   setSmtpPassword: (value: string) => void
   emailTrackingPixelsEnabled: boolean
   setEmailTrackingPixelsEnabled: (value: boolean) => void
+  emailCustomFooterText: string | null
+  setEmailCustomFooterText: (value: string | null) => void
   smtpFromAddress: string
   setSmtpFromAddress: (value: string) => void
   smtpSecure: string
@@ -55,6 +58,8 @@ export function EmailSettingsSection({
   setSmtpPassword,
   emailTrackingPixelsEnabled,
   setEmailTrackingPixelsEnabled,
+  emailCustomFooterText,
+  setEmailCustomFooterText,
   smtpFromAddress,
   setSmtpFromAddress,
   smtpSecure,
@@ -294,6 +299,21 @@ export function EmailSettingsSection({
             label="Admin Notification Schedule"
             description="Configure when you receive summaries of client comments across all projects. Note: Approval emails are always sent immediately."
           />
+        </div>
+
+        <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+          <Label htmlFor="emailCustomFooterText" className="text-sm font-medium">Client Email Footer Notice</Label>
+          <Textarea
+            id="emailCustomFooterText"
+            placeholder="Leave empty to use the default notice"
+            value={emailCustomFooterText ?? ''}
+            onChange={(e) => setEmailCustomFooterText(e.target.value || null)}
+            rows={4}
+            className="resize-y"
+          />
+          <p className="text-xs text-muted-foreground">
+            This text appears at the bottom of all client-facing emails. Leave empty to use the default notice. Clear all text and save to hide the notice entirely.
+          </p>
         </div>
       </CardContent>
       )}

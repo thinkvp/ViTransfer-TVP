@@ -35,7 +35,7 @@ export function projectStatusBadgeClass(status: string): string {
     case 'ON_HOLD':
       return 'bg-warning text-warning-visible border-2 border-warning-visible dark:bg-warning/20 dark:text-warning dark:border-warning/40'
     case 'IN_REVIEW':
-      return 'bg-primary text-primary-visible border-2 border-primary-visible dark:bg-primary/20 dark:text-primary dark:border-primary/40'
+      return 'bg-blue-600 text-blue-50 border-2 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-400/40'
     case 'IN_PROGRESS':
       return 'bg-violet-800 text-violet-100 border-2 border-violet-200 dark:bg-violet-500/20 dark:text-violet-300 dark:border-violet-400/40'
     case 'NOT_STARTED':
@@ -58,7 +58,7 @@ export function projectStatusDotClass(status: string): string {
     case 'ON_HOLD':
       return 'text-warning'
     case 'IN_REVIEW':
-      return 'text-primary'
+      return 'text-blue-600 dark:text-blue-400'
     case 'IN_PROGRESS':
       return 'text-violet-600 dark:text-violet-400'
     case 'NOT_STARTED':

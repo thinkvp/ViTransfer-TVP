@@ -414,7 +414,7 @@ export default function VideoList({
                         return willOpen ? video.id : null
                       })
                     }}
-                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                    className="text-primary hover:text-primary/80 hover:bg-primary/5 dark:hover:bg-primary/10"
                     title="Upload Assets"
                   >
                     <Upload className="w-4 h-4" />

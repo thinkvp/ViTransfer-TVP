@@ -48,9 +48,10 @@ export async function recomputeInvoiceStoredStatus(
 
   const taxRatePercent = await getSalesTaxRatePercent(tx)
   const items = Array.isArray(inv.itemsJson) ? inv.itemsJson : []
+  const invTaxEnabled = typeof (inv as any).taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
 
   const subtotalCents = sumLineItemsSubtotal(items as any)
-  const taxCents = sumLineItemsTax(items as any, taxRatePercent)
+  const taxCents = invTaxEnabled ? sumLineItemsTax(items as any, taxRatePercent) : 0
   const totalCents = subtotalCents + taxCents
 
   const paymentsAgg = await tx.salesPayment.aggregate({

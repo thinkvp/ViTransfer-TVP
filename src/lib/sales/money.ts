@@ -48,3 +48,12 @@ export function sumLineItemsTax(items: SalesLineItem[], defaultTaxRatePercent: n
 export function sumLineItemsTotal(items: SalesLineItem[], defaultTaxRatePercent: number): MoneyCents {
   return sumLineItemsSubtotal(items) + sumLineItemsTax(items, defaultTaxRatePercent)
 }
+
+/**
+ * Formats cents with a currency symbol, e.g. "$1,234.56" or "€1,234.56".
+ * @param cents - Amount in cents.
+ * @param currencySymbol - The currency symbol to prepend (default: '$').
+ */
+export function formatMoney(cents: MoneyCents, currencySymbol: string = '$'): string {
+  return `${currencySymbol}${centsToDollars(cents)}`
+}

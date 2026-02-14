@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import { Play, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, GripVertical, CheckCircle2, Images, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
+import { useTheme } from '@/hooks/useTheme'
 
 interface VideoGroup {
   name: string
@@ -24,6 +25,12 @@ interface VideoSidebarProps {
   hideApprovalGrouping?: boolean
   className?: string
   initialCollapsed?: boolean
+  /** If true, show the company logo at the top of the desktop sidebar */
+  hasLogo?: boolean
+  /** Whether a separate dark-mode logo has been configured */
+  hasDarkLogo?: boolean
+  /** Main company domain — makes the logo a clickable link (opens in new tab) */
+  mainCompanyDomain?: string | null
 }
 
 // Helper function to calculate thumbnail dimensions maintaining aspect ratio within 16:9
@@ -73,7 +80,12 @@ export default function VideoSidebar({
   hideApprovalGrouping = false,
   className,
   initialCollapsed = true,
+  hasLogo = false,
+  hasDarkLogo = false,
+  mainCompanyDomain,
 }: VideoSidebarProps) {
+  const { isDark } = useTheme()
+  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
   const [isCollapsed, setIsCollapsed] = useState(initialCollapsed)
   const [isMobileCollapsed, setIsMobileCollapsed] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(256) // Default 256px (w-64)
@@ -197,6 +209,27 @@ export default function VideoSidebar({
         )}
       >
         <div className="flex-1 min-h-0 max-h-full overflow-y-auto overflow-x-hidden sidebar-scrollbar">
+          {hasLogo && (
+            <div className="p-4 border-b border-border">
+              {mainCompanyDomain ? (
+                <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={logoSrc}
+                    alt="Company logo"
+                    className="w-full max-h-16 h-auto object-contain"
+                  />
+                </a>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoSrc}
+                  alt="Company logo"
+                  className="w-full max-h-16 h-auto object-contain"
+                />
+              )}
+            </div>
+          )}
           {heading && (
             <div className="p-4 border-b border-border">
               <h2 className="text-base font-semibold text-foreground truncate" title={heading}>

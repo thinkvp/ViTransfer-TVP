@@ -3,7 +3,7 @@ import Image from 'next/image'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/db'
 import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
-import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
@@ -90,10 +90,10 @@ function safeString(v: unknown): string {
   return typeof v === 'string' ? v : ''
 }
 
-function firstCurrencyFromCsv(value: unknown): string {
+function firstCurrencyFromCsv(value: unknown, fallback: string = 'AUD'): string {
   const raw = typeof value === 'string' ? value : ''
   const first = raw.split(',')[0]?.trim().toUpperCase()
-  return first && /^[A-Z]{3}$/.test(first) ? first : 'AUD'
+  return first && /^[A-Z]{3}$/.test(first) ? first : fallback
 }
 
 function getClientIpFromHeaders(h: Headers): string | null {
@@ -207,13 +207,18 @@ export default async function SalesDocPublicViewPage(
   const email = safeString(settings?.email)
   const website = safeString(settings?.website)
   const abn = safeString(settings?.abn)
+  const businessRegistrationLabel = safeString((settings as any)?.businessRegistrationLabel) || 'ABN'
+  const currencySymbol = safeString((settings as any)?.currencySymbol) || '$'
+  const currencyCode = safeString((settings as any)?.currencyCode) || 'AUD'
   const paymentDetails = safeString(settings?.paymentDetails)
   const taxRatePercent = Number(settings?.taxRatePercent)
   const defaultTaxRatePercent = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
+  // Use per-document taxEnabled (snapshot from creation); fall back to settings for legacy docs.
+  const taxEnabled = typeof doc?.taxEnabled === 'boolean' ? doc.taxEnabled : (settings?.taxEnabled !== false)
 
   const items = Array.isArray(doc?.items) ? doc.items : []
   const subtotalCents = sumLineItemsSubtotal(items)
-  const taxCents = sumLineItemsTax(items, defaultTaxRatePercent)
+  const taxCents = taxEnabled ? sumLineItemsTax(items, defaultTaxRatePercent) : 0
   const totalCents = subtotalCents + taxCents
 
   const issueDate = safeString(doc?.issueDate) ? formatDate(safeString(doc?.issueDate)) : ''
@@ -221,7 +226,8 @@ export default async function SalesDocPublicViewPage(
     ? (safeString(doc?.dueDate) ? formatDate(safeString(doc?.dueDate)) : '')
     : (safeString(doc?.validUntil) ? formatDate(safeString(doc?.validUntil)) : '')
 
-  const title = type === 'INVOICE' ? 'INVOICE' : 'QUOTE'
+  const title = type === 'INVOICE' ? (safeString(settings?.invoiceLabel) || 'INVOICE') : (safeString(settings?.quoteLabel) || 'QUOTE')
+  const taxLabel = safeString(settings?.taxLabel)
   const numberLabel = type === 'INVOICE' ? 'Invoice #' : 'Quote #'
   const number = safeString(share.docNumber)
 
@@ -328,9 +334,8 @@ export default async function SalesDocPublicViewPage(
     && Boolean(stripeGateway?.enabled)
     && effectiveStatus !== 'PAID'
 
-  const displayCurrency = type === 'INVOICE'
-    ? firstCurrencyFromCsv(stripeGateway?.currencies)
-    : 'AUD'
+  const stripeCurrency = firstCurrencyFromCsv(stripeGateway?.currencies, currencyCode)
+  const displayCurrency = currencyCode
 
   const processingFeeCents = (type === 'INVOICE' && canPayInvoice)
     ? calcStripeGrossUpCents(
@@ -356,7 +361,8 @@ export default async function SalesDocPublicViewPage(
             canPayInvoice={canPayInvoice}
             payLabel={stripeGateway?.label ?? null}
             processingFeeCents={processingFeeCents}
-            processingFeeCurrency={displayCurrency}
+            processingFeeCurrency={stripeCurrency}
+            currencySymbol={currencySymbol}
           />
         </div>
         <div className="rounded-xl border bg-card overflow-hidden">
@@ -376,7 +382,7 @@ export default async function SalesDocPublicViewPage(
                   </div>
                 )}
                 <div className="text-lg font-semibold break-words">{businessName}</div>
-                {abn && <div className="text-xs opacity-80 mt-0.5">ABN: {abn}</div>}
+                {abn && <div className="text-xs opacity-80 mt-0.5">{businessRegistrationLabel}: {abn}</div>}
                 {address && (
                   <div className="text-xs opacity-80 mt-2 whitespace-pre-wrap">{address}</div>
                 )}
@@ -438,14 +444,14 @@ export default async function SalesDocPublicViewPage(
                     <th className="px-3 py-2 text-left text-xs font-semibold min-w-[280px]">Item</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[72px]">Qty</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[104px]">Rate</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[104px]">Tax</th>
+                    {taxEnabled && <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[104px]">Tax</th>}
                     <th className="px-3 py-2 text-right text-xs font-semibold whitespace-nowrap min-w-[116px]">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">
+                      <td colSpan={taxEnabled ? 5 : 4} className="px-3 py-10 text-center text-muted-foreground">
                         No line items
                       </td>
                     </tr>
@@ -475,7 +481,7 @@ export default async function SalesDocPublicViewPage(
                         },
                         defaultTaxRatePercent
                       )
-                      const lineTotal = lineSubtotal + lineTax
+                      const lineTotal = lineSubtotal + (taxEnabled ? lineTax : 0)
 
                       const key = safeString(it?.id) || `${index}-${safeString(it?.description)}`
 
@@ -490,9 +496,13 @@ export default async function SalesDocPublicViewPage(
                             )}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[72px]">{Number.isFinite(qty) ? qty : 0}</td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[104px]">${centsToDollars(Number.isFinite(unit) ? unit : 0)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[104px]">${centsToDollars(lineTax)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums align-top font-medium whitespace-nowrap min-w-[116px]">${centsToDollars(lineTotal)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[104px]">{formatMoney(Number.isFinite(unit) ? unit : 0, currencySymbol)}</td>
+                          {taxEnabled && (
+                            <td className="px-3 py-2 text-right tabular-nums align-top whitespace-nowrap min-w-[104px]">
+                              {safeString(it?.taxRateName) ? `${safeString(it?.taxRateName)} ${itemTaxRatePercent}%` : `${itemTaxRatePercent}%`}
+                            </td>
+                          )}
+                          <td className="px-3 py-2 text-right tabular-nums align-top font-medium whitespace-nowrap min-w-[116px]">{formatMoney(lineTotal, currencySymbol)}</td>
                         </tr>
                       )
                     })
@@ -506,15 +516,17 @@ export default async function SalesDocPublicViewPage(
               <div className="w-full sm:w-[320px] space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span className="tabular-nums">${centsToDollars(subtotalCents)}</span>
+                  <span className="tabular-nums">{formatMoney(subtotalCents, currencySymbol)}</span>
                 </div>
+                {taxEnabled && (
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Tax</span>
-                  <span className="tabular-nums">${centsToDollars(taxCents)}</span>
+                  <span className="text-muted-foreground">{taxLabel ? `Tax (${taxLabel})` : 'Tax'}</span>
+                  <span className="tabular-nums">{formatMoney(taxCents, currencySymbol)}</span>
                 </div>
+                )}
                 <div className="flex justify-between border-t pt-2">
                   <span className="font-semibold">Total</span>
-                  <span className="font-semibold tabular-nums">${centsToDollars(totalCents)}</span>
+                  <span className="font-semibold tabular-nums">{formatMoney(totalCents, currencySymbol)}</span>
                 </div>
               </div>
             </div>

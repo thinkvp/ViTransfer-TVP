@@ -9,23 +9,25 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
+import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
 import {
   deleteSalesInvoice,
   fetchSalesInvoice,
   fetchSalesRollup,
   fetchSalesSettings,
+  fetchTaxRates,
   listSalesPayments,
   patchSalesInvoice,
 } from '@/lib/sales/admin-api'
 import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
-import type { ClientOption, InvoiceStatus, ProjectOption, SalesLineItem, SalesPayment, SalesSettings } from '@/lib/sales/types'
+import type { ClientOption, InvoiceStatus, ProjectOption, SalesLineItem, SalesPayment, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
   calcLineSubtotalCents,
   centsToDollars,
   dollarsToCents,
+  formatMoney,
   sumLineItemsSubtotal,
   sumLineItemsTax,
 } from '@/lib/sales/money'
@@ -36,8 +38,6 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
-
-const TAX_RATE_OPTIONS = [0, 10]
 
 function statusBadgeClass(status: InvoiceStatus): string {
   switch (status) {
@@ -71,11 +71,10 @@ function statusLabel(status: InvoiceStatus): string {
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
-  const candidate = Number.isFinite(n) ? n : defaultRate
-  return candidate >= 5 ? 10 : 0
+  return Number.isFinite(n) && n >= 0 ? n : defaultRate
 }
 
-function newLineItem(defaultTaxRatePercent: number): SalesLineItem {
+function newLineItem(defaultTaxRatePercent: number, defaultTaxRateName?: string): SalesLineItem {
   return {
     id: globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}`,
     description: '',
@@ -83,6 +82,7 @@ function newLineItem(defaultTaxRatePercent: number): SalesLineItem {
     quantity: 1,
     unitPriceCents: 0,
     taxRatePercent: normalizeTaxRatePercent(defaultTaxRatePercent, defaultTaxRatePercent),
+    taxRateName: defaultTaxRateName,
   }
 }
 
@@ -106,6 +106,13 @@ export default function InvoiceDetailPage() {
     phone: '',
     email: '',
     website: '',
+    businessRegistrationLabel: 'ABN',
+    currencySymbol: '$',
+    currencyCode: 'AUD',
+    quoteLabel: 'QUOTE',
+    invoiceLabel: 'INVOICE',
+    taxLabel: '',
+    taxEnabled: true,
     taxRatePercent: 10,
     defaultQuoteValidDays: 14,
     defaultInvoiceDueDays: 7,
@@ -149,6 +156,7 @@ export default function InvoiceDetailPage() {
   const [notes, setNotes] = useState('')
   const [terms, setTerms] = useState('')
   const [items, setItems] = useState<SalesLineItem[]>([])
+  const [taxRates, setTaxRates] = useState<SalesTaxRate[]>([])
   const [payments, setPayments] = useState<SalesPayment[]>([])
 
   useEffect(() => {
@@ -165,16 +173,18 @@ export default function InvoiceDetailPage() {
       }
 
       try {
-        const [s, inv, pay, r] = await Promise.all([
+        const [s, inv, pay, r, rates] = await Promise.all([
           fetchSalesSettings(),
           fetchSalesInvoice(id),
           listSalesPayments({ invoiceId: id, limit: 5000 }),
           fetchSalesRollup({ invoiceIds: [id], includeInvoices: true, includeQuotes: false, includePayments: false }),
+          fetchTaxRates(),
         ])
 
         if (cancelled) return
 
         setSettings(s)
+        setTaxRates(rates)
         setInvoice(inv)
         setPayments(pay)
         setSalesRollup(r)
@@ -368,7 +378,8 @@ export default function InvoiceDetailPage() {
 
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
-  const totalCents = subtotalCents + taxCents
+  const docTaxEnabled = invoice?.taxEnabled ?? settings.taxEnabled
+  const totalCents = subtotalCents + (docTaxEnabled ? taxCents : 0)
 
   const countablePayments = useMemo(() => payments.filter((p) => !p.excludeFromInvoiceBalance), [payments])
   const localPaidCents = useMemo(() => countablePayments.reduce((acc, p) => acc + p.amountCents, 0), [countablePayments])
@@ -453,16 +464,16 @@ export default function InvoiceDetailPage() {
     entries.sort((a, b) => a.ymd.localeCompare(b.ymd))
 
     if (entries.length === 0) {
-      if (paidOnDisplay) return `Paid: $${centsToDollars(paidCents)} on ${paidOnDisplay}`
+      if (paidOnDisplay) return `Paid: ${formatMoney(paidCents, settings.currencySymbol)} on ${paidOnDisplay}`
       return 'Paid'
     }
 
     const details = entries
-      .map((e) => `$${centsToDollars(e.amountCents)} on ${e.ymd.replaceAll('-', '/')}`)
+      .map((e) => `${formatMoney(e.amountCents, settings.currencySymbol)} on ${e.ymd.replaceAll('-', '/')}`)
       .join(', ')
 
     return `Paid: ${details}`
-  }, [countablePayments, effectiveStatus, paidCents, paidOnDisplay, stripePayments])
+  }, [countablePayments, effectiveStatus, paidCents, paidOnDisplay, settings.currencySymbol, stripePayments])
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const projectTitleById = useMemo(
@@ -837,7 +848,7 @@ export default function InvoiceDetailPage() {
                   </div>
 
                   <div className="space-y-1 md:col-span-2">
-                    <Label>Unit ($)</Label>
+                    <Label>{`Unit (${settings.currencySymbol || '$'})`}</Label>
                     <Input
                       value={centsToDollars(it.unitPriceCents)}
                       onChange={(e) => {
@@ -849,28 +860,31 @@ export default function InvoiceDetailPage() {
                   </div>
                 </div>
 
+                {docTaxEnabled && (
                 <div className="md:col-span-3 space-y-1">
                   <Label>Tax</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    <Select
-                      value={String(it.taxRatePercent)}
-                      onValueChange={(v) => {
-                        const rate = Number(v)
-                        setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, taxRatePercent: normalizeTaxRatePercent(rate, settings.taxRatePercent) } : x)))
-                      }}
-                    >
-                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {TAX_RATE_OPTIONS.map((r) => (
-                          <SelectItem key={r} value={String(r)}>{r}%</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <TaxRateSelect
+                      value={it.taxRatePercent}
+                      onChange={(rate, name) => setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, taxRatePercent: normalizeTaxRatePercent(rate, settings.taxRatePercent), taxRateName: name } : x)))}
+                      taxRates={taxRates}
+                      className="h-9"
+                    />
                     <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                      ${centsToDollars(calcLineSubtotalCents(it))}
+                      {formatMoney(calcLineSubtotalCents(it), settings.currencySymbol)}
                     </div>
                   </div>
                 </div>
+                )}
+
+                {!docTaxEnabled && (
+                <div className="md:col-span-3 space-y-1">
+                  <Label>Amount</Label>
+                  <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
+                    {formatMoney(calcLineSubtotalCents(it), settings.currencySymbol)}
+                  </div>
+                </div>
+                )}
 
                 <div className="md:col-span-1 flex justify-end">
                   <Button
@@ -890,21 +904,23 @@ export default function InvoiceDetailPage() {
           )}
 
           <div className="flex justify-between items-center gap-2 flex-wrap">
-            <Button variant="outline" onClick={() => setItems((prev) => [...prev, newLineItem(settings.taxRatePercent)])}>
+            <Button variant="outline" onClick={() => { const pr = taxRates.find((r) => r.isDefault); setItems((prev) => [...prev, newLineItem(settings.taxRatePercent, pr?.name)]) }}>
               Add line
             </Button>
             <div className="text-sm">
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span className="text-foreground font-medium tabular-nums">${centsToDollars(subtotalCents)}</span>
+                <span className="text-foreground font-medium tabular-nums">{formatMoney(subtotalCents, settings.currencySymbol)}</span>
               </div>
+              {docTaxEnabled && (
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Tax</span>
-                <span className="text-foreground font-medium tabular-nums">${centsToDollars(taxCents)}</span>
+                <span className="text-foreground font-medium tabular-nums">{formatMoney(taxCents, settings.currencySymbol)}</span>
               </div>
+              )}
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Total</span>
-                <span className="text-foreground font-semibold tabular-nums">${centsToDollars(totalCents)}</span>
+                <span className="text-foreground font-semibold tabular-nums">{formatMoney(totalCents, settings.currencySymbol)}</span>
               </div>
             </div>
           </div>

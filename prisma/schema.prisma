@@ -729,6 +729,11 @@ model Settings {
   companyLogoMode CompanyLogoMode @default(NONE)
   companyLogoPath String? // Stored logo for email communications (storage path)
   companyLogoUrl  String? // Direct URL to a hosted logo (PNG/JPG)
+  darkLogoEnabled Boolean         @default(false) // Whether a separate dark-theme logo is active
+  darkLogoMode    CompanyLogoMode @default(NONE)
+  darkLogoPath    String? // Stored dark-theme logo (storage path)
+  darkLogoUrl     String? // Direct URL to a hosted dark-theme logo (PNG/JPG)
+  accentColor     String? // Custom accent hex colour (e.g. "#FF6600") — overrides default blue app-wide
 
   // Browser Branding
   companyFaviconMode CompanyLogoMode @default(NONE)
@@ -745,9 +750,11 @@ model Settings {
 
   // Email privacy / tracking
   emailTrackingPixelsEnabled Boolean @default(true)
+  emailCustomFooterText      String? // Customisable notice displayed at the bottom of client-facing emails
 
   // Domain Configuration
-  appDomain String? // e.g., "https://yourdomain.com"
+  appDomain         String? // e.g., "https://yourdomain.com"
+  mainCompanyDomain String? // e.g., "https://yourcompany.com" — makes logos clickable links
 
   // Browser Web Push (admin-only)
   webPushVapidPublicKey          String?
@@ -1058,6 +1065,15 @@ model SalesSettings {
   email        String @default("")
   website      String @default("")
 
+  businessRegistrationLabel String @default("ABN")
+  currencySymbol            String @default("$")
+  currencyCode              String @default("AUD")
+
+  quoteLabel   String @default("QUOTE")
+  invoiceLabel String @default("INVOICE")
+  taxLabel     String @default("")
+  taxEnabled   Boolean @default(true)
+
   taxRatePercent        Float  @default(10)
   defaultQuoteValidDays Int    @default(14)
   defaultInvoiceDueDays Int    @default(7)
@@ -1066,6 +1082,20 @@ model SalesSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model SalesTaxRate {
+  id String @id @default(cuid())
+
+  name      String
+  rate      Float
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
 }
 
 model SalesSequence {
@@ -1104,6 +1134,8 @@ model SalesQuote {
 
   remindersEnabled        Boolean @default(true)
   lastExpiryReminderSentYmd String?
+
+  taxEnabled Boolean @default(true)
 
   qboId String? @unique
 
@@ -1162,6 +1194,8 @@ model SalesInvoice {
 
   remindersEnabled          Boolean @default(true)
   lastOverdueReminderSentYmd String?
+
+  taxEnabled Boolean @default(true)
 
   qboId String? @unique
 
