@@ -1190,23 +1190,7 @@ export default function SharePage() {
                 : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
             >
               {((project.hideFeedback || project.status === 'SHARE_ONLY') || isGuest) ? (
-                <div className="flex-1 min-h-0 flex flex-col relative">
-                  {/* Company logo overlay — top-right on mobile (desktop has sidebar logo) */}
-                  {hasLogo && (
-                    <div className="absolute top-2 right-2 z-10 lg:hidden">
-                      {mainCompanyDomain ? (
-                        <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[100px] opacity-80 hover:opacity-100 transition-opacity">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
-                        </a>
-                      ) : (
-                        <div className="max-w-[100px] opacity-80">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <div className="flex-1 min-h-0 flex flex-col">
                   <VideoPlayer
                     videos={readyVideos}
                     projectId={project.id}
@@ -1227,6 +1211,27 @@ export default function SharePage() {
                     hideDownloadButton={true}
                     fillContainer
                   />
+                  {/* Video name + Company logo row — below video player on mobile */}
+                  {(activeVideoName || hasLogo) && (
+                    <div className="flex items-center justify-between py-2 lg:hidden">
+                      {activeVideoName ? (
+                        <p className="text-sm font-medium text-foreground truncate mr-3">{activeVideoName}</p>
+                      ) : <span />}
+                      {hasLogo ? (
+                        mainCompanyDomain ? (
+                          <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[100px] flex-shrink-0 opacity-80 hover:opacity-100 transition-opacity">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                          </a>
+                        ) : (
+                          <div className="max-w-[100px] flex-shrink-0 opacity-80">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                          </div>
+                        )
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <ShareFeedbackGrid

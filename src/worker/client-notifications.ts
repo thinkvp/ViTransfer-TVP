@@ -224,6 +224,9 @@ export async function processClientNotifications() {
               mainCompanyDomain: emailSettings.mainCompanyDomain,
               emailCustomFooterText: emailSettings.emailCustomFooterText,
               accentColor: emailSettings.accentColor || undefined,
+              accentTextMode: emailSettings.accentTextMode || undefined,
+              emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+              emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
             })
 
             const result = await sendEmail({

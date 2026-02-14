@@ -3,7 +3,7 @@
  * Clean, minimal, and easy to scan
  */
 
-import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, escapeHtml, firstWordName, renderEmailShell, renderEmailFooterNotice } from './email'
+import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonStyle, emailVersionPillHtml, escapeHtml, firstWordName, renderEmailShell, renderEmailFooterNotice } from './email'
 import { formatTimecodeDisplay } from './timecode'
 
 interface NotificationData {
@@ -41,6 +41,9 @@ interface NotificationSummaryData {
   companyLogoUrl?: string
   emailCustomFooterText?: string | null
   accentColor?: string
+  accentTextMode?: string
+  emailHeaderColor?: string
+  emailHeaderTextMode?: string
 }
 
 interface AdminSummaryData {
@@ -49,6 +52,9 @@ interface AdminSummaryData {
   period: string
   companyLogoUrl?: string
   mainCompanyDomain?: string | null
+  accentTextMode?: string
+  emailHeaderColor?: string
+  emailHeaderTextMode?: string
   projects: Array<{
     projectTitle: string
     useFullTimecode: boolean
@@ -92,7 +98,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     if (n.type === 'PROJECT_APPROVED') {
       return `
         <div style="padding:10px 0;">
-          <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:${data.accentColor || EMAIL_THEME.accent}; margin-bottom:4px;">Project approved</div>
+          <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#15803d; margin-bottom:4px;">Project approved</div>
           <div style="font-size:14px; color:#111827;">All videos are ready for download.</div>
         </div>
       `
@@ -102,7 +108,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       const approved = n.type === 'VIDEO_APPROVED'
       return `
         <div style="padding:10px 0;">
-          <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:2px;">${escapeHtml(n.videoName)}${n.videoLabel ? ` ${escapeHtml(n.videoLabel)}` : ''}</div>
+          <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:2px;">${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}</div>
           <div style="font-size:13px; color:${approved ? '#15803d' : '#b45309'};">${approved ? 'Approved' : 'Approval removed'}</div>
         </div>
       `
@@ -112,7 +118,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     return `
       <div style="padding:10px 0;">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${escapeHtml(n.videoLabel)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode)}` : ''}
+          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode)}` : ''}
         </div>
         <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:2px;">${escapeHtml(n.authorName)}</div>
         ${isReply ? `<div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Replying to ${escapeHtml(n.parentComment!.authorName)} — "${escapeHtml(n.parentComment!.content.substring(0, 60))}${n.parentComment!.content.length > 60 ? '...' : ''}"</div>` : ''}
@@ -130,7 +136,8 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
   return renderEmailShell({
     companyName: data.companyName,
     companyLogoUrl: data.companyLogoUrl,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: data.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (data.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Project Update',
     subtitle: `${summaryText} ${data.period}`,
     trackingToken: data.trackingToken,
@@ -147,7 +154,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       </p>
       ${itemsHtml}
       <div style="text-align:center; margin:32px 0;">
-        <a href="${escapeHtml(data.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: data.accentColor })}">
+        <a href="${escapeHtml(data.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: data.accentColor, accentTextMode: data.accentTextMode })}">
           View Project
         </a>
       </div>
@@ -174,7 +181,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
     const items = project.notifications.map((n, index) => `
       <div style="padding:10px 0;${index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''}">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${escapeHtml(n.videoLabel)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode)}` : ''}
+          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, undefined, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode)}` : ''}
         </div>
         <div style="margin-bottom:4px;">
           <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(n.authorName)}</span>
@@ -189,7 +196,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
         <div style="font-size:15px; font-weight:800; color:#111827; margin-bottom:8px;">${escapeHtml(project.projectTitle)}</div>
         ${items}
         <div style="margin-top:12px; text-align:center;">
-          <a href="${escapeHtml(project.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999 })}">
+          <a href="${escapeHtml(project.shareUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999, accentTextMode: data.accentTextMode })}">
             View project<span style="font-size:16px;">→</span>
           </a>
         </div>
@@ -202,7 +209,8 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
   return renderEmailShell({
     companyName: data.companyName,
     companyLogoUrl: data.companyLogoUrl,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: data.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (data.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Client Activity Summary',
     subtitle: `${totalComments} ${totalComments === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
     mainCompanyDomain: data.mainCompanyDomain,
@@ -216,7 +224,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
       </p>
       ${projectsHtml}
       <div style="text-align:center; margin:32px 0;">
-        <a href="${adminUrl}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
+        <a href="${adminUrl}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accentTextMode: data.accentTextMode })}">
           Open Admin Dashboard
         </a>
       </div>
@@ -236,6 +244,9 @@ export interface InternalCommentSummaryEmailData {
   period: string
   companyLogoUrl?: string
   mainCompanyDomain?: string | null
+  accentTextMode?: string
+  emailHeaderColor?: string
+  emailHeaderTextMode?: string
   projects: InternalCommentSummaryProject[]
 }
 
@@ -261,7 +272,7 @@ export function generateInternalCommentSummaryEmail(data: InternalCommentSummary
         <div style="font-size:15px; font-weight:800; color:#111827; margin-bottom:8px;">${escapeHtml(project.projectTitle)}</div>
         ${items}
         <div style="margin-top:12px; text-align:center;">
-          <a href="${escapeHtml(project.adminUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999 })}">
+          <a href="${escapeHtml(project.adminUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999, accentTextMode: data.accentTextMode })}">
             Open project<span style="font-size:16px;">→</span>
           </a>
         </div>
@@ -274,7 +285,8 @@ export function generateInternalCommentSummaryEmail(data: InternalCommentSummary
   return renderEmailShell({
     companyName: data.companyName,
     companyLogoUrl: data.companyLogoUrl,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: data.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (data.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Internal Comments Summary',
     subtitle: `${total} ${total === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
     mainCompanyDomain: data.mainCompanyDomain,
@@ -288,7 +300,7 @@ export function generateInternalCommentSummaryEmail(data: InternalCommentSummary
       </p>
       ${projectsHtml}
       <div style="text-align:center; margin:32px 0;">
-        <a href="${dashboardUrl}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
+        <a href="${dashboardUrl}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accentTextMode: data.accentTextMode })}">
           Open Admin Dashboard
         </a>
       </div>
@@ -300,6 +312,9 @@ export interface ProjectInviteInternalUsersEmailData {
   companyName: string
   companyLogoUrl?: string
   mainCompanyDomain?: string | null
+  accentTextMode?: string
+  emailHeaderColor?: string
+  emailHeaderTextMode?: string
   recipientName?: string
   projectTitle: string
   projectAdminUrl: string
@@ -341,7 +356,8 @@ export function generateProjectInviteInternalUsersEmail(data: ProjectInviteInter
   return renderEmailShell({
     companyName: data.companyName,
     companyLogoUrl: data.companyLogoUrl,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: data.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (data.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Project Invite',
     subtitle: data.projectTitle,
     mainCompanyDomain: data.mainCompanyDomain,
@@ -356,7 +372,7 @@ export function generateProjectInviteInternalUsersEmail(data: ProjectInviteInter
       ${notesHtml}
       ${attachmentsHtml}
       <div style="text-align:center; margin:28px 0 8px;">
-        <a href="${escapeHtml(data.projectAdminUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8 })}">
+        <a href="${escapeHtml(data.projectAdminUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accentTextMode: data.accentTextMode })}">
           Open Project
         </a>
       </div>

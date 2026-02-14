@@ -54,7 +54,7 @@ function getSeverityColor(severity: string): string {
   const map: Record<string, string> = {
     'CRITICAL': 'bg-destructive-visible text-destructive border-2 border-destructive-visible',
     'WARNING': 'bg-warning-visible text-warning border-2 border-warning-visible',
-    'INFO': 'bg-primary-visible text-primary border-2 border-primary-visible',
+    'INFO': 'bg-blue-50 text-blue-600 border-2 border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900',
   }
   return map[severity] || 'bg-muted text-muted-foreground border border-border'
 }

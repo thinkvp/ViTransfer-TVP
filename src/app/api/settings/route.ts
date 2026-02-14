@@ -134,6 +134,9 @@ export async function PATCH(request: NextRequest) {
       adminNotificationDay,
       emailCustomFooterText,
       accentColor,
+      accentTextMode,
+      emailHeaderColor,
+      emailHeaderTextMode,
     } = body
 
     // SECURITY: Validate auto-close settings
@@ -424,6 +427,9 @@ export async function PATCH(request: NextRequest) {
       adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
       emailCustomFooterText,
       accentColor: typeof accentColor === 'string' ? (accentColor.trim() || null) : accentColor,
+      accentTextMode: accentTextMode === 'LIGHT' || accentTextMode === 'DARK' ? accentTextMode : undefined,
+      emailHeaderColor: typeof emailHeaderColor === 'string' ? (emailHeaderColor.trim() || null) : emailHeaderColor,
+      emailHeaderTextMode: emailHeaderTextMode === 'LIGHT' || emailHeaderTextMode === 'DARK' ? emailHeaderTextMode : undefined,
     }
 
     // Only update password if it's not the placeholder

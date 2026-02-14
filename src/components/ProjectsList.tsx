@@ -451,7 +451,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                   className={cn(
                     'inline-flex items-center',
                     statusFilterSelected.size > 0
-                      ? 'text-foreground'
+                      ? 'text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground'
                   )}
                   aria-label="Filter statuses"

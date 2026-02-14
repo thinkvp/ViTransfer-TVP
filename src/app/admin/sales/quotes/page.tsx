@@ -391,7 +391,7 @@ export default function SalesQuotesPage() {
                     size="sm"
                     className={cn(
                       'inline-flex items-center',
-                      statusFilterSelected.size > 0 ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+                      statusFilterSelected.size > 0 ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                     )}
                     aria-label="Filter statuses"
                     title="Filter statuses"

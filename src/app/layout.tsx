@@ -32,22 +32,26 @@ function hexToHslValues(hex: string): { h: number; s: number; l: number } | null
  * Build a CSS override block that replaces the default blue primary colour
  * with a custom accent colour in both light and dark modes.
  */
-function buildAccentOverrideCss(hex: string): string | null {
+function buildAccentOverrideCss(hex: string, textMode?: string | null): string | null {
   const hsl = hexToHslValues(hex)
   if (!hsl) return null
   const { h, s } = hsl
   // Light mode: use the colour at 50% lightness (vibrant), dark at 60%
   const lightL = 50, darkL = 60
   const lightVisibleL = 95, darkVisibleL = 20
+  // Accent text: LIGHT = white (0 0% 100%), DARK = near-black (220 14% 7%)
+  const foreground = textMode === 'DARK' ? '220 14% 7%' : '0 0% 100%'
   return `
     :root {
       --primary: ${h} ${s}% ${lightL}%;
+      --primary-foreground: ${foreground};
       --primary-visible: ${h} ${s}% ${lightVisibleL}%;
       --accent-foreground: ${h} ${s}% ${lightL}%;
       --ring: ${h} ${s}% ${lightL}%;
     }
     .dark {
       --primary: ${h} ${s}% ${darkL}%;
+      --primary-foreground: ${foreground};
       --primary-visible: ${h} ${s}% ${darkVisibleL}%;
       --accent-foreground: ${h} ${s}% ${darkL}%;
       --ring: ${h} ${s}% ${darkL}%;
@@ -111,13 +115,15 @@ export default async function RootLayout({
   const brandingSettings = await prisma.settings
     .findUnique({
       where: { id: 'default' },
-      select: { accentColor: true },
+      select: { accentColor: true, accentTextMode: true },
     })
     .catch(() => null)
 
   const accentCss = brandingSettings?.accentColor
-    ? buildAccentOverrideCss(brandingSettings.accentColor)
-    : null
+    ? buildAccentOverrideCss(brandingSettings.accentColor, brandingSettings.accentTextMode)
+    : brandingSettings?.accentTextMode === 'DARK'
+      ? `:root, .dark { --primary-foreground: 220 14% 7%; }`
+      : null
 
   return (
     <html lang="en" suppressHydrationWarning>

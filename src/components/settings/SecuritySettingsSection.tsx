@@ -226,11 +226,11 @@ export function SecuritySettingsSection({
               </p>
 
               {httpsEnabled && (
-                <div className="mt-3 p-3 bg-primary-visible border-2 border-primary-visible rounded-md">
-                  <p className="text-sm font-semibold text-primary mb-2">
+                <div className="mt-3 p-3 bg-blue-50 border-2 border-blue-100 dark:bg-blue-950 dark:border-blue-900 rounded-md">
+                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2">
                     When HTTPS is enabled, the following are enforced:
                   </p>
-                  <ul className="text-xs text-primary space-y-1 list-disc list-inside">
+                  <ul className="text-xs text-blue-600 dark:text-blue-400 space-y-1 list-disc list-inside">
                     <li>Cookies use <code className="bg-background px-1 py-0.5 rounded">secure: true</code> (only sent over HTTPS)</li>
                     <li>HSTS header enabled (forces browser to use HTTPS)</li>
                     <li>Enhanced security for all sessions and authentication</li>

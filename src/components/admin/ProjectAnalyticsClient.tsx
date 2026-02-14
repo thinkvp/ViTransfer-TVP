@@ -256,7 +256,7 @@ interface AnalyticsData {
 }
 
 function getAccessMethodColor(method: string): string {
-  return 'bg-primary-visible text-primary border-2 border-primary-visible'
+  return 'bg-blue-50 text-blue-600 border-2 border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900'
 }
 
 function StatusPill({ status }: { status: string }) {

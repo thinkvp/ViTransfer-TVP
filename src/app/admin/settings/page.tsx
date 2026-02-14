@@ -136,6 +136,9 @@ export default function GlobalSettingsPage() {
   const [darkLogoMode, setDarkLogoMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
   const [darkLogoUrl, setDarkLogoUrl] = useState('')
   const [accentColor, setAccentColor] = useState('')
+  const [accentTextMode, setAccentTextMode] = useState<'LIGHT' | 'DARK'>('LIGHT')
+  const [emailHeaderColor, setEmailHeaderColor] = useState('')
+  const [emailHeaderTextMode, setEmailHeaderTextMode] = useState<'LIGHT' | 'DARK'>('LIGHT')
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
@@ -273,6 +276,9 @@ export default function GlobalSettingsPage() {
         }
         setDarkLogoUrl(data.darkLogoUrl || '')
         setAccentColor(data.accentColor || '')
+        setAccentTextMode(data.accentTextMode === 'DARK' ? 'DARK' : 'LIGHT')
+        setEmailHeaderColor(data.emailHeaderColor || '')
+        setEmailHeaderTextMode(data.emailHeaderTextMode === 'DARK' ? 'DARK' : 'LIGHT')
         setSmtpServer(data.smtpServer || '')
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
@@ -493,6 +499,9 @@ export default function GlobalSettingsPage() {
         darkLogoMode: darkLogoEnabled ? (darkLogoMode || 'NONE') : 'NONE',
         darkLogoUrl: darkLogoEnabled && darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null,
         accentColor: accentColor.trim() || null,
+        accentTextMode,
+        emailHeaderColor: emailHeaderColor.trim() || null,
+        emailHeaderTextMode,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
@@ -848,6 +857,12 @@ export default function GlobalSettingsPage() {
             }}
             accentColor={accentColor}
             setAccentColor={setAccentColor}
+            accentTextMode={accentTextMode}
+            setAccentTextMode={setAccentTextMode}
+            emailHeaderColor={emailHeaderColor}
+            setEmailHeaderColor={setEmailHeaderColor}
+            emailHeaderTextMode={emailHeaderTextMode}
+            setEmailHeaderTextMode={setEmailHeaderTextMode}
             show={showCompanyBranding}
             setShow={setShowCompanyBranding}
           />

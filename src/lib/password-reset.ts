@@ -378,7 +378,8 @@ async function renderPasswordResetEmail({
     companyName,
     companyLogoUrl,
     mainCompanyDomain: settings?.mainCompanyDomain,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: settings?.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (settings?.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Password Reset Request',
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: ${EMAIL_THEME.textMuted}; line-height: 1.5;">
@@ -390,7 +391,7 @@ async function renderPasswordResetEmail({
       </p>
 
       <div style="text-align: center; margin: 0 0 24px 0;">
-        <a href="${escapeHtml(resetUrl)}" style="${emailPrimaryButtonStyle({ accent: settings.accentColor || undefined })}">
+        <a href="${escapeHtml(resetUrl)}" style="${emailPrimaryButtonStyle({ accent: settings.accentColor || undefined, accentTextMode: settings.accentTextMode })}">
           Reset Password
         </a>
       </div>

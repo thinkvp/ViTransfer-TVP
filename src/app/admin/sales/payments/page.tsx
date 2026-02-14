@@ -392,7 +392,7 @@ export default function SalesPaymentsPage() {
                     size="sm"
                     className={cn(
                       'inline-flex items-center',
-                      filterSelected.size > 0 ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+                      filterSelected.size > 0 ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                     )}
                     aria-label="Filter payments"
                     title="Filter payments"

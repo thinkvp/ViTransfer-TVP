@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
   const docLabel = isQuote ? 'Quote' : 'Invoice'
   const subject = `${docLabel} ${share.docNumber}`
 
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined, accentTextMode: emailSettings.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const doc = share.docJson as unknown as SalesQuote | SalesInvoice
@@ -270,7 +270,8 @@ export async function POST(request: NextRequest) {
     const html = renderEmailShell({
       companyName,
       companyLogoUrl,
-      headerGradient: EMAIL_THEME.headerBackground,
+      headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
+      headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
       title: `${docLabel} ready`,
       subtitle: share.clientName ? `For ${escapeHtml(share.clientName)}` : undefined,
       trackingToken,

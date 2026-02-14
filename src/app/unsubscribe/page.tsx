@@ -136,7 +136,7 @@ export default async function UnsubscribePage({
               <form action={unsubscribeAction}>
                 <button
                   type="submit"
-                  className="w-full h-10 rounded-lg btn-destructive text-white font-medium"
+                  className="w-full h-10 rounded-lg btn-destructive font-medium"
                 >
                   Unsubscribe
                 </button>
@@ -165,7 +165,7 @@ export default async function UnsubscribePage({
               <form action={resubscribeAction}>
                 <button
                   type="submit"
-                  className="w-full h-10 rounded-lg btn-primary text-white font-medium"
+                  className="w-full h-10 rounded-lg btn-primary font-medium"
                 >
                   Undo (keep receiving updates)
                 </button>

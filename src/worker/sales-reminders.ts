@@ -1,4 +1,4 @@
-﻿import crypto from 'crypto'
+import crypto from 'crypto'
 import { prisma } from '../lib/db'
 import {
   EMAIL_THEME,
@@ -451,7 +451,7 @@ export async function processSalesReminders() {
         continue
       }
 
-      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined })
+      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined, accentTextMode: emailSettings.accentTextMode })
       const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
       const greeting = (email: string, name: string | null) => {
@@ -463,7 +463,8 @@ export async function processSalesReminders() {
         companyName,
         companyLogoUrl,
         mainCompanyDomain: emailSettings.mainCompanyDomain,
-        headerGradient: EMAIL_THEME.headerBackground,
+        headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
+        headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
         title: 'Invoice overdue',
         subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
         trackingPixelsEnabled,
@@ -513,7 +514,8 @@ export async function processSalesReminders() {
           companyName,
           companyLogoUrl,
           mainCompanyDomain: emailSettings.mainCompanyDomain,
-          headerGradient: EMAIL_THEME.headerBackground,
+          headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
+        headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
           title: 'Invoice overdue',
           subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
           trackingPixelsEnabled,
@@ -661,7 +663,7 @@ export async function processSalesReminders() {
         continue
       }
 
-      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined })
+      const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: emailSettings.accentColor || undefined, accentTextMode: emailSettings.accentTextMode })
       const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
       const attachment = {
         filename: `${String(q.quoteNumber || 'quote')}.pdf`,
@@ -684,7 +686,8 @@ export async function processSalesReminders() {
           companyName,
           companyLogoUrl,
           mainCompanyDomain: emailSettings.mainCompanyDomain,
-          headerGradient: EMAIL_THEME.headerBackground,
+          headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
+        headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
           title: 'Quote expiring soon',
           subtitle: client?.name ? `For ${escapeHtml(client.name)}` : undefined,
           trackingPixelsEnabled,

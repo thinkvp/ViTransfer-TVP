@@ -236,7 +236,8 @@ export async function renderOTPEmail({
     companyName,
     companyLogoUrl,
     mainCompanyDomain: settings?.mainCompanyDomain,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: settings?.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (settings?.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Verification Code',
     bodyContent: `
       <p style="margin: 0 0 20px 0; font-size: 16px; color: ${EMAIL_THEME.textMuted}; line-height: 1.5;">

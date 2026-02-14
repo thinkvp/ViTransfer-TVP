@@ -35,6 +35,12 @@ interface CompanyBrandingSectionProps {
   onCompanyFaviconUploaded: () => void
   accentColor: string
   setAccentColor: (value: string) => void
+  accentTextMode: 'LIGHT' | 'DARK'
+  setAccentTextMode: (value: 'LIGHT' | 'DARK') => void
+  emailHeaderColor: string
+  setEmailHeaderColor: (value: string) => void
+  emailHeaderTextMode: 'LIGHT' | 'DARK'
+  setEmailHeaderTextMode: (value: 'LIGHT' | 'DARK') => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -73,6 +79,12 @@ export function CompanyBrandingSection({
   onCompanyFaviconUploaded,
   accentColor,
   setAccentColor,
+  accentTextMode,
+  setAccentTextMode,
+  emailHeaderColor,
+  setEmailHeaderColor,
+  emailHeaderTextMode,
+  setEmailHeaderTextMode,
   show,
   setShow,
 }: CompanyBrandingSectionProps) {
@@ -554,7 +566,7 @@ export function CompanyBrandingSection({
 
             <div className="pt-3 border-t space-y-2">
               <Label htmlFor="accentColor">Accent colour</Label>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <input
                   type="color"
                   id="accentColor"
@@ -574,8 +586,72 @@ export function CompanyBrandingSection({
                     Reset
                   </Button>
                 )}
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">Accent text</Label>
+                  <div className="inline-flex rounded-md border border-input overflow-hidden">
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${accentTextMode === 'LIGHT' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                      onClick={() => setAccentTextMode('LIGHT')}
+                    >
+                      Light
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${accentTextMode === 'DARK' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                      onClick={() => setAccentTextMode('DARK')}
+                    >
+                      Dark
+                    </button>
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">Custom accent colour for buttons, links, toggles, and email templates. Leave empty for default blue.</p>
+              <p className="text-xs text-muted-foreground">Custom accent colour for buttons, links, toggles, and email templates. Leave empty for default blue. Accent text controls the text colour on accent-coloured buttons (Light = white, Dark = near-black).</p>
+            </div>
+
+            <div className="pt-3 border-t space-y-2">
+              <Label htmlFor="emailHeaderColor">Email header colour</Label>
+              <div className="flex items-center gap-3 flex-wrap">
+                <input
+                  type="color"
+                  id="emailHeaderColor"
+                  value={emailHeaderColor || '#1F1F1F'}
+                  onChange={(e) => setEmailHeaderColor(e.target.value)}
+                  className="h-10 w-14 rounded-md border border-input bg-background cursor-pointer p-0.5"
+                />
+                <Input
+                  value={emailHeaderColor}
+                  onChange={(e) => setEmailHeaderColor(e.target.value)}
+                  placeholder="#1F1F1F"
+                  className="h-9 w-32 font-mono text-sm"
+                  maxLength={7}
+                />
+                {emailHeaderColor && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEmailHeaderColor('')}>
+                    Reset
+                  </Button>
+                )}
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm whitespace-nowrap">Email header text</Label>
+                  <div className="inline-flex rounded-md border border-input overflow-hidden">
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${emailHeaderTextMode === 'LIGHT' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                      onClick={() => setEmailHeaderTextMode('LIGHT')}
+                    >
+                      Light
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${emailHeaderTextMode === 'DARK' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                      onClick={() => setEmailHeaderTextMode('DARK')}
+                    >
+                      Dark
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Background colour for the header section of email templates. Leave empty for default dark (#1F1F1F). Header text controls the title and subtitle text colour in the email header (Light = white, Dark = near-black).</p>
             </div>
           </div>
         </CardContent>

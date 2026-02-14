@@ -231,7 +231,7 @@ export default function ClientsPage() {
                     size="sm"
                     className={cn(
                       'inline-flex items-center',
-                      isActiveFilterApplied ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+                      isActiveFilterApplied ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                     )}
                     aria-label="Filter clients"
                     title="Filter clients"

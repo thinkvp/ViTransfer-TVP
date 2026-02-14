@@ -1,4 +1,4 @@
-﻿import nodemailer from 'nodemailer'
+import nodemailer from 'nodemailer'
 import { prisma } from './db'
 import { decrypt } from './encryption'
 import { normalizeHexDisplayColor } from './display-color'
@@ -40,17 +40,20 @@ export function emailPrimaryButtonStyle({
   padding = '14px 32px',
   borderRadiusPx = 8,
   accent,
+  accentTextMode,
 }: {
   fontSizePx?: number
   padding?: string
   borderRadiusPx?: number
   accent?: string
+  accentTextMode?: 'LIGHT' | 'DARK' | string | null
 } = {}): string {
   const bg = accent || EMAIL_THEME.accent
+  const textColor = accentTextMode === 'DARK' ? '#111827' : '#ffffff'
   return [
     'display:inline-block',
     `background:${bg}`,
-    'color:#ffffff',
+    `color:${textColor}`,
     'text-decoration:none',
     `padding:${padding}`,
     `border-radius:${borderRadiusPx}px`,
@@ -59,6 +62,12 @@ export function emailPrimaryButtonStyle({
     // Use a solid color (no alpha) for better webmail compatibility.
     'box-shadow:0 2px 4px #cce6ff',
   ].join(';')
+}
+
+export function emailVersionPillHtml(label: string, accent?: string, accentTextMode?: string | null): string {
+  const bg = accent || EMAIL_THEME.accent
+  const textColor = accentTextMode === 'DARK' ? '#111827' : '#ffffff'
+  return `<span style="display:inline-block;background:${bg};color:${textColor};font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;vertical-align:middle;">${escapeHtml(label)}</span>`
 }
 
 export function emailCardStyle({
@@ -149,6 +158,7 @@ export interface EmailShellOptions {
   bodyContent: string
   footerNote?: string
   headerGradient: string
+  headerTextColor?: string
   companyLogoUrl?: string | null
   mainCompanyDomain?: string | null
   trackingToken?: string
@@ -212,6 +222,7 @@ export function renderEmailShell({
   bodyContent,
   footerNote,
   headerGradient,
+  headerTextColor,
   companyLogoUrl,
   mainCompanyDomain,
   trackingToken,
@@ -239,7 +250,8 @@ export function renderEmailShell({
 
   // NOTE: Some webmail clients (including Zoho) inconsistently apply inline CSS colors.
   // Use a solid hex color by default to keep subtitles legible on dark headers.
-  const resolvedSubtitleColor = (subtitleColor || '#ffffff').trim() || '#ffffff'
+  const resolvedHeaderTextColor = (headerTextColor || '#ffffff').trim() || '#ffffff'
+  const resolvedSubtitleColor = (subtitleColor || resolvedHeaderTextColor).trim() || resolvedHeaderTextColor
   
   return `
 <!DOCTYPE html>
@@ -253,7 +265,7 @@ export function renderEmailShell({
 
     <!-- Header -->
     <div style="background: ${headerGradient}; padding: 32px 24px; text-align: center;">
-      <div style="font-size: 24px; font-weight: 700; color: #ffffff; margin-bottom: 8px;">${escapeHtml(title)}</div>
+      <div style="font-size: 24px; font-weight: 700; color: ${escapeHtml(resolvedHeaderTextColor)}; margin-bottom: 8px;">${escapeHtml(title)}</div>
       ${subtitle ? `<div style="font-size: 15px; color: ${escapeHtml(resolvedSubtitleColor)} !important;"><span style="color: ${escapeHtml(resolvedSubtitleColor)} !important; -webkit-text-fill-color: ${escapeHtml(resolvedSubtitleColor)} !important;">${escapeHtml(subtitle)}</span></div>` : ''}
     </div>
 
@@ -308,6 +320,9 @@ interface EmailSettings {
   emailTrackingPixelsEnabled: boolean | null
   emailCustomFooterText: string | null
   accentColor: string | null
+  accentTextMode: string | null
+  emailHeaderColor: string | null
+  emailHeaderTextMode: string | null
   updatedAt?: Date
 }
 
@@ -333,6 +348,9 @@ async function resolveEmailBranding(
   emailCustomFooterText: string | null
   trackingPixelsEnabled: boolean
   accentColor: string
+  accentTextMode: string
+  emailHeaderColor: string
+  emailHeaderTextMode: string
   appDomain?: string
   settings?: EmailSettings
 }> {
@@ -344,6 +362,9 @@ async function resolveEmailBranding(
       emailCustomFooterText: null,
       trackingPixelsEnabled: overrides.trackingPixelsEnabled,
       accentColor: EMAIL_THEME.accent,
+      accentTextMode: 'LIGHT',
+      emailHeaderColor: EMAIL_THEME.headerBackground,
+      emailHeaderTextMode: 'LIGHT',
       appDomain: overrides.appDomain,
     }
   }
@@ -365,6 +386,9 @@ async function resolveEmailBranding(
     emailCustomFooterText: settings.emailCustomFooterText || null,
     trackingPixelsEnabled: overrides?.trackingPixelsEnabled ?? (settings.emailTrackingPixelsEnabled ?? true),
     accentColor: settings.accentColor || EMAIL_THEME.accent,
+    accentTextMode: settings.accentTextMode || 'LIGHT',
+    emailHeaderColor: settings.emailHeaderColor || EMAIL_THEME.headerBackground,
+    emailHeaderTextMode: settings.emailHeaderTextMode || 'LIGHT',
     appDomain: overrides?.appDomain || settings.appDomain || undefined,
     settings,
   }
@@ -409,6 +433,9 @@ export async function getEmailSettings(): Promise<EmailSettings> {
       emailTrackingPixelsEnabled: true,
       emailCustomFooterText: true,
       accentColor: true,
+      accentTextMode: true,
+      emailHeaderColor: true,
+      emailHeaderTextMode: true,
       updatedAt: true,
     }
   })
@@ -433,11 +460,14 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     emailTrackingPixelsEnabled: null,
     emailCustomFooterText: null,
     accentColor: null,
+    accentTextMode: null,
+    emailHeaderColor: null,
+    emailHeaderTextMode: null,
     updatedAt: undefined,
   }
   settingsCacheTime = now
 
-  return cachedSettings
+  return cachedSettings!
 }
 
 /**
@@ -571,8 +601,9 @@ export async function renderNewVersionEmail({
 
   const subject = `Video For Review: ${videoName} (${versionLabel})`
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8 })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -580,6 +611,7 @@ export async function renderNewVersionEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'New Video Version',
     subtitle: 'Ready for your review',
     trackingToken,
@@ -601,7 +633,7 @@ export async function renderNewVersionEmail({
           <strong>${escapeHtml(projectTitle)}</strong>
         </div>
         <div style="font-size: 14px; color: #374151; padding: 4px 0;">
-          ${escapeHtml(videoName)} <span style="color: ${resolved.accentColor};">${escapeHtml(versionLabel)}</span>
+          ${escapeHtml(videoName)} ${emailVersionPillHtml(versionLabel, resolved.accentColor, resolved.accentTextMode)}
         </div>
       </div>
 
@@ -693,8 +725,9 @@ export async function renderNewAlbumReadyEmail({
 
   const subject = `New Album Available: ${projectTitle}`
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -702,6 +735,7 @@ export async function renderNewAlbumReadyEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'New Album Available',
     subtitle: 'Ready for your review',
     trackingToken,
@@ -817,8 +851,9 @@ export async function renderProjectApprovedEmail({
     ? 'All videos are approved and ready to deliver'
     : `${approvedVideos[0]?.name || 'Your video'} has been approved`
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -847,6 +882,7 @@ export async function renderProjectApprovedEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: statusTitle,
     subtitle: statusMessage,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
@@ -868,7 +904,7 @@ export async function renderProjectApprovedEmail({
           <div style="${cardTitleStyle}">Approved Videos</div>
           ${approvedVideos.map(v => `
             <div style="font-size: 15px; color: #374151; padding: 4px 0;">
-              <span style="display: inline-block; width: 6px; height: 6px; background: ${resolved.accentColor}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+              <span style="display: inline-block; width: 6px; height: 6px; background: #374151; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
             </div>
           `).join('')}
         </div>
@@ -955,8 +991,9 @@ export async function renderCommentNotificationEmail({
   const subject = `New Comment: ${projectTitle}`
   const timecodeText = timecode ? `at ${timecode}` : ''
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
   const calloutStyle = emailCalloutStyle({ borderLeftPx: 0, accentColor: displayColor || null })
@@ -965,6 +1002,7 @@ export async function renderCommentNotificationEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'New Comment',
     subtitle: `${resolved.companyName} left feedback on your video`,
     trackingToken,
@@ -1093,8 +1131,9 @@ export async function renderAdminCommentNotificationEmail({
   const subject = `Client Feedback: ${projectTitle}`
   const timecodeText = timecode ? `at ${timecode}` : ''
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
   const calloutStyle = emailCalloutStyle({ borderLeftPx: 0, accentColor: displayColor || null })
@@ -1103,6 +1142,7 @@ export async function renderAdminCommentNotificationEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'New Client Feedback',
     subtitle: 'Your client left a comment',
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
@@ -1242,8 +1282,9 @@ export async function renderAdminProjectApprovedEmail({
     ? `The complete project has been ${isApproval ? 'approved' : 'unapproved'} by the client`
     : `${resolvedActionVideoName || 'A video'} has been ${isApproval ? 'approved' : 'unapproved'} by the client`
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -1251,6 +1292,7 @@ export async function renderAdminProjectApprovedEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: statusTitle,
     subtitle: statusMessage,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
@@ -1269,7 +1311,7 @@ export async function renderAdminProjectApprovedEmail({
           <div style="${cardTitleStyle}">Approved Videos</div>
           ${approvedVideos.map(v => `
             <div style="font-size: 15px; color: #374151; padding: 4px 0;">
-              <span style="display: inline-block; width: 6px; height: 6px; background: ${resolved.accentColor}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+              <span style="display: inline-block; width: 6px; height: 6px; background: #374151; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
             </div>
           `).join('')}
         </div>
@@ -1280,7 +1322,7 @@ export async function renderAdminProjectApprovedEmail({
         ${awaitingVideos.length > 0
           ? awaitingVideos.map(v => `
               <div style="font-size: 15px; color: #374151; padding: 4px 0;">
-                <span style="display: inline-block; width: 6px; height: 6px; background: ${resolved.accentColor}; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
+                <span style="display: inline-block; width: 6px; height: 6px; background: #374151; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(v.name)}
               </div>
             `).join('')
           : `
@@ -1402,8 +1444,9 @@ export async function renderAdminInvoicePaidEmail({
 
   const subject = `Invoice Paid: ${invoiceNumber}`
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -1411,6 +1454,7 @@ export async function renderAdminInvoicePaidEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'Invoice Paid',
     subtitle: 'A customer has paid an invoice',
     trackingPixelsEnabled: false,
@@ -1567,8 +1611,9 @@ export async function renderAdminQuoteAcceptedEmail({
   const quoteLabel = (quoteNumber || '').trim() || 'Quote'
   const subject = quoteNumber ? `Quote Accepted: ${quoteNumber}` : 'Quote Accepted'
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const cardTitleStyle = emailCardTitleStyle()
 
@@ -1576,6 +1621,7 @@ export async function renderAdminQuoteAcceptedEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'Quote Accepted',
     subtitle: 'A customer has accepted a quote',
     trackingPixelsEnabled: false,
@@ -1700,12 +1746,13 @@ export async function renderProjectGeneralNotificationEmail({
   const videosList = readyVideos.length > 0
     ? `<div style="${emailCardStyle({ paddingPx: 14, borderRadiusPx: 10, marginBottomPx: 14 })}">
         <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-bottom:6px;">Ready to view</div>
-        ${readyVideos.map(v => `<div style="font-size:15px; color:${EMAIL_THEME.text}; padding:4px 0;">${escapeHtml(v.name)} <span style="color:${resolved.accentColor};">${escapeHtml(v.versionLabel)}</span></div>`).join('')}
+        ${readyVideos.map(v => `<div style="font-size:15px; color:${EMAIL_THEME.text}; padding:4px 0;">${escapeHtml(v.name)} ${emailVersionPillHtml(v.versionLabel, resolved.accentColor, resolved.accentTextMode)}</div>`).join('')}
       </div>`
     : ''
 
-  const headerGradient = EMAIL_THEME.headerBackground
-  const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: resolved.accentColor })
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const notesCardStyle = emailCardStyle({ borderRadiusPx: 8 })
   const notesCardTitleStyle = emailCardTitleStyle()
 
@@ -1713,6 +1760,7 @@ export async function renderProjectGeneralNotificationEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'Project Ready for Review',
     subtitle: projectTitle,
     trackingToken,
@@ -1734,7 +1782,7 @@ export async function renderProjectGeneralNotificationEmail({
             <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
             ${readyVideos.map(v => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
-                &#8226; ${escapeHtml(v.name)} <span style="color:${resolved.accentColor};">${escapeHtml(v.versionLabel)}</span>
+                &#8226; ${escapeHtml(v.name)} ${emailVersionPillHtml(v.versionLabel, resolved.accentColor, resolved.accentTextMode)}
               </div>
             `).join('')}
           ` : ''}
@@ -1866,10 +1914,10 @@ export async function renderProjectKeyDateReminderEmail({
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
     mainCompanyDomain: resolved.mainCompanyDomain,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: resolved.emailHeaderColor,
+    headerTextColor: resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff',
     title: 'Key Date Reminder',
     subtitle: hasProject ? projectTitle : 'Personal',
-    subtitleColor: '#ffffff',
     footerNote: resolved.companyName,
     bodyContent: `
       <p style="margin:0 0 20px; font-size:15px; color:#374151;">
@@ -1924,13 +1972,14 @@ export async function renderSalesInvoiceOverdueReminderEmail({
   const resolved = await resolveEmailBranding(branding)
 
   const subject = `Invoice ${escapeHtml(invoiceNumber)} is overdue`
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: resolved.emailHeaderColor,
+    headerTextColor: resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff',
     title: 'Invoice overdue',
     subtitle: clientName ? `For ${escapeHtml(clientName)}` : undefined,
     trackingToken,
@@ -1991,13 +2040,14 @@ export async function renderSalesQuoteExpiryReminderEmail({
   const resolved = await resolveEmailBranding(branding)
 
   const subject = `Quote ${escapeHtml(quoteNumber)} expiring soon`
-  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor })
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
   const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
 
   const html = renderEmailShell({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
-    headerGradient: EMAIL_THEME.headerBackground,
+    headerGradient: resolved.emailHeaderColor,
+    headerTextColor: resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff',
     title: 'Quote expiring soon',
     subtitle: clientName ? `For ${escapeHtml(clientName)}` : undefined,
     trackingToken,
@@ -2053,7 +2103,8 @@ export async function renderPasswordEmail({
 
   const subject = `Access Password: ${escapeHtml(projectTitle)}`
 
-  const headerGradient = EMAIL_THEME.headerBackground
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
   const cardStyle = emailCardStyle({ borderRadiusPx: 10, paddingPx: 14, marginBottomPx: 12 })
   const cardTitleStyle = 'font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:' + EMAIL_THEME.textMuted + '; margin-bottom:6px;'
 
@@ -2061,6 +2112,7 @@ export async function renderPasswordEmail({
     companyName: resolved.companyName,
     companyLogoUrl: resolved.companyLogoUrl,
     headerGradient,
+    headerTextColor,
     title: 'Project Password',
     subtitle: projectTitle,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
@@ -2139,7 +2191,8 @@ export async function testEmailConnection(testEmail: string, customConfig?: any)
         companyLogoUrl: settings.companyLogoUrl || dbSettings.companyLogoUrl,
         updatedAt: dbSettings.updatedAt,
       }),
-      headerGradient: EMAIL_THEME.headerBackground,
+      headerGradient: dbSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
+      headerTextColor: (dbSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
       title: 'SMTP Test Succeeded',
       subtitle: 'Email sending is working',
       mainCompanyDomain: dbSettings.mainCompanyDomain,

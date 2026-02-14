@@ -198,6 +198,9 @@ export async function processAdminNotifications() {
             period,
             companyLogoUrl: companyLogoUrl || undefined,
             mainCompanyDomain: emailSettings.mainCompanyDomain,
+            accentTextMode: emailSettings.accentTextMode || undefined,
+            emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+            emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
             projects: recipient.projects
           })
 
