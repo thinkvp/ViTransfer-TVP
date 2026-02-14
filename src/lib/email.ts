@@ -276,7 +276,7 @@ export function renderEmailShell({
       <img
         src="${escapeHtml(companyLogoUrl)}"
         alt="${escapeHtml(companyName)} logo"
-        style="display:block; margin:0 auto; width:auto; max-width:300px; height:auto; border:0; outline:none; text-decoration:none;"
+        style="display:block; margin:0 auto; width:auto; max-width:100%; height:auto; border:0; outline:none; text-decoration:none;"
       />
       ${mainCompanyDomain ? `</a>` : ''}
       <div style="height: 20px; line-height: 20px;">&nbsp;</div>

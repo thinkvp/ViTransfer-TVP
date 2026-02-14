@@ -59,7 +59,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
   const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'comment-summary' | 'specific-album' | 'internal-invite'>('entire-project')
-  const [notificationTypeOpen, setNotificationTypeOpen] = useState(false)
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
@@ -263,8 +262,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   const notificationModalOpenRef = useRef(false)
   const notificationTypeRef = useRef(notificationType)
-  const notificationTypeTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const notificationTypeContentRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!showNotificationModal) {
@@ -294,14 +291,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setSendPasswordSeparately(false)
   }, [notificationType, sendPasswordSeparately])
 
-  const handleNotificationTypePointerDownCapture = (e: React.PointerEvent) => {
-    if (!notificationTypeOpen) return
-    const target = e.target as Node | null
-    if (!target) return
-    if (notificationTypeTriggerRef.current?.contains(target)) return
-    if (notificationTypeContentRef.current?.contains(target)) return
-    setNotificationTypeOpen(false)
-  }
+
 
   const selectedAttachmentsMeta = projectFiles
     .filter((f) => selectedProjectFileIds.includes(f.id))
@@ -646,7 +636,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       <Dialog open={showNotificationModal} onOpenChange={setShowNotificationModal}>
         <DialogContent
           className="max-w-[95vw] sm:max-w-md"
-          onPointerDownCapture={handleNotificationTypePointerDownCapture}
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -664,13 +653,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               <Select
                 value={notificationType}
                 onValueChange={handleNotificationTypeChange}
-                open={notificationTypeOpen}
-                onOpenChange={setNotificationTypeOpen}
               >
-                <SelectTrigger ref={notificationTypeTriggerRef}>
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent ref={notificationTypeContentRef}>
+                <SelectContent>
                   <SelectItem value="entire-project">
                     Entire Project (All Ready Videos)
                   </SelectItem>

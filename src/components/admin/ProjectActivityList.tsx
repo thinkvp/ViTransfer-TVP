@@ -7,7 +7,7 @@ import { cn, formatDateTime } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
 
 function getAccessMethodColor(_method: string): string {
-  return 'bg-blue-50 text-blue-600 border-2 border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900'
+  return 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400'
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -99,8 +99,8 @@ export default function ProjectActivityList({
                           (eventType === 'AUTH'
                             ? getAccessMethodColor(accessMethod)
                             : eventType === 'EMAIL' || eventType === 'EMAIL_OPEN'
-                              ? 'bg-warning-visible text-warning border-2 border-warning-visible'
-                              : 'bg-success-visible text-success border-2 border-success-visible')
+                              ? 'bg-warning-visible text-warning'
+                              : 'bg-success-visible text-success')
                         }
                       >
                         {eventType === 'AUTH' ? (
