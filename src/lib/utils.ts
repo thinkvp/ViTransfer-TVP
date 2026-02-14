@@ -186,6 +186,7 @@ export async function generateUniqueSlug(
 // Cache parsed trusted proxies across requests (per Node process).
 // Keyed by the raw env var value so changes cause a re-parse.
 let trustedProxiesCache: { raw: string; matchers: unknown[] } | null = null
+let untrustedForwardedWarningShown = false
 
 export function getClientIpAddress(request: NextRequest): string {
   const normalizeIp = (raw: string | null | undefined): string | null => {
@@ -293,6 +294,17 @@ export function getClientIpAddress(request: NextRequest): string {
   const realIp = normalizeIp(request.headers.get('x-real-ip'))
 
   const trusted = getTrusted()
+
+  // Security hardening: forwarded headers are untrusted unless explicit proxy trust is configured.
+  // Without TRUSTED_PROXIES, client-supplied X-Forwarded-For/X-Real-IP can bypass IP-based controls.
+  if (trusted.length === 0) {
+    if (!untrustedForwardedWarningShown && (chain.length > 0 || !!realIp)) {
+      untrustedForwardedWarningShown = true
+      console.warn('[SECURITY] TRUSTED_PROXIES is not configured; ignoring forwarded IP headers for client IP resolution.')
+    }
+    return 'unknown'
+  }
+
   if (trusted.length > 0 && chain.length > 0) {
     // XFF is client,proxy1,proxy2,... (each proxy appends). With a trust list,
     // peel trusted proxies from the right and take the first non-trusted.

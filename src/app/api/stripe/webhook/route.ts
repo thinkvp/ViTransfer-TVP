@@ -57,8 +57,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 400 })
   }
 
-  if (event.type === 'checkout.session.completed') {
+  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
     const session = event.data.object as Stripe.Checkout.Session
+
+    const paymentStatus = typeof session.payment_status === 'string'
+      ? session.payment_status.toLowerCase()
+      : ''
+
+    // Only treat checkout sessions as paid once Stripe confirms funds captured.
+    // This prevents prematurely marking invoices as PAID for delayed payment methods.
+    if (paymentStatus !== 'paid') {
+      return NextResponse.json({ received: true })
+    }
 
     const metadata = (session.metadata ?? {}) as Record<string, string>
     const shareToken = metadata.shareToken
