@@ -23,6 +23,7 @@ import {
   sumLineItemsSubtotal,
   sumLineItemsTax,
 } from '@/lib/sales/money'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesViewsAndTrackingSection'
@@ -81,8 +82,8 @@ export default function QuoteDetailPage() {
     email: '',
     website: '',
     businessRegistrationLabel: 'ABN',
-    currencySymbol: '$',
     currencyCode: 'AUD',
+    fiscalYearStartMonth: 7,
     quoteLabel: 'QUOTE',
     invoiceLabel: 'INVOICE',
     taxLabel: '',
@@ -620,7 +621,7 @@ export default function QuoteDetailPage() {
                   </div>
 
                   <div className="space-y-1 md:col-span-2">
-                    <Label>{`Unit (${settings.currencySymbol || '$'})`}</Label>
+                    <Label>{`Unit (${getCurrencySymbol(settings.currencyCode)})`}</Label>
                     <Input
                       value={centsToDollars(it.unitPriceCents)}
                       onChange={(e) => {
@@ -643,7 +644,7 @@ export default function QuoteDetailPage() {
                       className="h-9"
                     />
                     <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                      {formatMoney(calcLineSubtotalCents(it), settings.currencySymbol)}
+                      {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
                     </div>
                   </div>
                 </div>
@@ -653,7 +654,7 @@ export default function QuoteDetailPage() {
                 <div className="md:col-span-3 space-y-1">
                   <Label>Amount</Label>
                   <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                    {formatMoney(calcLineSubtotalCents(it), settings.currencySymbol)}
+                    {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
                   </div>
                 </div>
                 )}
@@ -682,17 +683,17 @@ export default function QuoteDetailPage() {
             <div className="text-sm">
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span className="text-foreground font-medium tabular-nums">{formatMoney(subtotalCents, settings.currencySymbol)}</span>
+                <span className="text-foreground font-medium tabular-nums">{formatMoney(subtotalCents, getCurrencySymbol(settings.currencyCode))}</span>
               </div>
               {docTaxEnabled && (
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Tax</span>
-                <span className="text-foreground font-medium tabular-nums">{formatMoney(taxCents, settings.currencySymbol)}</span>
+                <span className="text-foreground font-medium tabular-nums">{formatMoney(taxCents, getCurrencySymbol(settings.currencyCode))}</span>
               </div>
               )}
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Total</span>
-                <span className="text-foreground font-semibold tabular-nums">{formatMoney(totalCents, settings.currencySymbol)}</span>
+                <span className="text-foreground font-semibold tabular-nums">{formatMoney(totalCents, getCurrencySymbol(settings.currencyCode))}</span>
               </div>
             </div>
           </div>

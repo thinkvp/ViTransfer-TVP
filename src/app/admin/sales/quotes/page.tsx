@@ -18,6 +18,7 @@ import type { QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
@@ -72,8 +73,8 @@ export default function SalesQuotesPage() {
     email: '',
     website: '',
     businessRegistrationLabel: 'ABN',
-    currencySymbol: '$',
     currencyCode: 'AUD',
+    fiscalYearStartMonth: 7,
     quoteLabel: 'QUOTE',
     invoiceLabel: 'INVOICE',
     taxLabel: '',
@@ -493,7 +494,7 @@ export default function SalesQuotesPage() {
                               {statusLabel(row.effectiveStatus)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, settings.currencySymbol)}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {row.quote.clientId ? (
                               <Link href={`/admin/clients/${row.quote.clientId}`} className="hover:underline">

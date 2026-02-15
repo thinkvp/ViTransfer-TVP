@@ -1,15 +1,15 @@
 {
   "name": "vitransfer",
-  "version": "0.8.2-tvp-1.70",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "prebuild": "prisma generate && node scripts/ensure-prisma-client.mjs && node scripts/clean-next.mjs",
-    "build": "cross-env BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=true BROWSERSLIST_IGNORE_OLD_DATA=true next build --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
     "check:rbac": "node scripts/check-rbac-gates.mjs",
-    "lint": "cross-env BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=true BROWSERSLIST_IGNORE_OLD_DATA=true eslint .",
+    "lint": "eslint .",
     "postinstall": "prisma generate && node scripts/ensure-prisma-client.mjs",
     "worker": "tsx src/worker/index.ts",
     "preview:emails": "tsx scripts/render-email-previews.ts"

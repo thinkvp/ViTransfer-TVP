@@ -44,8 +44,8 @@ function normalizeSettings(input: unknown): SalesSettings {
     email: '',
     website: '',
     businessRegistrationLabel: 'ABN',
-    currencySymbol: '$',
     currencyCode: 'AUD',
+    fiscalYearStartMonth: 7,
     taxRatePercent: 10,
     defaultQuoteValidDays: 14,
     defaultInvoiceDueDays: 7,
@@ -64,10 +64,12 @@ function normalizeSettings(input: unknown): SalesSettings {
   const parsedTaxRatePercent = Number(patch.taxRatePercent)
   const parsedDefaultQuoteValidDays = Number((patch as any).defaultQuoteValidDays)
   const parsedDefaultInvoiceDueDays = Number((patch as any).defaultInvoiceDueDays)
+  const parsedFyMonth = Number(patch.fiscalYearStartMonth)
 
   return {
     ...defaults,
     ...patch,
+    fiscalYearStartMonth: Number.isFinite(parsedFyMonth) && parsedFyMonth >= 1 && parsedFyMonth <= 12 ? parsedFyMonth : 7,
     taxRatePercent: Number.isFinite(parsedTaxRatePercent) ? parsedTaxRatePercent : defaults.taxRatePercent,
     defaultQuoteValidDays:
       Number.isFinite(parsedDefaultQuoteValidDays) && parsedDefaultQuoteValidDays >= 0

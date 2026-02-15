@@ -226,7 +226,7 @@ export async function getClientSessionTimeoutSeconds(): Promise<number> {
  * Priority: Environment variable (HTTPS_ENABLED) > Database setting > Default (true)
  *
  * IMPORTANT: Environment variable ALWAYS takes precedence - this is the escape hatch!
- * If you get locked out on localhost, set HTTPS_ENABLED=false in docker-compose.yml
+ * If you get locked out on localhost, set HTTPS_ENABLED=false in docker-compose.yml (or docker-compose.build.yml)
  *
  * When HTTPS is OFF:
  * - No HSTS header

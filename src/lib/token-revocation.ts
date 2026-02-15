@@ -98,7 +98,8 @@ export async function isTokenRevoked(token: string): Promise<boolean> {
  * @param userId - The user ID whose tokens should be revoked
  *
  * Note: This requires maintaining a user->tokens mapping, which adds complexity.
- * For this implementation, we rely on short token TTLs (15 min access, 7 day refresh).
+ * For this implementation, we rely on token TTLs and explicit logout revocation.
+ * Defaults are 60 min admin access and 7 day refresh (both configurable via env).
  * For immediate revocation, use the logout endpoint which revokes specific tokens.
  *
  * Security: Throws error if Redis is unavailable (fail closed)

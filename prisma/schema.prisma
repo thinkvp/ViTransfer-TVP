@@ -1071,8 +1071,8 @@ model SalesSettings {
   website      String @default("")
 
   businessRegistrationLabel String @default("ABN")
-  currencySymbol            String @default("$")
   currencyCode              String @default("AUD")
+  fiscalYearStartMonth      Int    @default(7) // 1-12, where 1=Jan, 7=Jul (Australian FY)
 
   quoteLabel   String @default("QUOTE")
   invoiceLabel String @default("INVOICE")

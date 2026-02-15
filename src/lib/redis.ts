@@ -58,8 +58,12 @@ export function getRedis(): IORedis {
 /**
  * Get or create Redis connection optimized for BullMQ
  * BullMQ requires specific configuration: maxRetriesPerRequest: null, enableReadyCheck: false
+ *
+ * Note: Return type uses `any` cast because top-level ioredis and bullmq's
+ * bundled ioredis can drift on minor type details (e.g. AbstractConnector).
+ * The runtime instances are fully compatible; only the TypeScript declarations diverge.
  */
-export function getRedisForQueue(): IORedis {
+export function getRedisForQueue(): any {
   if (redisForQueue) return redisForQueue
 
   if (!process.env.REDIS_HOST) {

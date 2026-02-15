@@ -3,8 +3,10 @@ import Image from 'next/image'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/db'
 import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
+import type { SalesSettings } from '@/lib/sales/types'
 import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
 import { sendPushNotification } from '@/lib/push-notifications'
@@ -188,7 +190,7 @@ export default async function SalesDocPublicViewPage(
     .upsert({ where: { id: 'default' }, create: { id: 'default' }, update: {} })
     .catch(() => null)
   const liveSettings = liveSettingsRow ? salesSettingsFromDb(liveSettingsRow as any) : null
-  const settings = (liveSettings ?? (share.settingsJson as any) ?? {}) as any
+  const settings = (liveSettings ?? (share.settingsJson as any) ?? {}) as Partial<SalesSettings>
 
   const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
     where: { id: 'default' },
@@ -207,9 +209,9 @@ export default async function SalesDocPublicViewPage(
   const email = safeString(settings?.email)
   const website = safeString(settings?.website)
   const abn = safeString(settings?.abn)
-  const businessRegistrationLabel = safeString((settings as any)?.businessRegistrationLabel) || 'ABN'
-  const currencySymbol = safeString((settings as any)?.currencySymbol) || '$'
-  const currencyCode = safeString((settings as any)?.currencyCode) || 'AUD'
+  const businessRegistrationLabel = safeString(settings?.businessRegistrationLabel) || 'ABN'
+  const currencyCode = safeString(settings?.currencyCode) || 'AUD'
+  const currencySymbol = getCurrencySymbol(currencyCode)
   const paymentDetails = safeString(settings?.paymentDetails)
   const taxRatePercent = Number(settings?.taxRatePercent)
   const defaultTaxRatePercent = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
@@ -362,7 +364,7 @@ export default async function SalesDocPublicViewPage(
             payLabel={stripeGateway?.label ?? null}
             processingFeeCents={processingFeeCents}
             processingFeeCurrency={stripeCurrency}
-            currencySymbol={currencySymbol}
+            currencyCode={currencyCode}
           />
         </div>
         <div className="rounded-xl border bg-card overflow-hidden">
@@ -428,7 +430,7 @@ export default async function SalesDocPublicViewPage(
                   <div className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words">{clientAddress}</div>
                 )}
                 {projectTitle && (
-                  <div className="text-xs text-muted-foreground mt-1 break-words">Project: {projectTitle}</div>
+                  <div className="text-sm font-medium mt-3 break-words">Project: {projectTitle}</div>
                 )}
               </div>
               <div className="text-sm text-muted-foreground sm:text-right">

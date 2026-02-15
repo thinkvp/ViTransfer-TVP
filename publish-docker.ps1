@@ -1,5 +1,5 @@
 param(
-  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' }),
+  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'thinkvp' }),
   [string]$Version = $(if ($env:VERSION) { $env:VERSION } elseif (Test-Path -LiteralPath "VERSION") { ((Get-Content -LiteralPath "VERSION" | Select-Object -First 1) -as [string]).Trim() } else { 'latest' }),
   [switch]$Dev,
   [switch]$NoLatest,
@@ -10,8 +10,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$appRepo = "$DockerHubUser/vitransfer-app"
-$workerRepo = "$DockerHubUser/vitransfer-worker"
+$appRepo = "$DockerHubUser/vitransfer-tvp-app"
+$workerRepo = "$DockerHubUser/vitransfer-tvp-worker"
 
 if ($Dev) {
   $Version = 'dev'

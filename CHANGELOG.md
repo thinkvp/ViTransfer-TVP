@@ -1,40 +1,103 @@
-# Changelog
+﻿# Changelog
 
-All notable changes to ViTransfer will be documented in this file.
+All notable changes to ViTransfer-TVP will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.3-alpha-4] - 2025-12-28
+## [1.0.0] - 2026-02-15
 
-## [0.8.3-alpha-7] - 2025-12-30
+First independent release of ViTransfer-TVP as a hard fork.
+Forked from upstream ViTransfer v0.8.2 (archived at `archive/upstream-v0.8.2` branch).
 
-### Added
-- Projects: optional per-project setting to display full timecode (HH:MM:SS:FF) in comments
+### TVP-Exclusive Features
 
-### Fixed
-- Admin share view: header/sidebar layout alignment and scrolling behavior
-- Mobile: OTP input no longer overflows horizontally
+#### Sales & CRM
+- **Sales dashboard** with outstanding invoices, payment status, revenue tracking, and configurable fiscal year reporting
+- **Quote system** — create, send, and track quotes with expiry dates, reminders, and conversion to invoices
+- **Invoice management** — create, send, and track invoices with automated overdue payment reminders
+- **Payment tracking** — manual payment recording and real-time Stripe webhook updates
+- **Branded PDF generation** — downloadable quote and invoice PDFs with company logo support
+- **Document sharing** — public share links for quotes and invoices with view/open tracking and email analytics
+- **QuickBooks Online integration** — pull-only sync for clients, quotes, invoices, and payments with configurable daily polls
+- **Stripe Checkout** — accept payments directly on invoices with processing fee pass-through and surcharge display
+- **Currency support** — automatic symbol lookup from ISO 4217 currency codes (60+ currencies)
+- **Client database** — centralized client management with company details, contact info, display colors, and file storage
 
-## [0.8.3-alpha-6] - 2025-12-30
+#### Guest Video Links
+- **Single-video access** — generate unique links for individual videos without exposing the project
+- **Token-based security** — cryptographically secure tokens with 14-day auto-expiry and refresh
+- **Analytics tracking** — view counts with IP-based dedupe, push notifications on access, watermark support
 
-### Changed
-- Share authentication copy: clarified recipient wording and guest access messaging
+#### Photos & Albums
+- **Multi-photo albums** — create multiple albums per project with batch upload (up to 300 photos, 3 concurrent)
+- **Social media export** — automatic 4:5 (1080x1350) Instagram portrait crop generation
+- **Bulk downloads** — ZIP files for full resolution and social crops
+- **Share integration** — albums appear on client share pages when enabled per project
 
-### Fixed
-- Build: resolved jsdom/parse5 ESM incompatibility affecting `next build`
+#### Comprehensive Branding
+- **Company logos** — upload or link to PNG/JPG for app header, emails, and PDFs; separate dark mode logo
+- **Custom favicon** — upload or link for professional browser tab appearance
+- **Accent color** — custom hex color for buttons, links, toggles, and email templates with light/dark text modes
+- **Email branding** — custom header color, text mode, clickable logos, and company watermark across all communications
 
-### Added
-- Comment attachments: multi-file uploads (up to 5 files per comment) and expanded allowed formats (including PSD/AI and common videos)
-- Email privacy: global Admin setting to enable/disable email tracking pixels
-- Analytics: Project Update (“Updates on …”) digest emails now log "Comment Summary" sent/opened events (with optional tracking pixel)
+#### User Roles & Permissions (RBAC)
+- **Custom roles** — unlimited named roles (Project Manager, Editor, Accountant, etc.) with granular permissions
+- **Menu visibility** — per-role access to Projects, Clients, Sales, Settings, Users, Security, Analytics, Share Page
+- **Project status filtering** — limit visible statuses per role (e.g., editors only see IN_PROGRESS)
+- **Granular actions** — per-area permissions like uploads, full control, manage comments, send test emails
+- **Project assignment** — assign specific users to projects for targeted collaboration and notifications
 
-### Fixed
-- Share attachments: download now fetches authenticated blobs instead of accidentally downloading JSON error responses
-- Comments: deleting a comment now removes uploaded attachments from disk and cleans up empty attachment folders (best-effort)
+#### Better Aspect Ratio Support
+- **Portrait, square, ultra-wide, and legacy formats** — proper 9:16, 1:1, 21:9, 4:3 support with dynamic player sizing
+- **Container queries and metadata-first** — modern CSS scaling and database-stored dimensions prevent visible jumps
 
-### Changed
-- Comment attachments: upload progress now displays and input clears only after completion
+#### Communication & Notifications
+- **Video version notes** — per-version notes (500 chars) visible on share pages with inline editing
+- **Selectable email recipients** — choose which recipients receive each notification, with per-recipient opt-in/out
+- **Internal project chat** — admin-only threaded discussions hidden from client share pages
+- **Key date reminders** — automated emails to selected users/recipients before milestone dates
+- **Push notifications** — optional Gotify and browser Web Push (VAPID) for real-time alerts
+- **In-app notification bell** — unread badge, auto-polling, click-to-navigate, covering comments, approvals, sales, and security
+- **Smart email digests** — immediate, hourly, daily, or weekly batching to reduce noise
+- **Email tracking** — optional open-tracking pixels (can be disabled globally; legal compliance is your responsibility)
+- **Comment attachments** — multi-file uploads (up to 5 per comment) supporting images, PSD/AI, and video formats
+
+#### Status Workflow & Calendar
+- **8 project statuses** — NOT_STARTED, IN_PROGRESS, IN_REVIEW, REVIEWED, ON_HOLD, SHARE_ONLY, APPROVED, CLOSED
+- **Automated transitions** — auto-IN_REVIEW on client notify, auto-APPROVED when all videos approved, auto-close after X days
+- **Key dates** — PRE_PRODUCTION, SHOOTING, DUE_DATE, and personal dates with automated reminders
+- **Calendar sync** — iCal/ICS feed for Google Calendar, Apple Calendar, Outlook with automatic updates
+
+#### External Communication Library
+- **Email import** — drag-and-drop .eml files into projects with automatic parsing of subject, body, attachments, and inline images
+- **Background processing** — large email files processed asynchronously
+
+#### Additional Security
+- **Max upload safeguards**, **random slug generation**, **constant-time comparison**, **token hashing**, **OTP with crypto.randomInt()**, **account lockout**, **7-layer path traversal defense**, **FFmpeg input sanitization**, and **security event logging**
+
+#### Granular Approval Control
+- **Per-version approval toggle** — each video version has an `allowApproval` setting, defaulting to disabled to prevent accidental WIP approvals
+- **Admin override** — toggle approval permission on any version at any time
+- **API enforcement** — share page validates approval flag before processing
+
+#### Client File Storage
+- **Centralized document repository** — per-client file storage for contracts, branding assets, style guides, and reference materials
+- **Auto-categorized uploads** — files sorted by type (contracts, branding, images, video, audio, documents)
+- **Internal-only** — not exposed on client share pages
+
+### Infrastructure
+- **Independent versioning**: SemVer 1.0.0+, dropping upstream version prefix
+- **Docker Hub images**: `thinkvp/vitransfer-tvp-app` and `thinkvp/vitransfer-tvp-worker`
+- **Compose files**: `docker-compose.yml` (pull from Docker Hub) and `docker-compose.build.yml` (build from source)
+- **Publish scripts**: `publish-docker.ps1` and `scripts/retry-publish-docker.ps1` targeting `thinkvp` Docker Hub account
+
+---
+
+## Original ViTransfer Changelog
+
+Entries below are from the original [ViTransfer](https://github.com/MansiVisuals/ViTransfer) project by MansiVisuals (v0.1.0 - v0.8.2).
+ViTransfer-TVP forked from v0.8.2 and has since diverged significantly.
 
 ## [0.8.2] - 2025-12-24
 
@@ -192,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.4] - 2025-12-05
 
 ### Added
-- **Share Page Video Sorting**: Sort toggle button for video sidebar (upload date ↔ alphabetical)
+- **Share Page Video Sorting**: Sort toggle button for video sidebar (upload date â†” alphabetical)
   - Default to upload date (newest first)
   - Sort applied within "For Review" and "Approved" sections
   - Works on both public and admin share views
@@ -344,11 +407,11 @@ Major codebase refactoring with security hardening and architecture improvements
 - TypeScript null to undefined type conversions
 
 ### Refactored
-- **Video Processor**: 406 → 96 lines (76% reduction)
+- **Video Processor**: 406 â†’ 96 lines (76% reduction)
   - Extracted 8 helper functions to video-processor-helpers.ts
   - Eliminated magic numbers with named constants
   - Reduced nesting depth from 5 to 2 levels
-- **Comments API**: 340 → 189 lines (44% reduction)
+- **Comments API**: 340 â†’ 189 lines (44% reduction)
   - Extracted 5 helper functions to comment-helpers.ts
   - Separated validation, sanitization, and notification logic
 - Share/Content API consolidated with reduced duplication
@@ -629,7 +692,7 @@ Previous releases (0.3.5-0.3.7) added major features using patch increments. Now
 
 ### Added
 - Per-project companyName field in project creation and settings
-- Display priority: companyName → Primary Recipient → "Client"
+- Display priority: companyName â†’ Primary Recipient â†’ "Client"
 - Timezone-aware date/time formatting using Intl.DateTimeFormat
   - Client-side: uses browser timezone for proper user localization
   - Server-side: uses TZ environment variable for emails/logs/workers
@@ -835,7 +898,7 @@ Previous releases (0.3.5-0.3.7) added major features using patch increments. Now
 - Multiple recipient support for projects (ProjectRecipient model)
 - Recipient management UI in project settings (add, edit, remove)
 - Primary recipient designation for each project
-- Projects sorted by status on admin dashboard (In Review → Share Only → Approved)
+- Projects sorted by status on admin dashboard (In Review â†’ Share Only â†’ Approved)
 
 ### Changed
 - Migrated from single clientEmail/clientName to multi-recipient system
@@ -893,38 +956,38 @@ Future v0.2.x releases will include notification system changes (configurable em
 ### Initial Release
 
 #### Features
-- 📹 **Video Upload & Processing** - Automatic transcoding to multiple resolutions (720p/1080p)
-- 💧 **Watermarking** - Customizable watermarks for preview videos
-- 💬 **Timestamped Comments** - Collect feedback with precise video timestamps
-- ✅ **Approval Workflow** - Client approval system with revision tracking
-- 🔒 **Password Protection** - Secure projects with client passwords
-- 📧 **Email Notifications** - Automated notifications for new videos and replies
-- 🎨 **Dark Mode** - Beautiful dark/light theme support
-- 📱 **Fully Responsive** - Works perfectly on all devices
-- 👥 **Multi-User Support** - Create multiple admin accounts
-- 📊 **Analytics Dashboard** - Track page visits, downloads, and engagement
-- 🔐 **Security Logging** - Monitor access attempts and suspicious activity
-- 🎯 **Version Management** - Hide/show specific video versions
-- 🔄 **Revision Tracking** - Limit and track project revisions
-- ⚙️ **Flexible Settings** - Per-project and global configuration options
+- ðŸ“¹ **Video Upload & Processing** - Automatic transcoding to multiple resolutions (720p/1080p)
+- ðŸ’§ **Watermarking** - Customizable watermarks for preview videos
+- ðŸ’¬ **Timestamped Comments** - Collect feedback with precise video timestamps
+- âœ… **Approval Workflow** - Client approval system with revision tracking
+- ðŸ”’ **Password Protection** - Secure projects with client passwords
+- ðŸ“§ **Email Notifications** - Automated notifications for new videos and replies
+- ðŸŽ¨ **Dark Mode** - Beautiful dark/light theme support
+- ðŸ“± **Fully Responsive** - Works perfectly on all devices
+- ðŸ‘¥ **Multi-User Support** - Create multiple admin accounts
+- ðŸ“Š **Analytics Dashboard** - Track page visits, downloads, and engagement
+- ðŸ” **Security Logging** - Monitor access attempts and suspicious activity
+- ðŸŽ¯ **Version Management** - Hide/show specific video versions
+- ðŸ”„ **Revision Tracking** - Limit and track project revisions
+- âš™ï¸ **Flexible Settings** - Per-project and global configuration options
 
 #### Security
-- 🔐 **JWT Authentication** - Secure admin sessions with 15-minute inactivity timeout
-- 🔑 **AES-256 Encryption** - Encrypted password storage for share links
-- 🛡️ **Rate Limiting** - Protection against brute force attacks
-- 📝 **Security Event Logging** - Track all access attempts
-- 🚫 **Hotlink Protection** - Prevent unauthorized embedding
-- 🌐 **HTTPS Support** - SSL/TLS for secure connections
-- ⏱️ **Session Monitoring** - Inactivity warnings with auto-logout
+- ðŸ” **JWT Authentication** - Secure admin sessions with 15-minute inactivity timeout
+- ðŸ”‘ **AES-256 Encryption** - Encrypted password storage for share links
+- ðŸ›¡ï¸ **Rate Limiting** - Protection against brute force attacks
+- ðŸ“ **Security Event Logging** - Track all access attempts
+- ðŸš« **Hotlink Protection** - Prevent unauthorized embedding
+- ðŸŒ **HTTPS Support** - SSL/TLS for secure connections
+- â±ï¸ **Session Monitoring** - Inactivity warnings with auto-logout
 
 #### Technical
-- 🐳 **Docker-First** - Easy deployment with Docker Compose
-- 🚀 **Next.js 15 + React 19** - High performance modern stack
-- 📦 **Redis Queue** - Background video processing with BullMQ
-- 🎬 **FFmpeg Processing** - Industry-standard video transcoding
-- 🗄️ **PostgreSQL Database** - Reliable data storage
-- 🌐 **TUS Protocol** - Resumable uploads for large files
-- 🏗️ **Multi-Architecture** - Support for amd64 and arm64
+- ðŸ³ **Docker-First** - Easy deployment with Docker Compose
+- ðŸš€ **Next.js 15 + React 19** - High performance modern stack
+- ðŸ“¦ **Redis Queue** - Background video processing with BullMQ
+- ðŸŽ¬ **FFmpeg Processing** - Industry-standard video transcoding
+- ðŸ—„ï¸ **PostgreSQL Database** - Reliable data storage
+- ðŸŒ **TUS Protocol** - Resumable uploads for large files
+- ðŸ—ï¸ **Multi-Architecture** - Support for amd64 and arm64
 
 ---
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Download, CheckCircle2, CreditCard } from 'lucide-react'
 import { downloadInvoicePdf, downloadQuotePdf } from '@/lib/sales/pdf'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 
 type DocType = 'QUOTE' | 'INVOICE'
 
@@ -21,7 +22,7 @@ type Props = {
   payLabel?: string | null
   processingFeeCents?: number | null
   processingFeeCurrency?: string | null
-  currencySymbol?: string | null
+  currencyCode?: string | null
 }
 
 export default function PublicSalesDocActions(props: Props) {
@@ -118,7 +119,8 @@ export default function PublicSalesDocActions(props: Props) {
   const payLabel = typeof props.payLabel === 'string' && props.payLabel.trim() ? props.payLabel.trim() : null
   const feeCents = typeof props.processingFeeCents === 'number' && Number.isFinite(props.processingFeeCents) ? Math.max(0, Math.trunc(props.processingFeeCents)) : 0
   const feeCurrency = typeof props.processingFeeCurrency === 'string' && props.processingFeeCurrency.trim() ? props.processingFeeCurrency.trim().toUpperCase() : ''
-  const feeCurrencySymbol = typeof props.currencySymbol === 'string' && props.currencySymbol.trim() ? props.currencySymbol.trim() : '$'
+  const currencyCode = typeof props.currencyCode === 'string' && props.currencyCode.trim() ? props.currencyCode.trim() : 'AUD'
+  const feeCurrencySymbol = getCurrencySymbol(currencyCode)
   const feeText = feeCents > 0
     ? `Attracts ${feeCurrencySymbol}${(feeCents / 100).toFixed(2)} in card processing fees`
     : null
@@ -131,7 +133,7 @@ export default function PublicSalesDocActions(props: Props) {
             type="button"
             onClick={() => void onPay()}
             disabled={paying}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
             <CreditCard className="h-4 w-4 mr-2" />
             {paying ? 'Redirecting…' : 'Pay Invoice'}
@@ -149,7 +151,7 @@ export default function PublicSalesDocActions(props: Props) {
               type="button"
               onClick={() => void onAccept()}
               disabled={accepting}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               <CheckCircle2 className="h-4 w-4 mr-2" />
               {accepting ? 'Accepting…' : 'Accept Quote'}
@@ -159,9 +161,9 @@ export default function PublicSalesDocActions(props: Props) {
 
         <Button
           type="button"
+          variant="outline"
           onClick={() => void onDownload()}
           disabled={downloading}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           <Download className="h-4 w-4 mr-2" />
           {downloading ? 'Preparing…' : 'Download PDF'}

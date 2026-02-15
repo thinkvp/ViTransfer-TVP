@@ -13,6 +13,7 @@ import { apiFetch } from '@/lib/api-client'
 import { formatDateTime } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Pencil, Plus, Star, Trash2 } from 'lucide-react'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
@@ -41,8 +42,8 @@ export default function SalesSettingsPage() {
   const [email, setEmail] = useState('')
   const [website, setWebsite] = useState('')
   const [businessRegistrationLabel, setBusinessRegistrationLabel] = useState('ABN')
-  const [currencySymbol, setCurrencySymbol] = useState('$')
   const [currencyCode, setCurrencyCode] = useState('AUD')
+  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState('7')
   const [quoteLabel, setQuoteLabel] = useState('QUOTE')
   const [invoiceLabel, setInvoiceLabel] = useState('INVOICE')
   const [taxLabel, setTaxLabel] = useState('')
@@ -99,8 +100,8 @@ export default function SalesSettingsPage() {
         setEmail(s.email ?? '')
         setWebsite(s.website ?? '')
         setBusinessRegistrationLabel(s.businessRegistrationLabel || 'ABN')
-        setCurrencySymbol(s.currencySymbol || '$')
         setCurrencyCode(s.currencyCode || 'AUD')
+        setFiscalYearStartMonth(String(s.fiscalYearStartMonth ?? 7))
         setQuoteLabel(s.quoteLabel || 'QUOTE')
         setInvoiceLabel(s.invoiceLabel || 'INVOICE')
         setTaxLabel(s.taxLabel || '')
@@ -411,6 +412,9 @@ export default function SalesSettingsPage() {
       const parsedQuoteDays = Number(defaultQuoteValidDays)
       const parsedInvoiceDays = Number(defaultInvoiceDueDays)
 
+      const parsedFyMonth = Number(fiscalYearStartMonth)
+      const fyMonth = Number.isFinite(parsedFyMonth) && parsedFyMonth >= 1 && parsedFyMonth <= 12 ? parsedFyMonth : 7
+
       await saveSalesSettingsApi({
         businessName,
         address,
@@ -419,8 +423,8 @@ export default function SalesSettingsPage() {
         email,
         website,
         businessRegistrationLabel: businessRegistrationLabel.trim() || 'ABN',
-        currencySymbol: currencySymbol.trim() || '$',
         currencyCode: currencyCode.trim() || 'AUD',
+        fiscalYearStartMonth: fyMonth,
         quoteLabel: quoteLabel.trim() || 'QUOTE',
         invoiceLabel: invoiceLabel.trim() || 'INVOICE',
         taxLabel: taxLabel.trim(),
@@ -517,101 +521,113 @@ export default function SalesSettingsPage() {
       </div>
 
       <Card>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6">
-          <div className="space-y-2">
-            <Label>Business name</Label>
-            <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} className="h-9" />
+        <CardContent className="space-y-4 pt-6">
+          {/* Row 1: Business name / Email / Address  |  Row 2: Phone / Website / Address continues */}
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr] md:grid-rows-[auto_auto] gap-4">
+            <div className="space-y-2">
+              <Label>Business name</Label>
+              <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} className="h-9" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input value={email} onChange={(e) => setEmail(e.target.value)} className="h-9" placeholder="accounts@" />
+            </div>
+
+            <div className="space-y-2 md:row-span-2">
+              <Label>Address</Label>
+              <Textarea value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street\nSuburb State Postcode" className="h-[calc(100%-1.75rem)]" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Phone</Label>
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Website</Label>
+              <Input value={website} onChange={(e) => setWebsite(e.target.value)} className="h-9" placeholder="https://" />
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Email</Label>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} className="h-9" placeholder="accounts@" />
+          {/* Row 3: Business registration label / ABN / Currency code / FY Start Month */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label>Business registration label</Label>
+              <Input value={businessRegistrationLabel} onChange={(e) => setBusinessRegistrationLabel(e.target.value)} className="h-9" placeholder="ABN, GST No, VAT No, EIN, etc" />
+              <p className="text-xs text-muted-foreground">e.g. ABN, GST No, VAT No, EIN.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>{businessRegistrationLabel || 'Business registration number'}</Label>
+              <Input value={abn} onChange={(e) => setAbn(e.target.value)} className="h-9" />
+              <p className="text-xs text-muted-foreground">Update Business registration label to change this label.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Currency code</Label>
+              <Input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} className="h-9" placeholder="AUD" />
+              <p className="text-xs text-muted-foreground">e.g. AUD, USD, EUR, GBP. Symbol: {getCurrencySymbol(currencyCode)}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>FY Start Month</Label>
+              <Input value={fiscalYearStartMonth} onChange={(e) => setFiscalYearStartMonth(e.target.value)} className="h-9" inputMode="numeric" placeholder="7" />
+              <p className="text-xs text-muted-foreground">1-12 (1=Jan, 7=Jul). Used for sales dashboard.</p>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Phone</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9" />
+          {/* Row 4: Quote label / Default quote validity / Invoice label / Default invoice due */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label>Quote label</Label>
+              <Input value={quoteLabel} onChange={(e) => setQuoteLabel(e.target.value)} className="h-9" placeholder="QUOTE" />
+              <p className="text-xs text-muted-foreground">e.g. QUOTE, ESTIMATE, PROPOSAL.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Default quote validity (days)</Label>
+              <Input
+                value={defaultQuoteValidDays}
+                onChange={(e) => setDefaultQuoteValidDays(e.target.value)}
+                className="h-9"
+                inputMode="numeric"
+              />
+              <p className="text-xs text-muted-foreground">Used to prefill &ldquo;Valid until&rdquo;.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Invoice label</Label>
+              <Input value={invoiceLabel} onChange={(e) => setInvoiceLabel(e.target.value)} className="h-9" placeholder="INVOICE" />
+              <p className="text-xs text-muted-foreground">e.g. INVOICE, TAX INVOICE, BILL.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Default invoice due (days)</Label>
+              <Input
+                value={defaultInvoiceDueDays}
+                onChange={(e) => setDefaultInvoiceDueDays(e.target.value)}
+                className="h-9"
+                inputMode="numeric"
+              />
+              <p className="text-xs text-muted-foreground">Used to prefill &ldquo;Due date&rdquo;.</p>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Website</Label>
-            <Input value={website} onChange={(e) => setWebsite(e.target.value)} className="h-9" placeholder="https://" />
+          {/* Row 5: Payment details / Default T&Cs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Payment details</Label>
+              <Textarea value={paymentDetails} onChange={(e) => setPaymentDetails(e.target.value)} placeholder="BSB / Account / PayID / etc" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Default T&Cs</Label>
+              <Textarea value={defaultTerms} onChange={(e) => setDefaultTerms(e.target.value)} />
+            </div>
           </div>
 
-          <div className="md:col-span-2 space-y-2">
-            <Label>Address</Label>
-            <Textarea value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street\nSuburb State Postcode" />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Business registration label</Label>
-            <Input value={businessRegistrationLabel} onChange={(e) => setBusinessRegistrationLabel(e.target.value)} className="h-9" placeholder="ABN, GST No, VAT No, EIN, etc" />
-            <p className="text-xs text-muted-foreground">Label shown on invoices/quotes (e.g. ABN, GST No, VAT No, EIN).</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>{businessRegistrationLabel || 'Business registration number'}</Label>
-            <Input value={abn} onChange={(e) => setAbn(e.target.value)} className="h-9" />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Currency symbol</Label>
-            <Input value={currencySymbol} onChange={(e) => setCurrencySymbol(e.target.value)} className="h-9" placeholder="$" />
-            <p className="text-xs text-muted-foreground">Displayed on invoices and quotes (e.g. $, &euro;, &pound;).</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Currency code</Label>
-            <Input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} className="h-9" placeholder="AUD" />
-            <p className="text-xs text-muted-foreground">ISO 4217 code shown in &ldquo;Amounts in&rdquo; labels (e.g. AUD, USD, EUR, GBP).</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Quote label</Label>
-            <Input value={quoteLabel} onChange={(e) => setQuoteLabel(e.target.value)} className="h-9" placeholder="QUOTE" />
-            <p className="text-xs text-muted-foreground">Title shown on PDF and public link (e.g. QUOTE, ESTIMATE, PROPOSAL).</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Default quote validity (days)</Label>
-            <Input
-              value={defaultQuoteValidDays}
-              onChange={(e) => setDefaultQuoteValidDays(e.target.value)}
-              className="h-9"
-              inputMode="numeric"
-            />
-            <p className="text-xs text-muted-foreground">Used to prefill &ldquo;Valid until&rdquo;.</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Invoice label</Label>
-            <Input value={invoiceLabel} onChange={(e) => setInvoiceLabel(e.target.value)} className="h-9" placeholder="INVOICE" />
-            <p className="text-xs text-muted-foreground">Title shown on PDF and public link (e.g. INVOICE, TAX INVOICE, BILL).</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Default invoice due (days)</Label>
-            <Input
-              value={defaultInvoiceDueDays}
-              onChange={(e) => setDefaultInvoiceDueDays(e.target.value)}
-              className="h-9"
-              inputMode="numeric"
-            />
-            <p className="text-xs text-muted-foreground">Used to prefill &ldquo;Due date&rdquo;.</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Payment details</Label>
-            <Textarea value={paymentDetails} onChange={(e) => setPaymentDetails(e.target.value)} placeholder="BSB / Account / PayID / etc" />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Default T&Cs</Label>
-            <Textarea value={defaultTerms} onChange={(e) => setDefaultTerms(e.target.value)} />
-          </div>
-
-          <div className="md:col-span-2 flex justify-end gap-2">
-            {saved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
+          <div className="flex justify-end gap-2">
             <Button onClick={onSave} disabled={saving}>
               {saving ? 'Saving\u2026' : 'Save settings'}
             </Button>
@@ -630,7 +646,7 @@ export default function SalesSettingsPage() {
               <div className="space-y-2">
                 <Label>Tax label</Label>
                 <Input value={taxLabel} onChange={(e) => setTaxLabel(e.target.value)} className="h-9" placeholder="GST, VAT, etc" />
-                <p className="text-xs text-muted-foreground">Shown in brackets next to &ldquo;Tax&rdquo; on quotes/invoices (e.g. Tax (GST)).</p>
+                <p className="text-xs text-muted-foreground">Shown next to &ldquo;Tax&rdquo; on quotes/invoices, e.g. Tax (GST).</p>
               </div>
             </div>
 
@@ -759,7 +775,6 @@ export default function SalesSettingsPage() {
             </div>
 
             <div className="flex justify-end gap-2">
-              {saved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
               <Button onClick={onSave} disabled={saving}>
                 {saving ? 'Saving\u2026' : 'Save tax'}
               </Button>
@@ -828,7 +843,6 @@ export default function SalesSettingsPage() {
               </div>
 
               <div className="flex justify-end gap-2">
-                {remindersSaved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
                 <Button onClick={onSaveReminders} disabled={remindersSaving}>
                   {remindersSaving ? 'Saving…' : 'Save notifications'}
                 </Button>
@@ -872,7 +886,7 @@ export default function SalesSettingsPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Fixed fee ({currencySymbol || '$'})</Label>
+                    <Label>Fixed fee ({getCurrencySymbol(currencyCode)})</Label>
                     <Input
                       value={stripeFeeFixed}
                       onChange={(e) => setStripeFeeFixed(e.target.value)}
@@ -933,7 +947,6 @@ export default function SalesSettingsPage() {
               </div>
 
               <div className="flex justify-end gap-2">
-                {stripeSaved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
                 <Button onClick={() => void onSaveStripe()} disabled={stripeSaving}>
                   {stripeSaving ? 'Saving…' : 'Save Stripe settings'}
                 </Button>
@@ -989,7 +1002,6 @@ export default function SalesSettingsPage() {
               </div>
 
               <div className="flex flex-wrap gap-2 sm:col-span-1 items-end justify-end">
-                {qbSaved && <div className="text-sm text-emerald-600 dark:text-emerald-400 self-center">Saved</div>}
                 <Button onClick={() => void onSaveQuickBooks()} disabled={qbBusy || qbSaving}>
                   {qbSaving ? 'Saving…' : 'Save QuickBooks settings'}
                 </Button>

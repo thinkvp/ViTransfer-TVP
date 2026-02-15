@@ -1,24 +1,28 @@
-# ViTransfer Installation Guide
+# ViTransfer-TVP Installation Guide
 
-Step-by-step instructions for installing ViTransfer on various platforms.
+Step-by-step instructions for installing ViTransfer-TVP on various platforms.
+
+> **Architecture:** linux/amd64 only. ARM64 is not supported.
 
 ## Quick Install (5 Minutes)
 
 ```bash
 # 1. Download
-git clone https://github.com/yourusername/vitransfer.git && cd vitransfer
+mkdir vitransfer && cd vitransfer
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
 
 # 2. Configure
 cp .env.example .env
-nano .env  # Set ADMIN_EMAIL, ADMIN_PASSWORD, and generate secrets
+nano .env  # Set ADMIN_EMAIL, ADMIN_PASSWORD, and replace secret placeholders
 
-# 3. Generate secrets
-echo "ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
-echo "JWT_SECRET=$(openssl rand -base64 64)" >> .env
-echo "JWT_REFRESH_SECRET=$(openssl rand -base64 64)" >> .env
-echo "SHARE_TOKEN_SECRET=$(openssl rand -base64 64)" >> .env
-echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
-echo "REDIS_PASSWORD=$(openssl rand -base64 32)" >> .env
+# 3. Generate secrets (run each command, paste output into .env)
+openssl rand -hex 32      # → POSTGRES_PASSWORD
+openssl rand -hex 32      # → REDIS_PASSWORD
+openssl rand -base64 32   # → ENCRYPTION_KEY
+openssl rand -base64 64   # → JWT_SECRET
+openssl rand -base64 64   # → JWT_REFRESH_SECRET
+openssl rand -base64 64   # → SHARE_TOKEN_SECRET
 
 # 4. Start
 docker-compose up -d
@@ -35,19 +39,23 @@ docker-compose up -d
 - 4GB+ RAM
 - 20GB+ disk space
 - Linux, Windows (WSL2), or macOS
+- **Architecture:** linux/amd64 only
 
-### Step 1: Get ViTransfer
+### Step 1: Get ViTransfer-TVP
 
-**Option A: Git Clone**
+**Option A: Download files only (recommended)**
 ```bash
-git clone https://github.com/yourusername/vitransfer.git
-cd vitransfer
+mkdir vitransfer && cd vitransfer
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
 ```
 
-**Option B: Download ZIP**
-1. Download from GitHub releases
-2. Extract to your preferred location
-3. Navigate to the folder
+**Option B: Git Clone (for contributors/developers)**
+```bash
+git clone https://github.com/thinkvp/ViTransfer-TVP.git
+cd ViTransfer
+git checkout dev
+```
 
 ### Step 2: Configure Environment
 
@@ -61,7 +69,7 @@ Edit `.env` and set these required values:
 ```env
 # Change these!
 ADMIN_EMAIL=your-email@example.com
-ADMIN_PASSWORD=YourSecurePassword123!
+ADMIN_PASSWORD=YourSecurePassword123
 
 # Generate these (see next step)
 POSTGRES_PASSWORD=
@@ -74,32 +82,31 @@ SHARE_TOKEN_SECRET=
 
 ### Step 3: Generate Secrets
 
-**Linux/Mac:**
+Run each command individually and paste the output into the corresponding `.env` variable.
+
+**Linux/Mac/WSL:**
 ```bash
-# All in one command
-cat >> .env << 'EOF'
-POSTGRES_PASSWORD=$(openssl rand -base64 32)
-REDIS_PASSWORD=$(openssl rand -base64 32)
-ENCRYPTION_KEY=$(openssl rand -base64 32)
-JWT_SECRET=$(openssl rand -base64 64)
-JWT_REFRESH_SECRET=$(openssl rand -base64 64)
-SHARE_TOKEN_SECRET=$(openssl rand -base64 64)
-EOF
+openssl rand -hex 32      # → POSTGRES_PASSWORD (hex, no special chars)
+openssl rand -hex 32      # → REDIS_PASSWORD (hex, no special chars)
+openssl rand -base64 32   # → ENCRYPTION_KEY
+openssl rand -base64 64   # → JWT_SECRET
+openssl rand -base64 64   # → JWT_REFRESH_SECRET
+openssl rand -base64 64   # → SHARE_TOKEN_SECRET
 ```
 
 **Windows (PowerShell):**
 ```powershell
-# Generate each value
-$bytes = New-Object byte[] 32
-[Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($bytes)
-[Convert]::ToBase64String($bytes)
+# For hex values (POSTGRES_PASSWORD, REDIS_PASSWORD):
+-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
 
-# Copy output and paste into .env file
+# For base64 values (ENCRYPTION_KEY — 32 bytes):
+[Convert]::ToBase64String((1..32 | ForEach-Object { [byte](Get-Random -Max 256) }))
+
+# For base64 values (JWT secrets — 64 bytes):
+[Convert]::ToBase64String((1..64 | ForEach-Object { [byte](Get-Random -Max 256) }))
 ```
 
-**Online Tool (if OpenSSL not available):**
-- Use: https://generate-secret.vercel.app/32 (for 32-byte keys)
-- Use: https://generate-secret.vercel.app/64 (for 64-byte secrets)
+**Important:** Use hex (`openssl rand -hex 32`) for `POSTGRES_PASSWORD` and `REDIS_PASSWORD`. Base64 output contains `+/=` characters that can break database connection URLs.
 
 ### Step 4: Start Services
 
@@ -108,7 +115,7 @@ docker-compose up -d
 ```
 
 First startup takes 2-5 minutes:
-- Downloads images (~500MB)
+- Pulls images (app + worker)
 - Initializes database
 - Runs migrations
 - Starts worker
@@ -134,36 +141,21 @@ View logs if needed:
 docker-compose logs -f app
 ```
 
-### Step 6: Access ViTransfer
+### Step 6: Access ViTransfer-TVP
 
 1. Open browser to `http://localhost:4321`
 2. Login with your `ADMIN_EMAIL` and `ADMIN_PASSWORD`
 3. Complete initial setup:
    - Settings > Domain Configuration
-   - Settings > Email Configuration (optional)
+   - Settings > Email Configuration (optional, required for OTP auth and notifications)
    - Create your first project!
-
-## Platform-Specific Installation
-
-### Unraid
-
-See `README.md` section "Unraid Installation" or use the provided template.
-
-### TrueNAS SCALE
-
-See `README.md` section "TrueNAS SCALE Installation" or use `truenas-app.yaml`.
-
-### Synology/QNAP
-
-See `README.md` for NAS-specific instructions.
 
 ## Post-Installation
 
 ### Configure Reverse Proxy (Recommended)
 
 For production use with a custom domain, set up a reverse proxy with HTTPS.
-
-See `README.md` section "Reverse Proxy Setup" for Nginx/Traefik/Caddy examples.
+Tested with Cloudflare Tunnels — set `CLOUDFLARE_TUNNEL=true` in `.env`.
 
 ### Configure Email (Optional)
 
@@ -171,6 +163,8 @@ See `README.md` section "Reverse Proxy Setup" for Nginx/Traefik/Caddy examples.
 2. Add your SMTP server details
 3. Test the connection
 4. Save settings
+
+Email is required for: OTP authentication, notification digests, and payment reminders.
 
 ### Create Projects
 
@@ -193,7 +187,7 @@ docker-compose restart
 
 ### "Can't connect to database"
 ```bash
-# Verify DATABASE_URL in .env is correct
+# Verify DATABASE_URL format is correct internally
 # Should be: postgresql://vitransfer:PASSWORD@postgres:5432/vitransfer?schema=public
 
 # Check PostgreSQL is running
@@ -210,28 +204,34 @@ docker-compose up -d
 df -h
 
 # Check permissions
-ls -la ./  # Should show volumes directory
+ls -la ./
 
 # Check logs
 docker-compose logs app | grep upload
 ```
 
 ### "Can't login"
-- Verify ADMIN_EMAIL and ADMIN_PASSWORD in `.env`
+- Verify `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`
 - Check there are no extra spaces
-- Try resetting: edit `.env`, run `docker-compose restart app`
+- Try restarting: `docker-compose restart app`
+
+### "HTTPS lockout"
+- Set `HTTPS_ENABLED=false` in `.env`
+- Run `docker-compose restart app`
+- The env var always overrides database settings
 
 ## Updating
 
 ```bash
 # Backup first!
 docker-compose down
-cp -r volumes volumes-backup
+# Back up your postgres data and uploads volumes
 
 # Update
 docker-compose pull
 docker-compose up -d
 
+# Database migrations run automatically
 # Verify
 docker-compose logs -f app
 ```
@@ -246,18 +246,18 @@ docker-compose down
 docker-compose down -v
 
 # Remove images
-docker rmi vitransfer/vitransfer:latest postgres:16-alpine redis:7-alpine
+docker rmi thinkvp/vitransfer-tvp-app:latest thinkvp/vitransfer-tvp-worker:latest postgres:17-alpine redis:8-alpine
 ```
 
 ## Getting Help
 
 - Check logs: `docker-compose logs`
-- GitHub Issues: Report bugs and request features
+- GitHub Issues: [thinkvp/ViTransfer-TVP](https://github.com/thinkvp/ViTransfer-TVP/issues)
 - README.md: Full documentation
 
 ---
 
-**Installation complete!** 🎉
+**Installation complete!**
 
 Next steps:
 1. Create your first project

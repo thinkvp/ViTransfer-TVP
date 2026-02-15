@@ -22,6 +22,7 @@ import {
 import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { InvoiceStatus, SalesSettings } from '@/lib/sales/types'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadInvoicePdf } from '@/lib/sales/pdf'
 import { ArrowDown, ArrowUp, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
@@ -82,8 +83,8 @@ export default function SalesInvoicesPage() {
     email: '',
     website: '',
     businessRegistrationLabel: 'ABN',
-    currencySymbol: '$',
     currencyCode: 'AUD',
+    fiscalYearStartMonth: 7,
     quoteLabel: 'QUOTE',
     invoiceLabel: 'INVOICE',
     taxLabel: '',
@@ -517,7 +518,7 @@ export default function SalesInvoicesPage() {
                               {statusLabel(row.effectiveStatus)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, settings.currencySymbol)}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {row.invoice.clientId ? (
                               <Link href={`/admin/clients/${row.invoice.clientId}`} className="hover:underline">

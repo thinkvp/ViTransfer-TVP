@@ -84,8 +84,8 @@ export type SalesSettings = {
   email: string
   website: string
   businessRegistrationLabel: string
-  currencySymbol: string
   currencyCode: string
+  fiscalYearStartMonth: number
   quoteLabel: string
   invoiceLabel: string
   taxLabel: string

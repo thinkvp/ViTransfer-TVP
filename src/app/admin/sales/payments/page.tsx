@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { ClientOption, SalesInvoice } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, dollarsToCents, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import {
@@ -41,7 +42,7 @@ export default function SalesPaymentsPage() {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
   const [payments, setPayments] = useState<SalesRollupPaymentRow[]>([])
   const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
-  const [currencySymbol, setCurrencySymbol] = useState<string>('$')
+  const [currencyCode, setCurrencyCode] = useState<string>('AUD')
   const [rollup, setRollup] = useState<SalesRollupResponse | null>(null)
 
   const [filterSelected, setFilterSelected] = useState<Set<PaymentFilter>>(new Set())
@@ -89,7 +90,7 @@ export default function SalesPaymentsPage() {
 
         if (cancelled) return
         setTaxRatePercent(settings.taxRatePercent)
-        setCurrencySymbol(settings.currencySymbol ?? '$')
+        setCurrencyCode(settings.currencyCode)
         setInvoices(r.invoices)
         setPayments(r.payments)
         setRollup(r)
@@ -322,7 +323,7 @@ export default function SalesPaymentsPage() {
                   const bal = invoiceTotals.get(inv.id)?.balanceCents ?? 0
                   return (
                     <SelectItem key={inv.id} value={inv.id}>
-                      {inv.invoiceNumber} — {formatMoney(bal, currencySymbol)}
+                      {inv.invoiceNumber} — {formatMoney(bal, getCurrencySymbol(currencyCode))}
                     </SelectItem>
                   )
                 })}
@@ -336,7 +337,7 @@ export default function SalesPaymentsPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Amount ($)</Label>
+            <Label>Amount ({getCurrencySymbol(currencyCode)})</Label>
             <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="h-9" />
           </div>
 
@@ -487,7 +488,7 @@ export default function SalesPaymentsPage() {
                       visiblePayments.map((p) => (
                         <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                           <td className="px-3 py-2 tabular-nums">{formatDate(p.paymentDate)}</td>
-                          <td className="px-3 py-2 tabular-nums font-medium">{formatMoney(p.amountCents, currencySymbol)}</td>
+                          <td className="px-3 py-2 tabular-nums font-medium">{formatMoney(p.amountCents, getCurrencySymbol(currencyCode))}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {p.method || '—'}{p.excludeFromInvoiceBalance ? ' (reconciled)' : ''}
                           </td>

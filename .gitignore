@@ -23,10 +23,19 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 pnpm-debug.log*
+*.log
+logs/
 
 # OS
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.pem
+*.key
+*.crt
+*.p12
+*.pfx
+certs/
 
 # Debug
 .vscode/*
@@ -50,6 +59,7 @@ minio-data/
 postgres-data/
 redis-data/
 intergrations/
+integrations/
 
 # Local-only QuickBooks integration scratchpad (contains secrets/logs)
 .quickbooks/
@@ -61,6 +71,13 @@ prisma/.env
 *.tsbuildinfo
 next-env.d.ts
 AGENTS.md
+
+# Tooling caches
+.eslintcache
+.turbo/
+.vercel/
+.swc/
+.parcel-cache/
 
 # Website files
 website.html

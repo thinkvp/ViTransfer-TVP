@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ViTransfer Build Script (amd64)
+# ViTransfer-TVP Build Script (amd64 only)
 # Builds and pushes BOTH images (app + worker) for linux/amd64 only
 # Usage: ./build-multiarch.sh [version|--dev|-dev<version>|latest] [--no-cache]
 # Examples:
@@ -13,9 +13,9 @@
 
 set -e
 
-DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-simbamcsimba}"
-APP_IMAGE_NAME="vitransfer-app"
-WORKER_IMAGE_NAME="vitransfer-worker"
+DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-thinkvp}"
+APP_IMAGE_NAME="vitransfer-tvp-app"
+WORKER_IMAGE_NAME="vitransfer-tvp-worker"
 
 # Default to VERSION file if present, otherwise 'latest'
 DEFAULT_VERSION="latest"
@@ -182,6 +182,5 @@ if [ "$VERSION" != "latest" ]; then
 fi
 echo "   docker pull ${DOCKERHUB_USERNAME}/${APP_IMAGE_NAME}:latest"
 echo "   docker pull ${DOCKERHUB_USERNAME}/${WORKER_IMAGE_NAME}:latest"
-echo "   (will automatically select the correct architecture)"
 echo ""
 echo "Done!"

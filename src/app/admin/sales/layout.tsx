@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { DollarSign } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { getCurrencySymbol } from '@/lib/sales/currency'
+import { fetchSalesSettings } from '@/lib/sales/admin-api'
 
 const NAV = [
   { href: '/admin/sales', label: 'Dashboard' },
@@ -14,6 +16,15 @@ const NAV = [
 
 export default function SalesLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const [currencySymbol, setCurrencySymbol] = useState('$')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchSalesSettings()
+      .then((s) => { if (!cancelled) setCurrencySymbol(getCurrencySymbol(s.currencyCode)) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <div className="flex-1 min-h-0 bg-background">
@@ -21,7 +32,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
         <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-              <DollarSign className="w-7 h-7 sm:w-8 sm:h-8" />
+              <span className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center">{currencySymbol}</span>
               Sales
             </h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">

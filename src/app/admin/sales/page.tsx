@@ -15,6 +15,7 @@ import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
 import { formatDate } from '@/lib/utils'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 
 function quoteStatusBadgeClass(status: QuoteStatus): string {
   switch (status) {
@@ -86,8 +87,8 @@ export default function SalesDashboardPage() {
     email: '',
     website: '',
     businessRegistrationLabel: 'ABN',
-    currencySymbol: '$',
     currencyCode: 'AUD',
+    fiscalYearStartMonth: 7,
     quoteLabel: 'QUOTE',
     invoiceLabel: 'INVOICE',
     taxLabel: '',
@@ -165,9 +166,22 @@ export default function SalesDashboardPage() {
 
   const salesOverview = useMemo(() => {
     const now = nowIso ? new Date(nowIso) : new Date()
-    const fyStartYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
-    const fyStart = new Date(fyStartYear, 6, 1)
-    const fyEnd = new Date(fyStartYear + 1, 5, 30, 23, 59, 59, 999)
+    
+    // Get fiscal year start month from settings (1-12), default to 7 (July)
+    const fyStartMonth = settings.fiscalYearStartMonth ?? 7
+    const fyStartMonthZeroIndexed = Math.max(1, Math.min(12, fyStartMonth)) - 1 // Convert to 0-11
+    
+    // Calculate which FY year we're in
+    const fyStartYear = now.getMonth() >= fyStartMonthZeroIndexed ? now.getFullYear() : now.getFullYear() - 1
+    
+    // FY runs from fyStartMonth of fyStartYear to (fyStartMonth-1) of fyStartYear+1
+    const fyStart = new Date(fyStartYear, fyStartMonthZeroIndexed, 1)
+    
+    // Calculate last day of month before fyStartMonth in following year
+    const fyEndMonth = fyStartMonthZeroIndexed === 0 ? 11 : fyStartMonthZeroIndexed - 1
+    const fyEndYear = fyStartMonthZeroIndexed === 0 ? fyStartYear : fyStartYear + 1
+    const fyEnd = new Date(fyEndYear, fyEndMonth + 1, 0, 23, 59, 59, 999) // Last day of fyEndMonth
+    
     const financialYearLabel = `${String(fyStartYear).slice(-2)}-${String(fyStartYear + 1).slice(-2)}`
 
     const invoices = rollup?.invoices ?? []
@@ -209,7 +223,7 @@ export default function SalesDashboardPage() {
       totalSalesCents,
       financialYearLabel,
     }
-  }, [nowIso, rollup, settings.taxRatePercent])
+  }, [nowIso, rollup, settings])
 
   const dashboardData = useMemo(() => {
     const nowMs = nowIso ? new Date(nowIso).getTime() : 0
@@ -297,7 +311,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Awaiting payment</p>
-                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(stats.openBalanceCents, settings.currencySymbol)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(stats.openBalanceCents, getCurrencySymbol(settings.currencyCode))}</p>
               </div>
             </div>
 
@@ -307,7 +321,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Overdue</p>
-                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.overdueBalanceCents, settings.currencySymbol)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.overdueBalanceCents, getCurrencySymbol(settings.currencyCode))}</p>
               </div>
             </div>
 
@@ -317,7 +331,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Paid &lt;30 days</p>
-                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.recentPaymentsTotalCents, settings.currencySymbol)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.recentPaymentsTotalCents, getCurrencySymbol(settings.currencyCode))}</p>
               </div>
             </div>
 
@@ -327,7 +341,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Sales FY{salesOverview.financialYearLabel}</p>
-                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.totalSalesCents, settings.currencySymbol)}</p>
+                <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.totalSalesCents, getCurrencySymbol(settings.currencyCode))}</p>
               </div>
             </div>
           </div>
@@ -380,7 +394,7 @@ export default function SalesDashboardPage() {
                             {quoteStatusLabel(r.effectiveStatus)}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.totalCents, settings.currencySymbol)}</td>
+                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -439,7 +453,7 @@ export default function SalesDashboardPage() {
                             {invoiceStatusLabel(r.effectiveStatus)}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.balanceCents, settings.currencySymbol)}</td>
+                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.balanceCents, getCurrencySymbol(settings.currencyCode))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -481,7 +495,7 @@ export default function SalesDashboardPage() {
                   {dashboardData.recentPayments.map((p) => (
                     <tr key={p.id} className="border-b border-border/60 last:border-b-0">
                       <td className="py-2 pr-3 text-muted-foreground">{formatDate(p.paymentDate)}</td>
-                      <td className="py-2 pr-3 font-medium">{formatMoney(p.amountCents, settings.currencySymbol)}</td>
+                      <td className="py-2 pr-3 font-medium">{formatMoney(p.amountCents, getCurrencySymbol(settings.currencyCode))}</td>
                       <td className="py-2 pr-3 text-muted-foreground">
                         {p.clientId ? (
                           <Link href={`/admin/clients/${encodeURIComponent(p.clientId)}`} className="hover:underline">

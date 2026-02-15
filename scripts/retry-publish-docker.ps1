@@ -2,7 +2,7 @@ param(
   [int]$MaxAttempts = 4,
   [int]$SleepSeconds = 8,
   [string]$Version = $(if (Test-Path -LiteralPath "VERSION") { ((Get-Content -LiteralPath "VERSION" | Select-Object -First 1) -as [string]).Trim() } else { "latest" }),
-  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'simbamcsimba' }),
+  [string]$DockerHubUser = $(if ($env:DOCKERHUB_USERNAME) { $env:DOCKERHUB_USERNAME } else { 'thinkvp' }),
   [switch]$NoCache
 )
 
@@ -35,8 +35,8 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
 
 Write-Host "`nVerifying tags on Docker Hub..." -ForegroundColor Cyan
 
-$appRepo = "$DockerHubUser/vitransfer-app"
-$workerRepo = "$DockerHubUser/vitransfer-worker"
+$appRepo = "$DockerHubUser/vitransfer-tvp-app"
+$workerRepo = "$DockerHubUser/vitransfer-tvp-worker"
 
 docker buildx imagetools inspect "${appRepo}:$Version"
 docker buildx imagetools inspect "${workerRepo}:$Version"

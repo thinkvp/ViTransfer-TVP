@@ -1,46 +1,46 @@
 # Security Policy
 
-## Supported Versions
+This security policy applies to **ViTransfer-TVP**.
 
-Currently supported versions with security updates:
+Note: This document was originally adapted from the upstream ViTransfer project and has been updated for the ViTransfer-TVP fork.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.6.x   | :white_check_mark: |
-| 0.5.x   | :white_check_mark: |
-| < 0.5.0 | :x:                |
+
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in ViTransfer, please report it by creating a private security advisory on GitHub or by emailing the maintainers directly.
+If you discover a security vulnerability in ViTransfer-TVP, please report it by creating a private security advisory on GitHub.
 
 **Please do not open public issues for security vulnerabilities.**
 
-We will respond to your report within 48 hours and provide a timeline for a fix.
+We aim to respond to reports within 48 hours and provide a timeline for a fix.
 
 ## Security Features
 
 ### Authentication & Sessions
 - **Bearer-only authentication** (v0.6.0+): admin and share flows use Authorization headers only; browser-managed credentials are not trusted.
-- **Access/refresh tokens** returned in JSON; refresh stored in sessionStorage, access kept in memory.
-- **15-minute inactivity timeout** with automatic logout
-- **Session monitoring** with warning notifications before logout
+- **Access tokens** are returned in JSON and are kept in memory on the client.
+- **Refresh tokens** are stored in browser storage (sessionStorage by default; optional localStorage when “Remember this device” is enabled).
+- **Admin UI inactivity timeout** automatically logs out after 30 minutes of inactivity, with an on-screen warning shortly before logout.
 - **Token rotation** on each refresh to prevent replay attacks
 - **Token revocation** support for forced logouts
 - **No implicit cross-site tokens**: all state-changing endpoints rely on explicit bearer tokens
 
+Token lifetimes (defaults; may be configured via environment/settings):
+- Admin access token: 60 minutes
+- Admin refresh token: 7 days
+- Share token: 45 minutes (share token TTL may also be overridden by server settings)
+
 ### Password Protection
 - **AES-256-GCM encryption** for share passwords
-- **Bcrypt hashing** for admin passwords
-- **Rate limiting** on password attempts (5 attempts per 15 minutes)
-- **Automatic lockout** after failed password attempts
+- **Bcrypt hashing** (bcryptjs, cost factor 14) for admin passwords
+- **Rate limiting / lockout** for authentication attempts (defaults: 5 attempts per 15 minutes; configurable via Security Settings)
 - **Real-time password validation** with inline feedback
 
 ### Video Access Control
 - **Token-based video streaming** with session validation
 - **Hotlink protection** to prevent unauthorized embedding
 - **Watermarking** on preview videos
-- **Time-limited access tokens** (15 minutes)
+- **Time-limited access tokens** aligned with the configured client session timeout (default: 15 minutes)
 - **Session binding** for video access tokens
 
 ### Data Protection
@@ -51,55 +51,32 @@ We will respond to your report within 48 hours and provide a timeline for a fix.
 - **Content Security Policy** headers (nonce-based, no unsafe-inline/eval)
 
 ### Rate Limiting
-- **API endpoint rate limiting** (60 requests/minute for most endpoints)
-- **Auth refresh rate limiting** (8 requests/minute per token)
-- **Asset download rate limiting** (30 requests/minute)
-- **Video deletion rate limiting** (30 requests/minute)
-- **Redis-backed rate limiting** with IP + User-Agent hashing
+- **Redis-backed rate limiting** with hashed identifiers (IP + User-Agent for general limits; custom keys for sensitive flows)
+- **Configurable per-minute limits** via Security Settings (defaults: 1000 req/min per IP, 600 req/min per admin session, 300 req/min per share session)
+- **Stricter per-endpoint limits** may be applied for sensitive routes (login/OTP/etc.)
 
 ### Security Logging
 - **Failed login attempts** tracking
 - **Suspicious activity** monitoring
 - **Rate limit violations** logging
 - **Video access** audit trail
-- **Security events dashboard** for admins
+- **Security events** stored in the database and available in the admin UI when enabled
 
 ## Vulnerability Assessment
 
-### Docker Scout Scan Results (As of 2025-12-05 - Version 0.6.4)
+We recommend regularly scanning your deployed images and dependencies. Results change over time as base images and packages update.
 
-**Scan Summary:**
-- **Image**: simbamcsimba/vitransfer-app:latest
-- **Platform**: linux/arm64
-- **Base Image**: node:24.11.1-alpine3.23
-- **Image Size**: 774 MB
-- **Total Packages**: 1308
-- **Vulnerabilities**: 0 Critical | 0 High | 0 Medium | 0 Low | 1 Unspecified
-
-**Known Vulnerabilities:**
-
-| CVE ID | Severity | Package | Status | Risk Level |
-|--------|----------|---------|--------|-----------|
-| RUSTSEC-2024-0436 | Unspecified | cargo/paste@1.0.15 | No fix available | Very Low |
-
-### Details: RUSTSEC-2024-0436
-
-**What is it?**
-- Unspecified vulnerability in the `paste` Rust crate (version 1.0.15)
-- Transitive dependency through Alpine FFmpeg package (rav1e encoder component)
-- No CVE score assigned
-
-**Risk Assessment:**
-- **Exploitability**: Very Low - indirect dependency not accessible via API
-- **Impact**: Minimal - macro helper library used internally by FFmpeg
-- **Attack Vector**: Requires specially crafted video file + FFmpeg processing + container escape
-- **Mitigation**: Sandboxed in containerized environment with limited permissions
+Example commands:
+```bash
+docker scout cves thinkvp/vitransfer-tvp-app:latest
+docker scout cves thinkvp/vitransfer-tvp-worker:latest
+```
 
 ## Security Hardening
 
 ### Container Security
-- Base image: node:24.11.1-alpine3.23 with latest security patches
-- Non-root user execution (PUID/PGID support)
+- Base image: node:24.13.0-alpine3.23
+- Non-root user execution
 - no-new-privileges security option enabled
 - Regular image rebuilds with security updates
 
@@ -116,15 +93,15 @@ We will respond to your report within 48 hours and provide a timeline for a fix.
 
 **1. Keep images updated:**
 ```bash
-docker pull simbamcsimba/vitransfer-app:latest
-docker pull simbamcsimba/vitransfer-worker:latest
+docker pull thinkvp/vitransfer-tvp-app:latest
+docker pull thinkvp/vitransfer-tvp-worker:latest
 docker-compose up -d
 ```
 
 **2. Run security scans:**
 ```bash
-docker scout cves simbamcsimba/vitransfer-app:latest
-docker scout cves simbamcsimba/vitransfer-worker:latest
+docker scout cves thinkvp/vitransfer-tvp-app:latest
+docker scout cves thinkvp/vitransfer-tvp-worker:latest
 ```
 
 **3. Enable HTTPS:**
@@ -151,26 +128,9 @@ docker scout cves simbamcsimba/vitransfer-worker:latest
 
 ### Network Security
 - Use firewall rules to restrict access
+- Consider hosting the app on a VLAN
 - Consider VPN for admin access
 - Enable fail2ban or similar intrusion prevention
 - Monitor access logs for suspicious patterns
 
-## Security Updates
 
-Security updates are released as needed. Subscribe to GitHub releases to stay informed:
-- Watch the repository for security advisories
-- Enable GitHub Dependabot alerts
-- Check the CHANGELOG for security-related updates
-
-## Compliance
-
-ViTransfer follows security best practices for:
-- OWASP Top 10 protection
-- Secure session management
-- Input validation and sanitization
-- SQL injection prevention (via Prisma ORM)
-- XSS protection (via React and Content-Security-Policy)
-
-## Contact
-
-For security concerns, please contact the maintainers through [GitHub Security Advisories](https://github.com/MansiVisuals/ViTransfer/security/advisories).

@@ -1,16 +1,13 @@
-# ViTransfer-TVP Docker Compose
-# Video Production Review Platform & CRM
+# ViTransfer-TVP Docker Compose (Build from Source)
 #
-# This compose file pulls pre-built images from Docker Hub.
-# For building from source, use docker-compose.build.yml.
+# This compose file builds images locally from source code.
+# For production / pull-based deployments, use docker-compose.yml.
 #
-# Quick Start:
-# 1. Copy .env.example to .env and configure your settings
-# 2. Run: docker compose up -d
-# 3. Access: http://localhost:4321 (or your configured APP_PORT)
-# 4. Login with your ADMIN_EMAIL and ADMIN_PASSWORD from .env
+# Usage:
+# docker compose -f docker-compose.build.yml up -d --build
 #
 # Documentation: https://github.com/thinkvp/ViTransfer-TVP
+
 
 services:
   postgres:
@@ -54,7 +51,10 @@ services:
 
 
   app:
-    image: thinkvp/vitransfer-tvp-app:${VITRANSFER_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
     container_name: vitransfer-app
     restart: unless-stopped
     depends_on:
@@ -110,7 +110,10 @@ services:
 
 
   worker:
-    image: thinkvp/vitransfer-tvp-worker:${VITRANSFER_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
     container_name: vitransfer-worker
     restart: unless-stopped
     command: npm run worker

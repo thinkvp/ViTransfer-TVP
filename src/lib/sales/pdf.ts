@@ -8,6 +8,7 @@ import {
   sumLineItemsTax,
 } from '@/lib/sales/money'
 import { formatDate } from '@/lib/utils'
+import { getCurrencySymbol } from '@/lib/sales/currency'
 
 export type PdfPartyInfo = {
   clientName?: string
@@ -386,8 +387,13 @@ async function buildQuotePdfBytes(
         }
       }
     }
-    if (info.projectTitle) billToLines.push({ text: `Project: ${info.projectTitle}`, size: 9, color: subtleText })
-    y = drawLeftBlock(billToLines, left, y) - 12
+    y = drawLeftBlock(billToLines, left, y)
+    if (info.projectTitle) {
+      y -= 4
+      drawLeftText(`Project: ${info.projectTitle}`, left, y, 10, true, subtleText)
+      y -= 15
+    }
+    y -= 12
   }
 
   y = drawTableHeader(y)
@@ -427,7 +433,7 @@ async function buildQuotePdfBytes(
       const taxLabel = item.taxRateName ? `${item.taxRateName} ${Number(taxRate)}%` : `${Number(taxRate)}%`
       drawRightText(page, taxLabel, taxRight, textY, 10, font, textColor)
     }
-    drawRightText(page, formatMoney(amount, settings.currencySymbol), colAmountRight, textY, 10, fontBold, textColor)
+    drawRightText(page, formatMoney(amount, getCurrencySymbol(settings.currencyCode)), colAmountRight, textY, 10, fontBold, textColor)
 
     y -= rowHeight
     page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 1, color: lineColor })
@@ -450,12 +456,12 @@ async function buildQuotePdfBytes(
 
   if (y - 80 < bottomMargin) newPage(false)
   y -= 8
-  drawTotalsLine('Subtotal', formatMoney(subtotalCents, settings.currencySymbol))
+  drawTotalsLine('Subtotal', formatMoney(subtotalCents, getCurrencySymbol(settings.currencyCode)))
   if (taxEnabled) {
     const taxTotalsLabel = settings.taxLabel ? `Tax (${settings.taxLabel})` : 'Tax'
-    drawTotalsLine(taxTotalsLabel, formatMoney(taxCents, settings.currencySymbol))
+    drawTotalsLine(taxTotalsLabel, formatMoney(taxCents, getCurrencySymbol(settings.currencyCode)))
   }
-  drawTotalsLine('Total', formatMoney(totalCents, settings.currencySymbol), true)
+  drawTotalsLine('Total', formatMoney(totalCents, getCurrencySymbol(settings.currencyCode)), true)
 
   // A little breathing room after totals.
   y -= 12
@@ -631,7 +637,7 @@ async function buildInvoicePdfBytes(
 
   const formatMoneyWithCurrency = (cents: number, currency: string): string => {
     const cur = typeof currency === 'string' ? currency.trim().toUpperCase() : (settings.currencyCode || 'AUD').toUpperCase()
-    const sym = settings.currencySymbol || '$'
+    const sym = getCurrencySymbol(settings.currencyCode)
     const amount = centsToDollars(cents)
     if (cur === (settings.currencyCode || 'AUD').toUpperCase()) return `${sym}${amount}`
     return `${cur} ${amount}`
@@ -785,14 +791,17 @@ async function buildInvoicePdfBytes(
         }
       }
     }
-    if (info.projectTitle) {
-      for (const wrapped of wrapText(`Project: ${info.projectTitle}`, 220, font, 9)) {
-        if (wrapped.trim()) billToLines.push({ text: wrapped, size: 9, color: subtleText })
-      }
-    }
-
     const billToStartY = afterMetaY - 12
     afterBillToY = drawRightBlock(billToLines, right, billToStartY)
+    if (info.projectTitle) {
+      afterBillToY -= 4
+      for (const wrapped of wrapText(`Project: ${info.projectTitle}`, 220, fontBold, 10)) {
+        if (wrapped.trim()) {
+          drawRightText(page, wrapped, right, afterBillToY, 10, fontBold, subtleText)
+          afterBillToY -= 15
+        }
+      }
+    }
   }
 
   y = Math.min(afterCompanyY, afterBillToY) - 14
@@ -836,7 +845,7 @@ async function buildInvoicePdfBytes(
       const taxLabel = item.taxRateName ? `${item.taxRateName} ${Number(taxRate)}%` : `${Number(taxRate)}%`
       drawRightText(page, taxLabel, taxRight, textY, 10, font, textColor)
     }
-    drawRightText(page, formatMoney(amount, settings.currencySymbol), colAmountRight, textY, 10, fontBold, textColor)
+    drawRightText(page, formatMoney(amount, getCurrencySymbol(settings.currencyCode)), colAmountRight, textY, 10, fontBold, textColor)
 
     y -= rowHeight
 
@@ -862,12 +871,12 @@ async function buildInvoicePdfBytes(
   if (y - 80 < bottomMargin) newPage(false)
 
   y -= 8
-  drawTotalsLine('Subtotal', formatMoney(subtotalCents, settings.currencySymbol))
+  drawTotalsLine('Subtotal', formatMoney(subtotalCents, getCurrencySymbol(settings.currencyCode)))
   if (taxEnabled) {
     const taxTotalsLabel = settings.taxLabel ? `Tax (${settings.taxLabel})` : 'Tax'
-    drawTotalsLine(taxTotalsLabel, formatMoney(taxCents, settings.currencySymbol))
+    drawTotalsLine(taxTotalsLabel, formatMoney(taxCents, getCurrencySymbol(settings.currencyCode)))
   }
-  drawTotalsLine('Total', formatMoney(totalCents, settings.currencySymbol), true)
+  drawTotalsLine('Total', formatMoney(totalCents, getCurrencySymbol(settings.currencyCode)), true)
 
   // Payment section
   const paymentDetails = typeof settings.paymentDetails === 'string' ? settings.paymentDetails.trim() : ''
