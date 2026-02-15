@@ -4,6 +4,10 @@ param(
   [switch]$Dev,
   [switch]$NoLatest,
   [switch]$NoCache,
+  [switch]$NoRetry,
+  [switch]$NoVerify,
+  [int]$MaxAttempts = 4,
+  [int]$RetrySleep = 8,
   [string]$Platforms = 'linux/amd64',
   [string]$Builder
 )
@@ -40,11 +44,21 @@ if ($Version -like 'dev-*') {
 }
 
 Write-Host "Publishing ViTransfer images" -ForegroundColor Cyan
-Write-Host "  App:    $appRepo" 
-Write-Host "  Worker: $workerRepo" 
-Write-Host "  Version: $Version" 
-Write-Host "  Platforms: $Platforms" 
+Write-Host "  App:    $appRepo"
+Write-Host "  Worker: $workerRepo"
+Write-Host "  Version: $Version"
+Write-Host "  Platforms: $Platforms"
+if (-not $NoRetry) {
+  Write-Host "  Retry:  up to $MaxAttempts attempts (${RetrySleep}s between)"
+}
 Write-Host ""
+
+# DNS pre-check (informational only)
+try {
+  Resolve-DnsName auth.docker.io -ErrorAction Stop | Select-Object -First 1 Name, IPAddress | Format-Table | Out-String | Write-Host
+} catch {
+  Write-Host "DNS check failed for auth.docker.io (will attempt publish anyway)." -ForegroundColor Yellow
+}
 
 # Verify buildx
 & docker buildx version | Out-Null
@@ -115,20 +129,62 @@ function RetagLatestFromVersion([string]$repo, [string]$versionTag, [int]$maxRet
   }
 }
 
-BuildPushTarget -target 'app' -tags $appTags
-BuildPushTarget -target 'worker' -tags $workerTags
+function PublishAll {
+  BuildPushTarget -target 'app' -tags $appTags
+  BuildPushTarget -target 'worker' -tags $workerTags
 
-if ($shouldCreateLatest -and (-not $latestOnly) -and ($Version -ne 'dev') -and ($Version -notlike 'dev-*')) {
-  RetagLatestFromVersion -repo $appRepo -versionTag $Version
-  RetagLatestFromVersion -repo $workerRepo -versionTag $Version
+  if ($shouldCreateLatest -and (-not $latestOnly) -and ($Version -ne 'dev') -and ($Version -notlike 'dev-*')) {
+    RetagLatestFromVersion -repo $appRepo -versionTag $Version
+    RetagLatestFromVersion -repo $workerRepo -versionTag $Version
+  }
 }
 
-Write-Host "" 
+# Run with retry loop
+$attempts = if ($NoRetry) { 1 } else { $MaxAttempts }
+
+for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+  if ($attempts -gt 1) {
+    Write-Host "Publish attempt $attempt/$attempts" -ForegroundColor Cyan
+  }
+  try {
+    PublishAll
+    break
+  } catch {
+    Write-Host "Publish failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    if ($attempt -eq $attempts) { throw }
+    Write-Host "Retrying in ${RetrySleep}s..." -ForegroundColor Yellow
+    Start-Sleep -Seconds $RetrySleep
+  }
+}
+
+# Summary
+Write-Host ""
 Write-Host "Pushed tags:" -ForegroundColor Green
 $appTags | ForEach-Object { Write-Host "  $_" }
 $workerTags | ForEach-Object { Write-Host "  $_" }
 
 if ($shouldCreateLatest -and (-not $latestOnly) -and ($Version -ne 'dev') -and ($Version -notlike 'dev-*')) {
-  Write-Host "  ${appRepo}:latest" 
-  Write-Host "  ${workerRepo}:latest" 
+  Write-Host "  ${appRepo}:latest"
+  Write-Host "  ${workerRepo}:latest"
+}
+
+# Post-publish verification
+if (-not $NoVerify) {
+  Write-Host ""
+  Write-Host "Verifying tags on Docker Hub..." -ForegroundColor Cyan
+  $verifyTags = @()
+  $appTags | ForEach-Object { $verifyTags += $_ }
+  $workerTags | ForEach-Object { $verifyTags += $_ }
+  if ($shouldCreateLatest -and (-not $latestOnly) -and ($Version -ne 'dev') -and ($Version -notlike 'dev-*')) {
+    $verifyTags += "${appRepo}:latest"
+    $verifyTags += "${workerRepo}:latest"
+  }
+  foreach ($tag in $verifyTags) {
+    & docker buildx imagetools inspect $tag 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "  [OK] $tag" -ForegroundColor Green
+    } else {
+      Write-Host "  [WARN] $tag not found on registry" -ForegroundColor Yellow
+    }
+  }
 }

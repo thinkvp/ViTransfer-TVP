@@ -90,7 +90,7 @@ Forked from upstream ViTransfer v0.8.2 (archived at `archive/upstream-v0.8.2` br
 - **Independent versioning**: SemVer 1.0.0+, dropping upstream version prefix
 - **Docker Hub images**: `thinkvp/vitransfer-tvp-app` and `thinkvp/vitransfer-tvp-worker`
 - **Compose files**: `docker-compose.yml` (pull from Docker Hub) and `docker-compose.build.yml` (build from source)
-- **Publish scripts**: `publish-docker.ps1` and `scripts/retry-publish-docker.ps1` targeting `thinkvp` Docker Hub account
+- **Publish script**: `publish-docker.ps1` with built-in retry, DNS pre-check, and post-publish verification
 
 ---
 
