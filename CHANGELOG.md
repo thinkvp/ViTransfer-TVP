@@ -5,6 +5,15 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-02-15
+
+### Changed
+- Merged `scripts/retry-publish-docker.ps1` into `publish-docker.ps1` — retry loop, DNS pre-check, and post-publish verification are now built in
+- Added `-MaxAttempts`, `-RetrySleep`, `-NoRetry`, and `-NoVerify` flags to `publish-docker.ps1`
+
+### Removed
+- `scripts/retry-publish-docker.ps1` (no longer needed)
+
 ## [1.0.0] - 2026-02-15
 
 First independent release of ViTransfer-TVP as a hard fork.
