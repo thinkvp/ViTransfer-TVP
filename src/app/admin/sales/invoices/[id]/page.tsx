@@ -807,8 +807,8 @@ export default function InvoiceDetailPage() {
             <div className="text-sm text-muted-foreground">No items yet.</div>
           ) : (
             items.map((it) => (
-              <div key={it.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start rounded-md border border-border p-3">
-                <div className="md:col-span-5 space-y-1">
+              <div key={it.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3">
+                <div className="space-y-1">
                   <Label>Item</Label>
                   <Input
                     value={it.description}
@@ -833,7 +833,7 @@ export default function InvoiceDetailPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 md:col-span-3 md:grid-cols-3">
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                   <div className="space-y-1 md:col-span-1">
                     <Label>Qty</Label>
                     <Input
@@ -862,44 +862,58 @@ export default function InvoiceDetailPage() {
                 </div>
 
                 {docTaxEnabled && (
-                <div className="md:col-span-3 space-y-1">
+                <div className="space-y-1">
                   <Label>Tax</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <TaxRateSelect
-                      value={it.taxRatePercent}
-                      onChange={(rate, name) => setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, taxRatePercent: normalizeTaxRatePercent(rate, settings.taxRatePercent), taxRateName: name } : x)))}
-                      taxRates={taxRates}
-                      className="h-9"
-                    />
-                    <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                      {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                  <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                    <div className="grid grid-cols-2 gap-2">
+                      <TaxRateSelect
+                        value={it.taxRatePercent}
+                        onChange={(rate, name) => setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, taxRatePercent: normalizeTaxRatePercent(rate, settings.taxRatePercent), taxRateName: name } : x)))}
+                        taxRates={taxRates}
+                        className="h-9"
+                      />
+                      <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
+                        {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                      </div>
                     </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      aria-label="Remove line"
+                      title="Remove"
+                      onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
+                      disabled={items.length <= 1}
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
                   </div>
                 </div>
                 )}
 
                 {!docTaxEnabled && (
-                <div className="md:col-span-3 space-y-1">
+                <div className="space-y-1">
                   <Label>Amount</Label>
-                  <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                    {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                  <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                    <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
+                      {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      aria-label="Remove line"
+                      title="Remove"
+                      onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
+                      disabled={items.length <= 1}
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
                   </div>
                 </div>
                 )}
-
-                <div className="md:col-span-1 flex justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                    aria-label="Remove line"
-                    title="Remove"
-                    onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
-                    disabled={items.length <= 1}
-                  >
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
-                </div>
               </div>
             ))
           )}
