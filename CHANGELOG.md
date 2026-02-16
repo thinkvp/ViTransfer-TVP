@@ -98,7 +98,7 @@ Forked from upstream ViTransfer v0.8.2 (archived at `archive/upstream-v0.8.2` br
 ### Infrastructure
 - **Independent versioning**: SemVer 1.0.0+, dropping upstream version prefix
 - **Docker Hub images**: `thinkvp/vitransfer-tvp-app` and `thinkvp/vitransfer-tvp-worker`
-- **Compose files**: `docker-compose.yml` (pull from Docker Hub) and `docker-compose.build.yml` (build from source)
+- **Compose file**: `docker-compose.yml` (pull from Docker Hub); optional local `docker-compose.override.yml` (gitignored) can be used to build from source while keeping standard `docker compose up` commands
 - **Publish script**: `publish-docker.ps1` with built-in retry, DNS pre-check, and post-publish verification
 
 ---

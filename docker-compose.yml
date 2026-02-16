@@ -2,7 +2,9 @@
 # Video Production Review Platform & CRM
 #
 # This compose file pulls pre-built images from Docker Hub.
-# For building from source, use docker-compose.build.yml.
+# For building from source locally while keeping `docker compose up -d --build`,
+# create a local-only `docker-compose.override.yml` (gitignored) that adds `build:`
+# for the `app` and `worker` services.
 #
 # Quick Start:
 # 1. Copy .env.example to .env and configure your settings

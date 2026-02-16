@@ -344,14 +344,34 @@ docker-compose up -d
 ```bash
 git clone https://github.com/thinkvp/ViTransfer-TVP.git
 cd ViTransfer
-git checkout dev
+git checkout main
 ```
 
 2. **Follow steps 2-3 from Method 1 above** to configure your `.env` file
 
 3. **Build and start**
+
+Create a local-only override file (this repo's `.gitignore` ignores `docker-compose.override.yml`):
+
+```yaml
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+```
+
+Then start normally:
+
 ```bash
-docker-compose -f docker-compose.build.yml up -d --build
+docker compose up -d --build
 ```
 
 4. **Access ViTransfer-TVP** at http://localhost:4321 and login with your admin credentials

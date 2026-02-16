@@ -9,8 +9,8 @@ Step-by-step instructions for installing ViTransfer-TVP on various platforms.
 ```bash
 # 1. Download
 mkdir vitransfer && cd vitransfer
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/.env.example
 
 # 2. Configure
 cp .env.example .env
@@ -46,15 +46,15 @@ docker-compose up -d
 **Option A: Download files only (recommended)**
 ```bash
 mkdir vitransfer && cd vitransfer
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/.env.example
 ```
 
 **Option B: Git Clone (for contributors/developers)**
 ```bash
 git clone https://github.com/thinkvp/ViTransfer-TVP.git
 cd ViTransfer
-git checkout dev
+git checkout main
 ```
 
 ### Step 2: Configure Environment
