@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { TimePicker24h } from '@/components/ui/time-picker-24h'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -1150,6 +1151,8 @@ export default function ProjectsDashboardKeyDates() {
                     type="date"
                     value={projectDraft.date}
                     onChange={(e) => setProjectDraft((p) => (p ? { ...p, date: e.target.value } : p))}
+                    min="0001-01-01"
+                    max="9999-12-31"
                     className="h-10"
                   />
                 </div>
@@ -1167,47 +1170,21 @@ export default function ProjectsDashboardKeyDates() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Start</div>
-                    <Input
-                      type="text"
+                    <TimePicker24h
                       value={projectDraft.startTime}
                       disabled={projectDraft.allDay}
-                      placeholder="HH:MM"
-                      inputMode="numeric"
-                      onChange={(e) => setProjectDraft((p) => (p ? { ...p, startTime: e.target.value } : p))}
+                      onChange={(v) => setProjectDraft((p) => (p ? { ...p, startTime: v } : p))}
                       className="h-10"
-                      list="dashboard-project-key-date-start-times"
                     />
-                    <datalist id="dashboard-project-key-date-start-times">
-                      {Array.from({ length: 24 * 4 }).map((_, i) => {
-                        const minutes = i * 15
-                        const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-                        const mm = String(minutes % 60).padStart(2, '0')
-                        const t = `${hh}:${mm}`
-                        return <option key={t} value={t} />
-                      })}
-                    </datalist>
                   </div>
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Finish</div>
-                    <Input
-                      type="text"
+                    <TimePicker24h
                       value={projectDraft.finishTime}
                       disabled={projectDraft.allDay}
-                      placeholder="HH:MM"
-                      inputMode="numeric"
-                      onChange={(e) => setProjectDraft((p) => (p ? { ...p, finishTime: e.target.value } : p))}
+                      onChange={(v) => setProjectDraft((p) => (p ? { ...p, finishTime: v } : p))}
                       className="h-10"
-                      list="dashboard-project-key-date-finish-times"
                     />
-                    <datalist id="dashboard-project-key-date-finish-times">
-                      {Array.from({ length: 24 * 4 }).map((_, i) => {
-                        const minutes = i * 15
-                        const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-                        const mm = String(minutes % 60).padStart(2, '0')
-                        const t = `${hh}:${mm}`
-                        return <option key={t} value={t} />
-                      })}
-                    </datalist>
                   </div>
                 </div>
 
@@ -1269,29 +1246,18 @@ export default function ProjectsDashboardKeyDates() {
                         type="date"
                         value={projectDraft.reminderDate}
                         onChange={(e) => setProjectDraft((p) => (p ? { ...p, reminderDate: e.target.value } : p))}
+                        min="0001-01-01"
+                        max="9999-12-31"
                         className="h-10"
                       />
                     </div>
                     <div className="space-y-2">
                       <div className="text-sm">Reminder time</div>
-                      <Input
-                        type="text"
+                      <TimePicker24h
                         value={projectDraft.reminderTime}
-                        placeholder="HH:MM"
-                        inputMode="numeric"
-                        onChange={(e) => setProjectDraft((p) => (p ? { ...p, reminderTime: e.target.value } : p))}
+                        onChange={(v) => setProjectDraft((p) => (p ? { ...p, reminderTime: v } : p))}
                         className="h-10"
-                        list="dashboard-project-key-date-reminder-times"
                       />
-                      <datalist id="dashboard-project-key-date-reminder-times">
-                        {Array.from({ length: 24 * 4 }).map((_, i) => {
-                          const minutes = i * 15
-                          const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-                          const mm = String(minutes % 60).padStart(2, '0')
-                          const t = `${hh}:${mm}`
-                          return <option key={t} value={t} />
-                        })}
-                      </datalist>
                     </div>
                   </div>
 
@@ -1400,6 +1366,8 @@ export default function ProjectsDashboardKeyDates() {
                 type="date"
                 value={personalDraft.date}
                 onChange={(e) => setPersonalDraft((p) => ({ ...p, date: e.target.value }))}
+                min="0001-01-01"
+                max="9999-12-31"
                 className="h-10"
               />
             </div>
@@ -1417,47 +1385,21 @@ export default function ProjectsDashboardKeyDates() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <div className="text-sm font-medium">Start</div>
-                <Input
-                  type="text"
+                <TimePicker24h
                   value={personalDraft.startTime}
                   disabled={personalDraft.allDay}
-                  placeholder="HH:MM"
-                  inputMode="numeric"
-                  onChange={(e) => setPersonalDraft((p) => ({ ...p, startTime: e.target.value }))}
+                  onChange={(v) => setPersonalDraft((p) => ({ ...p, startTime: v }))}
                   className="h-10"
-                  list="personal-key-date-start-times"
                 />
-                <datalist id="personal-key-date-start-times">
-                  {Array.from({ length: 24 * 4 }).map((_, i) => {
-                    const minutes = i * 15
-                    const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-                    const mm = String(minutes % 60).padStart(2, '0')
-                    const t = `${hh}:${mm}`
-                    return <option key={t} value={t} />
-                  })}
-                </datalist>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-medium">Finish</div>
-                <Input
-                  type="text"
+                <TimePicker24h
                   value={personalDraft.finishTime}
                   disabled={personalDraft.allDay}
-                  placeholder="HH:MM"
-                  inputMode="numeric"
-                  onChange={(e) => setPersonalDraft((p) => ({ ...p, finishTime: e.target.value }))}
+                  onChange={(v) => setPersonalDraft((p) => ({ ...p, finishTime: v }))}
                   className="h-10"
-                  list="personal-key-date-finish-times"
                 />
-                <datalist id="personal-key-date-finish-times">
-                  {Array.from({ length: 24 * 4 }).map((_, i) => {
-                    const minutes = i * 15
-                    const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-                    const mm = String(minutes % 60).padStart(2, '0')
-                    const t = `${hh}:${mm}`
-                    return <option key={t} value={t} />
-                  })}
-                </datalist>
               </div>
             </div>
 
@@ -1509,29 +1451,18 @@ export default function ProjectsDashboardKeyDates() {
                     type="date"
                     value={personalDraft.reminderDate}
                     onChange={(e) => setPersonalDraft((p) => ({ ...p, reminderDate: e.target.value }))}
+                    min="0001-01-01"
+                    max="9999-12-31"
                     className="h-10"
                   />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm">Reminder time</div>
-                  <Input
-                    type="text"
+                  <TimePicker24h
                     value={personalDraft.reminderTime}
-                    placeholder="HH:MM"
-                    inputMode="numeric"
-                    onChange={(e) => setPersonalDraft((p) => ({ ...p, reminderTime: e.target.value }))}
+                    onChange={(v) => setPersonalDraft((p) => ({ ...p, reminderTime: v }))}
                     className="h-10"
-                    list="personal-key-date-reminder-times"
                   />
-                  <datalist id="personal-key-date-reminder-times">
-                    {Array.from({ length: 24 * 4 }).map((_, i) => {
-                      const minutes = i * 15
-                      const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-                      const mm = String(minutes % 60).padStart(2, '0')
-                      const t = `${hh}:${mm}`
-                      return <option key={t} value={t} />
-                    })}
-                  </datalist>
                 </div>
               </div>
 

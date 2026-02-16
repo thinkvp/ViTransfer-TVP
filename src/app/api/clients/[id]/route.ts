@@ -134,7 +134,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
     }
 
-    const existing = await prisma.client.findFirst({ where: { id, deletedAt: null }, select: { id: true } })
+    const existing = await prisma.client.findFirst({ where: { id, deletedAt: null }, select: { id: true, name: true } })
     if (!existing) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
 
     const { name, address, phone, website, notes } = parsed.data
@@ -165,6 +165,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         },
         select: { id: true, name: true },
       })
+
+      // Keep project display names in sync for linked projects.
+      // Many parts of the app currently use Project.companyName as the client-facing name.
+      if (typeof name === 'string' && name.trim() && name.trim() !== String(existing.name || '').trim()) {
+        await tx.project.updateMany({
+          where: { clientId: id },
+          data: { companyName: updated.name },
+        })
+      }
 
       if (recipientsInput) {
         const normalized = recipientsInput.filter((r) => r.email || r.name)

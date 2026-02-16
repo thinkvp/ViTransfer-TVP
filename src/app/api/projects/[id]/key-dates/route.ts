@@ -39,7 +39,7 @@ const keyDateTypeSchema = z.enum(['PRE_PRODUCTION', 'SHOOTING', 'DUE_DATE', 'OTH
 const baseBodySchema = z.object({
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD' }),
+    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Invalid date value. Please use the date picker.' }),
   allDay: z.boolean().default(false),
   startTime: z
     .union([

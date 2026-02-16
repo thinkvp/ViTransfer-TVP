@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { TimePicker24h } from '@/components/ui/time-picker-24h'
 import { Textarea } from '@/components/ui/textarea'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -89,14 +90,12 @@ function toIsoFromLocalDateTime(date: string, time: string): string | null {
 function PickerOnlyInput({
   value,
   onChange,
-  type,
   disabled,
   className,
   placeholder,
 }: {
   value: string
   onChange: (v: string) => void
-  type: 'date' | 'time'
   disabled?: boolean
   className?: string
   placeholder?: string
@@ -114,9 +113,11 @@ function PickerOnlyInput({
 
   return (
     <Input
-      type={type}
+      type="date"
       value={value}
       disabled={disabled}
+      min="0001-01-01"
+      max="9999-12-31"
       placeholder={placeholder}
       inputMode="none"
       onKeyDown={(e) => {
@@ -153,47 +154,6 @@ function isValidTime24h(value: string): boolean {
   if (!v) return true
   const m = /^([0-1]\d|2[0-3]):([0-5]\d)$/.exec(v)
   return Boolean(m)
-}
-
-function TimeInput24h({
-  value,
-  onChange,
-  disabled,
-  className,
-  placeholder,
-  listId,
-}: {
-  value: string
-  onChange: (v: string) => void
-  disabled?: boolean
-  className?: string
-  placeholder?: string
-  listId: string
-}) {
-  return (
-    <>
-      <Input
-        type="text"
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder || 'HH:MM'}
-        inputMode="numeric"
-        pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
-        list={listId}
-        onChange={(e) => onChange(e.target.value)}
-        className={className}
-      />
-      <datalist id={listId}>
-        {Array.from({ length: 24 * 4 }).map((_, i) => {
-          const minutes = i * 15
-          const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-          const mm = String(minutes % 60).padStart(2, '0')
-          const t = `${hh}:${mm}`
-          return <option key={t} value={t} />
-        })}
-      </datalist>
-    </>
-  )
 }
 
 function toDraft(item: ProjectKeyDate): Draft {
@@ -563,7 +523,6 @@ export function ProjectKeyDates({
               <div className="space-y-2">
                 <div className="text-sm font-medium">Date</div>
                 <PickerOnlyInput
-                  type="date"
                   value={draft.date}
                   onChange={(v) => setDraft((p) => (p ? { ...p, date: v } : p))}
                   className="h-10"
@@ -583,22 +542,20 @@ export function ProjectKeyDates({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Start</div>
-                  <TimeInput24h
+                  <TimePicker24h
                     value={draft.startTime}
                     disabled={draft.allDay}
                     onChange={(v) => setDraft((p) => (p ? { ...p, startTime: v } : p))}
                     className="h-10"
-                    listId="project-key-date-start-times"
                   />
                 </div>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Finish</div>
-                  <TimeInput24h
+                  <TimePicker24h
                     value={draft.finishTime}
                     disabled={draft.allDay}
                     onChange={(v) => setDraft((p) => (p ? { ...p, finishTime: v } : p))}
                     className="h-10"
-                    listId="project-key-date-finish-times"
                   />
                 </div>
               </div>
@@ -657,7 +614,6 @@ export function ProjectKeyDates({
                   <div className="space-y-2">
                     <div className="text-sm">Reminder date</div>
                     <PickerOnlyInput
-                      type="date"
                       value={draft.reminderDate}
                       onChange={(v) => setDraft((p) => (p ? { ...p, reminderDate: v } : p))}
                       className="h-10"
@@ -665,11 +621,10 @@ export function ProjectKeyDates({
                   </div>
                   <div className="space-y-2">
                     <div className="text-sm">Reminder time</div>
-                    <TimeInput24h
+                    <TimePicker24h
                       value={draft.reminderTime}
                       onChange={(v) => setDraft((p) => (p ? { ...p, reminderTime: v } : p))}
                       className="h-10"
-                      listId="project-key-date-reminder-times"
                     />
                   </div>
                 </div>

@@ -9,7 +9,7 @@ ViTransfer-TVP is a self-hosted web application for video production teams to sh
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![GitHub](https://img.shields.io/badge/github-thinkvp%2FViTransfer--TVP-blue)](https://github.com/thinkvp/ViTransfer-TVP)
 
-> **Fork Notice:** ViTransfer-TVP forked from [ViTransfer v0.8.2](https://github.com/MansiVisuals/ViTransfer/releases/tag/v0.8.2) and has since diverged significantly (170+ commits). The upstream project continues independently at [MansiVisuals/ViTransfer](https://github.com/MansiVisuals/ViTransfer). We gratefully credit them for the original concept and foundation.
+> **Fork Notice:** ViTransfer-TVP forked from [ViTransfer v0.8.2](https://github.com/MansiVisuals/ViTransfer/releases/tag/v0.8.2) and has since diverged significantly (170+ commits as of 15 February 2026). The upstream project continues independently at [MansiVisuals/ViTransfer](https://github.com/MansiVisuals/ViTransfer). We gratefully credit them for the original concept and foundation.
 
 
 ---
@@ -279,7 +279,7 @@ Team collaboration without cluttering client-facing comments:
 - Docker and Docker Compose installed
 - At least 4GB RAM
 - 20GB+ free disk space (more for video storage)
-- **Architecture:** linux/amd64 only (ARM64 is not supported)
+- **Architecture:** linux/amd64 only (ARM64 is not supported, but is supported by the original developer)
 
 ### Installation Method 1: Docker Hub (Recommended — 3 Minutes)
 
@@ -654,13 +654,6 @@ ViTransfer-TVP is developed primarily for our internal production needs and shar
 
 ### Contributing Code
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
-**How to Contribute:**
-1. **Fork the repository** — https://github.com/thinkvp/ViTransfer-TVP
-2. **Create a feature branch** from `dev` — `git checkout -b feature/amazing-feature`
-3. **Make your changes** — Follow the existing code style
-4. **Test thoroughly** — Ensure everything works
-5. **Submit a pull request** to `dev` — We'll review it as soon as possible
 
 ---
 

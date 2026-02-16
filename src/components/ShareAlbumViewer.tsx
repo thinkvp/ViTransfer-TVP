@@ -270,7 +270,7 @@ export function ShareAlbumViewer({
   }, [goNextPhoto, goPrevPhoto, viewerPhoto])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col gap-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-xl font-semibold truncate">{album?.name || 'Album'}</h2>
@@ -291,7 +291,7 @@ export function ShareAlbumViewer({
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             onClick={() => void requestZip('full')}
             disabled={photos.length === 0 || !album?.zip?.fullReady}
             className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
@@ -382,7 +382,7 @@ export function ShareAlbumViewer({
                   </Button>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="default"
                     onClick={() => triggerDownload(viewerPhoto.downloadUrl)}
                     className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                   >

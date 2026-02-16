@@ -84,6 +84,12 @@ export async function GET(request: NextRequest) {
         previewResolution: true,
         companyName: true,
         clientId: true,
+        client: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         maxRevisions: true,
         enableRevisions: true,
         assignedUsers: {

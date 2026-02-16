@@ -10,7 +10,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD' }),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Invalid date value. Please use the date picker.' }),
   allDay: z.boolean().default(false),
   startTime: z
     .union([

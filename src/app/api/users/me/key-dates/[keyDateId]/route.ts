@@ -13,7 +13,7 @@ const patchBodySchema = z
   .object({
     date: z
       .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD' })
+      .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Invalid date value. Please use the date picker.' })
       .optional(),
     allDay: z.boolean().optional(),
     startTime: z

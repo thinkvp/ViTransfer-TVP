@@ -7,6 +7,18 @@ input.no-picker-icon::-webkit-calendar-picker-indicator {
   opacity: 0;
 }
 
+/* Keep native date-picker trigger visible and legible across themes. */
+input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.8;
+  cursor: pointer;
+  filter: none;
+}
+
+.dark input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.95;
+  filter: invert(1) brightness(1.2);
+}
+
 input.no-picker-icon::-webkit-clear-button {
   display: none;
 }

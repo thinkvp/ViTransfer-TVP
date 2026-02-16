@@ -5,6 +5,32 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-02-16
+
+### Added
+- **24-hour time picker** for key dates — clock-style HH→MM selector with 5-minute increments, defaults to 12:00 when opened empty, replaces previous long-dropdown style for Start/Finish/Reminder times in all Add Key Date modals
+- **Automated setup scripts** — `setup.sh` (Linux/Mac/WSL) and `setup.ps1` (Windows PowerShell) auto-generate all 6 required secrets, validate admin credentials, port, timezone, and HTTPS configuration
+
+### Changed
+- **Video upload resume** — check video status before resuming from localStorage to prevent invalid resume attempts when video moved past UPLOADING phase
+- **Sales line item layout** — tightened invoice/quote line item grid layout with improved responsive behavior for tax rate and subtotal fields
+- **Share album download buttons** — changed to primary button style (from outline) for better visual prominence in album viewer
+- **Docker workflow** — simplified to use `docker-compose.override.yml` pattern (gitignored) for local builds instead of separate build compose file
+- Date validation error messages now show "Invalid date value. Please use the date picker." instead of locale-specific "date must be YYYY-MM-DD" format text
+- Date input fields now enforce 4-digit year bounds (0001–9999) via `min`/`max` attributes to prevent entering invalid year values
+- Updated all branch references from `dev` to `main` in installation documentation
+
+### Fixed
+- **Client name changes not reflected in project dashboard** — renaming a client now automatically syncs all linked projects' display names; dashboard now includes live client relation as fallback ensuring current names always display
+- **413 error for video uploads over 1GB** — video/asset uploads now correctly skip `maxUploadSizeGB` limit in TUS upload handler
+- **Video re-upload to ERROR status** — allow re-uploading to videos that previously failed by resetting state to UPLOADING
+- Date picker calendar icon now visible in dark mode with proper contrast (inverted and brightened) across all themes
+- Date picker icon globally styled in `globals.css` ensuring consistent visibility on all date input fields
+
+### Removed
+- `compose-up.ps1` helper script (standard `docker compose up -d` now works for both pull and build workflows)
+- `docker-compose.build.yml` (replaced by optional `docker-compose.override.yml` pattern)
+
 ## [1.0.1] - 2026-02-15
 
 ### Changed

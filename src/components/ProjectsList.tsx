@@ -30,6 +30,10 @@ interface Project {
   title: string
   companyName: string | null
   clientId: string | null
+  client?: {
+    id: string
+    name: string
+  } | null
   status: string
   createdAt: string | Date
   updatedAt: string | Date
@@ -263,7 +267,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
 
     const getClientName = (project: Project) => {
       const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
-      return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+      return project.companyName || project.client?.name || primaryRecipient?.name || primaryRecipient?.email || 'Client'
     }
 
     return byStatus.filter((p) => {
@@ -282,7 +286,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
   const tableProjects = useMemo(() => {
     const getClientName = (project: Project) => {
       const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
-      return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+      return project.companyName || project.client?.name || primaryRecipient?.name || primaryRecipient?.email || 'Client'
     }
 
     const getUniqueVideosCount = (project: Project) => {
@@ -596,7 +600,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                       const dataLabel = formatProjectData(getProjectDataBytes(project))
                       const clientName = (() => {
                         const primaryRecipient = project.recipients?.find((r) => r.isPrimary) || project.recipients?.[0]
-                        return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
+                        return project.companyName || project.client?.name || primaryRecipient?.name || primaryRecipient?.email || 'Client'
                       })()
 
                       const isExpanded = Boolean(expandedProjectRows[project.id])
