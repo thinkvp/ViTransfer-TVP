@@ -91,6 +91,11 @@ const tusServer: Server = new Server({
       const projectEmailId = upload.metadata?.projectEmailId as string
       const photoId = upload.metadata?.photoId as string
 
+      // `maxUploadSizeGB` is a conservative limit meant for general-purpose uploads.
+      // Do not apply it to video/version uploads (which can legitimately be multi-GB).
+      // Those are still bounded by the server hard cap (`maxSize`).
+      const isVideoOrAssetUpload = !!videoId || !!assetId
+
       const declaredSize = Number(upload.size)
       if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
         throw {
@@ -99,11 +104,13 @@ const tusServer: Server = new Server({
         }
       }
 
-      const maxUploadSizeBytes = await getMaxUploadSizeBytes()
-      if (declaredSize > maxUploadSizeBytes) {
-        throw {
-          status_code: 413,
-          body: `Upload exceeds max allowed size of ${Math.ceil(maxUploadSizeBytes / BYTES_PER_GB)}GB`
+      if (!isVideoOrAssetUpload) {
+        const maxUploadSizeBytes = await getMaxUploadSizeBytes()
+        if (declaredSize > maxUploadSizeBytes) {
+          throw {
+            status_code: 413,
+            body: `Upload exceeds max allowed size of ${Math.ceil(maxUploadSizeBytes / BYTES_PER_GB)}GB`
+          }
         }
       }
 
@@ -126,7 +133,13 @@ const tusServer: Server = new Server({
           }
         }
 
-        if (video.status !== 'UPLOADING') {
+        if (video.status === 'ERROR') {
+          // Allow re-uploading to a video that previously failed — reset it.
+          await prisma.video.update({
+            where: { id: videoId },
+            data: { status: 'UPLOADING', processingError: null, processingProgress: 0 },
+          })
+        } else if (video.status !== 'UPLOADING') {
           throw {
             status_code: 400,
             body: 'Video is not in UPLOADING state'
@@ -224,10 +237,12 @@ const tusServer: Server = new Server({
 
     try {
       const maxUploadSizeBytes = await getMaxUploadSizeBytes()
+      // Video/asset uploads are only bounded by the hard cap (same as onUploadCreate).
+      const hardMaxBytes = HARD_MAX_UPLOAD_SIZE_GB * BYTES_PER_GB
       if (videoId) {
-        return await handleVideoUploadFinish(tusFilePath, upload, videoId, tusServer, maxUploadSizeBytes)
+        return await handleVideoUploadFinish(tusFilePath, upload, videoId, tusServer, hardMaxBytes)
       } else if (assetId) {
-        return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer, maxUploadSizeBytes)
+        return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer, hardMaxBytes)
       } else if (clientFileId) {
         return await handleClientFileUploadFinish(tusFilePath, upload, clientFileId, tusServer, maxUploadSizeBytes)
       } else if (projectFileId) {

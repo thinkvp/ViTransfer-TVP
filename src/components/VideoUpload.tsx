@@ -189,7 +189,7 @@ export default function VideoUpload({
         existingMetadata?.targetName === trimmedVideoName &&
         (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
 
-      // Verify the server-side record still exists before resuming
+      // Verify the server-side record still exists and is resumable before resuming
       if (canResumeExisting) {
         try {
           const checkRes = await apiFetch(`/api/videos/${existingMetadata!.videoId}`)
@@ -198,6 +198,14 @@ export default function VideoUpload({
             clearUploadMetadata(file)
             clearTUSFingerprint(file)
             canResumeExisting = false
+          } else {
+            const videoData = await checkRes.json()
+            if (videoData.status !== 'UPLOADING' && videoData.status !== 'ERROR') {
+              // Video moved past upload phase (PROCESSING/READY) — start fresh
+              clearUploadMetadata(file)
+              clearTUSFingerprint(file)
+              canResumeExisting = false
+            }
           }
         } catch {
           clearUploadMetadata(file)
