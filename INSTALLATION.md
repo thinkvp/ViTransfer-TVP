@@ -6,6 +6,47 @@ Step-by-step instructions for installing ViTransfer-TVP on various platforms.
 
 ## Quick Install (5 Minutes)
 
+### Automated Setup (Recommended)
+
+**Linux/Mac/WSL:**
+```bash
+# 1. Download files
+mkdir vitransfer && cd vitransfer
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/.env.example
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/setup.sh
+
+# 2. Run setup script
+chmod +x setup.sh
+./setup.sh
+
+# 3. Start
+docker-compose up -d
+
+# 4. Access
+# Open http://localhost:4321
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. Download files
+mkdir vitransfer; cd vitransfer
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/docker-compose.yml" -OutFile "docker-compose.yml"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/.env.example" -OutFile ".env.example"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/setup.ps1" -OutFile "setup.ps1"
+
+# 2. Run setup script
+.\setup.ps1
+
+# 3. Start
+docker-compose up -d
+
+# 4. Access
+# Open http://localhost:4321
+```
+
+### Manual Setup (Alternative)
+
 ```bash
 # 1. Download
 mkdir vitransfer && cd vitransfer
@@ -59,6 +100,29 @@ git checkout main
 
 ### Step 2: Configure Environment
 
+**Option A: Automated Setup (Recommended)**
+
+Run the interactive setup script that will generate all secrets and prompt for configuration:
+
+**Linux/Mac/WSL:**
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+.\setup.ps1
+```
+
+The script will:
+- Generate 6 secure random secrets automatically
+- Prompt for admin email and password
+- Ask for optional settings (port, timezone, HTTPS)
+- Create a ready-to-use `.env` file
+
+**Option B: Manual Configuration**
+
 Create `.env` from template:
 ```bash
 cp .env.example .env
@@ -80,7 +144,9 @@ JWT_REFRESH_SECRET=
 SHARE_TOKEN_SECRET=
 ```
 
-### Step 3: Generate Secrets
+### Step 3: Generate Secrets (Manual Only)
+
+*Skip this step if you used the automated setup script.*
 
 Run each command individually and paste the output into the corresponding `.env` variable.
 

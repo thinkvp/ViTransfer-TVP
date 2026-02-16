@@ -290,12 +290,32 @@ Team collaboration without cluttering client-facing comments:
 # Create directory
 mkdir vitransfer && cd vitransfer
 
-# Download docker-compose.yml and .env.example
+# Download files
 curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
 curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/setup.sh  # Linux/Mac/WSL
+# OR for Windows:
+# Invoke-WebRequest -Uri "https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/setup.ps1" -OutFile "setup.ps1"
 ```
 
-2. **Create and configure environment file**
+2. **Configure environment**
+
+**Option A: Automated Setup (Easiest)**
+
+Run the interactive setup script:
+```bash
+# Linux/Mac/WSL
+chmod +x setup.sh
+./setup.sh
+
+# Windows PowerShell
+.\setup.ps1
+```
+
+The script automatically generates all secrets and prompts for your admin credentials.
+
+**Option B: Manual Configuration**
+
 ```bash
 # Copy and edit the file
 cp .env.example .env
@@ -312,17 +332,7 @@ openssl rand -base64 64   # JWT_REFRESH_SECRET
 openssl rand -base64 64   # SHARE_TOKEN_SECRET
 ```
 
-Replace each placeholder in `.env`:
-- `POSTGRES_PASSWORD=<<REPLACE_WITH_openssl_rand_hex_32>>`
-- `REDIS_PASSWORD=<<REPLACE_WITH_openssl_rand_hex_32>>`
-- `ENCRYPTION_KEY=<<REPLACE_WITH_openssl_rand_base64_32>>`
-- `JWT_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
-- `JWT_REFRESH_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
-- `SHARE_TOKEN_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
-
-**Default admin credentials** (change in production):
-- `ADMIN_EMAIL=admin@example.com`
-- `ADMIN_PASSWORD=Admin1234`
+Replace each placeholder in `.env` and set your admin credentials.
 
 3. **Start the application**
 ```bash
@@ -347,7 +357,9 @@ cd ViTransfer
 git checkout main
 ```
 
-2. **Follow steps 2-3 from Method 1 above** to configure your `.env` file
+2. **Configure environment**
+
+Run the automated setup script or manually configure `.env` (see Method 1 step 2 above)
 
 3. **Build and start**
 
