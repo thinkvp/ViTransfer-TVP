@@ -736,6 +736,10 @@ model Settings {
   accentColor     String? // Custom accent hex colour (e.g. "#FF6600") — overrides default blue app-wide
   accentTextMode  String  @default("LIGHT") // LIGHT (white) or DARK (almost-black) text on accent-coloured buttons
 
+  // Theme Preferences
+  defaultTheme     String  @default("DARK") // LIGHT, DARK, or AUTO (system decides)
+  allowThemeToggle Boolean @default(true) // Whether clients/users can toggle theme
+
   // Email Header Branding
   emailHeaderColor    String? // Custom email header background hex colour (default #1F1F1F)
   emailHeaderTextMode String  @default("LIGHT") // LIGHT (white) or DARK (almost-black) text in email header

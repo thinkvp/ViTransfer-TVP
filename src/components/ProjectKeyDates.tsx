@@ -39,6 +39,21 @@ function formatTypeLabel(type: ProjectKeyDateType): string {
   return typeOptions.find((o) => o.value === type)?.label || type
 }
 
+function typeColorClasses(type: string): { pill: string; dot: string } {
+  switch (type) {
+    case 'PRE_PRODUCTION':
+      return { pill: 'bg-blue-500 text-white', dot: 'bg-blue-500' }
+    case 'SHOOTING':
+      return { pill: 'bg-amber-500 text-white', dot: 'bg-amber-500' }
+    case 'DUE_DATE':
+      return { pill: 'bg-red-500 text-white', dot: 'bg-red-500' }
+    case 'OTHER':
+      return { pill: 'bg-purple-500 text-white', dot: 'bg-purple-500' }
+    default:
+      return { pill: 'bg-foreground/40 text-white', dot: 'bg-foreground/40' }
+  }
+}
+
 function truncateNotes(notes: string | null | undefined, maxChars = 120): string {
   if (!notes) return ''
   const chars = Array.from(notes)
@@ -460,7 +475,11 @@ export function ProjectKeyDates({
                     <td className="px-3 py-2">{item.allDay ? 'Yes' : 'No'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{item.allDay ? '-' : (item.startTime || '-')}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{item.allDay ? '-' : (item.finishTime || '-')}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatTypeLabel(item.type)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${typeColorClasses(item.type).pill}`}>
+                        {formatTypeLabel(item.type)}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 min-w-[120px] whitespace-normal break-words">
                       <span title={item.notes || ''}>{truncateNotes(item.notes, 120)}</span>
                     </td>

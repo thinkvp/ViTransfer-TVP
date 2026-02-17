@@ -139,6 +139,8 @@ export default function GlobalSettingsPage() {
   const [accentTextMode, setAccentTextMode] = useState<'LIGHT' | 'DARK'>('LIGHT')
   const [emailHeaderColor, setEmailHeaderColor] = useState('')
   const [emailHeaderTextMode, setEmailHeaderTextMode] = useState<'LIGHT' | 'DARK'>('LIGHT')
+  const [defaultTheme, setDefaultTheme] = useState<'LIGHT' | 'DARK' | 'AUTO'>('DARK')
+  const [allowThemeToggle, setAllowThemeToggle] = useState(true)
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
@@ -279,6 +281,8 @@ export default function GlobalSettingsPage() {
         setAccentTextMode(data.accentTextMode === 'DARK' ? 'DARK' : 'LIGHT')
         setEmailHeaderColor(data.emailHeaderColor || '')
         setEmailHeaderTextMode(data.emailHeaderTextMode === 'DARK' ? 'DARK' : 'LIGHT')
+        setDefaultTheme(data.defaultTheme === 'LIGHT' || data.defaultTheme === 'AUTO' ? data.defaultTheme : 'DARK')
+        setAllowThemeToggle(data.allowThemeToggle ?? true)
         setSmtpServer(data.smtpServer || '')
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
@@ -502,6 +506,8 @@ export default function GlobalSettingsPage() {
         accentTextMode,
         emailHeaderColor: emailHeaderColor.trim() || null,
         emailHeaderTextMode,
+        defaultTheme,
+        allowThemeToggle,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
@@ -863,6 +869,10 @@ export default function GlobalSettingsPage() {
             setEmailHeaderColor={setEmailHeaderColor}
             emailHeaderTextMode={emailHeaderTextMode}
             setEmailHeaderTextMode={setEmailHeaderTextMode}
+            defaultTheme={defaultTheme}
+            setDefaultTheme={setDefaultTheme}
+            allowThemeToggle={allowThemeToggle}
+            setAllowThemeToggle={setAllowThemeToggle}
             show={showCompanyBranding}
             setShow={setShowCompanyBranding}
           />

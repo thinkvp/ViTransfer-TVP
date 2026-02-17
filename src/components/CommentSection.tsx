@@ -1132,7 +1132,7 @@ export function CommentSectionView({
                         <Info className="w-4 h-4" />
                       </Button>
 
-                      <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-md">
+                      <DialogContent className="max-w-[95vw] sm:max-w-md">
                         <DialogHeader>
                           <DialogTitle>Video Information</DialogTitle>
                           <DialogDescription className="text-muted-foreground">

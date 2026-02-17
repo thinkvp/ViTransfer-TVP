@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-02-17
+
+### Added
+- **Default theme setting** — new Light / Dark / Auto selector in Company Branding to set the default colour theme for all visitors
+- **Allow theme toggle setting** — new toggle in Company Branding to show or hide the theme switcher button across the entire app; when disabled, all users see only the admin-configured default theme
+- Auto mode uses the visitor's operating-system preference (`prefers-color-scheme`)
+
+### Changed
+- **Light mode contrast** — background, card, popover, border, and muted tones are now deeper and more contrasty; text and status colours darkened slightly; shadows strengthened
+- **Email logo size** — company logo in email templates now constrained to max 280 × 120 px to prevent oversized logos
+- **Email hyperlink colours** — Unsubscribe and secondary text links in all email templates no longer override colour with the accent colour; they now inherit the email client's default link colour for better readability
+- **Invoice/quote logo theme adaptation** — public invoice and quote pages now display theme-appropriate logos: light mode (dark header) shows dark logo when configured, dark mode (light header) shows normal logo
+- **Logo size on sales documents** — company logo on HTML invoice/quote pages and PDF templates increased by ~10% (h-10→h-11 on HTML, 42pt→46pt on PDF)
+- **Add New User password UI** — password field now uses inline generate/copy buttons (matching Create Project page) instead of separate row button; improved mobile layout
+- **Branding settings simplified** — removed URL/link option for Company Logos and Favicon; only None and Upload modes remain
+
 ## [1.0.2] - 2026-02-16
 
 ### Added

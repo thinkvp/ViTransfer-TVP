@@ -21,6 +21,7 @@ import {
 } from '@/lib/sales/admin-api'
 import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { InvoiceStatus, SalesSettings } from '@/lib/sales/types'
+import { invoiceStatusBadgeClass, invoiceStatusLabel } from '@/lib/sales/badge'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
@@ -37,36 +38,6 @@ type InvoiceRow = {
   invoice: SalesInvoiceWithVersion
   effectiveStatus: InvoiceStatus
   totalCents: number
-}
-
-function statusBadgeClass(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'OVERDUE':
-      return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
-    case 'PARTIALLY_PAID':
-      return 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20'
-    case 'PAID':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-  }
-}
-
-function statusLabel(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'OVERDUE':
-      return 'Overdue'
-    case 'PARTIALLY_PAID':
-      return 'Partially Paid'
-    case 'PAID':
-      return 'Paid'
-  }
 }
 
 export default function SalesInvoicesPage() {
@@ -442,7 +413,7 @@ export default function SalesInvoicesPage() {
                           })
                         }}
                       >
-                        {statusLabel(s)}
+                        {invoiceStatusLabel(s)}
                       </DropdownMenuCheckboxItem>
                     )
                   })}
@@ -514,8 +485,8 @@ export default function SalesInvoicesPage() {
                           <td className="px-3 py-2 tabular-nums">{formatDate(row.invoice.issueDate)}</td>
                           <td className="px-3 py-2 tabular-nums">{row.invoice.dueDate ? formatDate(row.invoice.dueDate) : '—'}</td>
                           <td className="px-3 py-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${statusBadgeClass(row.effectiveStatus)}`}>
-                              {statusLabel(row.effectiveStatus)}
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${invoiceStatusBadgeClass(row.effectiveStatus)}`}>
+                              {invoiceStatusLabel(row.effectiveStatus)}
                             </span>
                           </td>
                           <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>

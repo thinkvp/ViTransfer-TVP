@@ -160,12 +160,12 @@ function LoginForm() {
               {mainCompanyDomain ? (
                 <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[200px]">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                  <img src={logoSrc} alt="Company logo" className="w-full max-h-20 h-auto object-contain" />
                 </a>
               ) : (
                 <div className="max-w-[200px]">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                  <img src={logoSrc} alt="Company logo" className="w-full max-h-20 h-auto object-contain" />
                 </div>
               )}
             </div>

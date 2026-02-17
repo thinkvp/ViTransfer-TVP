@@ -4,6 +4,10 @@ import { headers } from 'next/headers'
 import { prisma } from '@/lib/db'
 import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
 import type { SalesSettings } from '@/lib/sales/types'
+import {
+  invoiceStatusBadgeClass, invoiceStatusLabel,
+  quoteStatusBadgeClass, quoteStatusLabel,
+} from '@/lib/sales/badge'
 import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
 import { getCurrencySymbol } from '@/lib/sales/currency'
@@ -31,62 +35,6 @@ type DocType = 'QUOTE' | 'INVOICE'
 
 type QuoteStatus = 'OPEN' | 'SENT' | 'CLOSED' | 'ACCEPTED'
 type InvoiceStatus = 'OPEN' | 'SENT' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID'
-
-function quoteStatusBadgeClass(status: QuoteStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'ACCEPTED':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-    case 'CLOSED':
-      return 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border border-slate-500/20'
-  }
-}
-
-function quoteStatusLabel(status: QuoteStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'ACCEPTED':
-      return 'Accepted'
-    case 'CLOSED':
-      return 'Closed'
-  }
-}
-
-function invoiceStatusBadgeClass(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'OVERDUE':
-      return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
-    case 'PARTIALLY_PAID':
-      return 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20'
-    case 'PAID':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-  }
-}
-
-function invoiceStatusLabel(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'OVERDUE':
-      return 'Overdue'
-    case 'PARTIALLY_PAID':
-      return 'Partially Paid'
-    case 'PAID':
-      return 'Paid'
-  }
-}
 
 function safeString(v: unknown): string {
   return typeof v === 'string' ? v : ''
@@ -199,9 +147,22 @@ export default async function SalesDocPublicViewPage(
 
   const logoSettings = await prisma.settings.findUnique({
     where: { id: 'default' },
-    select: { companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true },
+    select: {
+      companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true,
+      darkLogoEnabled: true, darkLogoPath: true, darkLogoMode: true, darkLogoUrl: true,
+    },
   })
   const showLogo = hasConfiguredLogo(logoSettings)
+
+  // The invoice/quote header uses bg-foreground text-background, so it inverts
+  // with the theme: dark surface in light mode, light surface in dark mode.
+  // When a separate dark-mode logo exists we render both and CSS-toggle them:
+  //   Light mode (dark header) → show dark logo   (dark:hidden)
+  //   Dark mode (light header) → show normal logo (hidden dark:block)
+  const hasDarkLogo = !!(logoSettings?.darkLogoEnabled && (
+    logoSettings.darkLogoPath ||
+    (logoSettings.darkLogoMode === 'LINK' && typeof logoSettings.darkLogoUrl === 'string' && logoSettings.darkLogoUrl.trim())
+  ))
 
   const businessName = safeString(settings?.businessName) || 'Business'
   const address = safeString(settings?.address)
@@ -373,14 +334,37 @@ export default async function SalesDocPublicViewPage(
               <div className="min-w-0">
                 {showLogo && (
                   <div className="mb-3">
-                    <Image
-                      src="/api/branding/logo"
-                      alt="Company logo"
-                      width={240}
-                      height={80}
-                      className="h-10 w-auto object-contain"
-                      priority
-                    />
+                    {hasDarkLogo ? (
+                      <>
+                        {/* Light mode → dark header → show dark logo */}
+                        <Image
+                          src="/api/branding/dark-logo"
+                          alt="Company logo"
+                          width={264}
+                          height={88}
+                          className="h-11 w-auto object-contain dark:hidden"
+                          priority
+                        />
+                        {/* Dark mode → light header → show normal logo */}
+                        <Image
+                          src="/api/branding/logo"
+                          alt="Company logo"
+                          width={264}
+                          height={88}
+                          className="h-11 w-auto object-contain hidden dark:block"
+                          priority
+                        />
+                      </>
+                    ) : (
+                      <Image
+                        src="/api/branding/logo"
+                        alt="Company logo"
+                        width={264}
+                        height={88}
+                        className="h-11 w-auto object-contain"
+                        priority
+                      />
+                    )}
                   </div>
                 )}
                 <div className="text-lg font-semibold break-words">{businessName}</div>

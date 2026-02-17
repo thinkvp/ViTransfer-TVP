@@ -9,7 +9,7 @@ ViTransfer-TVP is a self-hosted web application for video production teams to sh
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![GitHub](https://img.shields.io/badge/github-thinkvp%2FViTransfer--TVP-blue)](https://github.com/thinkvp/ViTransfer-TVP)
 
-> **Fork Notice:** ViTransfer-TVP forked from [ViTransfer v0.8.2](https://github.com/MansiVisuals/ViTransfer/releases/tag/v0.8.2) and has since diverged significantly (170+ commits as of 15 February 2026). The upstream project continues independently at [MansiVisuals/ViTransfer](https://github.com/MansiVisuals/ViTransfer). We gratefully credit them for the original concept and foundation.
+> **Fork Notice:** ViTransfer-TVP forked from [ViTransfer v0.8.2](https://github.com/MansiVisuals/ViTransfer/releases/tag/v0.8.2) and has since diverged significantly (170+ commits). The upstream project continues independently at [MansiVisuals/ViTransfer](https://github.com/MansiVisuals/ViTransfer). We gratefully credit them for the original concept and foundation.
 
 
 ---
@@ -35,7 +35,6 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 - **Video Upload & Processing** — Automatic FFmpeg transcoding to 720p, 1080p, or 4K with resumable uploads via TUS protocol
 - **Smart Watermarking** — Customizable watermarks with center and corner placements, configurable per project or globally
 - **Timestamped Comments** — Timestamped feedback with threaded replies that track video versions (up to 10,000 characters), with full timecode support (HH:MM:SS:FF including drop-frame)
-- **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
 - **Comment Attachments** — Multi-file uploads (up to 5 files per comment) supporting images, PSD/AI, and common video formats
 - **Approval Workflow** — Per-video approval system with automatic project approval when all videos are approved
 - **Version Control** — Multiple video versions per project with revision tracking and optional max revision limits
@@ -56,11 +55,8 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 - **Sales Dashboard** — Overview of outstanding invoices, payment status, and revenue
 
 ### Notifications
-- **In-App Notification Bell** — Real-time notification center in admin header with unread badge count, auto-polling (30s intervals), click-to-navigate links, and persistent read/unread state tracking. Covers client comments, video approvals, sales events, and security alerts.
 - **Smart Email Notifications** — Scheduling options: immediate, hourly, daily, or weekly digests
-- **Email Tracking** — Optional tracking pixels for email open analytics (can be disabled globally). ⚠️ **Legal Notice:** Email tracking regulations vary by jurisdiction. Some regions (e.g., GDPR in EU, CPRA in California) require explicit consent before tracking email opens. Check your local laws and privacy regulations before enabling this feature. You are responsible for ensuring compliance with applicable privacy laws.
 - **Project Update Digests** — Batched comment summaries to reduce email noise
-- **Payment Reminders** — Automated invoice payment reminder emails
 - **Push Notifications** — Optional Gotify integration and browser Web Push notifications for instant alerts
 
 ### Admin Features
@@ -98,6 +94,9 @@ Built-in customer relationship management and invoicing capabilities:
 - **Quote System** — Manage quotes with expiry dates and conversion to projects
 - **Calendar Integration** — Quote expiry and invoice due dates automatically appear on the calendar view
 - **Project Linking** — Link invoices directly to projects for seamless workflow from quote to delivery
+
+### Export Feedback and Import in NLE
+- **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
 
 ### Guest Video Links
 Per-video shareable links for targeted distribution:
@@ -168,6 +167,12 @@ Enhanced tools for project communication and notification management:
 - **Key Date Reminders** — Send automated reminder emails to specific users and/or recipients before key dates
 - **Unsubscribe Links** — All client-facing emails include unsubscribe links to disable notifications per project
 
+### Additional Notifications & Analytics
+- **Analytics Page Overhaul** — Added tracking of Video Views, improved inaccurate page/unique visits count, separated Video Downloads and Video Asset downloads for a more accurate understanding of client activity.
+- **In-App Notification Bell** — Real-time notification center in admin header with unread badge count, auto-polling (30s intervals), click-to-navigate links, and persistent read/unread state tracking. Covers client comments, video approvals, sales events, and security alerts.
+- **Email Tracking** — Optional tracking pixels for email open analytics (can be disabled globally). ⚠️ **Legal Notice:** Email tracking regulations vary by jurisdiction. Some regions (e.g., GDPR in EU, CPRA in California) require explicit consent before tracking email opens. Check your local laws and privacy regulations before enabling this feature. You are responsible for ensuring compliance with applicable privacy laws.
+- **Payment Reminders** — Automated invoice payment reminder emails
+
 ### Granular Approval Control
 Fine-tuned control over which video versions can be approved:
 - **Per-Version Approval Toggle** — Each video version has an `allowApproval` checkbox to enable/disable client approval
@@ -175,7 +180,6 @@ Fine-tuned control over which video versions can be approved:
 - **Admin Override** — Admins can toggle approval permission on any video version at any time
 - **Visual Indicators** — "Approvable?" checkbox in video lists shows approval status at a glance
 - **Client Protection** — Clients can only approve videos where `allowApproval` is explicitly enabled
-- **API Validation** — Share page approve endpoint validates `allowApproval` flag before processing approvals
 - **Flexible Workflow** — Upload multiple versions for review, then selectively enable approval only on the final version
 - **Backward Compatible** — Existing videos were backfilled with approval enabled to preserve behavior from previous versions
 - **Multi-Video Upload** — Bulk upload modal includes per-video approval toggles for efficient batch operations
@@ -198,23 +202,15 @@ Granular role-based access control beyond simple admin/client:
 - **Project Assignment** — System admins can assign specific users to projects for targeted collaboration
 - **Notification Control** — Per-user notification settings for assigned projects
 - **Protected Roles** — System admin and built-in admin roles cannot be deleted or demoted
+- **Forgot Password System** — Internal users can reset their password without admin assistance
 
 ### Additional Security Tweaks
 Multiple layers of protection beyond standard security measures:
-- **Max Upload Safeguards** — Configurable maximum upload size (default 1GB) enforced at application and TUS handler levels
+- **Max Upload Safeguards** — Configurable maximum upload size (default 1GB) for Client uploads, enforced at application and TUS handler levels
+- **Configurable Project Safeguards** — Ability to configure max internal comments, video comments, recipipents and project files
 - **Random Slug Generation** — Cryptographically secure project share links using crypto.randomInt() (8-12 alphanumeric chars)
-- **De-identification** — Generic error messages like "Not found" and "Invalid credentials" prevent user enumeration attacks
-- **Constant-Time Comparison** — Password verification uses crypto.timingSafeEqual() to prevent timing attacks
-- **Token Hashing** — Share access token fingerprints hashed (SHA-256) before Redis storage
-- **Random Session IDs** — All session identifiers use crypto.randomBytes(16) for unpredictability
+- **De-identification** — Authentication routes have been de-identified to reduce automated reconnaissance and limit exposure to opportunistic scanning. 
 - **Rate Limit Scoping** — Rate limits scoped per admin+resource (e.g., `${auth.id}:${albumId}`) to prevent IP-based lockouts during bulk operations
-- **Failed Attempt Tracking** — IP+token+email hashing (SHA-256, 16-char) for rate limiting without exposing PII
-- **OTP Security** — 6-digit OTP codes use crypto.randomInt() for cryptographic randomness
-- **Account Lockout** — Configurable max password attempts (default 5) with 15-minute lockout windows
-- **Security Event Logging** — All authentication attempts logged with severity levels (INFO/WARNING/CRITICAL)
-- **Path Traversal Prevention** — 7-layer defense including input validation, normalization, and path containment checks
-- **JSON Parse Safety** — Robust error handling for corrupted Redis data with graceful degradation
-- **FFmpeg Input Sanitization** — Watermark text validation (100 char limit, alphanumeric whitelist) to prevent command injection
 
 ### Detailed Status Workflow
 Intelligent project lifecycle management with 8 distinct statuses (NOT_STARTED, IN_PROGRESS, IN_REVIEW, REVIEWED, ON_HOLD, SHARE_ONLY, APPROVED, CLOSED). The workflow includes:
@@ -279,7 +275,7 @@ Team collaboration without cluttering client-facing comments:
 - Docker and Docker Compose installed
 - At least 4GB RAM
 - 20GB+ free disk space (more for video storage)
-- **Architecture:** linux/amd64 only (ARM64 is not supported, but is supported by the original developer)
+- **Architecture:** linux/amd64 only (ARM64 is not supported)
 
 ### Installation Method 1: Docker Hub (Recommended — 3 Minutes)
 
@@ -290,32 +286,12 @@ Team collaboration without cluttering client-facing comments:
 # Create directory
 mkdir vitransfer && cd vitransfer
 
-# Download files
+# Download docker-compose.yml and .env.example
 curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
 curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/setup.sh  # Linux/Mac/WSL
-# OR for Windows:
-# Invoke-WebRequest -Uri "https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/setup.ps1" -OutFile "setup.ps1"
 ```
 
-2. **Configure environment**
-
-**Option A: Automated Setup (Easiest)**
-
-Run the interactive setup script:
-```bash
-# Linux/Mac/WSL
-chmod +x setup.sh
-./setup.sh
-
-# Windows PowerShell
-.\setup.ps1
-```
-
-The script automatically generates all secrets and prompts for your admin credentials.
-
-**Option B: Manual Configuration**
-
+2. **Create and configure environment file**
 ```bash
 # Copy and edit the file
 cp .env.example .env
@@ -332,7 +308,17 @@ openssl rand -base64 64   # JWT_REFRESH_SECRET
 openssl rand -base64 64   # SHARE_TOKEN_SECRET
 ```
 
-Replace each placeholder in `.env` and set your admin credentials.
+Replace each placeholder in `.env`:
+- `POSTGRES_PASSWORD=<<REPLACE_WITH_openssl_rand_hex_32>>`
+- `REDIS_PASSWORD=<<REPLACE_WITH_openssl_rand_hex_32>>`
+- `ENCRYPTION_KEY=<<REPLACE_WITH_openssl_rand_base64_32>>`
+- `JWT_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
+- `JWT_REFRESH_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
+- `SHARE_TOKEN_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
+
+**Default admin credentials** (change in production):
+- `ADMIN_EMAIL=admin@example.com`
+- `ADMIN_PASSWORD=Admin1234`
 
 3. **Start the application**
 ```bash
@@ -357,9 +343,7 @@ cd ViTransfer
 git checkout main
 ```
 
-2. **Configure environment**
-
-Run the automated setup script or manually configure `.env` (see Method 1 step 2 above)
+2. **Follow steps 2-3 from Method 1 above** to configure your `.env` file
 
 3. **Build and start**
 
@@ -651,9 +635,6 @@ ViTransfer-TVP is developed primarily for our internal production needs and shar
 - **Bug reports are welcome and encouraged!** Please open an issue on [GitHub Issues](https://github.com/thinkvp/ViTransfer-TVP/issues) with reproduction steps
 - **Feature requests:** We may consider feature requests, but please understand this software is developed primarily for our production workflow. Features that benefit our specific use cases are more likely to be implemented
 - **Support limitations:** We are not in a position to provide detailed technical support, troubleshooting, or consulting. The software is provided as-is
-
-### Contributing Code
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ---
 

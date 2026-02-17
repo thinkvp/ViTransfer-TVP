@@ -27,21 +27,21 @@ export function projectStatusLabel(status: string): string {
 export function projectStatusBadgeClass(status: string): string {
   switch (status) {
     case 'REVIEWED':
-      return 'bg-emerald-200 text-emerald-800 border-2 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-400/40'
+      return 'bg-emerald-200 text-emerald-800 border border-foreground/20 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-foreground/20'
     case 'APPROVED':
-      return 'bg-success text-success-visible border-2 border-success-visible dark:bg-success/20 dark:text-success dark:border-success/40'
+      return 'bg-success text-success-visible border border-foreground/20 dark:bg-success/20 dark:text-success dark:border-foreground/20'
     case 'SHARE_ONLY':
-      return 'bg-info text-info-visible border-2 border-info-visible dark:bg-info/20 dark:text-info dark:border-info/40'
+      return 'bg-info text-info-visible border border-foreground/20 dark:bg-info/20 dark:text-info dark:border-foreground/20'
     case 'ON_HOLD':
-      return 'bg-warning text-warning-visible border-2 border-warning-visible dark:bg-warning/20 dark:text-warning dark:border-warning/40'
+      return 'bg-warning text-warning-visible border border-foreground/20 dark:bg-warning/20 dark:text-warning dark:border-foreground/20'
     case 'IN_REVIEW':
-      return 'bg-blue-600 text-blue-50 border-2 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-400/40'
+      return 'bg-blue-600 text-blue-50 border border-foreground/20 dark:bg-blue-500/20 dark:text-blue-300 dark:border-foreground/20'
     case 'IN_PROGRESS':
-      return 'bg-violet-800 text-violet-100 border-2 border-violet-200 dark:bg-violet-500/20 dark:text-violet-300 dark:border-violet-400/40'
+      return 'bg-violet-800 text-violet-100 border border-foreground/20 dark:bg-violet-500/20 dark:text-violet-300 dark:border-foreground/20'
     case 'NOT_STARTED':
-      return 'bg-pending text-pending-visible border-2 border-pending-visible dark:bg-pending/20 dark:text-pending dark:border-pending/40'
+      return 'bg-pending text-pending-visible border border-foreground/20 dark:bg-pending/20 dark:text-pending dark:border-foreground/20'
     case 'CLOSED':
-      return 'bg-muted text-muted-foreground border-2 border-muted-foreground'
+      return 'bg-muted text-muted-foreground border border-foreground/20 dark:border-foreground/20'
     default:
       return 'bg-muted text-muted-foreground border border-border'
   }

@@ -41,6 +41,10 @@ interface CompanyBrandingSectionProps {
   setEmailHeaderColor: (value: string) => void
   emailHeaderTextMode: 'LIGHT' | 'DARK'
   setEmailHeaderTextMode: (value: 'LIGHT' | 'DARK') => void
+  defaultTheme: 'LIGHT' | 'DARK' | 'AUTO'
+  setDefaultTheme: (value: 'LIGHT' | 'DARK' | 'AUTO') => void
+  allowThemeToggle: boolean
+  setAllowThemeToggle: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -85,6 +89,10 @@ export function CompanyBrandingSection({
   setEmailHeaderColor,
   emailHeaderTextMode,
   setEmailHeaderTextMode,
+  defaultTheme,
+  setDefaultTheme,
+  allowThemeToggle,
+  setAllowThemeToggle,
   show,
   setShow,
 }: CompanyBrandingSectionProps) {
@@ -108,20 +116,12 @@ export function CompanyBrandingSection({
     return `Upload a PNG or JPG logo (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px).`
   }, [])
 
-  const linkHelpText = useMemo(() => {
-    return `Link directly to a PNG or JPG image (max: ${COMPANY_LOGO_MAX_WIDTH}x${COMPANY_LOGO_MAX_HEIGHT}px, <= 2MB). Use an https:// URL that is publicly accessible.`
-  }, [])
-
   const faviconHelpText = useMemo(() => {
     return `This favicon will be used by browsers for the tab icon.`
   }, [])
 
   const faviconUploadHelpText = useMemo(() => {
     return `Upload a PNG favicon (max: ${FAVICON_MAX_WIDTH}x${FAVICON_MAX_HEIGHT}px).`
-  }, [])
-
-  const faviconLinkHelpText = useMemo(() => {
-    return `Link directly to a PNG favicon (max: ${FAVICON_MAX_WIDTH}x${FAVICON_MAX_HEIGHT}px, <= 512KB). Use an https:// URL that is publicly accessible.`
   }, [])
 
   async function validateDimensions(file: File): Promise<{ ok: boolean; error?: string }> {
@@ -348,7 +348,6 @@ export function CompanyBrandingSection({
               >
                 <option value="NONE">None</option>
                 <option value="UPLOAD">Upload</option>
-                <option value="LINK">Link</option>
               </select>
               <p className="text-xs text-muted-foreground">{logoHelpText}</p>
 
@@ -362,19 +361,6 @@ export function CompanyBrandingSection({
                     onChange={(e) => handleLogoSelected(e.target.files?.[0] || null)}
                   />
                   <p className="text-xs text-muted-foreground">{uploadHelpText}</p>
-                </div>
-              ) : null}
-
-              {companyLogoMode === 'LINK' ? (
-                <div className="space-y-2">
-                  <Input
-                    id="companyLogoLink"
-                    type="url"
-                    value={companyLogoLinkUrl}
-                    onChange={(e) => setCompanyLogoLinkUrl(e.target.value)}
-                    placeholder="https://example.com/logo.png"
-                  />
-                  <p className="text-xs text-muted-foreground">{linkHelpText}</p>
                 </div>
               ) : null}
 
@@ -436,7 +422,6 @@ export function CompanyBrandingSection({
                   >
                     <option value="NONE">None</option>
                     <option value="UPLOAD">Upload</option>
-                    <option value="LINK">Link</option>
                   </select>
 
                   {darkLogoMode === 'UPLOAD' ? (
@@ -449,19 +434,6 @@ export function CompanyBrandingSection({
                         onChange={(e) => handleDarkLogoSelected(e.target.files?.[0] || null)}
                       />
                       <p className="text-xs text-muted-foreground">{uploadHelpText}</p>
-                    </div>
-                  ) : null}
-
-                  {darkLogoMode === 'LINK' ? (
-                    <div className="space-y-2">
-                      <Input
-                        id="darkLogoLink"
-                        type="url"
-                        value={darkLogoLinkUrl}
-                        onChange={(e) => setDarkLogoLinkUrl(e.target.value)}
-                        placeholder="https://example.com/logo-dark.png"
-                      />
-                      <p className="text-xs text-muted-foreground">{linkHelpText}</p>
                     </div>
                   ) : null}
 
@@ -508,7 +480,6 @@ export function CompanyBrandingSection({
               >
                 <option value="NONE">None</option>
                 <option value="UPLOAD">Upload</option>
-                <option value="LINK">Link</option>
               </select>
               <p className="text-xs text-muted-foreground">{faviconHelpText}</p>
 
@@ -522,19 +493,6 @@ export function CompanyBrandingSection({
                     onChange={(e) => handleFaviconSelected(e.target.files?.[0] || null)}
                   />
                   <p className="text-xs text-muted-foreground">{faviconUploadHelpText}</p>
-                </div>
-              ) : null}
-
-              {companyFaviconMode === 'LINK' ? (
-                <div className="space-y-2">
-                  <Input
-                    id="companyFaviconLink"
-                    type="url"
-                    value={companyFaviconLinkUrl}
-                    onChange={(e) => setCompanyFaviconLinkUrl(e.target.value)}
-                    placeholder="https://example.com/favicon.png"
-                  />
-                  <p className="text-xs text-muted-foreground">{faviconLinkHelpText}</p>
                 </div>
               ) : null}
 
@@ -652,6 +610,48 @@ export function CompanyBrandingSection({
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">Background colour for the header section of email templates. Leave empty for default dark (#1F1F1F). Header text controls the title and subtitle text colour in the email header (Light = white, Dark = near-black).</p>
+            </div>
+
+            <div className="pt-3 border-t space-y-2">
+              <Label>Default theme</Label>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="inline-flex rounded-md border border-input overflow-hidden">
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${defaultTheme === 'LIGHT' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                    onClick={() => setDefaultTheme('LIGHT')}
+                  >
+                    Light
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${defaultTheme === 'DARK' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                    onClick={() => setDefaultTheme('DARK')}
+                  >
+                    Dark
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${defaultTheme === 'AUTO' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                    onClick={() => setDefaultTheme('AUTO')}
+                  >
+                    Auto
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Default colour theme for new visitors. Auto uses the visitor&apos;s system preference.</p>
+            </div>
+
+            <div className="pt-3 border-t space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="allowThemeToggle">Allow clients and users to change theme</Label>
+                <Switch
+                  id="allowThemeToggle"
+                  checked={allowThemeToggle}
+                  onCheckedChange={setAllowThemeToggle}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">When disabled, the theme toggle button is hidden throughout the app and all users see the default theme above.</p>
             </div>
           </div>
         </CardContent>

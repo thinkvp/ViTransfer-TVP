@@ -605,7 +605,7 @@ export default function CommentInput({
             open={fullscreenUploadNotSupportedOpen}
             onOpenChange={setFullscreenUploadNotSupportedOpen}
           >
-            <DialogContent portalContainer={dialogPortalContainer} className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-md">
+            <DialogContent portalContainer={dialogPortalContainer} className="max-w-[95vw] sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>File uploads are not supported in fullscreen mode</DialogTitle>
                 <DialogDescription className="text-muted-foreground">

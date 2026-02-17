@@ -522,7 +522,7 @@ export default function NewProjectPage() {
               </div>
 
               <Dialog open={createClientOpen} onOpenChange={setCreateClientOpen}>
-                <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-2xl">
+                <DialogContent className="max-w-[95vw] sm:max-w-2xl">
                   <DialogHeader>
                     <DialogTitle>Create Client</DialogTitle>
                     <DialogDescription>Create a client record and default recipients</DialogDescription>

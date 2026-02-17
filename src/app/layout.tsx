@@ -111,11 +111,11 @@ export default async function RootLayout({
 }>) {
   noStore()
 
-  // Read accent colour from database for CSS override injection.
+  // Read accent colour and theme settings from database.
   const brandingSettings = await prisma.settings
     .findUnique({
       where: { id: 'default' },
-      select: { accentColor: true, accentTextMode: true },
+      select: { accentColor: true, accentTextMode: true, defaultTheme: true, allowThemeToggle: true },
     })
     .catch(() => null)
 
@@ -124,6 +124,9 @@ export default async function RootLayout({
     : brandingSettings?.accentTextMode === 'DARK'
       ? `:root, .dark { --primary-foreground: 220 14% 7%; }`
       : null
+
+  const defaultTheme = brandingSettings?.defaultTheme || 'DARK'
+  const allowThemeToggle = brandingSettings?.allowThemeToggle ?? true
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -136,14 +139,31 @@ export default async function RootLayout({
             __html: `
               (function() {
                 try {
+                  window.__THEME_CONFIG__ = { defaultTheme: ${JSON.stringify(defaultTheme)}, allowToggle: ${JSON.stringify(allowThemeToggle)} };
                   var theme = localStorage.getItem('theme');
+                  if (!${JSON.stringify(allowThemeToggle)}) {
+                    // Theme toggle disabled — always use the admin-configured default
+                    localStorage.removeItem('theme');
+                    theme = null;
+                  }
                   if (theme === 'dark') {
                     document.documentElement.classList.add('dark');
                   } else if (theme === 'light') {
                     document.documentElement.classList.remove('dark');
                   } else {
-                    // No saved preference: default to dark
-                    document.documentElement.classList.add('dark');
+                    // No saved preference: use admin default
+                    var def = ${JSON.stringify(defaultTheme)};
+                    if (def === 'AUTO') {
+                      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                        document.documentElement.classList.add('dark');
+                      } else {
+                        document.documentElement.classList.remove('dark');
+                      }
+                    } else if (def === 'LIGHT') {
+                      document.documentElement.classList.remove('dark');
+                    } else {
+                      document.documentElement.classList.add('dark');
+                    }
                   }
                 } catch (e) {}
               })();

@@ -160,7 +160,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       </div>
       ${data.unsubscribeUrl ? `
         <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="color:${data.accentColor || EMAIL_THEME.accent}; text-decoration:underline;">Unsubscribe</a>
+          Don't want to receive updates for this project? <a href="${escapeHtml(data.unsubscribeUrl)}" style="text-decoration:underline;">Unsubscribe</a>
         </p>
       ` : ''}
       ${renderEmailFooterNotice(data.emailCustomFooterText)}

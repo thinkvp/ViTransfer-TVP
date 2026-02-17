@@ -22,6 +22,7 @@ import {
 } from '@/lib/sales/admin-api'
 import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { ClientOption, InvoiceStatus, ProjectOption, SalesLineItem, SalesPayment, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
+import { invoiceStatusBadgeClass, invoiceStatusLabel } from '@/lib/sales/badge'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
   calcLineSubtotalCents,
@@ -39,36 +40,6 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
-
-function statusBadgeClass(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'OVERDUE':
-      return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
-    case 'PARTIALLY_PAID':
-      return 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20'
-    case 'PAID':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-  }
-}
-
-function statusLabel(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'OVERDUE':
-      return 'Overdue'
-    case 'PARTIALLY_PAID':
-      return 'Partially Paid'
-    case 'PAID':
-      return 'Paid'
-  }
-}
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -444,7 +415,7 @@ export default function InvoiceDetailPage() {
   }, [dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
 
   const invoiceStatusDisplay = useMemo((): string => {
-    if (effectiveStatus !== 'PAID') return statusLabel(effectiveStatus)
+    if (effectiveStatus !== 'PAID') return invoiceStatusLabel(effectiveStatus)
 
     const entries: Array<{ ymd: string; amountCents: number }> = []
 
@@ -616,8 +587,8 @@ export default function InvoiceDetailPage() {
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl font-semibold">{invoice.invoiceNumber}</h2>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(effectiveStatus)}`}>
-              {statusLabel(effectiveStatus)}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${invoiceStatusBadgeClass(effectiveStatus)}`}>
+              {invoiceStatusLabel(effectiveStatus)}
             </span>
           </div>
           <p className="text-sm text-muted-foreground">View and edit invoice details.</p>

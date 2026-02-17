@@ -469,7 +469,7 @@ export default function UsersPage() {
         </div>
 
         <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-          <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{roleDialogMode === 'create' ? 'Add New Role' : 'Edit Role'}</DialogTitle>
               <DialogDescription>
@@ -592,7 +592,7 @@ export default function UsersPage() {
                             className={cn(
                               'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border transition-colors',
                               selected
-                                ? cn(projectStatusBadgeClass(value), 'border-2 font-semibold')
+                                ? cn(projectStatusBadgeClass(value), 'font-semibold')
                                 : 'bg-muted text-muted-foreground border border-border opacity-70 hover:opacity-100'
                             )}
                             onClick={() => {

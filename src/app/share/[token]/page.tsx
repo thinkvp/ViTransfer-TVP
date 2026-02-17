@@ -1221,12 +1221,12 @@ export default function SharePage() {
                         mainCompanyDomain ? (
                           <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[100px] flex-shrink-0 opacity-80 hover:opacity-100 transition-opacity">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                            <img src={logoSrc} alt="Company logo" className="w-full max-h-10 h-auto object-contain" />
                           </a>
                         ) : (
                           <div className="max-w-[100px] flex-shrink-0 opacity-80">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+                            <img src={logoSrc} alt="Company logo" className="w-full max-h-10 h-auto object-contain" />
                           </div>
                         )
                       ) : null}
@@ -1766,12 +1766,12 @@ function ShareFeedbackGrid({
           {mainCompanyDomain ? (
             <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer" className="block max-w-[200px]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+              <img src={logoSrc} alt="Company logo" className="w-full max-h-16 h-auto object-contain" />
             </a>
           ) : (
             <div className="max-w-[200px]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logoSrc} alt="Company logo" className="w-full h-auto object-contain" />
+              <img src={logoSrc} alt="Company logo" className="w-full max-h-16 h-auto object-contain" />
             </div>
           )}
         </div>

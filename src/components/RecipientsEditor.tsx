@@ -555,7 +555,7 @@ export function RecipientsEditor({
             if (!open) setNewAlsoAddToClient(false)
           }}
         >
-          <DialogContent className="bg-background dark:bg-card border-border text-foreground dark:text-card-foreground max-w-[95vw] sm:max-w-lg">
+          <DialogContent className="max-w-[95vw] sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{addButtonLabel}</DialogTitle>
             </DialogHeader>

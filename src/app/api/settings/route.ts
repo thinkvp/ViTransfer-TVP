@@ -137,6 +137,8 @@ export async function PATCH(request: NextRequest) {
       accentTextMode,
       emailHeaderColor,
       emailHeaderTextMode,
+      defaultTheme,
+      allowThemeToggle,
     } = body
 
     // SECURITY: Validate auto-close settings
@@ -430,6 +432,8 @@ export async function PATCH(request: NextRequest) {
       accentTextMode: accentTextMode === 'LIGHT' || accentTextMode === 'DARK' ? accentTextMode : undefined,
       emailHeaderColor: typeof emailHeaderColor === 'string' ? (emailHeaderColor.trim() || null) : emailHeaderColor,
       emailHeaderTextMode: emailHeaderTextMode === 'LIGHT' || emailHeaderTextMode === 'DARK' ? emailHeaderTextMode : undefined,
+      defaultTheme: defaultTheme === 'LIGHT' || defaultTheme === 'DARK' || defaultTheme === 'AUTO' ? defaultTheme : undefined,
+      allowThemeToggle: typeof allowThemeToggle === 'boolean' ? allowThemeToggle : undefined,
     }
 
     // Only update password if it's not the placeholder

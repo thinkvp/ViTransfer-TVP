@@ -8,7 +8,13 @@ import { useEffect, useState } from 'react'
  * stays in sync when the ThemeToggle (or anything else) flips theme.
  */
 export function useTheme(): { theme: 'light' | 'dark'; isDark: boolean } {
-  const [isDark, setIsDark] = useState(true) // default dark (matches ThemeToggle default)
+  // Initial value: check the DOM class if available, else assume dark
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.classList.contains('dark')
+    }
+    return true // SSR fallback
+  })
 
   useEffect(() => {
     const root = document.documentElement

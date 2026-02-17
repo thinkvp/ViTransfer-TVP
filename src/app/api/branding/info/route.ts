@@ -31,6 +31,8 @@ export async function GET(request: NextRequest) {
         mainCompanyDomain: true,
         companyName: true,
         accentColor: true,
+        defaultTheme: true,
+        allowThemeToggle: true,
       },
     })
 
@@ -55,10 +57,12 @@ export async function GET(request: NextRequest) {
       mainCompanyDomain: settings?.mainCompanyDomain || null,
       companyName: settings?.companyName || null,
       accentColor: settings?.accentColor || null,
+      defaultTheme: settings?.defaultTheme || 'DARK',
+      allowThemeToggle: settings?.allowThemeToggle ?? true,
     })
     response.headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120')
     return response
   } catch {
-    return NextResponse.json({ hasLogo: false, hasDarkLogo: false, mainCompanyDomain: null, companyName: null, accentColor: null })
+    return NextResponse.json({ hasLogo: false, hasDarkLogo: false, mainCompanyDomain: null, companyName: null, accentColor: null, defaultTheme: 'DARK', allowThemeToggle: true })
   }
 }

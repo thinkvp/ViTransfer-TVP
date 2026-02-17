@@ -19,6 +19,10 @@ import { cn } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
 import { centsToDollars, formatMoney, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
+import {
+  invoiceStatusBadgeClass, invoiceStatusLabel,
+  quoteStatusBadgeClass, quoteStatusLabel,
+} from '@/lib/sales/badge'
 import { fetchSalesRollup } from '@/lib/sales/admin-api'
 import type { SalesRollupPaymentRow, SalesRollupResponse } from '@/lib/sales/admin-api'
 import {
@@ -57,62 +61,6 @@ type ClientProjectRow = {
 
 type ProjectSortKey = 'title' | 'status' | 'videos' | 'versions' | 'comments' | 'createdAt' | 'updatedAt'
 type ProjectSortDirection = 'asc' | 'desc'
-
-function quoteStatusBadgeClass(status: QuoteStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'ACCEPTED':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-    case 'CLOSED':
-      return 'bg-muted text-muted-foreground border border-border'
-  }
-}
-
-function quoteStatusLabel(status: QuoteStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'ACCEPTED':
-      return 'Accepted'
-    case 'CLOSED':
-      return 'Closed'
-  }
-}
-
-function invoiceStatusBadgeClass(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'OVERDUE':
-      return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
-    case 'PARTIALLY_PAID':
-      return 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20'
-    case 'PAID':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-  }
-}
-
-function invoiceStatusLabel(status: InvoiceStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'OVERDUE':
-      return 'Overdue'
-    case 'PARTIALLY_PAID':
-      return 'Partially Paid'
-    case 'PAID':
-      return 'Paid'
-  }
-}
 
 export default function ClientDetailPage() {
   const params = useParams()

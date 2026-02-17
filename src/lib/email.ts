@@ -276,7 +276,7 @@ export function renderEmailShell({
       <img
         src="${escapeHtml(companyLogoUrl)}"
         alt="${escapeHtml(companyName)} logo"
-        style="display:block; margin:0 auto; width:auto; max-width:100%; height:auto; border:0; outline:none; text-decoration:none;"
+        style="display:block; margin:0 auto; width:auto; max-width:280px; max-height:120px; height:auto; border:0; outline:none; text-decoration:none;"
       />
       ${mainCompanyDomain ? `</a>` : ''}
       <div style="height: 20px; line-height: 20px;">&nbsp;</div>
@@ -1041,7 +1041,7 @@ export async function renderCommentNotificationEmail({
 
       ${unsubscribeUrl ? `
         <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
-          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="color:${resolved.accentColor}; text-decoration:underline;">Unsubscribe</a>
+          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="text-decoration:underline;">Unsubscribe</a>
         </p>
       ` : ''}
 
@@ -1487,7 +1487,7 @@ export async function renderAdminInvoicePaidEmail({
       ${(publicInvoiceUrl || projectAdminUrl) ? `
         <div style="text-align: center; margin: 28px 0;">
           ${publicInvoiceUrl ? `<a href="${escapeHtml(publicInvoiceUrl)}" style="${primaryButtonStyle}">View Paid Invoice</a>` : ''}
-          ${projectAdminUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(projectAdminUrl)}" style="font-size: 14px; color: ${resolved.accentColor}; text-decoration: none;">Open Project</a></div>` : ''}
+          ${projectAdminUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(projectAdminUrl)}" style="font-size: 14px; text-decoration: none;">Open Project</a></div>` : ''}
         </div>
       ` : ''}
     `,
@@ -1645,7 +1645,7 @@ export async function renderAdminQuoteAcceptedEmail({
       ${(publicQuoteUrl || adminQuoteUrl) ? `
         <div style="text-align: center; margin: 28px 0;">
           ${publicQuoteUrl ? `<a href="${escapeHtml(publicQuoteUrl)}" style="${primaryButtonStyle}">View Quote</a>` : ''}
-          ${adminQuoteUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(adminQuoteUrl)}" style="font-size: 14px; color: ${resolved.accentColor}; text-decoration: none;">Open in Admin</a></div>` : ''}
+          ${adminQuoteUrl ? `<div style="margin-top: 12px;"><a href="${escapeHtml(adminQuoteUrl)}" style="font-size: 14px; text-decoration: none;">Open in Admin</a></div>` : ''}
         </div>
       ` : ''}
     `,
@@ -2009,7 +2009,7 @@ export async function renderSalesInvoiceOverdueReminderEmail({
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
         If the button doesn't work, copy and paste this link into your browser:<br />
-        <a href="${escapeHtml(shareUrl)}" style="color: ${resolved.accentColor}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+        <a href="${escapeHtml(shareUrl)}" style="text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,
   }).trim()
@@ -2077,7 +2077,7 @@ export async function renderSalesQuoteExpiryReminderEmail({
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
         If the button doesn't work, copy and paste this link into your browser:<br />
-        <a href="${escapeHtml(shareUrl)}" style="color: ${resolved.accentColor}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
+        <a href="${escapeHtml(shareUrl)}" style="text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,
   }).trim()

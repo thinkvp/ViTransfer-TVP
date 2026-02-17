@@ -5,6 +5,23 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+/** Read server-injected theme config from the inline script in layout.tsx */
+function getThemeConfig(): { defaultTheme: string; allowToggle: boolean } {
+  if (typeof window !== 'undefined' && (window as any).__THEME_CONFIG__) {
+    return (window as any).__THEME_CONFIG__
+  }
+  return { defaultTheme: 'DARK', allowToggle: true }
+}
+
+function resolveDefault(defaultTheme: string): 'light' | 'dark' {
+  if (defaultTheme === 'LIGHT') return 'light'
+  if (defaultTheme === 'AUTO') {
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
+    return 'light'
+  }
+  return 'dark'
+}
+
 export default function ThemeToggle({
   buttonClassName,
   iconClassName,
@@ -14,15 +31,31 @@ export default function ThemeToggle({
 }) {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark')
   const [mounted, setMounted] = useState(false)
+  const [allowed, setAllowed] = useState(true)
 
   useEffect(() => {
     setMounted(true)
 
-    // Check if user has a saved preference, otherwise default to dark
+    const config = getThemeConfig()
+    setAllowed(config.allowToggle)
+
+    if (!config.allowToggle) {
+      // Theme toggle disabled — apply admin default and remove saved preference
+      localStorage.removeItem('theme')
+      const resolved = resolveDefault(config.defaultTheme)
+      setTheme(resolved)
+      if (resolved === 'dark') {
+        document.documentElement.classList.add('dark')
+      } else {
+        document.documentElement.classList.remove('dark')
+      }
+      return
+    }
+
+    // Check if user has a saved preference, otherwise use admin default
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
 
     if (savedTheme) {
-      // User has manually set a preference
       setTheme(savedTheme)
       if (savedTheme === 'dark') {
         document.documentElement.classList.add('dark')
@@ -30,9 +63,13 @@ export default function ThemeToggle({
         document.documentElement.classList.remove('dark')
       }
     } else {
-      // No saved preference: default to dark
-      setTheme('dark')
-      document.documentElement.classList.add('dark')
+      const resolved = resolveDefault(config.defaultTheme)
+      setTheme(resolved)
+      if (resolved === 'dark') {
+        document.documentElement.classList.add('dark')
+      } else {
+        document.documentElement.classList.remove('dark')
+      }
     }
   }, [])
 
@@ -49,6 +86,9 @@ export default function ThemeToggle({
       document.documentElement.classList.remove('dark')
     }
   }
+
+  // Don't render if theme toggle is disabled
+  if (!allowed) return null
 
   // Avoid hydration mismatch
   if (!mounted) {

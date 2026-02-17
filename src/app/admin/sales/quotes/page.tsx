@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { deleteSalesQuote, fetchSalesQuote, fetchSalesSettings, listSalesQuotes, patchSalesQuote } from '@/lib/sales/admin-api'
 import type { SalesQuoteWithVersion } from '@/lib/sales/admin-api'
 import type { QuoteStatus, SalesSettings } from '@/lib/sales/types'
+import { quoteStatusBadgeClass, quoteStatusLabel } from '@/lib/sales/badge'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
@@ -31,32 +32,6 @@ type QuoteRow = {
   quote: SalesQuoteWithVersion
   effectiveStatus: QuoteStatus
   totalCents: number
-}
-
-function statusBadgeClass(status: QuoteStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20'
-    case 'SENT':
-      return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
-    case 'ACCEPTED':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-    case 'CLOSED':
-      return 'bg-muted text-muted-foreground border border-border'
-  }
-}
-
-function statusLabel(status: QuoteStatus): string {
-  switch (status) {
-    case 'OPEN':
-      return 'Open'
-    case 'SENT':
-      return 'Sent'
-    case 'ACCEPTED':
-      return 'Accepted'
-    case 'CLOSED':
-      return 'Closed'
-  }
 }
 
 export default function SalesQuotesPage() {
@@ -418,7 +393,7 @@ export default function SalesQuotesPage() {
                           })
                         }}
                       >
-                        {statusLabel(s)}
+                        {quoteStatusLabel(s)}
                       </DropdownMenuCheckboxItem>
                     )
                   })}
@@ -490,8 +465,8 @@ export default function SalesQuotesPage() {
                           <td className="px-3 py-2 tabular-nums">{formatDate(row.quote.issueDate)}</td>
                           <td className="px-3 py-2 tabular-nums">{row.quote.validUntil ? formatDate(row.quote.validUntil) : '—'}</td>
                           <td className="px-3 py-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${statusBadgeClass(row.effectiveStatus)}`}>
-                              {statusLabel(row.effectiveStatus)}
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${quoteStatusBadgeClass(row.effectiveStatus)}`}>
+                              {quoteStatusLabel(row.effectiveStatus)}
                             </span>
                           </td>
                           <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>

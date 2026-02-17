@@ -103,32 +103,32 @@ function typeColorClasses(type: string): { pill: string; dot: string } {
   switch (type) {
     case 'PRE_PRODUCTION':
       return {
-        pill: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20',
+        pill: 'bg-blue-500 text-white',
         dot: 'bg-blue-500',
       }
     case 'SHOOTING':
       return {
-        pill: 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20',
+        pill: 'bg-amber-500 text-white',
         dot: 'bg-amber-500',
       }
     case 'DUE_DATE':
       return {
-        pill: 'bg-red-500/10 text-red-700 dark:text-red-300 border border-red-500/20',
+        pill: 'bg-red-500 text-white',
         dot: 'bg-red-500',
       }
     case 'OTHER':
       return {
-        pill: 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20',
+        pill: 'bg-purple-500 text-white',
         dot: 'bg-purple-500',
       }
     case 'SALES':
       return {
-        pill: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20',
+        pill: 'bg-emerald-500 text-white',
         dot: 'bg-emerald-500',
       }
     default:
       return {
-        pill: 'bg-foreground/5 text-foreground/80 border border-foreground/10',
+        pill: 'bg-foreground/40 text-white',
         dot: 'bg-foreground/40',
       }
   }

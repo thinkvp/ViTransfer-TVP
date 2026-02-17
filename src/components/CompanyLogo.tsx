@@ -13,6 +13,8 @@ interface CompanyLogoProps {
   imgClassName?: string
   /** Max width constraint for the image */
   maxWidth?: number
+  /** Max height constraint for the image (default 80px) */
+  maxHeight?: number
   /** Whether to render as a block-level container (default true) */
   block?: boolean
   /** Whether a separate dark-mode logo has been configured */
@@ -30,6 +32,7 @@ export function CompanyLogo({
   className = '',
   imgClassName = '',
   maxWidth,
+  maxHeight = 80,
   block = true,
   hasDarkLogo = false,
 }: CompanyLogoProps) {
@@ -48,6 +51,7 @@ export function CompanyLogo({
         height: 'auto',
         objectFit: 'contain',
         ...(maxWidth ? { maxWidth: `${maxWidth}px` } : {}),
+        ...(maxHeight ? { maxHeight: `${maxHeight}px` } : {}),
       }}
     />
   )

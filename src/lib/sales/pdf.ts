@@ -188,7 +188,7 @@ async function tryEmbedCompanyLogo(doc: any, opts?: { baseUrl?: string }): Promi
         const image = kind === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes)
         const dims = image.scale(1)
 
-        const drawHeight = 42
+        const drawHeight = 46
         const scale = drawHeight / dims.height
         const drawWidth = dims.width * scale
 
