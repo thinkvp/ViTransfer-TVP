@@ -722,6 +722,15 @@ export async function PATCH(
         }
 
         updateData.authMode = validatedBody.authMode
+
+        // Clear stored password when switching to a mode that doesn't use passwords
+        if (validatedBody.authMode === 'OTP' || validatedBody.authMode === 'NONE') {
+          if (validatedBody.sharePassword === undefined) {
+            // Only clear if password wasn't explicitly provided in this request
+            updateData.sharePassword = null
+            passwordWasChanged = currentProject.sharePassword !== null
+          }
+        }
       }
 
       // Handle guest mode

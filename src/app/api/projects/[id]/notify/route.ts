@@ -65,6 +65,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         title: true,
         slug: true,
         sharePassword: true,
+        authMode: true,
         status: true,
         enablePhotos: true,
         useFullTimecode: true,
@@ -456,7 +457,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     // Generate share URL
     const shareUrl = await generateShareUrl(project.slug)
-    const isPasswordProtected = !!project.sharePassword
+    const isPasswordProtected = (project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && !!project.sharePassword
 
     const readyAlbums =
       project.enablePhotos === false

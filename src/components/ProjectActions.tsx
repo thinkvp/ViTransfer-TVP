@@ -102,8 +102,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     [projectRecipients]
   )
 
-  // Check if project is password protected
-  const isPasswordProtected = (project as any).sharePassword !== null &&
+  // Check if project is password protected (based on authMode, not just password existence)
+  const projectAuthMode = (project as any).authMode as string | undefined
+  const isPasswordProtected = (projectAuthMode === 'PASSWORD' || projectAuthMode === 'BOTH') &&
+                               (project as any).sharePassword !== null &&
                                (project as any).sharePassword !== undefined &&
                                (project as any).sharePassword !== ''
 

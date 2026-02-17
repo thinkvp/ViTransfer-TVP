@@ -304,9 +304,9 @@ export default function ProjectSettingsPage() {
   // Track if initial load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
 
-  // Clear password when switching to NONE mode
+  // Clear password when switching to a non-password mode (OTP or NONE)
   useEffect(() => {
-    if (initialLoadComplete && authMode === 'NONE') {
+    if (initialLoadComplete && (authMode === 'NONE' || authMode === 'OTP')) {
       setSharePassword('')
     }
   }, [authMode, initialLoadComplete])

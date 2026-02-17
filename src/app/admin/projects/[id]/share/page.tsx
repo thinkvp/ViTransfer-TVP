@@ -604,7 +604,7 @@ export default function AdminSharePage() {
                       defaultQuality={defaultQuality}
                       projectTitle={project.title}
                       clientName={project.clientName}
-                      isPasswordProtected={!!project.sharePassword}
+                      isPasswordProtected={(project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && !!project.sharePassword}
                       watermarkEnabled={project.watermarkEnabled}
                       activeVideoName={activeVideoName}
                       initialSeekTime={initialSeekTime}
@@ -851,7 +851,7 @@ function AdminShareFeedbackGrid({
     initialComments: serverComments as any,
     videos: readyVideos as any,
     clientEmail: project.recipients?.[0]?.email,
-    isPasswordProtected: Boolean(project.sharePassword),
+    isPasswordProtected: (project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && Boolean(project.sharePassword),
     adminUser,
     recipients: (project.recipients || []) as any,
     clientName: clientDisplayName,
@@ -931,7 +931,7 @@ function AdminShareFeedbackGrid({
               defaultQuality={defaultQuality}
               projectTitle={project.title}
               clientName={project.clientName}
-              isPasswordProtected={!!project.sharePassword}
+              isPasswordProtected={(project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && !!project.sharePassword}
               watermarkEnabled={project.watermarkEnabled}
               activeVideoName={activeVideoName}
               initialSeekTime={initialSeekTime}
@@ -1033,7 +1033,7 @@ function AdminShareFeedbackGrid({
               companyName={companyName}
               clientCompanyName={project.companyName}
               smtpConfigured={project.smtpConfigured}
-              isPasswordProtected={!!project.sharePassword}
+              isPasswordProtected={(project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && !!project.sharePassword}
               adminUser={adminUser}
               recipients={project.recipients || []}
               shareToken={null}
