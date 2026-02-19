@@ -33,8 +33,8 @@ export async function generateMetadata(
 
 type DocType = 'QUOTE' | 'INVOICE'
 
-type QuoteStatus = 'OPEN' | 'SENT' | 'CLOSED' | 'ACCEPTED'
-type InvoiceStatus = 'OPEN' | 'SENT' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID'
+type QuoteStatus = 'OPEN' | 'SENT' | 'OPENED' | 'CLOSED' | 'ACCEPTED'
+type InvoiceStatus = 'OPEN' | 'SENT' | 'OPENED' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID'
 
 function safeString(v: unknown): string {
   return typeof v === 'string' ? v : ''
@@ -292,7 +292,7 @@ export default async function SalesDocPublicViewPage(
   const clientAddress = (liveClientAddress || safeString(doc?.clientAddress)).trim()
 
   // Allow accepting quotes that are OPEN or SENT (not CLOSED, ACCEPTED, or expired)
-  const canAcceptQuote = type === 'QUOTE' && (effectiveStatus === 'OPEN' || effectiveStatus === 'SENT')
+  const canAcceptQuote = type === 'QUOTE' && (effectiveStatus === 'OPEN' || effectiveStatus === 'SENT' || effectiveStatus === 'OPENED')
   const canPayInvoice = type === 'INVOICE'
     && Boolean(stripeGateway?.enabled)
     && effectiveStatus !== 'PAID'

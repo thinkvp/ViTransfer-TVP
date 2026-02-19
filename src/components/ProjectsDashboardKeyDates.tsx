@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, Trash2, Pencil, Bell, Check, X } from 'lucide-react'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { useAuth } from '@/components/AuthProvider'
@@ -308,28 +308,39 @@ export default function ProjectsDashboardKeyDates() {
 
   const [salesByMonth, setSalesByMonth] = useState<Record<string, SalesCalendarItemRow[]>>({})
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const result = await apiJson<KeyDatesResponse>('/api/projects/key-dates')
-        setData(result)
+  const loadKeyDates = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const result = await apiJson<KeyDatesResponse>('/api/projects/key-dates')
+      setData(result)
 
-        // If server's "today" differs from local, align the default month to the server date.
-        if (result?.today) {
-          const serverToday = parseYmdToDateLocal(result.today)
-          setMonthCursor(new Date(serverToday.getFullYear(), serverToday.getMonth(), 1))
-        }
-      } catch (e: any) {
-        setError(e?.message || 'Failed to load key dates')
-      } finally {
-        setLoading(false)
+      // If server's "today" differs from local, align the default month to the server date.
+      if (result?.today) {
+        const serverToday = parseYmdToDateLocal(result.today)
+        setMonthCursor(new Date(serverToday.getFullYear(), serverToday.getMonth(), 1))
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load key dates')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadKeyDates()
+  }, [loadKeyDates])
+
+  // Refetch when tab regains focus so stale data (e.g. renamed clients) is refreshed
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadKeyDates()
       }
     }
-
-    load()
-  }, [])
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [loadKeyDates])
 
   const monthKey = useMemo(() => ymForDateLocal(monthCursor), [monthCursor])
 

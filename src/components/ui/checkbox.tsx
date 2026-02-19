@@ -31,7 +31,7 @@ const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
       )}
       {...props}
     >
-      {checked ? <Check className="h-3.5 w-3.5" /> : null}
+      {checked ? <Check className="h-3.5 w-3.5 pointer-events-none" /> : null}
     </button>
   )
 )

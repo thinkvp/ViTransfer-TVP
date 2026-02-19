@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiSystemAdmin } from '@/lib/auth'
+import { requireApiAdmin } from '@/lib/auth'
 import { listWebPushSubscriptionsForUser } from '@/lib/admin-web-push'
 import { Prisma } from '@prisma/client'
 
@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
-  const user = await requireApiSystemAdmin(request)
+  const user = await requireApiAdmin(request)
   if (user instanceof Response) return user
 
   try {

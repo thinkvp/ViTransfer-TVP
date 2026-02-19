@@ -409,10 +409,11 @@ export default function InvoiceDetailPage() {
         dueDate: dueDate || invoice?.dueDate || null,
         totalCents,
         paidCents,
+        hasOpenedEmail: Boolean(invoice?.hasOpenedEmail),
       },
       nowMs
     )
-  }, [dueDate, invoice?.dueDate, invoice?.sentAt, nowIso, paidCents, status, totalCents])
+  }, [dueDate, invoice?.dueDate, invoice?.hasOpenedEmail, invoice?.sentAt, nowIso, paidCents, status, totalCents])
 
   const invoiceStatusDisplay = useMemo((): string => {
     if (effectiveStatus !== 'PAID') return invoiceStatusLabel(effectiveStatus)

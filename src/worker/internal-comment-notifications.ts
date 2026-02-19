@@ -110,7 +110,15 @@ export async function processInternalCommentNotifications() {
       }
       const group = projectGroups[row.projectId]
       if (group) {
-        usersById.get(user.id)!.projects.push(group)
+        const recipientEmail = user.email.toLowerCase()
+        // Exclude comments authored by this recipient — they shouldn't receive
+        // summaries of their own comments (mirrors the share page behaviour).
+        const filteredComments = group.comments.filter(
+          (c: any) => !c.authorEmail || c.authorEmail.toLowerCase() !== recipientEmail
+        )
+        if (filteredComments.length > 0) {
+          usersById.get(user.id)!.projects.push({ ...group, comments: filteredComments })
+        }
       }
     }
 
@@ -140,6 +148,7 @@ export async function processInternalCommentNotifications() {
             period,
             companyLogoUrl: companyLogoUrl || undefined,
             mainCompanyDomain: emailSettings.mainCompanyDomain,
+            accentColor: emailSettings.accentColor || undefined,
             accentTextMode: emailSettings.accentTextMode || undefined,
             emailHeaderColor: emailSettings.emailHeaderColor || undefined,
             emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,

@@ -41,7 +41,14 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
   const row = await prisma.salesQuote.findUnique({ where: { id } })
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const res = NextResponse.json({ quote: salesQuoteFromDb(row as any) })
+  const opened = await prisma.salesEmailTracking.findFirst({
+    where: { type: 'QUOTE', docId: id, openedAt: { not: null } },
+    select: { id: true },
+  }).catch(() => null)
+
+  const quote = { ...salesQuoteFromDb(row as any), hasOpenedEmail: Boolean(opened) }
+
+  const res = NextResponse.json({ quote })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }

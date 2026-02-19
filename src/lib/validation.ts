@@ -167,9 +167,6 @@ export const createProjectSchema = z.object({
     )
     .max(200)
     .optional(),
-  // Legacy single-recipient inputs (kept for backwards compatibility)
-  recipientEmail: emailSchema.optional().or(z.literal('')),
-  recipientName: safeStringSchema(0, 255).optional(),
   sharePassword: z.string()
     .min(8, 'Share password must be at least 8 characters')
     .max(255, 'Share password must not exceed 255 characters')

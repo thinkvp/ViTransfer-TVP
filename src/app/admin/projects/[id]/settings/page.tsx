@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -127,6 +127,7 @@ export default function ProjectSettingsPage() {
   const [enablePhotos, setEnablePhotos] = useState(false)
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string }>>([])
+  const clientSearchRef = useRef<HTMLDivElement>(null)
   const [clientsLoading, setClientsLoading] = useState(false)
   const [enableRevisions, setEnableRevisions] = useState(false)
   const [maxRevisions, setMaxRevisions] = useState<number | ''>('')
@@ -291,6 +292,19 @@ export default function ProjectSettingsPage() {
     } finally {
       setClientsLoading(false)
     }
+  }, [])
+
+  // Close client suggestions dropdown when clicking outside
+  useEffect(() => {
+    function handlePointerDown(e: PointerEvent) {
+      const container = clientSearchRef.current
+      if (!container) return
+      if (!container.contains(e.target as Node)) {
+        setClientSuggestions([])
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
   }, [])
 
   useEffect(() => {
@@ -631,7 +645,7 @@ export default function ProjectSettingsPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="companyName">Company/Brand Name</Label>
-                  <div className="relative">
+                  <div className="relative" ref={clientSearchRef}>
                     <Input
                       id="companyName"
                       type="text"

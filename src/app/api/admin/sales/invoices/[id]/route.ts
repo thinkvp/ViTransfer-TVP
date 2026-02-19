@@ -69,7 +69,14 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
   const row = await prisma.salesInvoice.findUnique({ where: { id } })
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const res = NextResponse.json({ invoice: salesInvoiceFromDb(row as any) })
+  const opened = await prisma.salesEmailTracking.findFirst({
+    where: { type: 'INVOICE', docId: id, openedAt: { not: null } },
+    select: { id: true },
+  }).catch(() => null)
+
+  const invoice = { ...salesInvoiceFromDb(row as any), hasOpenedEmail: Boolean(opened) }
+
+  const res = NextResponse.json({ invoice })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }

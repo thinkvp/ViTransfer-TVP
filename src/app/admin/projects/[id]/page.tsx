@@ -88,16 +88,6 @@ export default function ProjectPage() {
 
   useEffect(() => {
     setNowIso(new Date().toISOString())
-
-    const onFocus = () => {
-      setNowIso(new Date().toISOString())
-      setSalesTick((v) => v + 1)
-    }
-
-    window.addEventListener('focus', onFocus)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-    }
   }, [])
 
   useEffect(() => {
@@ -143,7 +133,7 @@ export default function ProjectPage() {
   const quoteEffectiveStatus = useCallback(
     (q: SalesQuote): QuoteStatus => {
       const rollupStatus = salesRollup?.quoteEffectiveStatusById?.[q.id]
-      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'ACCEPTED' || rollupStatus === 'CLOSED') {
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OPENED' || rollupStatus === 'ACCEPTED' || rollupStatus === 'CLOSED') {
         return rollupStatus
       }
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
@@ -155,7 +145,7 @@ export default function ProjectPage() {
   const invoiceEffectiveStatus = useCallback(
     (inv: SalesInvoice): InvoiceStatus => {
       const rollupStatus = salesRollup?.invoiceRollupById?.[inv.id]?.effectiveStatus
-      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OPENED' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
         return rollupStatus
       }
       const totalCents = sumLineItemsTotal(inv.items, taxRatePercent)
@@ -172,6 +162,7 @@ export default function ProjectPage() {
           dueDate: inv.dueDate,
           totalCents,
           paidCents,
+          hasOpenedEmail: Boolean(inv.hasOpenedEmail),
         },
         nowMs
       )
@@ -211,6 +202,18 @@ export default function ProjectPage() {
       setLoading(false)
     }
   }, [id, router])
+
+  // Refetch project data when the window regains focus so stale data
+  // (e.g. a renamed client) is reflected immediately.
+  useEffect(() => {
+    const onFocus = () => {
+      setNowIso(new Date().toISOString())
+      setSalesTick((v) => v + 1)
+      fetchProject()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [fetchProject])
 
   const persistRecipients = useCallback(async (next: EditableRecipient[]) => {
     if (!canChangeProjectSettings) return

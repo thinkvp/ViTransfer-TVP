@@ -110,6 +110,38 @@ export async function GET(request: NextRequest) {
   const quotes = quoteRows.map((r) => salesQuoteFromDb(r as any))
 
   const invoiceIdList = invoices.map((i) => i.id)
+  const quoteIdList = quotes.map((q) => q.id)
+
+  const [openedInvoiceAgg, openedQuoteAgg] = await Promise.all([
+    invoiceIdList.length
+      ? prisma.salesEmailTracking.groupBy({
+          by: ['docId'],
+          where: {
+            type: 'INVOICE',
+            docId: { in: invoiceIdList },
+            openedAt: { not: null },
+          },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as any[]),
+    quoteIdList.length
+      ? prisma.salesEmailTracking.groupBy({
+          by: ['docId'],
+          where: {
+            type: 'QUOTE',
+            docId: { in: quoteIdList },
+            openedAt: { not: null },
+          },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as any[]),
+  ])
+
+  const hasOpenedInvoiceEmail = new Set((openedInvoiceAgg as any[]).map((g) => String(g?.docId ?? '').trim()).filter(Boolean))
+  const hasOpenedQuoteEmail = new Set((openedQuoteAgg as any[]).map((g) => String(g?.docId ?? '').trim()).filter(Boolean))
+
+  const invoicesWithTracking = invoices.map((inv) => ({ ...inv, hasOpenedEmail: hasOpenedInvoiceEmail.has(inv.id) }))
+  const quotesWithTracking = quotes.map((q) => ({ ...q, hasOpenedEmail: hasOpenedQuoteEmail.has(q.id) }))
 
   const paymentInvoiceConstraint = invoiceIds.length ? invoiceIds : projectId ? invoiceIdList : null
   const paymentRows = includePayments
@@ -226,6 +258,7 @@ export async function GET(request: NextRequest) {
         dueDate: inv.dueDate,
         totalCents: total,
         paidCents: paid,
+        hasOpenedEmail: hasOpenedInvoiceEmail.has(inv.id),
       },
       nowMs
     )
@@ -249,7 +282,14 @@ export async function GET(request: NextRequest) {
 
   const quoteEffectiveStatusById: Record<string, string> = {}
   for (const q of quotes) {
-    quoteEffectiveStatusById[q.id] = quoteEffectiveStatus({ status: q.status, validUntil: q.validUntil }, nowMs)
+    quoteEffectiveStatusById[q.id] = quoteEffectiveStatus(
+      {
+        status: q.status,
+        validUntil: q.validUntil,
+        hasOpenedEmail: hasOpenedQuoteEmail.has(q.id),
+      },
+      nowMs
+    )
   }
 
   const invoiceById = Object.fromEntries(invoices.map((i) => [i.id, i]))
@@ -310,7 +350,7 @@ export async function GET(request: NextRequest) {
   const stats = (() => {
     const openQuotes = quotes.filter((q) => {
       const st = quoteEffectiveStatusById[q.id]
-      return st === 'OPEN' || st === 'SENT'
+      return st === 'OPEN' || st === 'SENT' || st === 'OPENED'
     }).length
 
     const openQuoteDrafts = quotes.filter((q) => quoteEffectiveStatusById[q.id] === 'OPEN').length
@@ -331,8 +371,8 @@ export async function GET(request: NextRequest) {
 
   const res = NextResponse.json({
     taxRatePercent,
-    invoices,
-    quotes,
+    invoices: invoicesWithTracking,
+    quotes: quotesWithTracking,
     payments: unifiedPayments,
     invoiceRollupById,
     quoteEffectiveStatusById,

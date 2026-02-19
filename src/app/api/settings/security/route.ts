@@ -120,11 +120,6 @@ export async function PATCH(request: NextRequest) {
       maxProjectFilesPerProject,
     } = body
 
-    // Backward compatibility for older clients that may still send this name.
-    const legacyMaxVideoVersionsPerVideo = (body as any)?.maxVideoVersionsPerVideo
-    const resolvedMaxCommentsPerVideoVersion =
-      maxCommentsPerVideoVersion ?? legacyMaxVideoVersionsPerVideo
-
     // Validate required security fields
     if (sessionTimeoutValue !== undefined && sessionTimeoutValue !== null) {
       const timeoutVal = parseInt(sessionTimeoutValue, 10)
@@ -176,7 +171,7 @@ export async function PATCH(request: NextRequest) {
 
     try {
       validatePositiveInt(maxInternalCommentsPerProject, 'Max internal comments per project')
-      validatePositiveInt(resolvedMaxCommentsPerVideoVersion, 'Max comments per video version')
+      validatePositiveInt(maxCommentsPerVideoVersion, 'Max comments per video version')
       validatePositiveInt(maxProjectRecipients, 'Max recipients per project')
       validatePositiveInt(maxProjectFilesPerProject, 'Max project files per project')
     } catch (e) {
@@ -217,8 +212,8 @@ export async function PATCH(request: NextRequest) {
             ? parseInt(maxInternalCommentsPerProject, 10)
             : undefined,
         maxCommentsPerVideoVersion:
-          resolvedMaxCommentsPerVideoVersion !== undefined && resolvedMaxCommentsPerVideoVersion !== null && resolvedMaxCommentsPerVideoVersion !== ''
-            ? parseInt(resolvedMaxCommentsPerVideoVersion, 10)
+          maxCommentsPerVideoVersion !== undefined && maxCommentsPerVideoVersion !== null && maxCommentsPerVideoVersion !== ''
+            ? parseInt(maxCommentsPerVideoVersion, 10)
             : undefined,
         maxProjectRecipients:
           maxProjectRecipients !== undefined && maxProjectRecipients !== null && maxProjectRecipients !== ''
@@ -249,8 +244,8 @@ export async function PATCH(request: NextRequest) {
             ? parseInt(maxInternalCommentsPerProject, 10)
             : 250,
         maxCommentsPerVideoVersion:
-          resolvedMaxCommentsPerVideoVersion !== undefined && resolvedMaxCommentsPerVideoVersion !== null && resolvedMaxCommentsPerVideoVersion !== ''
-            ? parseInt(resolvedMaxCommentsPerVideoVersion, 10)
+          maxCommentsPerVideoVersion !== undefined && maxCommentsPerVideoVersion !== null && maxCommentsPerVideoVersion !== ''
+            ? parseInt(maxCommentsPerVideoVersion, 10)
             : 100,
         maxProjectRecipients:
           maxProjectRecipients !== undefined && maxProjectRecipients !== null && maxProjectRecipients !== ''

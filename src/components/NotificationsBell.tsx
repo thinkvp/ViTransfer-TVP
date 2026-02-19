@@ -2,10 +2,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell } from 'lucide-react'
+import { Bell, BellOff, BellRing } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { apiFetch } from '@/lib/api-client'
+import { apiFetch, apiJson, apiPost } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
 import { formatDateTime } from '@/lib/utils'
 
@@ -42,7 +42,7 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
   const projectName = typeof payload?.projectName === 'string' ? payload.projectName : undefined
 
   function isHiddenDetailKey(key: string): boolean {
-    if (key === '__payload' || key === '__link' || key === '__delivery') return true
+    if (key.startsWith('__')) return true
     const normalizedKey = key.toLowerCase().replace(/[_\-\s]/g, '')
     return normalizedKey === 'salesdocid' || normalizedKey === 'salesdoctype'
   }
@@ -86,6 +86,26 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
   return { payloadTitle, payloadMessage, projectName, lines }
 }
 
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length) as Uint8Array<ArrayBuffer>
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i)
+  return outputArray
+}
+
+async function getAdminSwRegistration(): Promise<ServiceWorkerRegistration | null> {
+  const regs = await navigator.serviceWorker.getRegistrations()
+  return regs.find((r) => r.scope?.includes('/admin')) || null
+}
+
+async function ensureAdminSwRegistration(): Promise<ServiceWorkerRegistration> {
+  const reg = await navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' })
+  await navigator.serviceWorker.ready
+  return reg
+}
+
 export default function NotificationsBell() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -100,6 +120,82 @@ export default function NotificationsBell() {
   const pollingRef = useRef<number | null>(null)
   const itemsRef = useRef<NotificationRow[]>([])
   const openRef = useRef(false)
+
+  // Browser push subscription state
+  const [pushSupported, setPushSupported] = useState(false)
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
+
+  const checkPushState = useCallback(async () => {
+    if (
+      typeof window === 'undefined' ||
+      !('serviceWorker' in navigator) ||
+      !('PushManager' in window) ||
+      !('Notification' in window)
+    ) {
+      setPushSupported(false)
+      return
+    }
+    // If we can't get the VAPID key the user lacks access; hide the toggle.
+    try {
+      await apiJson('/api/web-push/vapid-public-key')
+    } catch {
+      setPushSupported(false)
+      return
+    }
+    setPushSupported(true)
+    try {
+      const reg = await getAdminSwRegistration()
+      const sub = await reg?.pushManager.getSubscription()
+      setPushSubscribed(!!sub)
+    } catch {
+      setPushSubscribed(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    checkPushState()
+  }, [checkPushState])
+
+  async function togglePush() {
+    if (pushBusy) return
+    setPushBusy(true)
+    setPushError(null)
+    try {
+      if (pushSubscribed) {
+        const reg = await getAdminSwRegistration()
+        const sub = await reg?.pushManager.getSubscription()
+        if (sub) {
+          await sub.unsubscribe()
+          await apiPost('/api/web-push/unsubscribe', { endpoint: sub.endpoint })
+        }
+        setPushSubscribed(false)
+      } else {
+        const reg = await ensureAdminSwRegistration()
+        const { publicKey } = await apiJson('/api/web-push/vapid-public-key')
+        if (!publicKey) throw new Error('Missing VAPID key')
+        const perm = await Notification.requestPermission()
+        if (perm === 'denied') {
+          setPushError('Notifications are blocked in your browser. Check your browser settings.')
+          return
+        }
+        if (perm !== 'granted') throw new Error('Notification permission was not granted')
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        })
+        await apiPost('/api/web-push/subscribe', { subscription: sub.toJSON() })
+        setPushSubscribed(true)
+      }
+    } catch (e: any) {
+      const msg = e?.message || 'Failed to update push subscription'
+      setPushError(msg)
+      await checkPushState()
+    } finally {
+      setPushBusy(false)
+    }
+  }
 
   function resolveHref(n: NotificationRow): string | null {
     const explicit = typeof n?.details?.__link?.href === 'string' ? String(n.details.__link.href) : ''
@@ -247,9 +343,31 @@ export default function NotificationsBell() {
         className="!p-0 w-[92vw] sm:w-[420px] max-w-[92vw] h-[80dvh] max-h-[80dvh] overflow-hidden data-[state=open]:!animate-none data-[state=closed]:!animate-none"
       >
         <div className="flex h-full flex-col">
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
             <div className="text-sm font-semibold text-foreground">Notifications</div>
+            {pushSupported ? (
+              <button
+                type="button"
+                onClick={togglePush}
+                disabled={pushBusy}
+                title={pushSubscribed ? 'Browser push: on — click to disable on this device' : 'Enable browser push on this device'}
+                className={`p-1 rounded transition-colors disabled:opacity-40 ${
+                  pushSubscribed
+                    ? 'text-primary hover:text-primary/70'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {pushSubscribed
+                  ? <BellRing className="w-4 h-4" />
+                  : <BellOff className="w-4 h-4" />}
+              </button>
+            ) : null}
           </div>
+          {pushError ? (
+            <div className="px-4 sm:px-5 py-2 text-xs text-red-600 border-b border-border bg-red-50 dark:bg-red-950/20">
+              {pushError}
+            </div>
+          ) : null}
 
           <div className="flex-1 min-h-0 overflow-y-auto">
             {loading ? (

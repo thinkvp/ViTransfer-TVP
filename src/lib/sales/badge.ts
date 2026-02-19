@@ -6,6 +6,8 @@ export function invoiceStatusBadgeClass(status: InvoiceStatus): string {
       return 'bg-blue-600 text-white'
     case 'SENT':
       return 'bg-purple-600 text-white'
+    case 'OPENED':
+      return 'bg-purple-600 text-white'
     case 'OVERDUE':
       return 'bg-amber-600 text-white'
     case 'PARTIALLY_PAID':
@@ -21,6 +23,8 @@ export function invoiceStatusLabel(status: InvoiceStatus): string {
       return 'Open'
     case 'SENT':
       return 'Sent'
+    case 'OPENED':
+      return 'Opened'
     case 'OVERDUE':
       return 'Overdue'
     case 'PARTIALLY_PAID':
@@ -36,6 +40,8 @@ export function quoteStatusBadgeClass(status: QuoteStatus): string {
       return 'bg-blue-600 text-white'
     case 'SENT':
       return 'bg-purple-600 text-white'
+    case 'OPENED':
+      return 'bg-purple-600 text-white'
     case 'ACCEPTED':
       return 'bg-emerald-600 text-white'
     case 'CLOSED':
@@ -49,6 +55,8 @@ export function quoteStatusLabel(status: QuoteStatus): string {
       return 'Open'
     case 'SENT':
       return 'Sent'
+    case 'OPENED':
+      return 'Opened'
     case 'ACCEPTED':
       return 'Accepted'
     case 'CLOSED':

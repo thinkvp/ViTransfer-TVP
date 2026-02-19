@@ -217,8 +217,6 @@ export async function POST(request: NextRequest) {
       clientId,
       assignedUserIds,
       recipients,
-      recipientEmail,
-      recipientName,
       sharePassword,
       authMode,
       enableVideos,
@@ -378,14 +376,7 @@ export async function POST(request: NextRequest) {
       return mapped
     }
 
-    const recipientsFromArray = normalizeRecipients(recipients as any)
-    const legacyEmail = normalizeEmail(recipientEmail)
-    const legacyName = normalizeName(recipientName)
-    const effectiveRecipients = recipientsFromArray.length
-      ? recipientsFromArray
-      : legacyEmail
-        ? [{ email: legacyEmail, name: legacyName, displayColor: null, alsoAddToClient: false, isPrimary: true, receiveNotifications: true }]
-        : []
+    const effectiveRecipients = normalizeRecipients(recipients as any)
 
     const { maxProjectRecipients } = await getSafeguardLimits()
     if (effectiveRecipients.length > maxProjectRecipients) {

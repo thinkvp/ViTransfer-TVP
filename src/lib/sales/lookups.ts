@@ -54,8 +54,10 @@ export async function fetchProjectOptions(): Promise<ProjectOption[]> {
   const data = await res.json()
   const list = Array.isArray(data?.projects) ? data.projects : []
   return list
-    .map((p: any) => ({ id: String(p?.id || ''), title: String(p?.title || p?.slug || '') }))
-    .filter((p: ProjectOption) => p.id && p.title)
+    .map((p: any) => ({ id: String(p?.id || ''), title: String(p?.title || p?.slug || ''), _createdAt: p?.createdAt ?? '' }))
+    .filter((p: any) => p.id && p.title)
+    .sort((a: any, b: any) => (a._createdAt < b._createdAt ? 1 : a._createdAt > b._createdAt ? -1 : 0))
+    .map(({ _createdAt, ...rest }: any) => rest as ProjectOption)
 }
 
 export async function fetchProjectOptionsForClient(clientId: string): Promise<ProjectOption[]> {
@@ -65,6 +67,8 @@ export async function fetchProjectOptionsForClient(clientId: string): Promise<Pr
   const data = await res.json()
   const list = Array.isArray(data?.projects) ? data.projects : []
   return list
-    .map((p: any) => ({ id: String(p?.id || ''), title: String(p?.title || p?.slug || '') }))
-    .filter((p: ProjectOption) => p.id && p.title)
+    .map((p: any) => ({ id: String(p?.id || ''), title: String(p?.title || p?.slug || ''), _createdAt: p?.createdAt ?? '' }))
+    .filter((p: any) => p.id && p.title)
+    .sort((a: any, b: any) => (a._createdAt < b._createdAt ? 1 : a._createdAt > b._createdAt ? -1 : 0))
+    .map(({ _createdAt, ...rest }: any) => rest as ProjectOption)
 }

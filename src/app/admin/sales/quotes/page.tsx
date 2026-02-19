@@ -159,7 +159,7 @@ export default function SalesQuotesPage() {
     try {
       const parsed = JSON.parse(stored)
       if (!Array.isArray(parsed)) return
-      const valid = new Set<QuoteStatus>(['OPEN', 'SENT', 'ACCEPTED', 'CLOSED'])
+      const valid = new Set<QuoteStatus>(['OPEN', 'SENT', 'OPENED', 'ACCEPTED', 'CLOSED'])
       const next = new Set<QuoteStatus>()
       parsed.forEach((v) => {
         if (typeof v === 'string' && valid.has(v as QuoteStatus)) next.add(v as QuoteStatus)
@@ -377,7 +377,7 @@ export default function SalesQuotesPage() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
-                  {(['OPEN', 'SENT', 'ACCEPTED', 'CLOSED'] as const).map((s) => {
+                  {(['OPEN', 'SENT', 'OPENED', 'ACCEPTED', 'CLOSED'] as const).map((s) => {
                     const checked = statusFilterSelected.has(s)
                     return (
                       <DropdownMenuCheckboxItem

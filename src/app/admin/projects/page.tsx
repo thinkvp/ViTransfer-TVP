@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Download, Eye, FolderKanban, Image as ImageIcon, Layers, Plus, Video } from 'lucide-react'
@@ -94,47 +94,59 @@ export default function AdminPage() {
     return totals
   }, [analyticsByProjectId, filteredProjects, projects])
 
-  useEffect(() => {
-    const load = async () => {
+  const loadProjects = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/projects')
+      if (!res.ok) throw new Error('Failed to load projects')
+      const data = await res.json()
+      const loadedProjects = (data.projects || data || []) as Project[]
+      setProjects(loadedProjects)
+
       try {
-        const res = await apiFetch('/api/projects')
-        if (!res.ok) throw new Error('Failed to load projects')
-        const data = await res.json()
-        const loadedProjects = (data.projects || data || []) as Project[]
-        setProjects(loadedProjects)
+        const analyticsRes = await apiFetch('/api/analytics')
+        if (analyticsRes.ok) {
+          const analyticsData = await analyticsRes.json()
+          const analyticsProjects = analyticsData.projects || analyticsData || []
 
-        try {
-          const analyticsRes = await apiFetch('/api/analytics')
-          if (analyticsRes.ok) {
-            const analyticsData = await analyticsRes.json()
-            const analyticsProjects = analyticsData.projects || analyticsData || []
-
-            if (Array.isArray(analyticsProjects)) {
-              const next: Record<string, AnalyticsProject> = {}
-              for (const p of analyticsProjects) {
-                const id = String((p as any)?.id || '')
-                if (!id) continue
-                next[id] = {
-                  id,
-                  totalVisits: Number((p as any)?.totalVisits) || 0,
-                  totalDownloads: Number((p as any)?.totalDownloads) || 0,
-                  videoCount: Number((p as any)?.videoCount) || 0,
-                }
+          if (Array.isArray(analyticsProjects)) {
+            const next: Record<string, AnalyticsProject> = {}
+            for (const p of analyticsProjects) {
+              const id = String((p as any)?.id || '')
+              if (!id) continue
+              next[id] = {
+                id,
+                totalVisits: Number((p as any)?.totalVisits) || 0,
+                totalDownloads: Number((p as any)?.totalDownloads) || 0,
+                videoCount: Number((p as any)?.videoCount) || 0,
               }
-              setAnalyticsByProjectId(next)
             }
+            setAnalyticsByProjectId(next)
           }
-        } catch {
-          // Analytics totals are optional; fall back to 0s
         }
-      } catch (error) {
-        setProjects([])
-      } finally {
-        setLoading(false)
+      } catch {
+        // Analytics totals are optional; fall back to 0s
+      }
+    } catch (error) {
+      setProjects([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadProjects()
+  }, [loadProjects])
+
+  // Refetch when tab regains focus so stale data (e.g. a renamed client) is refreshed
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadProjects()
       }
     }
-    load()
-  }, [])
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [loadProjects])
 
   if (loading) {
     return (

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendPasswordEmail, isSmtpConfigured, getEmailSettings, buildCompanyLogoUrl, sendEmail } from '@/lib/email'
-import { generateNotificationSummaryEmail, generateProjectInviteInternalUsersEmail } from '@/lib/email-templates'
+import { generateNotificationSummaryEmail, generateProjectInviteInternalUsersEmail, generateAdminSummaryEmail } from '@/lib/email-templates'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { generateShareUrl } from '@/lib/url'
 import { requireApiAuth } from '@/lib/auth'
 import { decrypt } from '@/lib/encryption'
@@ -218,6 +219,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           companyName: emailSettings.companyName || 'ViTransfer',
           companyLogoUrl: companyLogoUrl || undefined,
           mainCompanyDomain: emailSettings.mainCompanyDomain,
+          accentColor: emailSettings.accentColor || undefined,
           accentTextMode: emailSettings.accentTextMode || undefined,
           emailHeaderColor: emailSettings.emailHeaderColor || undefined,
           emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
@@ -243,39 +245,37 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ success: true, message: `Sent invite email to ${recipients.length} user(s).` })
     }
 
-    // COMMENT SUMMARY: send summary of pending admin replies to clients who opted in
+    // COMMENT SUMMARY: send pending comment summaries to client recipients AND internal users
     if (isCommentSummary) {
-      const allRecipients = await getProjectRecipients(projectId)
-      const recipients = allRecipients.filter((r) => r.receiveNotifications && r.email)
-
-      if (recipients.length === 0) {
-        return NextResponse.json({ error: 'No recipients with notifications enabled.' }, { status: 400 })
-      }
-
-      const pendingNotifications = await prisma.notificationQueue.findMany({
+      // Load all pending notifications for this project where either side still needs sending
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      const allPending = await prisma.notificationQueue.findMany({
         where: {
           projectId,
-          type: 'ADMIN_REPLY',
-          sentToClients: false,
-          clientFailed: false,
-          clientAttempts: { lt: 3 },
+          type: { in: ['ADMIN_REPLY', 'CLIENT_COMMENT'] },
+          createdAt: { gte: sevenDaysAgo },
+          OR: [
+            { sentToClients: false, clientFailed: false, clientAttempts: { lt: 3 } },
+            { sentToAdmins: false, adminFailed: false, adminAttempts: { lt: 3 } },
+          ],
         },
         orderBy: { createdAt: 'asc' },
       })
 
-      if (pendingNotifications.length === 0) {
+      if (allPending.length === 0) {
         return NextResponse.json({ error: 'No pending comment summaries to send.' }, { status: 400 })
       }
 
+      // Filter out cancelled notifications (comment was deleted)
       const redis = getRedis()
-      const validNotifications: typeof pendingNotifications = []
+      const validNotifications: typeof allPending = []
       const cancelledNotificationIds: string[] = []
 
-      for (const notification of pendingNotifications) {
+      for (const notification of allPending) {
         const commentId = (notification.data as any).commentId
         if (commentId) {
-          const notificationData = await redis.get(`comment_notification:${commentId}`)
-          if (!notificationData) {
+          const isCancelled = await redis.get(`comment_cancelled:${commentId}`)
+          if (isCancelled) {
             cancelledNotificationIds.push(notification.id)
             continue
           }
@@ -293,31 +293,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         return NextResponse.json({ error: 'No valid comment summaries to send.' }, { status: 400 })
       }
 
-      const notificationIds = validNotifications.map((n) => n.id)
+      // Split by side
+      const clientPending = validNotifications.filter(n => !n.sentToClients && !n.clientFailed && n.clientAttempts < 3)
+      const adminPending  = validNotifications.filter(n => !n.sentToAdmins  && !n.adminFailed  && n.adminAttempts  < 3)
 
-      await prisma.notificationQueue.updateMany({
-        where: { id: { in: notificationIds } },
-        data: { clientAttempts: { increment: 1 } }
-      })
-
-      const currentAttempts = (validNotifications[0]?.clientAttempts ?? 0) + 1
-      const period = getPeriodString(project.clientNotificationSchedule)
-      const shareUrl = await generateShareUrl(project.slug)
-
+      // Shared email settings
       const emailSettings = await getEmailSettings()
-      const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
+      const shareUrl = await generateShareUrl(project.slug)
       let appDomain = new URL(shareUrl).origin
       if (emailSettings.appDomain) {
         try {
           const parsed = new URL(emailSettings.appDomain)
-          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-            appDomain = parsed.origin
-          }
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') appDomain = parsed.origin
         } catch {
-          // Fallback to shareUrl origin
+          // fallback to shareUrl origin
         }
       }
-
+      const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
       const companyLogoUrl = buildCompanyLogoUrl({
         appDomain,
         companyLogoMode: emailSettings.companyLogoMode,
@@ -326,106 +318,206 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         updatedAt: emailSettings.updatedAt,
       })
 
-      const notifications = validNotifications.map((n) =>
-        normalizeNotificationDataTimecode(n.data as any)
-      )
+      let clientSent = false
+      let adminSent  = false
+      let lastError: string | undefined
 
-      const sortedNotificationIds = [...notificationIds].sort().join('|')
-      const batchKey = `${project.id}|${period}|${sortedNotificationIds}|manual`
-      const batchHash = crypto.createHash('sha256').update(batchKey).digest('hex').slice(0, 16)
+      // ── CLIENT SIDE ────────────────────────────────────────────────────────
+      if (clientPending.length > 0) {
+        const allRecipients = await getProjectRecipients(projectId)
+        const recipients = allRecipients.filter((r) => r.receiveNotifications && r.email)
 
-      const result = await sendNotificationsWithRetry({
-        notificationIds,
-        currentAttempts,
-        isClientNotification: true,
-        logPrefix: '[CLIENT-MANUAL] ',
-        onSuccess: async () => {
-          const successfulRecipientEmails: string[] = []
+        if (recipients.length > 0) {
+          const clientIds = clientPending.map((n) => n.id)
+          await prisma.notificationQueue.updateMany({
+            where: { id: { in: clientIds } },
+            data: { clientAttempts: { increment: 1 } },
+          })
+          const currentAttempts = (clientPending[0]?.clientAttempts ?? 0) + 1
+          const period = getPeriodString(project.clientNotificationSchedule)
+          const sortedClientIds = [...clientIds].sort().join('|')
+          const batchHash = crypto.createHash('sha256')
+            .update(`${project.id}|${period}|${sortedClientIds}|manual`)
+            .digest('hex').slice(0, 16)
+          const notifications = clientPending.map((n) => normalizeNotificationDataTimecode(n.data as any))
 
-          for (const recipient of recipients) {
-            const normalizedEmail = recipient.email!.toLowerCase()
-            const stableToken = `${project.id}-${batchHash}-${normalizedEmail}`
-            const trackingToken = trackingPixelsEnabled
-              ? await prisma.emailTracking.upsert({
-                  where: { token: stableToken },
-                  update: { sentAt: new Date() },
-                  create: {
-                    token: stableToken,
-                    projectId: project.id,
-                    type: 'COMMENT_SUMMARY',
-                    videoId: null,
-                    recipientEmail: normalizedEmail,
-                  },
+          const clientResult = await sendNotificationsWithRetry({
+            notificationIds: clientIds,
+            currentAttempts,
+            isClientNotification: true,
+            logPrefix: '[CLIENT-MANUAL]',
+            onSuccess: async () => {
+              const successfulRecipientEmails: string[] = []
+
+              for (const recipient of recipients) {
+                const normalizedEmail = recipient.email!.toLowerCase()
+                const stableToken = `${project.id}-${batchHash}-${normalizedEmail}`
+                const trackingToken = trackingPixelsEnabled
+                  ? await prisma.emailTracking.upsert({
+                      where: { token: stableToken },
+                      update: { sentAt: new Date() },
+                      create: {
+                        token: stableToken,
+                        projectId: project.id,
+                        type: 'COMMENT_SUMMARY',
+                        videoId: null,
+                        recipientEmail: normalizedEmail,
+                      },
+                    })
+                  : null
+
+                const html = generateNotificationSummaryEmail({
+                  companyName: emailSettings.companyName || 'ViTransfer',
+                  projectTitle: project.title,
+                  useFullTimecode: project.useFullTimecode,
+                  shareUrl,
+                  unsubscribeUrl: recipient.id ? buildUnsubscribeUrl(appDomain, project.id, recipient.id) : undefined,
+                  recipientName: recipient.name || recipient.email!,
+                  recipientEmail: recipient.email!,
+                  period,
+                  notifications,
+                  trackingToken: trackingToken?.token,
+                  trackingPixelsEnabled,
+                  appDomain,
+                  companyLogoUrl: companyLogoUrl || undefined,
+                  mainCompanyDomain: emailSettings.mainCompanyDomain,
+                  emailCustomFooterText: emailSettings.emailCustomFooterText,
+                  accentColor: emailSettings.accentColor || undefined,
+                  accentTextMode: emailSettings.accentTextMode || undefined,
+                  emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+                  emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
                 })
-              : null
 
-            const html = generateNotificationSummaryEmail({
-              companyName: emailSettings.companyName || 'ViTransfer',
-              projectTitle: project.title,
-              useFullTimecode: project.useFullTimecode,
-              shareUrl,
-              unsubscribeUrl: recipient.id ? buildUnsubscribeUrl(appDomain, project.id, recipient.id) : undefined,
-              recipientName: recipient.name || recipient.email!,
-              recipientEmail: recipient.email!,
-              period,
-              notifications,
-              trackingToken: trackingToken?.token,
-              trackingPixelsEnabled,
-              appDomain,
-              companyLogoUrl: companyLogoUrl || undefined,
-              mainCompanyDomain: emailSettings.mainCompanyDomain,
-              emailCustomFooterText: emailSettings.emailCustomFooterText,
-              accentColor: emailSettings.accentColor || undefined,
-            })
-
-            const sendResult = await sendEmail({
-              to: recipient.email!,
-              subject: `Updates on ${project.title}`,
-              html,
-            })
-
-            if (sendResult.success) {
-              successfulRecipientEmails.push(recipient.email!)
-            } else {
-              throw new Error(`Failed to send to ${recipient.email}: ${sendResult.error}`)
-            }
-          }
-
-          if (successfulRecipientEmails.length > 0) {
-            try {
-              const recipientEmailsJson = JSON.stringify(successfulRecipientEmails)
-              const dedupeKey = `COMMENT_SUMMARY:${project.id}:${batchHash}`
-
-              try {
-                await prisma.projectEmailEvent.create({
-                  data: {
-                    projectId: project.id,
-                    type: 'COMMENT_SUMMARY',
-                    dedupeKey,
-                    videoId: null,
-                    recipientEmails: recipientEmailsJson,
-                  },
-                })
-              } catch (e: any) {
-                if (e?.code !== 'P2002') throw e
+                const sendResult = await sendEmail({ to: recipient.email!, subject: `Updates on ${project.title}`, html })
+                if (sendResult.success) {
+                  successfulRecipientEmails.push(recipient.email!)
+                } else {
+                  throw new Error(`Failed to send to ${recipient.email}: ${sendResult.error}`)
+                }
               }
-            } catch (e) {
-              console.error('Failed to log ProjectEmailEvent:', e)
-            }
+
+              if (successfulRecipientEmails.length > 0) {
+                try {
+                  await prisma.projectEmailEvent.create({
+                    data: {
+                      projectId: project.id,
+                      type: 'COMMENT_SUMMARY',
+                      dedupeKey: `COMMENT_SUMMARY:${project.id}:${batchHash}`,
+                      videoId: null,
+                      recipientEmails: JSON.stringify(successfulRecipientEmails),
+                    },
+                  })
+                } catch (e: any) {
+                  if (e?.code !== 'P2002') console.error('Failed to log ProjectEmailEvent:', e)
+                }
+              }
+            },
+          })
+
+          if (clientResult.success) {
+            clientSent = true
+            await prisma.project.update({ where: { id: project.id }, data: { lastClientNotificationSent: new Date() } })
+          } else {
+            lastError = clientResult.lastError
           }
         }
-      })
-
-      if (result.success) {
-        await prisma.project.update({
-          where: { id: project.id },
-          data: { lastClientNotificationSent: new Date() }
-        })
-
-        return NextResponse.json({ success: true, message: 'Comment summary sent successfully.' })
       }
 
-      return NextResponse.json({ error: result.lastError || 'Failed to send comment summary' }, { status: 500 })
+      // ── ADMIN/INTERNAL SIDE ────────────────────────────────────────────────
+      if (adminPending.length > 0) {
+        const assignedUsers = await prisma.projectUser.findMany({
+          where: { projectId, receiveNotifications: true },
+          select: {
+            user: {
+              select: {
+                id: true, email: true, name: true,
+                appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
+              },
+            },
+          },
+        })
+
+        // Filter to users with Share Page access, same rules as the automated worker
+        const internalRecipients = assignedUsers
+          .map((r) => r.user)
+          .filter((u): u is NonNullable<typeof u> & { email: string } => {
+            if (!u?.email) return false
+            const role = u.appRole
+            const isAdminRole = role?.isSystemAdmin === true ||
+              (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+            if (isAdminRole) return true
+            const permissions = normalizeRolePermissions(role?.permissions)
+            return canDoAction(permissions, 'accessSharePage')
+          })
+
+        if (internalRecipients.length > 0) {
+          const adminIds = adminPending.map((n) => n.id)
+          await prisma.notificationQueue.updateMany({
+            where: { id: { in: adminIds } },
+            data: { adminAttempts: { increment: 1 } },
+          })
+          const currentAttempts = (adminPending[0]?.adminAttempts ?? 0) + 1
+
+          const globalSettings = await prisma.settings.findUnique({
+            where: { id: 'default' },
+            select: { adminNotificationSchedule: true },
+          })
+          const period = getPeriodString(globalSettings?.adminNotificationSchedule || 'IMMEDIATE')
+          const adminNotifications = adminPending.map((n) => normalizeNotificationDataTimecode(n.data as any))
+
+          const adminResult = await sendNotificationsWithRetry({
+            notificationIds: adminIds,
+            currentAttempts,
+            isClientNotification: false,
+            logPrefix: '[ADMIN-MANUAL]',
+            onSuccess: async () => {
+              for (const user of internalRecipients) {
+                const html = generateAdminSummaryEmail({
+                  companyName: emailSettings.companyName || 'ViTransfer',
+                  adminName: user.name || '',
+                  period,
+                  companyLogoUrl: companyLogoUrl || undefined,
+                  mainCompanyDomain: emailSettings.mainCompanyDomain,
+                  accentTextMode: emailSettings.accentTextMode || undefined,
+                  emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+                  emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
+                  accentColor: emailSettings.accentColor || undefined,
+                  projects: [{
+                    projectTitle: project.title,
+                    useFullTimecode: project.useFullTimecode,
+                    shareUrl,
+                    notifications: adminNotifications,
+                  }],
+                })
+                const sendResult = await sendEmail({
+                  to: user.email,
+                  subject: `Project activity summary — ${project.title}`,
+                  html,
+                })
+                if (!sendResult.success) {
+                  throw new Error(`Failed to send to ${user.email}: ${sendResult.error}`)
+                }
+              }
+            },
+          })
+
+          if (adminResult.success) {
+            adminSent = true
+            await prisma.settings.update({ where: { id: 'default' }, data: { lastAdminNotificationSent: new Date() } })
+          } else {
+            lastError = adminResult.lastError
+          }
+        }
+      }
+
+      if (!clientSent && !adminSent) {
+        return NextResponse.json({ error: lastError || 'No notifications could be sent (no eligible recipients).' }, { status: 500 })
+      }
+
+      const sentTo: string[] = []
+      if (clientSent) sentTo.push('client recipients')
+      if (adminSent)  sentTo.push('internal users')
+      return NextResponse.json({ success: true, message: `Comment summary sent to ${sentTo.join(' and ')}.` })
     }
 
     // Get recipients (client notifications)

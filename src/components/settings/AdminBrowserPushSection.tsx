@@ -305,7 +305,7 @@ export function AdminBrowserPushSection({ show, setShow }: AdminBrowserPushSecti
       {show && (
         <CardContent className="space-y-4 border-t pt-4">
           <div className="text-sm text-muted-foreground">
-            Browser push notifications work only for system admins and only inside the admin area.
+            Browser push notifications work inside the admin area. All admin users can subscribe their devices and will receive notifications relevant to their access level.
           </div>
 
           <div className="space-y-2 border p-4 rounded-lg bg-muted/30">

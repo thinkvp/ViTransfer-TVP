@@ -46,7 +46,8 @@ export async function processClientNotifications() {
             type: 'ADMIN_REPLY',
             sentToClients: false,
             clientFailed: false,
-            clientAttempts: { lt: 3 }
+            clientAttempts: { lt: 3 },
+            createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
           },
           orderBy: { createdAt: 'asc' }
         }
@@ -112,8 +113,8 @@ export async function processClientNotifications() {
       for (const notification of project.notificationQueue) {
         const commentId = (notification.data as any).commentId
         if (commentId) {
-          const notificationData = await redis.get(`comment_notification:${commentId}`)
-          if (!notificationData) {
+          const isCancelled = await redis.get(`comment_cancelled:${commentId}`)
+          if (isCancelled) {
             console.log(`[CLIENT]   Skipping cancelled notification for comment ${commentId}`)
             cancelledNotificationIds.push(notification.id)
             continue

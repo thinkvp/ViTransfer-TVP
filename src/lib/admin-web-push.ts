@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/encryption'
 import type { PushNotificationPayload } from '@/lib/push-notifications'
 import { buildAdminWebPushNotification } from '@/lib/admin-web-push-templates'
+import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 
 type VapidKeys = { publicKey: string; privateKey: string }
 
@@ -179,27 +180,84 @@ async function sendToSubscription(sub: { endpoint: string; p256dh: string; auth:
   await webpush.sendNotification(webPushSub as any, payload)
 }
 
-export async function sendBrowserPushToSystemAdmins(payload: PushNotificationPayload): Promise<void> {
+// Notification types scoped to project events (non-security)
+const PROJECT_PUSH_TYPES = ['CLIENT_COMMENT', 'ADMIN_SHARE_COMMENT', 'VIDEO_APPROVAL', 'INTERNAL_COMMENT']
+const SALES_PUSH_TYPES = ['SALES_QUOTE_VIEWED', 'SALES_QUOTE_ACCEPTED', 'SALES_INVOICE_VIEWED', 'SALES_INVOICE_PAID']
+
+/**
+ * Send a browser push notification to all eligible subscribers.
+ *
+ * Scoping rules:
+ *   - Security events  → system admins only
+ *   - Project events   → system admins + users with 'projects' menu access assigned to the project
+ *   - Sales events     → system admins + users with 'sales' menu access
+ *
+ * The comment/event author (via __meta.authorUserId) is always excluded.
+ */
+export async function sendBrowserPushToEligibleUsers(payload: PushNotificationPayload): Promise<void> {
   const notification = buildAdminWebPushNotification(payload)
 
   const authorUserId = (payload.details && typeof (payload.details as any)?.__meta?.authorUserId === 'string')
     ? String((payload.details as any).__meta.authorUserId)
     : null
 
+  const projectId = payload.projectId ?? null
+  const isProjectType = PROJECT_PUSH_TYPES.includes(payload.type)
+  const isSalesType = SALES_PUSH_TYPES.includes(payload.type)
+
+  // For project-scoped events, pre-fetch the assigned user IDs so we avoid
+  // sending to users who don't have access to that specific project.
+  let assignedProjectUserIds: Set<string> | null = null
+  if (isProjectType && projectId) {
+    const rows = await prisma.projectUser.findMany({
+      where: { projectId },
+      select: { userId: true },
+    })
+    assignedProjectUserIds = new Set(rows.map((r) => r.userId))
+  }
+
   const subs = await prisma.webPushSubscription.findMany({
-    where: {
+    select: {
+      id: true,
+      userId: true,
+      endpoint: true,
+      p256dh: true,
+      auth: true,
       user: {
-        appRole: {
-          isSystemAdmin: true,
+        select: {
+          appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
         },
       },
     },
-    select: { id: true, userId: true, endpoint: true, p256dh: true, auth: true },
   })
 
-  const filteredSubs = authorUserId
-    ? subs.filter((s) => s.userId !== authorUserId)
-    : subs
+  const filteredSubs = subs.filter((s) => {
+    // Never notify the author of the event.
+    if (authorUserId && s.userId === authorUserId) return false
+
+    const role = (s as any).user?.appRole
+    const isSystemAdmin = role?.isSystemAdmin === true
+
+    // System admins receive all notification types.
+    if (isSystemAdmin) return true
+
+    // Non-system-admin: check menu-level entitlements.
+    const permissions = normalizeRolePermissions(role?.permissions)
+
+    if (isProjectType) {
+      if (!canSeeMenu(permissions, 'projects')) return false
+      // Must also be assigned to the specific project (if we know it).
+      if (assignedProjectUserIds !== null && !assignedProjectUserIds.has(s.userId)) return false
+      return true
+    }
+
+    if (isSalesType) {
+      return canSeeMenu(permissions, 'sales')
+    }
+
+    // Security / other events: non-system-admins do not receive these.
+    return false
+  })
 
   if (filteredSubs.length === 0) return
 
@@ -210,7 +268,7 @@ export async function sendBrowserPushToSystemAdmins(payload: PushNotificationPay
       try {
         await sendToSubscription(s, notification)
       } catch (err: any) {
-        // If the endpoint is gone, delete it.
+        // If the endpoint is gone, clean it up.
         const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : null
         if (statusCode === 404 || statusCode === 410) {
           await prisma.webPushSubscription.deleteMany({ where: { id: s.id } })

@@ -5,6 +5,21 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-02-19
+
+### Added
+- **Internal comment bell notifications** — posting an internal comment now fires a real-time `PushNotificationLog` entry, updating badge counts and optional browser push for all users assigned to the project
+- **Browser push for all admin users** — push notification subscriptions are no longer restricted to system admins; all admin users can subscribe and receive notifications scoped to their role (project events for assigned projects, sales events for sales-menu users, security events for system admins only)
+- **Inline push subscribe toggle in notification bell** — a `BellOff`/`BellRing` icon button in the bell header lets any user subscribe or unsubscribe from browser push without needing access to Settings
+- **Push error feedback** — blocked or failed push subscription attempts now surface an inline error message in the bell dropdown instead of silently doing nothing
+
+### Fixed
+- **Internal comment email self-notification** — the comment author is no longer included in their own internal comment email digest
+- **Notification data leak for non-admin users** — removed an `OR projectId: null` clause that was allowing all project-type notifications without a `projectId` to bleed through to any user with Projects menu access
+- **Badge count for project-assigned users** — notification visibility is now gated on current project assignment rather than Projects menu visibility; users assigned to projects now correctly see and receive badge counts even if the Projects menu is disabled in their role
+- **Cross-window auth token sync** — tokens received via `BroadcastChannel` are now persisted to storage, preventing stale sessions after page reload when another tab rotates the refresh token
+- **Password UI visibility** — password-related UI (prompt, clear button, settings fields) no longer appears on share and project pages when the auth mode is OTP, Guest, or None; API now clears stored password when switching away from password-based modes
+
 ## [1.0.3] - 2026-02-17
 
 ### Added

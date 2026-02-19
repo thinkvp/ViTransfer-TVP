@@ -121,6 +121,20 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
       return { title, body: body || payload.message, url }
     }
 
+    case 'INTERNAL_COMMENT': {
+      const author = getDetail(payload.details, ['Author', 'authorName'])
+      const comment = getDetail(payload.details, ['Comment', 'comment'])
+
+      const title = 'New internal comment'
+      const body = joinParts([
+        projectTitle ? `Project: ${projectTitle}` : null,
+        author ? `By: ${author}` : null,
+        comment ? `"${excerpt(comment, 140)}"` : null,
+      ])
+
+      return { title, body: body || payload.message, url }
+    }
+
     case 'SHARE_ACCESS': {
       const method = getDetail(payload.details, ['Access Method', 'accessMethod'])
       const title = 'Share page viewed'

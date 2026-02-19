@@ -188,7 +188,7 @@ export default function SalesDashboardPage() {
 
         return { quote: q, effectiveStatus, totalCents: total }
       })
-      .filter((r) => r.effectiveStatus === 'OPEN' || r.effectiveStatus === 'SENT')
+      .filter((r) => r.effectiveStatus === 'OPEN' || r.effectiveStatus === 'SENT' || r.effectiveStatus === 'OPENED')
       .sort((a, b) => b.quote.issueDate.localeCompare(a.quote.issueDate))
       .slice(0, 10)
 

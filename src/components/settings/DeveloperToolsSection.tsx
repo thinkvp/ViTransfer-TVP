@@ -26,6 +26,16 @@ type OrphanCommentCleanupResult = {
   errors?: Array<{ storagePath: string; error: string }>
 }
 
+type NotificationBacklogResult = {
+  ok: true
+  dryRun: boolean
+  totalUnsent?: number
+  staleCount?: number
+  recentCount?: number
+  oldestCreatedAt?: string | null
+  dismissed?: number
+}
+
 type ProjectStorageYearMonthMigrationResult = {
   ok: true
   dryRun: boolean
@@ -79,6 +89,23 @@ export function DeveloperToolsSection({
   const [projectStorageMigrationLoading, setProjectStorageMigrationLoading] = useState(false)
   const [projectStorageMigrationResult, setProjectStorageMigrationResult] = useState<ProjectStorageYearMonthMigrationResult | null>(null)
   const [projectStorageMigrationError, setProjectStorageMigrationError] = useState<string | null>(null)
+
+  const [backlogLoading, setBacklogLoading] = useState(false)
+  const [backlogResult, setBacklogResult] = useState<NotificationBacklogResult | null>(null)
+  const [backlogError, setBacklogError] = useState<string | null>(null)
+
+  async function runBacklogPurge(dryRun: boolean) {
+    setBacklogLoading(true)
+    setBacklogError(null)
+    try {
+      const res = await apiPost('/api/settings/purge-notification-backlog', { dryRun })
+      setBacklogResult(res as NotificationBacklogResult)
+    } catch (e: any) {
+      setBacklogError(e?.message || 'Failed to run purge')
+    } finally {
+      setBacklogLoading(false)
+    }
+  }
 
   const cleanupSummary = useMemo(() => {
     if (!cleanupResult) return null
@@ -354,6 +381,66 @@ export function DeveloperToolsSection({
                   }}
                 >
                   {projectStorageMigrationLoading ? 'Running…' : 'Migrate'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Notification queue backlog</Label>
+                <p className="text-xs text-muted-foreground">
+                  Finds unsent notification queue entries older than 7 days and marks them as already sent,
+                  so they are never delivered. Use this after upgrades or configuration changes that left
+                  a backlog of stale queued notifications. Run a dry-run first to see what would be dismissed.
+                </p>
+
+                {backlogError ? (
+                  <p className="text-xs text-destructive">{backlogError}</p>
+                ) : null}
+
+                {backlogResult ? (
+                  <div className="mt-2 space-y-1">
+                    {backlogResult.dryRun ? (
+                      <>
+                        <p className="text-xs text-muted-foreground">Total unsent entries: {backlogResult.totalUnsent}</p>
+                        <p className="text-xs text-muted-foreground">Stale (&gt;7 days, would be dismissed): {backlogResult.staleCount}</p>
+                        <p className="text-xs text-muted-foreground">Recent (≤7 days, would be kept): {backlogResult.recentCount}</p>
+                        {backlogResult.oldestCreatedAt ? (
+                          <p className="text-xs text-muted-foreground">Oldest entry: {new Date(backlogResult.oldestCreatedAt).toLocaleDateString()}</p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted-foreground">Dismissed: {backlogResult.dismissed} stale entries</p>
+                        <p className="text-xs text-muted-foreground">Recent entries kept: {backlogResult.recentCount}</p>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={backlogLoading}
+                  onClick={() => void runBacklogPurge(true)}
+                >
+                  {backlogLoading ? 'Running…' : 'Dry run'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={backlogLoading}
+                  onClick={() => {
+                    if (!confirm('Mark all unsent notification queue entries older than 7 days as already sent? They will not be delivered.')) return
+                    void runBacklogPurge(false)
+                  }}
+                >
+                  {backlogLoading ? 'Running…' : 'Dismiss backlog'}
                 </Button>
               </div>
             </div>

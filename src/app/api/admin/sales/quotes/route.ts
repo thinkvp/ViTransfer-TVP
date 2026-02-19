@@ -63,7 +63,23 @@ export async function GET(request: NextRequest) {
     take: limit,
   })
 
-  const res = NextResponse.json({ quotes: rows.map((r: any) => salesQuoteFromDb(r)) })
+  const ids = rows.map((r: any) => String(r?.id ?? '')).filter(Boolean)
+  const openedAgg = ids.length
+    ? await prisma.salesEmailTracking.groupBy({
+        by: ['docId'],
+        where: { type: 'QUOTE', docId: { in: ids }, openedAt: { not: null } },
+        _count: { _all: true },
+      })
+    : ([] as any[])
+
+  const openedSet = new Set((openedAgg as any[]).map((g) => String(g?.docId ?? '').trim()).filter(Boolean))
+
+  const quotes = rows.map((r: any) => {
+    const q = salesQuoteFromDb(r)
+    return { ...q, hasOpenedEmail: openedSet.has(q.id) }
+  })
+
+  const res = NextResponse.json({ quotes })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }

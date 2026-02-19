@@ -271,12 +271,13 @@ export function renderEmailShell({
 
     ${companyLogoUrl ? `
     <!-- Logo -->
-    <div style="padding: 24px 24px 0; text-align: center; background: #ffffff;">
+    <div style="padding: 24px 24px 0; text-align: center; background: #ffffff; box-sizing: border-box;">
       ${mainCompanyDomain ? `<a href="${escapeHtml(mainCompanyDomain)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">` : ''}
       <img
         src="${escapeHtml(companyLogoUrl)}"
         alt="${escapeHtml(companyName)} logo"
-        style="display:block; margin:0 auto; width:auto; max-width:280px; max-height:120px; height:auto; border:0; outline:none; text-decoration:none;"
+        style="display:block; margin:0 auto; width:auto; max-width:100%; max-height:120px; height:auto; border:0; outline:none; text-decoration:none;"
+        width="280"
       />
       ${mainCompanyDomain ? `</a>` : ''}
       <div style="height: 20px; line-height: 20px;">&nbsp;</div>

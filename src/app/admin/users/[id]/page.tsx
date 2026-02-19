@@ -242,7 +242,7 @@ export default function EditUserPage() {
       return
     }
     if (formData.password && !isEditingSelf && !canAdminResetPassword) {
-      setError('Only an Admin can reset another user\'s password')
+      setError("Only an Admin can reset another user's password")
       return
     }
 
@@ -280,130 +280,126 @@ export default function EditUserPage() {
   }
 
   return (
-    <div className="w-full min-w-0 max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-      <div className="w-full min-w-0 mx-auto md:max-w-2xl">
-        <div className="mb-4 sm:mb-6">
+    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
         </div>
 
-        <Card className="w-full min-w-0">
-          <CardHeader className="p-4 sm:p-6">
-            <CardTitle className="text-xl sm:text-2xl">User Details</CardTitle>
+        <Card>
+          <CardHeader>
+            <CardTitle>User Details</CardTitle>
           </CardHeader>
-          <CardContent className="p-4 sm:p-6 pt-0">
-            <form onSubmit={handleSubmit} className="space-y-4">
+          <CardContent>
+            <form onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded">
+              <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded mb-4">
                 {error}
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email *</Label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                placeholder="Optional"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Optional"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Select
-                key={`${rolesLoading ? 'roles-loading' : 'roles-loaded'}:${formData.appRoleId}`}
-                value={formData.appRoleId}
-                onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
-                disabled={rolesLoading}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="displayColor">Display Colour</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  id="displayColor"
-                  type="color"
-                  value={formData.displayColor}
-                  onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
-                  className="h-10 w-14 rounded-md border border-input bg-background p-1"
-                  aria-label="Display colour"
-                />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+              {/* Row 1: Email | Full Name */}
+              <div className="space-y-2">
+                <Label htmlFor="email">Email *</Label>
                 <Input
-                  type="text"
-                  value={formData.displayColor}
-                  onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
-                  placeholder="#RRGGBB"
-                  className="max-w-[140px]"
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Used for this admin’s comment highlight and timeline markers.
-              </p>
+
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+
+              {/* Row 2: Username | Display Colour */}
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="displayColor">Display Colour</Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="displayColor"
+                    type="color"
+                    value={formData.displayColor}
+                    onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
+                    className="h-10 w-14 rounded-md border border-input bg-background p-1"
+                    aria-label="Display colour"
+                  />
+                  <Input
+                    type="text"
+                    value={formData.displayColor}
+                    onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
+                    placeholder="#RRGGBB"
+                    className="max-w-[140px]"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Used for this admin&apos;s comment highlight and timeline markers.
+                </p>
+              </div>
+
+              {/* Row 3: Role (single column) */}
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select
+                  key={`${rolesLoading ? 'roles-loading' : 'roles-loaded'}:${formData.appRoleId}`}
+                  value={formData.appRoleId}
+                  onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
+                  disabled={rolesLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
+              </div>
+
+              {/* Empty cell to maintain grid alignment */}
+              <div className="hidden md:block" />
             </div>
 
-            <div className="border-t pt-4 mt-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-medium">Change Password (optional)</h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {sessionUser?.id === userId
-                      ? 'Leave blank to keep current password'
-                      : sessionUser?.isSystemAdmin
-                        ? 'Set a new password for this user (they will need to log in again)'
-                        : 'Password can only be changed by the account owner'}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={generateRandomPassword}
-                  className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span className="sm:hidden">Generate</span>
-                  <span className="hidden sm:inline">Generate Password</span>
-                </Button>
+            <div className="border-t pt-4 mt-6">
+              <div className="mb-3">
+                <h3 className="text-sm font-medium">Change Password (optional)</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {sessionUser?.id === userId
+                    ? 'Leave blank to keep current password'
+                    : sessionUser?.isSystemAdmin
+                      ? 'Set a new password for this user (they will need to log in again)'
+                      : 'Password can only be changed by the account owner'}
+                </p>
               </div>
 
               {sessionUser?.id === userId && (
-                <div className="space-y-2">
+                <div className="space-y-2 mb-4">
                   <Label htmlFor="oldPassword">Current Password</Label>
                   <Input
                     id="oldPassword"
@@ -415,93 +411,92 @@ export default function EditUserPage() {
                 </div>
               )}
 
-              <div className="space-y-2 mt-3">
-                <Label htmlFor="password">New Password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="Leave blank to keep current"
-                    className="pr-20"
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-2">
-                    {formData.password && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                {/* New Password */}
+                <div className="space-y-2">
+                  <Label htmlFor="password">New Password</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        placeholder="Leave blank to keep current"
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={generateRandomPassword}
+                      title="Generate new password"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={copyPassword}
+                      title="Copy password"
+                    >
+                      {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                  {formData.password && (
+                    <PasswordRequirements password={formData.password} className="mt-3" />
+                  )}
+                </div>
+
+                {/* Confirm New Password */}
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="confirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={formData.confirmPassword}
+                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                      placeholder="Leave blank to keep current"
+                      className="pr-10"
+                    />
+                    <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-2">
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={copyPassword}
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                         className="h-7 w-7 p-0"
-                        title="Copy password"
+                        title={showConfirmPassword ? "Hide password" : "Show password"}
                       >
-                        {copied ? (
-                          <Check className="h-4 w-4 text-green-500" />
+                        {showConfirmPassword ? (
+                          <EyeOff className="h-4 w-4" />
                         ) : (
-                          <Copy className="h-4 w-4" />
+                          <Eye className="h-4 w-4" />
                         )}
                       </Button>
-                    )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="h-7 w-7 p-0"
-                      title={showPassword ? "Hide password" : "Show password"}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
+                    </div>
                   </div>
+                  {formData.password && formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                    <p className="text-sm text-destructive flex items-center gap-1">
+                      <X className="w-4 h-4" /> Passwords do not match
+                    </p>
+                  )}
+                  {formData.password && formData.confirmPassword && formData.password === formData.confirmPassword && formData.password.length > 0 && (
+                    <p className="text-sm text-success flex items-center gap-1">
+                      <Check className="w-4 h-4" /> Passwords match
+                    </p>
+                  )}
                 </div>
-                {formData.password && (
-                  <PasswordRequirements password={formData.password} className="mt-3" />
-                )}
-              </div>
-
-              <div className="space-y-2 mt-3">
-                <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                <div className="relative">
-                  <Input
-                    id="confirmPassword"
-                    type={showConfirmPassword ? "text" : "password"}
-                    value={formData.confirmPassword}
-                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                    placeholder="Leave blank to keep current"
-                    className="pr-10"
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="h-7 w-7 p-0"
-                      title={showConfirmPassword ? "Hide password" : "Show password"}
-                    >
-                      {showConfirmPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-                {formData.password && formData.confirmPassword && formData.password !== formData.confirmPassword && (
-                  <p className="text-sm text-destructive flex items-center gap-1">
-                    <X className="w-4 h-4" /> Passwords do not match
-                  </p>
-                )}
-                {formData.password && formData.confirmPassword && formData.password === formData.confirmPassword && formData.password.length > 0 && (
-                  <p className="text-sm text-success flex items-center gap-1">
-                    <Check className="w-4 h-4" /> Passwords match
-                  </p>
-                )}
               </div>
             </div>
 
@@ -564,7 +559,7 @@ export default function EditUserPage() {
                           <div className="text-sm">
                             <p className="font-medium">{pk.credentialName || 'Unnamed PassKey'}</p>
                             <p className="text-xs text-muted-foreground">
-                              {pk.deviceType === 'multiDevice' ? 'Multi-device' : 'Single device'} •
+                              {pk.deviceType === 'multiDevice' ? 'Multi-device' : 'Single device'} &bull;
                               Last used: {formatDate(pk.lastUsedAt)}
                             </p>
                           </div>
@@ -585,19 +580,18 @@ export default function EditUserPage() {
               )}
             </div>
 
-            <div className="flex gap-3 pt-4 w-full sm:justify-end">
+            <div className="flex gap-3 pt-6 justify-end">
               <Button
                 type="button"
                 variant="outline"
                 size="lg"
-                className="flex-1 sm:flex-none"
                 onClick={() => router.push('/admin/users')}
                 disabled={loading}
               >
                 <X className="w-4 h-4 mr-2" />
                 <span>Cancel</span>
               </Button>
-              <Button type="submit" variant="default" size="lg" className="flex-1 sm:flex-none" disabled={loading}>
+              <Button type="submit" variant="default" size="lg" disabled={loading}>
                 <Save className="w-4 h-4 mr-2" />
                 <span>{loading ? 'Saving...' : 'Save Changes'}</span>
               </Button>

@@ -169,7 +169,7 @@ export default function SalesInvoicesPage() {
     try {
       const parsed = JSON.parse(stored)
       if (!Array.isArray(parsed)) return
-      const valid = new Set<InvoiceStatus>(['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'])
+      const valid = new Set<InvoiceStatus>(['OPEN', 'SENT', 'OPENED', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'])
       const next = new Set<InvoiceStatus>()
       parsed.forEach((v) => {
         if (typeof v === 'string' && valid.has(v as InvoiceStatus)) next.add(v as InvoiceStatus)
@@ -259,7 +259,17 @@ export default function SalesInvoicesPage() {
       const total = invoiceTotalCents(inv)
       const paid = invoicePaidCents(inv)
       const nowMs = nowIso ? new Date(nowIso).getTime() : 0
-      return computeInvoiceEffectiveStatus({ status: inv.status, sentAt: inv.sentAt, dueDate: inv.dueDate, totalCents: total, paidCents: paid }, nowMs)
+      return computeInvoiceEffectiveStatus(
+        {
+          status: inv.status,
+          sentAt: inv.sentAt,
+          dueDate: inv.dueDate,
+          totalCents: total,
+          paidCents: paid,
+          hasOpenedEmail: Boolean(inv.hasOpenedEmail),
+        },
+        nowMs
+      )
     },
     [invoicePaidCents, invoiceTotalCents, nowIso]
   )
@@ -397,7 +407,7 @@ export default function SalesInvoicesPage() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
-                  {(['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'] as const).map((s) => {
+                  {(['OPEN', 'SENT', 'OPENED', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'] as const).map((s) => {
                     const checked = statusFilterSelected.has(s)
                     return (
                       <DropdownMenuCheckboxItem

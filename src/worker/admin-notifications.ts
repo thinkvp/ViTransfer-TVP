@@ -53,12 +53,14 @@ export async function processAdminNotifications() {
     console.log(`[ADMIN] Time to send! Checking for pending notifications...`)
 
     // Get pending admin notifications
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const pendingNotifications = await prisma.notificationQueue.findMany({
       where: {
-        type: 'CLIENT_COMMENT',
+        type: { in: ['CLIENT_COMMENT', 'ADMIN_REPLY'] },
         sentToAdmins: false,
         adminFailed: false,
-        adminAttempts: { lt: 3 }
+        adminAttempts: { lt: 3 },
+        createdAt: { gte: sevenDaysAgo }
       },
       include: {
         project: {
@@ -83,8 +85,8 @@ export async function processAdminNotifications() {
     for (const notification of pendingNotifications) {
       const commentId = (notification.data as any).commentId
       if (commentId) {
-        const notificationData = await redis.get(`comment_notification:${commentId}`)
-        if (!notificationData) {
+        const isCancelled = await redis.get(`comment_cancelled:${commentId}`)
+        if (isCancelled) {
           console.log(`[ADMIN]   Skipping cancelled notification for comment ${commentId}`)
           cancelledNotificationIds.push(notification.id)
           continue
@@ -198,6 +200,7 @@ export async function processAdminNotifications() {
             period,
             companyLogoUrl: companyLogoUrl || undefined,
             mainCompanyDomain: emailSettings.mainCompanyDomain,
+            accentColor: emailSettings.accentColor || undefined,
             accentTextMode: emailSettings.accentTextMode || undefined,
             emailHeaderColor: emailSettings.emailHeaderColor || undefined,
             emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,

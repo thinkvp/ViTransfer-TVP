@@ -66,7 +66,7 @@ RUN if [ -f package-lock.json ]; then \
         fi
 
 RUN echo "Running npm security audit..." && \
-    if audit_output="$(npm audit --audit-level=high 2>&1)"; then \
+    if audit_output="$(npm audit --audit-level=high --omit=dev 2>&1)"; then \
         echo "$audit_output"; \
     else \
         echo "$audit_output"; \

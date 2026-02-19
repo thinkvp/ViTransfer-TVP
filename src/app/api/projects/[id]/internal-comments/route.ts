@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { contentSchema } from '@/lib/validation'
 import { getSafeguardLimits } from '@/lib/settings'
+import { sendPushNotification } from '@/lib/push-notifications'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -200,6 +201,34 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     })
   } catch (e) {
     console.error('[INTERNAL COMMENTS] Failed to queue notification:', e)
+  }
+
+  // Fire an instant bell + browser push notification to other project members.
+  // Best-effort: never fail the request if push delivery doesn't work.
+  try {
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { title: true } })
+    if (project) {
+      await sendPushNotification({
+        type: 'INTERNAL_COMMENT',
+        projectId,
+        projectName: project.title,
+        title: 'New internal comment',
+        message: `New internal comment on ${project.title}`,
+        details: {
+          __meta: {
+            authorUserId: currentUser.id,
+          },
+          __link: {
+            href: `/admin/projects/${encodeURIComponent(projectId)}`,
+          },
+          'Project': project.title,
+          'Author': currentUser.name || currentUser.email,
+          'Comment': created.content.substring(0, 200) + (created.content.length > 200 ? '...' : ''),
+        },
+      })
+    }
+  } catch (e) {
+    console.warn('[INTERNAL COMMENTS] Failed to send push notification:', e)
   }
 
   return NextResponse.json(serializeComment({ ...created, replies: created.replies || [] }))

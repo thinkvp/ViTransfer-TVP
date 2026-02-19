@@ -1,8 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { Prisma } from '@prisma/client'
-import { requireApiSystemAdmin } from '@/lib/auth'
+import { requireApiAdmin } from '@/lib/auth'
+import { canSeeMenu } from '@/lib/rbac'
 import { rateLimit } from '@/lib/rate-limit'
+
+// Security/auth events (UNAUTHORIZED_OTP, FAILED_LOGIN, SUCCESSFUL_ADMIN_LOGIN,
+// FAILED_SHARE_PASSWORD, SHARE_ACCESS, GUEST_VIDEO_LINK_ACCESS, PASSWORD_RESET_* etc.)
+// are implicitly excluded for non-system-admin users because they are not in
+// PROJECT_TYPES or SALES_TYPES — the positive-inclusion allow-list below.
+
+// Notification types for users with Sales menu access
+const SALES_TYPES = [
+  'SALES_QUOTE_VIEWED',
+  'SALES_QUOTE_ACCEPTED',
+  'SALES_INVOICE_VIEWED',
+  'SALES_INVOICE_PAID',
+]
+
+// Notification types for users with Projects menu access
+const PROJECT_TYPES = [
+  'CLIENT_COMMENT',
+  'ADMIN_SHARE_COMMENT',
+  'VIDEO_APPROVAL',
+  'INTERNAL_COMMENT',
+  'PROJECT_USER_ASSIGNED',
+]
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,8 +38,9 @@ const noStoreHeaders = {
 /**
  * GET /api/notifications
  *
- * Returns recent push notification logs (the same events that would be sent to Gotify).
- * ADMIN ONLY.
+ * Returns push notification log entries for the current user.
+ * System admins see all types. Other internal users see only notifications
+ * relevant to their role permissions (project/sales events for assigned projects).
  *
  * Query params:
  * - limit: number (default 20, max 100)
@@ -24,7 +48,7 @@ const noStoreHeaders = {
  * - successOnly: 1|0 (default 1)
  */
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiSystemAdmin(request)
+  const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -52,24 +76,88 @@ export async function GET(request: NextRequest) {
 
     const successOnly = (searchParams.get('successOnly') ?? '1') !== '0'
 
-    const where: any = {}
-    if (successOnly) where.success = true
-    if (beforeValid) {
-      where.sentAt = { lt: before }
+    // Base author filter: never show self-authored notifications
+    const authorFilter = {
+      OR: [
+        { details: { path: ['__meta', 'authorUserId'], equals: Prisma.JsonNull } },
+        { details: { path: ['__meta', 'authorUserId'], equals: Prisma.DbNull } },
+        { details: { path: ['__meta', 'authorUserId'], not: authResult.id } },
+      ],
     }
 
-    // Hide self-authored collaboration signals.
-    // PushNotificationLog is global (not per-user), so we filter based on JSON metadata.
-    // Keep rows with no authorUserId metadata.
-    where.AND = [
+    const andConditions: any[] = [
+      authorFilter,
+      // PROJECT_USER_ASSIGNED is always scoped to the target user only
       {
         OR: [
-          { details: { path: ['__meta', 'authorUserId'], equals: Prisma.JsonNull } },
-          { details: { path: ['__meta', 'authorUserId'], equals: Prisma.DbNull } },
-          { details: { path: ['__meta', 'authorUserId'], not: authResult.id } },
+          { type: { not: 'PROJECT_USER_ASSIGNED' } },
+          { details: { path: ['__meta', 'targetUserId'], equals: authResult.id } },
         ],
       },
     ]
+
+    let typeFilter: any = undefined // undefined = no type restriction (system admin sees all)
+
+    if (!authResult.appRoleIsSystemAdmin) {
+      const permissions = authResult.permissions
+      // Sales access is gated on menu visibility (no per-doc assignment model).
+      const hasSalesAccess = permissions ? canSeeMenu(permissions, 'sales') : false
+
+      // Project notifications are gated on project *assignment*, not menu visibility.
+      // A user may be assigned to projects without having the Projects menu in their role,
+      // and they should still receive notifications for those projects.
+      const assignedRows = await prisma.projectUser.findMany({
+        where: { userId: authResult.id },
+        select: { projectId: true },
+      })
+      const assignedProjectIds = assignedRows.map((r) => r.projectId)
+      const hasAssignedProjects = assignedProjectIds.length > 0
+
+      const allowedTypes: string[] = []
+      if (hasAssignedProjects) allowedTypes.push(...PROJECT_TYPES)
+      if (hasSalesAccess) allowedTypes.push(...SALES_TYPES)
+
+      if (allowedTypes.length === 0) {
+        // User has no assigned projects and no sales access
+        const res = NextResponse.json({
+          items: [],
+          nextBefore: null,
+          unreadCount: 0,
+          lastSeenAt: null,
+        })
+        Object.entries(noStoreHeaders).forEach(([k, v]) => res.headers.set(k, v))
+        return res
+      }
+
+      typeFilter = { in: allowedTypes }
+
+      if (hasAssignedProjects) {
+        // Project-related notifications: only show if in an assigned project.
+        // Sales-related notifications: no per-project restriction.
+        // Note: we intentionally exclude projectId: null here — project-type
+        // events should always have a projectId; leaking null-projectId rows
+        // to unassigned users would be incorrect.
+        const projectScopeOrClauses: any[] = [
+          {
+            AND: [
+              { type: { in: PROJECT_TYPES } },
+              { projectId: { in: assignedProjectIds } },
+            ],
+          },
+        ]
+        if (hasSalesAccess) {
+          projectScopeOrClauses.push({ type: { in: SALES_TYPES } })
+        }
+        andConditions.push({ OR: projectScopeOrClauses })
+      }
+    }
+
+    // Base where clause — reused for both the main query and the unread count
+    const baseWhere: any = {
+      ...(successOnly ? { success: true } : {}),
+      ...(typeFilter !== undefined ? { type: typeFilter } : {}),
+      AND: andConditions,
+    }
 
     const readState = await prisma.notificationReadState.findUnique({
       where: { userId: authResult.id },
@@ -77,7 +165,10 @@ export async function GET(request: NextRequest) {
     })
 
     const rows = await prisma.pushNotificationLog.findMany({
-      where,
+      where: {
+        ...baseWhere,
+        ...(beforeValid ? { sentAt: { lt: before } } : {}),
+      },
       orderBy: { sentAt: 'desc' },
       take: limit + 1,
       select: {
@@ -104,16 +195,7 @@ export async function GET(request: NextRequest) {
     if (lastSeenAt) {
       unreadCount = await prisma.pushNotificationLog.count({
         where: {
-          ...(successOnly ? { success: true } : {}),
-          AND: [
-            {
-              OR: [
-                { details: { path: ['__meta', 'authorUserId'], equals: Prisma.JsonNull } },
-                { details: { path: ['__meta', 'authorUserId'], equals: Prisma.DbNull } },
-                { details: { path: ['__meta', 'authorUserId'], not: authResult.id } },
-              ],
-            },
-          ],
+          ...baseWhere,
           sentAt: { gt: lastSeenAt },
         },
       })
@@ -137,10 +219,10 @@ export async function GET(request: NextRequest) {
  * POST /api/notifications
  *
  * Mark notifications as seen by setting the per-user lastSeenAt.
- * ADMIN ONLY.
+ * Available to all authenticated internal users.
  */
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiSystemAdmin(request)
+  const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) {
     return authResult
   }

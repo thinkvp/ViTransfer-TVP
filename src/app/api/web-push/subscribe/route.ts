@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiSystemAdmin } from '@/lib/auth'
+import { requireApiAdmin } from '@/lib/auth'
 import { upsertWebPushSubscription } from '@/lib/admin-web-push'
 import { Prisma } from '@prisma/client'
 
@@ -11,7 +11,7 @@ function asTrimmedString(value: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await requireApiSystemAdmin(request)
+  const user = await requireApiAdmin(request)
   if (user instanceof Response) return user
 
   try {

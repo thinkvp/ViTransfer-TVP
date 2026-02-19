@@ -152,6 +152,13 @@ export async function POST(request: NextRequest) {
     : (share.settingsJson as unknown as SalesSettings)
   )
 
+  // Prefer the explicit email branding domain, but fall back to Sales settings website.
+  // This ensures sales docs (invoice/quote) have a clickable footer even when
+  // Settings.mainCompanyDomain isn't configured.
+  const mainCompanyDomain =
+    normalizeBaseUrl(emailSettings.mainCompanyDomain) ||
+    normalizeBaseUrl(settings?.website)
+
   const stripeGateway = await prisma.salesStripeGatewaySettings.findUnique({
     where: { id: 'default' },
     select: { enabled: true, feePercent: true, feeFixedCents: true, currencies: true },
@@ -270,6 +277,7 @@ export async function POST(request: NextRequest) {
     const html = renderEmailShell({
       companyName,
       companyLogoUrl,
+      mainCompanyDomain,
       headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
       headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
       title: `${docLabel} ready`,

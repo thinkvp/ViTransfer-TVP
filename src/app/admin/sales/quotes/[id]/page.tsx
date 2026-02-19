@@ -38,6 +38,8 @@ function quoteStatusLabel(status: QuoteStatus): string {
       return 'Open'
     case 'SENT':
       return 'Sent'
+    case 'OPENED':
+      return 'Opened'
     case 'ACCEPTED':
       return 'Accepted'
     case 'CLOSED':

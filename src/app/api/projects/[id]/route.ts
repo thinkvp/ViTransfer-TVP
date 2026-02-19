@@ -779,6 +779,13 @@ export async function PATCH(
       updateData.clientNotificationDay = validatedBody.clientNotificationDay
     }
 
+    // Snapshot existing assignments so we can detect newly added users after the transaction
+    const previousAssignedUserIds = assignedUsersToSet !== null
+      ? new Set(
+          (await prisma.projectUser.findMany({ where: { projectId: id }, select: { userId: true } })).map((r) => r.userId)
+        )
+      : null
+
     // Update the project in database FIRST (before invalidating sessions)
     const project = await prisma.$transaction(async (tx) => {
       const updated = await tx.project.update({
@@ -802,6 +809,51 @@ export async function PATCH(
 
       return updated
     })
+
+    // Notify newly assigned users (in-app PROJECT_USER_ASSIGNED notification)
+    if (assignedUsersToSet !== null && previousAssignedUserIds !== null) {
+      const newlyAddedUserIds = assignedUsersToSet
+        .filter((u) => !previousAssignedUserIds.has(u.userId) && u.userId !== admin.id)
+        .map((u) => u.userId)
+
+      if (newlyAddedUserIds.length > 0) {
+        try {
+          const usersToNotify = await prisma.user.findMany({
+            where: { id: { in: newlyAddedUserIds } },
+            select: { id: true, appRole: { select: { isSystemAdmin: true } } },
+          })
+          // Skip system admins — they have full project visibility anyway
+          const filteredUsers = usersToNotify.filter((u) => u.appRole?.isSystemAdmin !== true)
+          if (filteredUsers.length > 0) {
+            await Promise.allSettled(
+              filteredUsers.map((u) =>
+                prisma.pushNotificationLog.create({
+                  data: {
+                    type: 'PROJECT_USER_ASSIGNED',
+                    projectId: project.id,
+                    success: true,
+                    statusCode: null,
+                    message: null,
+                    details: {
+                      __payload: {
+                        title: 'Project Assignment',
+                        message: `You have been added to "${project.title}"`,
+                      },
+                      __meta: {
+                        targetUserId: u.id,
+                        authorUserId: admin.id,
+                      },
+                    },
+                  },
+                })
+              )
+            )
+          }
+        } catch (err) {
+          console.error('[PROJECT UPDATE] Failed to create assignment notification:', err)
+        }
+      }
+    }
 
     // Record status change in analytics activity feed
     if (validatedBody.status !== undefined && previousStatus && previousStatus !== validatedBody.status) {

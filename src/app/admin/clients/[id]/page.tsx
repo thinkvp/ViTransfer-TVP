@@ -356,7 +356,7 @@ export default function ClientDetailPage() {
   const invoiceEffectiveStatus = useCallback(
     (inv: SalesInvoice): InvoiceStatus => {
       const rollupStatus = salesRollup?.invoiceRollupById?.[inv.id]?.effectiveStatus
-      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OPENED' || rollupStatus === 'OVERDUE' || rollupStatus === 'PARTIALLY_PAID' || rollupStatus === 'PAID') {
         return rollupStatus
       }
       const totalCents = sumLineItemsTotal(inv.items, salesTaxRatePercent)
@@ -368,6 +368,7 @@ export default function ClientDetailPage() {
         dueDate: inv.dueDate,
         totalCents,
         paidCents,
+        hasOpenedEmail: Boolean(inv.hasOpenedEmail),
       })
     },
     [invoicePaidCents, salesRollup?.invoiceRollupById, salesTaxRatePercent]
@@ -376,7 +377,7 @@ export default function ClientDetailPage() {
   const quoteEffectiveStatus = useCallback(
     (q: SalesQuote): QuoteStatus => {
       const rollupStatus = salesRollup?.quoteEffectiveStatusById?.[q.id]
-      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'ACCEPTED' || rollupStatus === 'CLOSED') {
+      if (rollupStatus === 'OPEN' || rollupStatus === 'SENT' || rollupStatus === 'OPENED' || rollupStatus === 'ACCEPTED' || rollupStatus === 'CLOSED') {
         return rollupStatus
       }
       return computeQuoteEffectiveStatus(q)
@@ -883,7 +884,7 @@ export default function ClientDetailPage() {
                         <tr className="border-b border-border">
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Due date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Project</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
                         </tr>
@@ -891,6 +892,7 @@ export default function ClientDetailPage() {
                       <tbody>
                         {sales.invoices.slice(0, 10).map((inv) => {
                           const effectiveStatus = invoiceEffectiveStatus(inv)
+                          const totalCents = sumLineItemsTotal(inv.items, salesTaxRatePercent)
                           return (
                           <tr key={inv.id} className="border-b border-border/60 last:border-b-0">
                             <td className="px-3 py-2 font-medium">
@@ -899,7 +901,7 @@ export default function ClientDetailPage() {
                               </Link>
                             </td>
                             <td className="px-3 py-2 tabular-nums">{formatDate(inv.issueDate)}</td>
-                            <td className="px-3 py-2 tabular-nums">{inv.dueDate ? formatDate(inv.dueDate) : '—'}</td>
+                            <td className="px-3 py-2 tabular-nums">{formatMoney(totalCents)}</td>
                             <td className="px-3 py-2 text-muted-foreground">
                               {inv.projectId ? (
                                 <Link href={`/admin/projects/${inv.projectId}`} className="hover:underline">

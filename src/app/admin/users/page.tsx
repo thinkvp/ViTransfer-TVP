@@ -517,22 +517,26 @@ export default function UsersPage() {
                               (() => {
                                 const isProjectsGroup = group.key === 'projects'
                                 const isSharePageGroup = group.key === 'sharePage'
-                                const fullControlEnabled = rolePermissions.actions.projectsFullControl === true
-                                const isLockedPhotoVideo =
-                                  isProjectsGroup && item.key === 'projectsPhotoVideoUploads' && fullControlEnabled
-
-                                const isDisabled = !areaEnabled || isLockedPhotoVideo
+                                const isDisabled = !areaEnabled
 
                                 const handleCheckedChange = (checked: boolean) => {
                                   setRolePermissions((prev) => {
-                                    const next = {
-                                      ...prev,
-                                      actions: { ...prev.actions, [item.key]: checked === true },
-                                    }
+                                    const nextActions = { ...prev.actions, [item.key]: checked === true }
 
                                     // Projects: Full Control implies Photo & Video Uploads.
                                     if (isProjectsGroup && item.key === 'projectsFullControl' && checked === true) {
-                                      next.actions.projectsPhotoVideoUploads = true
+                                      nextActions.projectsPhotoVideoUploads = true
+                                    }
+
+                                    // Projects: disabling Photo & Video Uploads clears Full Control too,
+                                    // since Full Control implies Photo & Video access.
+                                    if (
+                                      isProjectsGroup &&
+                                      item.key === 'projectsPhotoVideoUploads' &&
+                                      checked !== true &&
+                                      prev.actions.projectsFullControl === true
+                                    ) {
+                                      nextActions.projectsFullControl = false
                                     }
 
                                     // Share Page: disabling the main area clears child actions.
@@ -540,7 +544,7 @@ export default function UsersPage() {
                                       // no-op; the area gate already disables the checkbox
                                     }
 
-                                    return next
+                                    return { ...prev, actions: nextActions }
                                   })
                                 }
 
@@ -549,7 +553,7 @@ export default function UsersPage() {
                                 key={item.key}
                                 className={cn(
                                   'flex items-center gap-2 text-sm',
-                                  (!areaEnabled || isLockedPhotoVideo) && 'opacity-60'
+                                  !areaEnabled && 'opacity-60'
                                 )}
                               >
                                 <Checkbox

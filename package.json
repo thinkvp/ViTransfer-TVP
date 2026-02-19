@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -63,7 +63,6 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
-    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
     "postcss": "^8",
@@ -76,6 +75,8 @@
     "esbuild": "0.27.0",
     "glob": "^11.1.0",
     "jsdom": "27.2.0",
-    "parse5": "7.2.1"
+    "parse5": "7.2.1",
+    "minimatch": "10.2.1",
+    "ajv": "8.18.0"
   }
 }

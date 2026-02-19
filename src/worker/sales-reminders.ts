@@ -92,6 +92,19 @@ function safeOriginFromUrl(value: unknown): string | null {
   }
 }
 
+function normalizeOriginFromInput(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const raw = value.trim()
+  if (!raw) return null
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
 function computeQuoteShareExpiresAt(validUntilYmd: string | null): Date | null {
   const until = validUntilYmd ? parseYmd(validUntilYmd) : null
   if (!until) return null
@@ -182,6 +195,10 @@ export async function processSalesReminders() {
   const emailSettings = await getEmailSettings()
   const fromAddress = emailSettings.smtpFromAddress || emailSettings.smtpUsername || 'noreply@vitransfer.com'
   const companyName = (emailSettings.companyName || 'Studio').trim() || 'Studio'
+
+  const mainCompanyDomain =
+    normalizeOriginFromInput(emailSettings.mainCompanyDomain) ||
+    normalizeOriginFromInput(settings.website)
 
   const appBaseUrl =
     safeOriginFromUrl(process.env.NEXT_PUBLIC_APP_URL) ||
@@ -462,7 +479,7 @@ export async function processSalesReminders() {
       const html = renderEmailShell({
         companyName,
         companyLogoUrl,
-        mainCompanyDomain: emailSettings.mainCompanyDomain,
+        mainCompanyDomain,
         headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
         headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
         title: 'Invoice overdue',
@@ -513,7 +530,7 @@ export async function processSalesReminders() {
         const htmlTracked = renderEmailShell({
           companyName,
           companyLogoUrl,
-          mainCompanyDomain: emailSettings.mainCompanyDomain,
+          mainCompanyDomain,
           headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
         headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
           title: 'Invoice overdue',
@@ -685,7 +702,7 @@ export async function processSalesReminders() {
         const htmlTracked = renderEmailShell({
           companyName,
           companyLogoUrl,
-          mainCompanyDomain: emailSettings.mainCompanyDomain,
+          mainCompanyDomain,
           headerGradient: emailSettings.emailHeaderColor || EMAIL_THEME.headerBackground,
         headerTextColor: (emailSettings.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
           title: 'Quote expiring soon',

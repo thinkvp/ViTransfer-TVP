@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db'
-import { sendBrowserPushToSystemAdmins } from '@/lib/admin-web-push'
+import { sendBrowserPushToEligibleUsers } from '@/lib/admin-web-push'
 
 export interface PushNotificationPayload {
   type:
@@ -12,6 +12,7 @@ export interface PushNotificationPayload {
     | 'CLIENT_COMMENT'
     | 'ADMIN_SHARE_COMMENT'
     | 'VIDEO_APPROVAL'
+    | 'INTERNAL_COMMENT'
     | 'SALES_QUOTE_VIEWED'
     | 'SALES_QUOTE_ACCEPTED'
     | 'SALES_INVOICE_VIEWED'
@@ -46,7 +47,7 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
 
     // Always attempt browser Web Push for system admins (best-effort).
     // This is intentionally independent of Gotify configuration.
-    sendBrowserPushToSystemAdmins(payload).catch((err: any) => {
+    sendBrowserPushToEligibleUsers(payload).catch((err: any) => {
       const code = typeof err?.code === 'string' ? err.code : ''
       // Common when DB hasn't been migrated yet.
       if (code === 'P2021' || code === 'P2022') {
@@ -83,6 +84,8 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'CLIENT_COMMENT': 'notifyClientComments',
       // Treat share-visible admin comments as part of the "comments" category.
       'ADMIN_SHARE_COMMENT': 'notifyClientComments',
+      // Internal comments are part of the admin comments category.
+      'INTERNAL_COMMENT': 'notifyClientComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',
       'SALES_QUOTE_VIEWED': 'notifySalesQuoteViewed',
       'SALES_QUOTE_ACCEPTED': 'notifySalesQuoteAccepted',
@@ -188,12 +191,15 @@ async function sendToGotify(
       title = `[${titlePrefix}] ${title}`
     }
 
-    // Build the message with details
+    // Build the message with details (skip internal __ keys)
     let message = payload.message
     if (payload.details && Object.keys(payload.details).length > 0) {
       const detailLines = Object.entries(payload.details)
+        .filter(([key]) => !key.startsWith('__'))
         .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
-      message += '\n\n' + detailLines.join('\n')
+      if (detailLines.length > 0) {
+        message += '\n\n' + detailLines.join('\n')
+      }
     }
 
     const response = await fetch(webhookUrl, {

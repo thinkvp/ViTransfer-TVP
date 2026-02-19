@@ -96,7 +96,7 @@ export default function AdminHeader() {
             >
               <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-            {user.isSystemAdmin ? <NotificationsBell /> : null}
+            <NotificationsBell />
           </div>
         </div>
       </div>

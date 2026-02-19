@@ -628,11 +628,31 @@ async function main() {
   )
 
   notificationWorker.on('completed', (job) => {
-    console.log(`Notification check ${job.id} completed`)
+    const name = job.name
+    const label =
+      name === 'project-key-date-reminders' ||
+      name === 'user-key-date-reminders' ||
+      name === 'auto-start-projects-on-shooting-key-date'
+        ? 'Key Date check'
+        : name === 'process-notifications' || name === 'process-notifications-retry'
+        ? 'Notification check'
+        : name || 'Job'
+
+    console.log(`${label} ${job.id} completed`)
   })
 
   notificationWorker.on('failed', (job, err) => {
-    console.error(`Notification check ${job?.id} failed:`, err)
+    const name = job?.name
+    const label =
+      name === 'project-key-date-reminders' ||
+      name === 'user-key-date-reminders' ||
+      name === 'auto-start-projects-on-shooting-key-date'
+        ? 'Key Date check'
+        : name === 'process-notifications' || name === 'process-notifications-retry'
+        ? 'Notification check'
+        : name || 'Job'
+
+    console.error(`${label} ${job?.id} failed:`, err)
   })
 
   console.log('Notification worker started')

@@ -32,60 +32,34 @@ interface ApprovalNotificationContext {
 
 /**
  * Send immediate notification (when schedule is IMMEDIATE)
+ * @param target - 'client' to send to client recipients, 'admin' to send to internal users
  */
-export async function sendImmediateNotification(context: NotificationContext) {
+export async function sendImmediateNotification(context: NotificationContext, target: 'client' | 'admin' = 'client') {
   const { comment, project, video } = context
 
-  // IMPORTANT: author identity is not the same as visibility.
-  // Internal users can create share-visible comments (isInternal === false).
-  // For notification routing, any authenticated internal-user-authored comment
-  // should be treated as admin activity.
-  const authoredByInternalUser = !!comment.userId
-
-  // Check if notification was cancelled before sending
+  // Check if notification was cancelled (comment deleted)
   const redis = getRedis()
-  const notificationData = await redis.get(`comment_notification:${comment.id}`)
+  const cancelled = await redis.get(`comment_cancelled:${comment.id}`)
 
-  if (!notificationData) {
+  if (cancelled) {
     console.log(`[IMMEDIATE] Comment ${comment.id} notification was cancelled, skipping send`)
     return
   }
 
-  // Get recipients with notifications enabled
-  const allRecipients = await getProjectRecipients(comment.projectId)
-  const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
-
-  // Internal recipients (admins + non-admins) assigned to this project with notifications enabled.
-  // IMPORTANT: users without Share Page access should not receive Share-related emails.
-  const internalUsers = await prisma.projectUser.findMany({
-    where: { projectId: comment.projectId, receiveNotifications: true },
-    select: {
-      user: {
-        select: {
-          email: true,
-          name: true,
-          appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
-        },
-      },
-    },
-  })
-  const internalEmails = internalUsers
-    .filter((r) => {
-      const role = r.user.appRole
-      const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
-      if (isAdminRole) return true
-      const permissions = normalizeRolePermissions(role?.permissions)
-      return canDoAction(permissions, 'accessSharePage')
-    })
-    .map((r) => r.user.email)
-    .filter(Boolean)
-
   const shareUrl = await generateShareUrl(project.slug)
   const videoName = video?.name || 'Unknown Video'
   const versionLabel = video?.versionLabel || 'Unknown Version'
+  const authorEmail = comment.authorEmail?.toLowerCase() ?? null
+  const authorLabel = comment.authorName || (comment.isInternal ? 'Admin' : 'Client')
 
-  if (authoredByInternalUser || comment.isInternal) {
-    // Admin commented/replied → notify clients IMMEDIATELY
+  if (target === 'client') {
+    // → notify client recipients (skip the comment author)
+    const allRecipients = await getProjectRecipients(comment.projectId)
+    const recipients = allRecipients.filter(r =>
+      r.receiveNotifications && r.email &&
+      r.email.toLowerCase() !== authorEmail
+    )
+
     if (recipients.length === 0) {
       console.log(`[IMMEDIATE→CLIENT] Skipped - no recipients for project "${project.title}"`)
       return
@@ -107,7 +81,7 @@ export async function sendImmediateNotification(context: NotificationContext) {
 
     console.log(`[IMMEDIATE→CLIENT] Sending to ${recipients.length} recipient(s) for "${project.title}"`)
     console.log(`[IMMEDIATE→CLIENT]   Video: ${videoName} (${versionLabel})`)
-    console.log(`[IMMEDIATE→CLIENT]   Author: ${comment.authorName || 'Admin'}`)
+    console.log(`[IMMEDIATE→CLIENT]   Author: ${authorLabel}`)
 
     const emailPromises = recipients.map(async (recipient) => {
       const recipientEmail = recipient.email!
@@ -145,7 +119,7 @@ export async function sendImmediateNotification(context: NotificationContext) {
         projectTitle: project.title,
         videoName,
         versionLabel,
-        authorName: comment.authorName || 'Admin',
+        authorName: authorLabel,
         commentContent: comment.content,
         timecode: comment.timecode,
         shareUrl,
@@ -192,19 +166,42 @@ export async function sendImmediateNotification(context: NotificationContext) {
       }
     }
   } else {
-    // Client commented → notify admins IMMEDIATELY
-    if (internalEmails.length === 0) {
-      console.log(`[IMMEDIATE→ADMIN] Skipped - no internal users opted in`)
+    // → notify internal users (skip the comment author)
+    const internalUsers = await prisma.projectUser.findMany({
+      where: { projectId: comment.projectId, receiveNotifications: true },
+      select: {
+        user: {
+          select: {
+            email: true,
+            name: true,
+            appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
+          },
+        },
+      },
+    })
+    const targetAdmins = internalUsers
+      .filter((r) => {
+        const role = r.user.appRole
+        const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+        if (isAdminRole) return true
+        const permissions = normalizeRolePermissions(role?.permissions)
+        return canDoAction(permissions, 'accessSharePage')
+      })
+      .map((r) => r.user.email)
+      .filter((e): e is string => !!e && e.toLowerCase() !== authorEmail)
+
+    if (targetAdmins.length === 0) {
+      console.log(`[IMMEDIATE→ADMIN] Skipped - no internal users to notify for "${project.title}"`)
       return
     }
 
-    console.log(`[IMMEDIATE→ADMIN] Sending to ${internalEmails.length} internal user(s) for "${project.title}"`)
+    console.log(`[IMMEDIATE→ADMIN] Sending to ${targetAdmins.length} internal user(s) for "${project.title}"`)
     console.log(`[IMMEDIATE→ADMIN]   Video: ${videoName} (${versionLabel})`)
-    console.log(`[IMMEDIATE→ADMIN]   Client: ${comment.authorName || 'Client'}`)
+    console.log(`[IMMEDIATE→ADMIN]   Author: ${authorLabel}`)
 
     const result = await sendAdminCommentNotificationEmail({
-      adminEmails: internalEmails,
-      clientName: comment.authorName || 'Client',
+      adminEmails: targetAdmins,
+      clientName: authorLabel,
       clientEmail: comment.authorEmail,
       projectTitle: project.title,
       videoName,
@@ -226,7 +223,7 @@ export async function sendImmediateNotification(context: NotificationContext) {
 /**
  * Queue notification for later batch sending (when schedule is not IMMEDIATE)
  */
-export async function queueNotification(context: NotificationContext) {
+export async function queueNotification(context: NotificationContext, alreadySentTo?: { admins?: boolean; clients?: boolean }) {
   const { comment, project, video, isReply } = context
 
   // IMPORTANT: author identity is not the same as visibility.
@@ -256,10 +253,16 @@ export async function queueNotification(context: NotificationContext) {
     }
   }
 
+  const now = new Date()
   await prisma.notificationQueue.create({
     data: {
       projectId: comment.projectId,
       type,
+      // Pre-mark sides already handled via IMMEDIATE so workers don't re-process them.
+      sentToAdmins: alreadySentTo?.admins || false,
+      adminSentAt: alreadySentTo?.admins ? now : undefined,
+      sentToClients: alreadySentTo?.clients || false,
+      clientSentAt: alreadySentTo?.clients ? now : undefined,
       data: {
         type, // Include type in data JSON for email templates
         commentId: comment.id,

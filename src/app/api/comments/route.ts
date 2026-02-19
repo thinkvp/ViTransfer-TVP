@@ -14,7 +14,6 @@ import {
   sanitizeAndValidateContent,
   handleCommentNotifications,
   fetchProjectComments,
-  maybeRunLegacyCommentBackfills,
   resolveCommentDisplayColorSnapshot
 
 } from '@/lib/comment-helpers'
@@ -99,9 +98,6 @@ export async function GET(request: NextRequest) {
     const primaryRecipient = await getPrimaryRecipient(projectId)
     // Priority: companyName → primary recipient → 'Client'
     const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
-
-    // Best-effort legacy backfill: link older client comments to a recipient by authorName.
-    await maybeRunLegacyCommentBackfills(projectId)
 
     // Fetch all comments for the project
     const allComments = await prisma.comment.findMany({

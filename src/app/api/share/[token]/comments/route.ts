@@ -4,7 +4,6 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
-import { maybeRunLegacyCommentBackfills } from '@/lib/comment-helpers'
 import { getRateLimitSettings } from '@/lib/settings'
 export const runtime = 'nodejs'
 
@@ -83,9 +82,6 @@ export async function GET(
     if (project.guestMode && isGuest) {
       return NextResponse.json([], { headers: noStoreHeaders })
     }
-
-    // Best-effort legacy backfill: link older client comments to a recipient by authorName.
-    await maybeRunLegacyCommentBackfills(project.id)
 
     // Fetch comments with nested replies
     const comments = await prisma.comment.findMany({

@@ -63,7 +63,23 @@ export async function GET(request: NextRequest) {
     take: limit,
   })
 
-  const res = NextResponse.json({ invoices: rows.map((r: any) => salesInvoiceFromDb(r)) })
+  const ids = rows.map((r: any) => String(r?.id ?? '')).filter(Boolean)
+  const openedAgg = ids.length
+    ? await prisma.salesEmailTracking.groupBy({
+        by: ['docId'],
+        where: { type: 'INVOICE', docId: { in: ids }, openedAt: { not: null } },
+        _count: { _all: true },
+      })
+    : ([] as any[])
+
+  const openedSet = new Set((openedAgg as any[]).map((g) => String(g?.docId ?? '').trim()).filter(Boolean))
+
+  const invoices = rows.map((r: any) => {
+    const inv = salesInvoiceFromDb(r)
+    return { ...inv, hasOpenedEmail: openedSet.has(inv.id) }
+  })
+
+  const res = NextResponse.json({ invoices })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }
