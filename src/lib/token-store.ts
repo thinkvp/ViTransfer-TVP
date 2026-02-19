@@ -10,6 +10,31 @@ const listeners = new Set<TokenChangeListener>()
 let tokenChannel: BroadcastChannel | null = null
 let tokenChannelInitialized = false
 
+/**
+ * Persist a refresh token received from another window (via BroadcastChannel / storage event)
+ * into THIS window's own storage so that page reloads pick up the latest rotated token.
+ */
+function persistReceivedRefreshToken(token: string | null) {
+  if (typeof window === 'undefined') return
+  try {
+    if (token) {
+      const preferred = getPreferredRefreshStorage()
+      preferred?.setItem(REFRESH_TOKEN_KEY, token)
+      // Keep token in one storage only
+      if (getRememberDeviceEnabledUnsafe()) {
+        window.sessionStorage.removeItem(REFRESH_TOKEN_KEY)
+      } else {
+        window.localStorage.removeItem(REFRESH_TOKEN_KEY)
+      }
+    } else {
+      window.localStorage.removeItem(REFRESH_TOKEN_KEY)
+      window.sessionStorage.removeItem(REFRESH_TOKEN_KEY)
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 function ensureTokenChannel(): BroadcastChannel | null {
   if (tokenChannelInitialized) return tokenChannel
   tokenChannelInitialized = true
@@ -29,6 +54,8 @@ function ensureTokenChannel(): BroadcastChannel | null {
         }
         if (Object.prototype.hasOwnProperty.call(data, 'refreshToken')) {
           cachedRefreshToken = typeof data.refreshToken === 'string' ? data.refreshToken : null
+          // Persist to THIS window's storage so reloads / re-opens stay fresh
+          persistReceivedRefreshToken(cachedRefreshToken)
         }
         notifyListeners()
       }
@@ -36,11 +63,31 @@ function ensureTokenChannel(): BroadcastChannel | null {
       if (data.type === 'clear') {
         inMemoryAccessToken = null
         cachedRefreshToken = null
+        persistReceivedRefreshToken(null)
         notifyListeners()
       }
     }
   } catch {
     tokenChannel = null
+  }
+
+  // Backup sync: listen for localStorage changes made by other windows.
+  // This fires when another Chrome window writes to localStorage (same origin).
+  // It does NOT fire in the window that made the change, so there's no loop.
+  try {
+    window.addEventListener('storage', (event) => {
+      if (event.key === REFRESH_TOKEN_KEY && event.storageArea === window.localStorage) {
+        cachedRefreshToken = event.newValue
+        notifyListeners()
+      }
+      if (event.key === REMEMBER_DEVICE_KEY && event.storageArea === window.localStorage) {
+        // Another window toggled remember-device; re-sync refresh token from storage
+        syncRefreshFromStorage()
+        notifyListeners()
+      }
+    })
+  } catch {
+    // Ignore — SSR or non-standard environment
   }
 
   return tokenChannel
@@ -131,6 +178,8 @@ export function getAccessToken(): string | null {
 
 export function getRefreshToken(): string | null {
   ensureTokenChannel()
+  // Trust in-memory cache first — it's kept fresh by BroadcastChannel and
+  // storage event listeners. Fall back to storage only on first load (cold start).
   if (cachedRefreshToken) return cachedRefreshToken
   return syncRefreshFromStorage()
 }

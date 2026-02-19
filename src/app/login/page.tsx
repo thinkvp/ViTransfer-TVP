@@ -185,7 +185,7 @@ function LoginForm() {
               {sessionExpired && (
                 <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
                   <p className="text-sm text-warning font-medium">
-                    Your session has expired due to inactivity. Please log in again.
+                    Your session expired due to inactivity. Please log in again.
                   </p>
                 </div>
               )}
