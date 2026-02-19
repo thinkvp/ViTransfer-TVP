@@ -8,17 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.4] - 2026-02-19
 
 ### Added
-- **Internal comment bell notifications** — posting an internal comment now fires a real-time `PushNotificationLog` entry, updating badge counts and optional browser push for all users assigned to the project
-- **Browser push for all admin users** — push notification subscriptions are no longer restricted to system admins; all admin users can subscribe and receive notifications scoped to their role (project events for assigned projects, sales events for sales-menu users, security events for system admins only)
-- **Inline push subscribe toggle in notification bell** — a `BellOff`/`BellRing` icon button in the bell header lets any user subscribe or unsubscribe from browser push without needing access to Settings
-- **Push error feedback** — blocked or failed push subscription attempts now surface an inline error message in the bell dropdown instead of silently doing nothing
+- **Internal comment bell notifications** — posting an internal comment now fires a real-time `PushNotificationLog` entry, updating the badge count and triggering browser push for all users assigned to the project (excluding the author)
+- **Browser push for all admin users** — push notification subscriptions are no longer restricted to system admins; all admin users can subscribe their devices and receive notifications scoped to their access level: project events for assigned projects, sales events for sales-menu users, security events for system admins only
+- **Inline push subscribe/unsubscribe toggle in notification bell** — a `BellOff`/`BellRing` icon in the bell dropdown header lets any user enable or disable browser push on the current device without needing Settings access; button is hidden automatically when push is unavailable (no VAPID key, unsupported browser, or insufficient permissions)
+- **Push subscription error feedback** — blocked or failed push subscribe/unsubscribe attempts now show an inline error message in the bell dropdown; permission-denied state shows a specific "Notifications are blocked in your browser" message rather than silently failing
+- **Developer tools section** — new Developer Tools card in Settings for ad-hoc maintenance actions (e.g. purge notification backlog)
+- **Notification backlog purge API** — new `POST /api/settings/purge-notification-backlog` endpoint to clear stale unprocessed notification queue entries
+
+### Changed
+- **Notification routing refactored** — `sendImmediateNotification` now accepts a `target` parameter (`'client'` or `'admin'`) to cleanly separate routing paths; client and admin delivery are no longer entangled in the same code path
+- **Comment notification cancellation key renamed** — Redis key changed from `comment_notification:{id}` to `comment_cancelled:{id}` to accurately reflect its purpose; all workers and the notify route updated consistently
+- **Admin notification worker processes both directions** — the admin notifications worker now handles both `CLIENT_COMMENT` (client-to-admin) and `ADMIN_REPLY` types, matching the client notifications worker; previously only `CLIENT_COMMENT` was picked up for admin digest delivery
+- **Notification backlog age limit** — admin notification worker and comment summary route now ignore queue entries older than 7 days to prevent delivering stale digests after downtime
+- **Comment summary route sends to both sides** — `POST /api/projects/:id/notify` with `type: COMMENT_SUMMARY` now queues emails to both client recipients and internal assigned users from the same payload, rather than only handling one direction
+- **Accent colour passed to all email templates** — admin summary, internal comment digest, and comment notification emails now correctly pass `accentColor` through to templates (previously missing, causing some branded emails to fall back to the default colour)
+- **Worker job log labels improved** — worker completion and failure log messages now distinguish between key-date checks, notification checks, and other job types instead of labelling everything as "Notification check"
+- **User edit page layout rebuilt** — the edit user page now uses a card layout with a two-column grid for fields (email, name, role, status, password), consistent with the rest of the admin UI; same inline generate/copy password buttons as the create user flow
 
 ### Fixed
-- **Internal comment email self-notification** — the comment author is no longer included in their own internal comment email digest
-- **Notification data leak for non-admin users** — removed an `OR projectId: null` clause that was allowing all project-type notifications without a `projectId` to bleed through to any user with Projects menu access
-- **Badge count for project-assigned users** — notification visibility is now gated on current project assignment rather than Projects menu visibility; users assigned to projects now correctly see and receive badge counts even if the Projects menu is disabled in their role
-- **Cross-window auth token sync** — tokens received via `BroadcastChannel` are now persisted to storage, preventing stale sessions after page reload when another tab rotates the refresh token
-- **Password UI visibility** — password-related UI (prompt, clear button, settings fields) no longer appears on share and project pages when the auth mode is OTP, Guest, or None; API now clears stored password when switching away from password-based modes
+- **Dialog backdrop click no longer blocked** — removed `event.stopPropagation()` handlers from `DialogOverlay` that were preventing modals from closing when clicking outside them
+- **Checkbox tick intercepting click events** — added `pointer-events-none` to the `Check` icon inside the checkbox component so that clicking the tick area no longer double-fires the toggle and causes the checkbox to flick back
+- **Internal comment email self-notification** — the comment author is now filtered from their own internal comment digest; previously both sides of an internal comment thread would receive the same summary email
+- **Notification data leak for non-admin users** — removed an `OR projectId: null` clause from the bell API's project scope filter that was incorrectly leaking all project-type notification log entries (with no project ID) to any user with Projects menu access
+- **Bell badge count for project-assigned non-admin users** — notification visibility is now gated on project assignment directly rather than Projects menu visibility; users assigned to projects now correctly see badge counts even when their role does not include the Projects menu item
+- **Projects dashboard stale client names** — projects list and key dates calendar now refetch data when the browser tab regains focus, so a client name change made in another tab is reflected immediately without a manual reload
+- **Cross-window auth token sync** — tokens received via `BroadcastChannel` from another tab are now written to storage immediately, preventing stale sessions after page reload when a background tab rotated the refresh token
+- **Password UI shown for non-password auth modes** — password-related UI (entry prompt, clear button, settings field) no longer appears on share pages and project settings when the project auth mode is OTP, Guest, or None; the project PATCH API now clears any stored password hash when switching away from password-based modes
+- **Client page sales status rollup** — client detail page invoice and quote rollup now includes all relevant statuses (`PAID`, `PARTIALLY_PAID`, `OPENED`, `OVERDUE`, `ACCEPTED`, `CLOSED`) rather than a partial subset
+
+### Removed
+- **Legacy comment recipient backfill** — removed `backfillCommentRecipientIdsByAuthorName` helper and all call sites; recipient IDs have been normalised in the database and the backfill is no longer needed
+- **Dead utility modules** — removed `src/lib/encryption.ts` (duplicated logic), `src/lib/password-utils.ts` (inlined at call sites), and unused dev scripts (`export-pwa-notification-previews.ts`, `_check_prisma_sales_share.js`)
+- **Broken `ajv` package override** — removed the `overrides.ajv: 8.18.0` entry in `package.json` that was forcing ajv v8 onto `@eslint/eslintrc`, which requires ajv v6 and crashed ESLint with `TypeError: Cannot set properties of undefined (setting 'defaultMeta')`
 
 ## [1.0.3] - 2026-02-17
 
