@@ -29,6 +29,80 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 
 ---
 
+## Screenshots
+
+### Project Management & Dashboard
+
+<p align="center">
+  <img src="docs/screenshots/Project Dashboard.jpg" alt="Project Dashboard" width="800">
+  <br><em>Main project dashboard with status tracking, search, and filtering</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Project Page.jpg" alt="Project Page" width="800">
+  <br><em>Detailed project view with video versions, comments, and approval workflow</em>
+</p>
+
+### Client Share Experience
+
+<p align="center">
+  <img src="docs/screenshots/Share Page - Client View - Desktop.jpg" alt="Share Page Desktop" width="800">
+  <br><em>Client share page on desktop with video player and timestamped comments</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Share Page - Client View - Mobile.jpg" alt="Share Page Mobile" width="400">
+  <br><em>Responsive mobile view of client share page</em>
+</p>
+
+### Sales & CRM Integration
+
+<p align="center">
+  <img src="docs/screenshots/Sales Dashboard.jpg" alt="Sales Dashboard" width="800">
+  <br><em>Sales dashboard with invoice tracking and QuickBooks integration</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Sales - Invoice.jpg" alt="Invoice Page" width="800">
+  <br><em>Invoice detail page with Stripe payment integration</em>
+</p>
+
+### Client & User Management
+
+<p align="center">
+  <img src="docs/screenshots/Clients Page.jpg" alt="Clients Page" width="800">
+  <br><em>Client database with contact information and project linking</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/User Management Page.jpg" alt="User Management" width="800">
+  <br><em>User management with role-based access control</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Add New Role modal.jpg" alt="Add New Role" width="600">
+  <br><em>Granular permission control when creating custom roles</em>
+</p>
+
+### Additional Features
+
+<p align="center">
+  <img src="docs/screenshots/Photo Album.jpg" alt="Photo Album" width="800">
+  <br><em>Photo gallery with lightbox viewer and bulk download options</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Analytics Page.jpg" alt="Analytics" width="800">
+  <br><em>Detailed analytics tracking video views, downloads, and client engagement</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Add Key Date modal.jpg" alt="Add Key Date" width="600">
+  <br><em>Key date scheduling with automated reminders</em>
+</p>
+
+---
+
 ## Features
 
 ### Core Video Review
