@@ -83,7 +83,14 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const sortedAlbums = useMemo(() => {
-    return [...albums].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    return [...albums].sort((a, b) => {
+      const nameCompare = String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+      if (nameCompare !== 0) return nameCompare
+      return a.createdAt < b.createdAt ? 1 : -1
+    })
   }, [albums])
 
   async function fetchAlbums() {

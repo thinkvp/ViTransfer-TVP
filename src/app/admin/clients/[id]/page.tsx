@@ -827,6 +827,7 @@ export default function ClientDetailPage() {
                         <tr className="border-b border-border">
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Quote</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Project</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
                         </tr>
@@ -834,6 +835,7 @@ export default function ClientDetailPage() {
                       <tbody>
                         {sales.quotes.slice(0, 10).map((q) => {
                           const effectiveStatus = quoteEffectiveStatus(q)
+                          const totalCents = sumLineItemsTotal(q.items, salesTaxRatePercent)
                           return (
                             <tr key={q.id} className="border-b border-border/60 last:border-b-0">
                               <td className="px-3 py-2 font-medium">
@@ -842,6 +844,7 @@ export default function ClientDetailPage() {
                                 </Link>
                               </td>
                               <td className="px-3 py-2 tabular-nums">{formatDate(q.issueDate)}</td>
+                              <td className="px-3 py-2 tabular-nums">{formatMoney(totalCents)}</td>
                               <td className="px-3 py-2 text-muted-foreground">
                                 {q.projectId ? (
                                   <Link href={`/admin/projects/${q.projectId}`} className="hover:underline">
