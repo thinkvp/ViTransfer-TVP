@@ -128,7 +128,7 @@ export default function SalesPaymentsPage() {
 
   const displayPayments = useMemo(() => payments, [payments])
 
-  const isReadOnlyPayment = (p: SalesRollupPaymentRow): boolean => p.source === 'STRIPE' || p.source === 'QUICKBOOKS'
+  const isReadOnlyPayment = (p: SalesRollupPaymentRow): boolean => p.source === 'STRIPE'
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const invoiceNumberById = useMemo(() => Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber])), [invoices])
@@ -520,7 +520,7 @@ export default function SalesPaymentsPage() {
                                 className="h-9 w-9 p-0"
                                 onClick={() => onDelete(p.id)}
                                 disabled={isReadOnlyPayment(p) || deletingId === p.id}
-                                title={isReadOnlyPayment(p) ? 'Stripe payments are read-only' : 'Delete'}
+                                title={isReadOnlyPayment(p) ? 'Stripe payments cannot be deleted' : 'Delete'}
                                 aria-label={isReadOnlyPayment(p) ? 'Read-only payment' : 'Delete'}
                               >
                                 <Trash2 className="w-4 h-4 text-destructive" />
