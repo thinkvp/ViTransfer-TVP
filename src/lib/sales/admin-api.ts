@@ -137,7 +137,7 @@ export async function deleteSalesPayment(id: string): Promise<void> {
 
 export type SalesRollupPaymentRow = {
   id: string
-  source: 'LOCAL' | 'STRIPE'
+  source: 'MANUAL' | 'QUICKBOOKS' | 'STRIPE'
   paymentDate: string
   amountCents: number
   method: string | null

@@ -208,7 +208,7 @@ export default function VideoSidebar({
           'hidden lg:flex lg:flex-col'
         )}
       >
-        <div className="flex-1 min-h-0 max-h-full overflow-y-auto overflow-x-hidden sidebar-scrollbar">
+        <div className="flex-1 min-h-0 max-h-full overflow-y-auto overflow-x-hidden">
           {hasLogo && (
             <div className="p-4 border-b border-border">
               {mainCompanyDomain ? (
@@ -527,7 +527,7 @@ export default function VideoSidebar({
             'overflow-hidden transition-all duration-200',
             isMobileCollapsed ? 'max-h-0 opacity-0' : 'max-h-[500px] opacity-100'
           )}>
-            <div className="overflow-x-auto mobile-scrollbar">
+            <div className="overflow-x-auto">
               <div className="flex gap-3 p-3">
               {/* Videos */}
               {shouldShowVideos && sortedVideoGroups(videoGroups).map((group) => {
@@ -659,45 +659,6 @@ export default function VideoSidebar({
         </div>
       </div>
 
-      <style jsx global>{`
-        /* Discreet desktop sidebar scrollbar */
-        .sidebar-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .sidebar-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .sidebar-scrollbar::-webkit-scrollbar-thumb {
-          background: hsl(var(--muted-foreground) / 0.2);
-          border-radius: 3px;
-        }
-        .sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: hsl(var(--muted-foreground) / 0.3);
-        }
-        .sidebar-scrollbar {
-          scrollbar-width: thin;
-          scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
-        }
-
-        /* Discreet mobile horizontal scrollbar */
-        .mobile-scrollbar::-webkit-scrollbar {
-          height: 6px;
-        }
-        .mobile-scrollbar::-webkit-scrollbar-track {
-          background: hsl(var(--accent));
-        }
-        .mobile-scrollbar::-webkit-scrollbar-thumb {
-          background: hsl(var(--muted-foreground) / 0.3);
-          border-radius: 3px;
-        }
-        .mobile-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: hsl(var(--muted-foreground) / 0.4);
-        }
-        .mobile-scrollbar {
-          scrollbar-width: thin;
-          scrollbar-color: hsl(var(--muted-foreground) / 0.3) hsl(var(--accent));
-        }
-      `}</style>
     </>
   )
 }

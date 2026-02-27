@@ -128,7 +128,7 @@ export default function SalesPaymentsPage() {
 
   const displayPayments = useMemo(() => payments, [payments])
 
-  const isReadOnlyPayment = (p: SalesRollupPaymentRow): boolean => p.source === 'STRIPE'
+  const isReadOnlyPayment = (p: SalesRollupPaymentRow): boolean => p.source === 'STRIPE' || p.source === 'QUICKBOOKS'
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const invoiceNumberById = useMemo(() => Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber])), [invoices])

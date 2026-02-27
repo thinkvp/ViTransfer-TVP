@@ -34,7 +34,7 @@ function parseCommaIds(raw: string | null): string[] {
 
 type RollupPaymentRow = {
   id: string
-  source: 'LOCAL' | 'STRIPE'
+  source: 'MANUAL' | 'QUICKBOOKS' | 'STRIPE'
   paymentDate: string // YYYY-MM-DD
   amountCents: number
   method: string | null
@@ -332,7 +332,7 @@ export async function GET(request: NextRequest) {
   const unifiedPayments: RollupPaymentRow[] = [
     ...localPayments.map((p) => ({
       id: p.id,
-      source: 'LOCAL' as const,
+      source: (p.source === 'QUICKBOOKS' ? 'QUICKBOOKS' : p.source === 'STRIPE' ? 'STRIPE' : 'MANUAL') as 'MANUAL' | 'QUICKBOOKS' | 'STRIPE',
       paymentDate: p.paymentDate,
       amountCents: p.amountCents,
       method: p.method || null,

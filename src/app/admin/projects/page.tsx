@@ -39,6 +39,7 @@ type AnalyticsProject = {
   totalVisits?: number
   totalDownloads?: number
   videoCount?: number
+  lastActivityAt?: string | null
 }
 
 type OverviewStats = {
@@ -118,6 +119,7 @@ export default function AdminPage() {
                 totalVisits: Number((p as any)?.totalVisits) || 0,
                 totalDownloads: Number((p as any)?.totalDownloads) || 0,
                 videoCount: Number((p as any)?.videoCount) || 0,
+                lastActivityAt: typeof (p as any)?.lastActivityAt === 'string' ? (p as any).lastActivityAt : null,
               }
             }
             setAnalyticsByProjectId(next)
@@ -339,7 +341,7 @@ export default function AdminPage() {
           </CardContent>
         </Card>
 
-        <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} />
+        <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} analyticsMap={analyticsByProjectId} />
         <ProjectsDashboardKeyDates />
       </div>
     </div>

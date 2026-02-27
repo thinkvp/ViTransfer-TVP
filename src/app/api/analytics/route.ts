@@ -80,6 +80,56 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    const projectIds = projects.map(p => p.id)
+
+    // Fetch max activity timestamps per project from the three most relevant event tables.
+    // These are more accurate than project.updatedAt for "Last Activity" display.
+    const [maxShareAccess, maxVideoAnalytics, maxAlbumAnalytics] = await Promise.all([
+      projectIds.length
+        ? prisma.sharePageAccess.groupBy({
+            by: ['projectId'],
+            where: { projectId: { in: projectIds } },
+            _max: { createdAt: true },
+          })
+        : Promise.resolve([] as any[]),
+      projectIds.length
+        ? prisma.videoAnalytics.groupBy({
+            by: ['projectId'],
+            where: { projectId: { in: projectIds } },
+            _max: { createdAt: true },
+          })
+        : Promise.resolve([] as any[]),
+      projectIds.length
+        ? prisma.albumAnalytics.groupBy({
+            by: ['projectId'],
+            where: { projectId: { in: projectIds } },
+            _max: { createdAt: true },
+          })
+        : Promise.resolve([] as any[]),
+    ])
+
+    const toIsoOrNull = (dt: unknown): string | null => {
+      if (dt instanceof Date) return dt.toISOString()
+      if (typeof dt === 'string' && dt.length > 0) return dt
+      return null
+    }
+
+    const maxShareByPid: Record<string, string | null> = {}
+    for (const g of maxShareAccess as any[]) {
+      const id = String(g?.projectId ?? '').trim()
+      if (id) maxShareByPid[id] = toIsoOrNull(g?._max?.createdAt)
+    }
+    const maxVideoByPid: Record<string, string | null> = {}
+    for (const g of maxVideoAnalytics as any[]) {
+      const id = String(g?.projectId ?? '').trim()
+      if (id) maxVideoByPid[id] = toIsoOrNull(g?._max?.createdAt)
+    }
+    const maxAlbumByPid: Record<string, string | null> = {}
+    for (const g of maxAlbumAnalytics as any[]) {
+      const id = String(g?.projectId ?? '').trim()
+      if (id) maxAlbumByPid[id] = toIsoOrNull(g?._max?.createdAt)
+    }
+
     const projectsWithAnalytics = projects.map(project => {
       const totalDownloads = project.analytics.length
       const displayName = project.companyName || project.recipients[0]?.name || project.recipients[0]?.email || 'Client'
@@ -99,6 +149,19 @@ export async function GET(request: NextRequest) {
         NONE: project.sharePageAccesses.filter(a => a.accessMethod === 'NONE').length,
       }
 
+      // Compute the most recent genuine activity across event tables,
+      // falling back to project.updatedAt if no event records exist.
+      const updatedAtIso = toIsoOrNull(project.updatedAt) ?? new Date(0).toISOString()
+      const lastActivityAt = [
+        updatedAtIso,
+        maxShareByPid[project.id],
+        maxVideoByPid[project.id],
+        maxAlbumByPid[project.id],
+      ]
+        .filter((d): d is string => typeof d === 'string' && d.length > 0)
+        .sort()
+        .at(-1) ?? updatedAtIso
+
       return {
         id: project.id,
         title: project.title,
@@ -114,6 +177,7 @@ export async function GET(request: NextRequest) {
         totalDownloads,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
+        lastActivityAt,
       }
     })
 

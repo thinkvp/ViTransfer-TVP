@@ -469,6 +469,7 @@ export function ProjectInternalComments(props: {
           </div>
         </div>
       </CardContent>
+
     </Card>
   )
 }

@@ -366,9 +366,9 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
       const paidLocalCents = localPaidByInvoiceId[inv.id] ?? 0
       const paidBeforeCents = Math.max(0, Math.trunc(paidStripeCents + paidLocalCents))
 
-      // If Stripe already paid this invoice (or this payment would push us past the invoice total),
+      // If Stripe already paid this invoice (or this payment would push us to or past the invoice total),
       // treat the QBO payment as an accounting mirror and exclude it from invoice balance/status.
-      const wouldOverpay = invoiceTotalCents > 0 && paidBeforeCents + Math.max(0, Math.trunc(amountCents)) > invoiceTotalCents
+      const wouldOverpay = invoiceTotalCents > 0 && paidBeforeCents + Math.max(0, Math.trunc(amountCents)) >= invoiceTotalCents
       const alreadyPaid = invoiceTotalCents > 0 && paidBeforeCents >= invoiceTotalCents
       const excludeFromInvoiceBalance = paidStripeCents > 0 && (alreadyPaid || wouldOverpay)
 

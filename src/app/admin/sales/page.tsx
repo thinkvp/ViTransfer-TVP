@@ -143,8 +143,8 @@ export default function SalesDashboardPage() {
 
     const recentPaymentsThresholdMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30).getTime()
     const recentPaymentsTotalCents = payments.reduce((acc, p) => {
+      // Skip reconciliation/mirror entries (e.g. QBO mirroring a Stripe payment)
       if (p.excludeFromInvoiceBalance) return acc
-      if (p.source === 'STRIPE') return acc
       const d = parseDateOnlyLocal(p.paymentDate)
       if (!d || (d as Date).getTime() < recentPaymentsThresholdMs) return acc
       return acc + Math.max(0, Math.trunc(p.amountCents))

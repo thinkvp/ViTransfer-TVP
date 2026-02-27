@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-02-28
+
+### Added
+- **Accurate "Last Activity" timestamps** — projects dashboard, client detail page, and analytics now derive the last-activity timestamp from real event records (`sharePageAccess`, `videoAnalytics`, `albumAnalytics`) rather than `project.updatedAt`, giving a more meaningful signal of when a project was last genuinely active
+
+### Changed
+- **Quote amounts in client sales summary** — client detail page now shows the amount column for quotes in the per-client sales summary table
+- **Albums sorted alphabetically** — project albums are now listed in alphabetical order on share pages and in the admin view
+- **QuickBooks payments are read-only** — QBO-synced payment entries are now marked read-only in the payments table alongside Stripe payments, preventing accidental edits to mirrored records
+- **Payment source types expanded** — the payment source field now distinguishes `MANUAL`, `QUICKBOOKS`, and `STRIPE` (previously collapsed `LOCAL` and `QUICKBOOKS` into a single `LOCAL` value)
+- **Recent payments metric corrected** — the sales dashboard recent-payments total now correctly excludes reconciliation/mirror entries via the `excludeFromInvoiceBalance` flag rather than only filtering by `STRIPE` source, so QBO-mirrored Stripe payments are no longer double-counted
+- **Scrollbar styling centralized** — all custom scrollbar CSS consolidated into a single global rule in `globals.css` (6 px width and height, discreet muted-foreground thumb); per-component `styled-jsx` scrollbar blocks removed from `VideoSidebar`, `ProjectInternalComments`, and `ProjectAnalyticsClient`
+
+### Fixed
+- **`react-hooks/exhaustive-deps` lint warnings** — `ProjectsList` useMemo was missing `analyticsMap` from its dependency array; `ProjectAnalyticsClient` `activity` array was recreated on every render, making the downstream `sortedActivity` useMemo stale — both corrected
+
 ## [1.0.4] - 2026-02-19
 
 ### Added

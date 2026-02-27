@@ -76,9 +76,10 @@ function getProjectDataBytes(project: Project): number | null {
 interface ProjectsListProps {
   projects: Project[]
   onFilteredProjectsChange?: (projects: Project[]) => void
+  analyticsMap?: Record<string, { lastActivityAt?: string | null }>
 }
 
-export default function ProjectsList({ projects, onFilteredProjectsChange }: ProjectsListProps) {
+export default function ProjectsList({ projects, onFilteredProjectsChange, analyticsMap }: ProjectsListProps) {
   const router = useRouter()
   const { user } = useAuth()
 
@@ -326,12 +327,12 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
       if (tableSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
       if (tableSortKey === 'data') return dir * ((getProjectDataBytes(a) || 0) - (getProjectDataBytes(b) || 0))
       if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      if (tableSortKey === 'updatedAt') return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
+      if (tableSortKey === 'updatedAt') return dir * (new Date(analyticsMap?.[a.id]?.lastActivityAt ?? a.updatedAt).getTime() - new Date(analyticsMap?.[b.id]?.lastActivityAt ?? b.updatedAt).getTime())
       return 0
     })
 
     return sorted
-  }, [filteredProjects, statusOverrides, tableSortDirection, tableSortKey])
+  }, [analyticsMap, filteredProjects, statusOverrides, tableSortDirection, tableSortKey])
 
   const tableTotalPages = useMemo(() => {
     return Math.max(1, Math.ceil(tableProjects.length / recordsPerPage))
@@ -749,7 +750,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                               <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
                             )}
                             {visibleColumns.has('updatedAt') && (
-                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.updatedAt)}</td>
+                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(analyticsMap?.[project.id]?.lastActivityAt ?? project.updatedAt)}</td>
                             )}
                           </tr>
 
@@ -780,7 +781,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange }: Pro
                                       <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
                                     </div>
                                     <div className="text-right">
-                                      <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(project.updatedAt)}
+                                      <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(analyticsMap?.[project.id]?.lastActivityAt ?? project.updatedAt)}
                                     </div>
                                   </div>
                                 </div>

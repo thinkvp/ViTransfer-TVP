@@ -320,6 +320,9 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   useEffect(() => {
     const loadAnalytics = async () => {
       try {
+        setLoading(true)
+        setError(false)
+
         if (denied) {
           setError(true)
           return
@@ -339,19 +342,20 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
       } finally {
         setLoading(false)
       }
+
     }
-    loadAnalytics()
+
+    void loadAnalytics()
   }, [id, denied])
 
-  const pageSize = 50
   const activity = useMemo(() => data?.activity ?? [], [data?.activity])
+  const pageSize = 20
   const sortedActivity = useMemo(() => {
-    const sorted = [...activity]
-    sorted.sort((a, b) => {
+    const sorted = [...activity].sort((a, b) => {
       let cmp = 0
       switch (activitySortKey) {
         case 'event':
-          cmp = a.type.localeCompare(b.type)
+          cmp = String(a.type).localeCompare(String(b.type))
           break
         case 'description':
           cmp = getMainText(a).localeCompare(getMainText(b))
@@ -367,6 +371,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
     })
     return sorted
   }, [activity, activitySortKey, activitySortAsc])
+
   const totalPages = Math.max(1, Math.ceil(sortedActivity.length / pageSize))
   const pagedActivity = sortedActivity.slice((activityPage - 1) * pageSize, activityPage * pageSize)
   useEffect(() => {
@@ -501,7 +506,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
               {!hasVideos && !hasAlbums ? (
                 <p className="text-center text-muted-foreground py-8">No videos or albums available</p>
               ) : (
-                  <div className="space-y-4 overflow-y-auto min-h-0 flex-1 pr-1 sidebar-scrollbar">
+                  <div className="space-y-4 overflow-y-auto min-h-0 flex-1 pr-1">
                   {videoStats.map((video) => (
                     <div key={video.videoName} className="border border-border rounded-lg bg-muted/40 p-3 sm:p-4">
                       <div className="flex items-start justify-between mb-3">
@@ -611,7 +616,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                 <p className="text-center text-muted-foreground py-8">No activity yet</p>
               ) : (
                 <>
-                  <div ref={activityScrollRef} className="overflow-y-auto overflow-x-hidden min-h-0 flex-1 pr-1 w-full sidebar-scrollbar">
+                  <div ref={activityScrollRef} className="overflow-y-auto overflow-x-hidden min-h-0 flex-1 pr-1 w-full">
                     <table className="w-full min-w-full text-sm table-auto">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
@@ -901,26 +906,6 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
           </Card>
         </div>
       </div>
-      <style jsx global>{`
-        /* Discreet analytics scrollbars (match share page sidebar) */
-        .sidebar-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .sidebar-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .sidebar-scrollbar::-webkit-scrollbar-thumb {
-          background: hsl(var(--muted-foreground) / 0.2);
-          border-radius: 3px;
-        }
-        .sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: hsl(var(--muted-foreground) / 0.3);
-        }
-        .sidebar-scrollbar {
-          scrollbar-width: thin;
-          scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
-        }
-      `}</style>
     </div>
   )
 }

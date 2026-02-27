@@ -55,6 +55,7 @@ type ClientProjectRow = {
   status: string
   createdAt: string | Date
   updatedAt: string | Date
+  lastActivityAt?: string | null
   videos: any[]
   _count: { comments: number }
 }
@@ -292,7 +293,7 @@ export default function ClientDetailPage() {
       if (projectsSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (projectsSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
       if (projectsSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      if (projectsSortKey === 'updatedAt') return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
+      if (projectsSortKey === 'updatedAt') return dir * (new Date(a.lastActivityAt ?? a.updatedAt).getTime() - new Date(b.lastActivityAt ?? b.updatedAt).getTime())
       return 0
     })
 
@@ -737,7 +738,7 @@ export default function ClientDetailPage() {
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
                                 <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
-                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.updatedAt)}</td>
+                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.lastActivityAt ?? project.updatedAt)}</td>
                               </tr>
 
                               {projectsIsMobile && isExpanded && (
@@ -764,7 +765,7 @@ export default function ClientDetailPage() {
                                           <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
                                         </div>
                                         <div className="text-right">
-                                          <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(project.updatedAt)}
+                                          <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(project.lastActivityAt ?? project.updatedAt)}
                                         </div>
                                       </div>
                                     </div>
