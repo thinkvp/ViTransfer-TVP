@@ -619,6 +619,7 @@ model VideoAsset {
 
 enum VideoStatus {
   UPLOADING
+  QUEUED
   PROCESSING
   READY
   ERROR

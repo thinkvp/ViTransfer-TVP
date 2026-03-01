@@ -369,11 +369,13 @@ export default function VideoList({
             {/* Action icons - right side on all screen sizes */}
             {editingId !== video.id && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {/* Only show status badge for PROCESSING and ERROR states */}
-                {(video.status === 'PROCESSING' || video.status === 'ERROR') && (
+                {/* Only show status badge for QUEUED, PROCESSING, and ERROR states */}
+                {(video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') && (
                   <span
                     className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 ${
-                      video.status === 'PROCESSING'
+                      video.status === 'QUEUED'
+                        ? 'bg-warning-visible text-warning border-2 border-warning-visible'
+                        : video.status === 'PROCESSING'
                         ? 'bg-primary-visible text-primary border-2 border-primary-visible'
                         : 'bg-destructive-visible text-destructive border-2 border-destructive-visible'
                     }`}
@@ -496,6 +498,17 @@ export default function VideoList({
                     />
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {video.status === 'QUEUED' && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-warning">Waiting in queue...</span>
+              </div>
+              <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
+                <div className="h-full w-full bg-warning/40" />
               </div>
             </div>
           )}

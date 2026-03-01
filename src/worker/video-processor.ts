@@ -42,8 +42,8 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
   const processingStart = Date.now()
 
   try {
-    // Stage 1: Update status to processing (may already be PROCESSING from TUS handler)
-    console.log(`[WORKER] Setting video ${videoId} to PROCESSING status (if not already)`)
+    // Stage 1: Advance status from QUEUED → PROCESSING now that the worker has claimed the job
+    console.log(`[WORKER] Setting video ${videoId} to PROCESSING status`)
     await updateVideoStatus(videoId, 'PROCESSING', 0)
 
     // Stage 2: Download and validate video

@@ -161,6 +161,7 @@ export default function AdminVideoManager({
         const approvedCount = groupVideos.filter(v => v.approved).length
         const hasApprovedVideos = approvedCount > 0
         const hasProcessing = groupVideos.some((v) => v?.status === 'PROCESSING')
+        const hasQueued = groupVideos.some((v) => v?.status === 'QUEUED')
 
         return (
           <Card key={groupName} className="overflow-hidden">
@@ -222,6 +223,11 @@ export default function AdminVideoManager({
                 </div>
                 {editingGroupName !== groupName && (
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {hasQueued && (
+                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-warning-visible text-warning border-2 border-warning-visible">
+                        QUEUED
+                      </span>
+                    )}
                     {hasProcessing && (
                       <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-primary-visible text-primary border-2 border-primary-visible">
                         <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />

@@ -289,6 +289,10 @@ export function getClientIpAddress(request: NextRequest): string {
     return false
   }
 
+  // Prefer CF-Connecting-IP (set by Cloudflare, not spoofable by clients)
+  const cfIp = normalizeIp(request.headers.get('cf-connecting-ip'))
+  if (cfIp) return cfIp
+
   const xff = request.headers.get('x-forwarded-for')
   const chain = parseXForwardedFor(xff)
   const realIp = normalizeIp(request.headers.get('x-real-ip'))

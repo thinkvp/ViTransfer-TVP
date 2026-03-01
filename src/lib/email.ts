@@ -3,6 +3,7 @@ import { prisma } from './db'
 import { decrypt } from './encryption'
 import { normalizeHexDisplayColor } from './display-color'
 import { formatDate } from './utils'
+import { htmlToText } from 'html-to-text'
 
 export const EMAIL_THEME = {
   headerBackground: '#1F1F1F',
@@ -552,7 +553,7 @@ export async function sendEmail({
       to,
       bcc,
       subject,
-      text: text || html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
+      text: text || htmlToText(html), // Strip HTML for text version
       html,
       attachments,
     })

@@ -16,7 +16,9 @@ import { useTheme } from '@/hooks/useTheme'
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const returnUrl = searchParams?.get('returnUrl') || '/admin'
+  const rawReturnUrl = searchParams?.get('returnUrl') || '/admin'
+  // SECURITY: Only allow relative paths — prevents javascript: and open redirect attacks
+  const returnUrl = rawReturnUrl.startsWith('/') && !rawReturnUrl.startsWith('//') ? rawReturnUrl : '/admin'
   const sessionExpired = searchParams?.get('sessionExpired') === 'true'
 
   const [email, setEmail] = useState('')

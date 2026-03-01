@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -34,6 +34,7 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.3.0",
     "file-type": "^19.0.0",
+    "html-to-text": "^9.0.5",
     "ioredis": "^5.8.2",
     "isomorphic-dompurify": "^2.31.0",
     "jsonwebtoken": "^9.0.2",
@@ -56,6 +57,7 @@
   "devDependencies": {
     "@types/archiver": "^6.0.2",
     "@types/bcryptjs": "^2.4.6",
+    "@types/html-to-text": "^9.0.4",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^22",
@@ -76,6 +78,7 @@
     "glob": "^11.1.0",
     "jsdom": "27.2.0",
     "parse5": "7.2.1",
-    "minimatch": "10.2.1"
+    "minimatch": "10.2.3",
+    "bn.js": "4.12.3"
   }
 }

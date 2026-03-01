@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-03-02
+
+### Added
+- **"QUEUED" video status badge** — when multiple videos are uploaded simultaneously and the worker CPU limit is reached, videos waiting in the processing queue now display an orange `QUEUED` badge (and a flat amber progress bar) instead of silently waiting; the badge appears in the same position as the `PROCESSING` badge in both the video list and the group card header in `AdminVideoManager`; the `PROCESSING` status and animated stripe bar are unchanged and only appear once the worker actually begins encoding
+
+### Security
+- **Open-redirect fix on login `returnUrl`** — the `returnUrl` query parameter on the login page is now validated to only allow relative paths (must start with `/`, must not start with `//`); external URLs and `javascript:` URIs are silently rejected and the user is redirected to `/admin` instead, preventing phishing and script-injection via crafted login links
+- **Secure watermark temp-file creation** — replaced direct `/tmp` file creation with `fs.mkdtempSync` for FFmpeg watermark temp files; the new approach creates a dedicated directory with restricted `0700` permissions before writing the file, closing a symlink/hard-link race-condition window; both `close` and `error` cleanup handlers now also remove the temp directory
+- **ReDoS fix in `sanitizeFilename`** — replaced the `^[.\s]+|[.\s]+$` alternation regex (catastrophic backtracking on crafted filenames) with deterministic while-loops that strip leading/trailing dots and spaces in O(n) time
+- **Proper HTML-to-plaintext in email fallback** — replaced the naive `/<[^>]*>/g` tag-stripping regex in `sendEmail` with the `html-to-text` library; malformed, multi-line, or encoded HTML tags are now handled correctly, preventing garbled or partially-tagged plain-text email parts
+- **Cloudflare IP header priority** — `getClientIpAddress()` now checks `CF-Connecting-IP` before `X-Forwarded-For`; when running behind Cloudflare this header is set by the CDN itself and cannot be spoofed by clients, ensuring accurate IP logging and rate-limiting for Cloudflare-proxied deployments
+
 ## [1.0.5] - 2026-02-28
 
 ### Added

@@ -304,9 +304,9 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!project?.videos) return
 
-    // Check if any videos are currently processing
+    // Check if any videos are currently processing or queued
     const hasProcessingVideos = project.videos.some(
-      (video: any) => video.status === 'PROCESSING' || video.status === 'UPLOADING'
+      (video: any) => video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'UPLOADING'
     )
 
     if (hasProcessingVideos) {
