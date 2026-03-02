@@ -488,7 +488,11 @@ export default function SalesPaymentsPage() {
                       visiblePayments.map((p) => (
                         <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                           <td className="px-3 py-2 tabular-nums">{formatDate(p.paymentDate)}</td>
-                          <td className="px-3 py-2 tabular-nums font-medium">{formatMoney(p.amountCents, getCurrencySymbol(currencyCode))}</td>
+                          <td className="px-3 py-2 tabular-nums font-medium">
+                            {p.excludeFromInvoiceBalance
+                              ? `(${formatMoney(p.amountCents, getCurrencySymbol(currencyCode))})`
+                              : formatMoney(p.amountCents, getCurrencySymbol(currencyCode))}
+                          </td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {p.method || '—'}{p.excludeFromInvoiceBalance ? ' (reconciled)' : ''}
                           </td>
