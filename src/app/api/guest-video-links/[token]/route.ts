@@ -5,6 +5,7 @@ import { generateVideoAccessToken, logSecurityEvent, trackVideoAccess } from '@/
 import { sendPushNotification } from '@/lib/push-notifications'
 import { getClientIpAddress } from '@/lib/utils'
 import { getRedis } from '@/lib/redis'
+import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -88,6 +89,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const sessionId = `guest-video-link:${link.token}`
 
+  // Best-effort internal user detection: skip analytics/notifications when an
+  // internal user is testing the link from the same IP they last logged in from.
+  const ipAddress = getClientIpAddress(request)
+  const likelyAdmin = await isLikelyAdminIp(ipAddress).catch(() => false)
+
   // Log a security event for visibility on the admin/security dashboard (best-effort).
   await logSecurityEvent({
     type: 'GUEST_VIDEO_LINK_VIEWED',
@@ -109,34 +115,36 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   // Track a view event in analytics (best-effort) with IP-based dedupe.
   // Guest-video links share a sessionId across viewers, so dedupe must not be session-based.
-  const ipAddress = getClientIpAddress(request)
-  const redis = getRedis()
-  const dedupeKey = `analytics:guest_video_view:${link.project.id}:${link.video.id}:${ipAddress || 'unknown'}`
-  const alreadyTracked = await redis.get(dedupeKey).catch(() => null)
-  if (!alreadyTracked) {
-    await redis.setex(dedupeKey, 6 * 60 * 60, '1').catch(() => {})
-    await trackVideoAccess({
-      videoId: link.video.id,
+  // Skip tracking entirely when the visitor is likely an admin.
+  if (!likelyAdmin) {
+    const redis = getRedis()
+    const dedupeKey = `analytics:guest_video_view:${link.project.id}:${link.video.id}:${ipAddress || 'unknown'}`
+    const alreadyTracked = await redis.get(dedupeKey).catch(() => null)
+    if (!alreadyTracked) {
+      await redis.setex(dedupeKey, 6 * 60 * 60, '1').catch(() => {})
+      await trackVideoAccess({
+        videoId: link.video.id,
+        projectId: link.project.id,
+        sessionId,
+        request,
+        quality: 'guest-video-link',
+        eventType: 'VIDEO_VIEW',
+      }).catch(() => {})
+    }
+
+    await sendPushNotification({
+      type: 'GUEST_VIDEO_LINK_ACCESS',
       projectId: link.project.id,
-      sessionId,
-      request,
-      quality: 'guest-video-link',
-      eventType: 'VIDEO_VIEW',
+      projectName: link.project.title,
+      title: 'Guest Video Link Access',
+      message: 'A guest opened a video-only guest link.',
+      details: {
+        Project: link.project.title,
+        Video: `${link.video.name ?? 'Video'} (${link.video.versionLabel ?? '—'})`,
+        IP: ipAddress,
+      },
     }).catch(() => {})
   }
-
-  await sendPushNotification({
-    type: 'GUEST_VIDEO_LINK_ACCESS',
-    projectId: link.project.id,
-    projectName: link.project.title,
-    title: 'Guest Video Link Access',
-    message: 'A guest opened a video-only guest link.',
-    details: {
-      Project: link.project.title,
-      Video: `${link.video.name ?? 'Video'} (${link.video.versionLabel ?? '—'})`,
-      IP: ipAddress,
-    },
-  }).catch(() => {})
 
   // Build tokenized URLs (mirrors /share/* behavior but for a single video and public access).
   const wantTimeline = Boolean(link.project.timelinePreviewsEnabled) && Boolean(link.video.timelinePreviewsReady)

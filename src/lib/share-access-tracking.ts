@@ -2,6 +2,7 @@ import { prisma } from './db'
 import { NextRequest } from 'next/server'
 import { getSecuritySettings } from './video-access'
 import { sendPushNotification } from './push-notifications'
+import { getClientIpAddress } from './utils'
 
 export async function trackSharePageAccess(params: {
   projectId: string
@@ -18,11 +19,13 @@ export async function trackSharePageAccess(params: {
     return
   }
 
-  // Get IP address from headers
-  const ipAddress =
-    request.headers.get('x-forwarded-for')?.split(',')[0] ||
-    request.headers.get('x-real-ip') ||
-    'unknown'
+  // Avoid inflating metrics with admin activity (admin sessions prefixed with "admin:")
+  if (sessionId?.startsWith('admin:')) {
+    return
+  }
+
+  // Get IP address using the centralised helper (respects TRUSTED_PROXIES, CF headers, etc.)
+  const ipAddress = getClientIpAddress(request)
   const userAgent = request.headers.get('user-agent') || undefined
 
   try {

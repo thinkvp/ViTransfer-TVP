@@ -15,6 +15,7 @@ import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { formatDate } from '@/lib/utils'
+import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import {
   invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
   quoteEffectiveStatus as computeQuoteEffectiveStatus,
@@ -62,10 +63,12 @@ function hasConfiguredLogo(settings: { companyLogoPath: string | null; companyLo
 }
 
 export default async function SalesDocPublicViewPage(
-  { params }: { params: Promise<{ token: string }> }
+  { params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }
 ) {
   const { token } = await params
   if (!token) return notFound()
+  const sp = await searchParams
+  const refIsInternal = sp?.ref === 'internal'
 
   const shares = await prisma.$queryRaw<any[]>`
     SELECT *
@@ -79,17 +82,24 @@ export default async function SalesDocPublicViewPage(
   const share = shares?.[0]
   if (!share) return notFound()
 
-  // Track access (best-effort)
-  await prisma.salesDocumentShare.update({
-    where: { token },
-    data: { lastAccessedAt: new Date() },
-  }).catch(() => {})
+  // Determine whether the visitor is likely an internal user (best-effort).
+  // Primary signal: `?ref=internal` query param appended by the admin UI "View" button.
+  // Fallback: compare the visitor IP against recent admin login IPs.
+  const h = await headers()
+  const ipAddress = getClientIpFromHeaders(h)
+  const skipTracking = refIsInternal || await isLikelyAdminIp(ipAddress).catch(() => false)
 
-  // Track view event + push notification (best-effort)
+  // Track access (best-effort) — skip for internal user previews.
+  if (!skipTracking) {
+    await prisma.salesDocumentShare.update({
+      where: { token },
+      data: { lastAccessedAt: new Date() },
+    }).catch(() => {})
+  }
+
+  // Track view event + push notification (best-effort) — skip for internal user previews.
   const security = await getSecuritySettings().catch(() => null)
-  if (security?.trackAnalytics) {
-    const h = await headers()
-    const ipAddress = getClientIpFromHeaders(h)
+  if (security?.trackAnalytics && !skipTracking) {
     const userAgent = h.get('user-agent') || null
 
     await prisma.salesDocumentViewEvent.create({

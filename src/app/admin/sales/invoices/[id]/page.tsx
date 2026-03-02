@@ -538,7 +538,9 @@ export default function InvoiceDetailPage() {
     } catch {
       // ignore
     }
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const viewUrl = new URL(url, window.location.origin)
+    viewUrl.searchParams.set('ref', 'internal')
+    window.open(viewUrl.toString(), '_blank', 'noopener,noreferrer')
   }
 
   if (!loaded) {

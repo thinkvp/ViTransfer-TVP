@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-03-02
+
+### Added
+- **Reconciled payment amounts shown in brackets** — the payments page now wraps the amount in parentheses (e.g. `($120.00)`) for any payment marked as a reconciliation/mirror entry (`excludeFromInvoiceBalance`), making it visually clear at a glance that the entry is a QBO-mirrored or reconciliation record and not a new payment; the `(reconciled)` source label in the method column is unchanged
+
+### Changed
+- **Internal user analytics suppression** — share page access, video analytics, invoice/quote view events, guest video link access events, and associated push/bell notifications are no longer recorded when the visitor is identified as an internal user; detection uses two layers: (1) a `?ref=internal` query parameter automatically appended when internal users click "View Invoice" or "View Quote" from the admin UI, and (2) a best-effort IP match against recent admin login IPs from the `SecurityEvent` table (cached in Redis for 24 h) as a fallback for direct URL access; the security event audit log is unaffected
+- **Consistent IP resolution via `getClientIpAddress`** — `trackSharePageAccess` and the NONE-mode share route were using raw `x-forwarded-for` / `x-real-ip` header extraction instead of the centralised `getClientIpAddress()` helper; they now go through the same normalisation, IPv4-mapped-IPv6 handling, Cloudflare header priority, and `TRUSTED_PROXIES` proxy-peeling logic as every other IP callsite
+
+### Fixed
+- **IP addresses missing in Security Events and Video Analytics** — the proxy IP hardening introduced in v1.0.0 returned `'unknown'` unconditionally when `TRUSTED_PROXIES` was not configured, breaking IP detection for local/dev deployments and any environment without an explicit trust list; `getClientIpAddress()` now falls back to the left-most `X-Forwarded-For` entry (or `X-Real-IP`) with a one-time console warning when no trust list is set, restoring the pre-hardening behaviour while still recommending `TRUSTED_PROXIES` for production; deployments that already have `TRUSTED_PROXIES` configured are unaffected
+
 ## [1.0.6] - 2026-03-02
 
 ### Added

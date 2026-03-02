@@ -7,6 +7,7 @@ import { verifyProjectAccess, fetchProjectWithVideos } from '@/lib/project-acces
 import { rateLimit } from '@/lib/rate-limit'
 import { trackSharePageAccess } from '@/lib/share-access-tracking'
 import { getRedis } from '@/lib/redis'
+import { getClientIpAddress } from '@/lib/utils'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -122,9 +123,7 @@ export async function GET(
     if (projectMeta.authMode === 'NONE' && !projectMeta.guestMode && !isAdmin) {
       // Use Redis for 30-minute deduplication
       const redis = getRedis()
-      const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0] ||
-                       request.headers.get('x-real-ip') ||
-                       'unknown'
+      const ipAddress = getClientIpAddress(request)
       const dedupeKey = `share_access:${projectMeta.id}:${ipAddress}`
       const alreadyTracked = await redis.get(dedupeKey)
 
@@ -340,9 +339,7 @@ export async function GET(
       let sessionId = accessCheck.shareTokenSessionId || `share:${project.id}:${token}`
 
       if (projectMeta.authMode === 'NONE') {
-        const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0] ||
-                         request.headers.get('x-real-ip') ||
-                         'unknown'
+        const ipAddress = getClientIpAddress(request)
         sessionId = `none:${projectMeta.id}:${ipAddress}`
       }
 

@@ -322,7 +322,9 @@ export default function SalesQuotesPage() {
       clientName: q.clientId ? (clientNameById[q.clientId] ?? undefined) : undefined,
       projectTitle: q.projectId ? (projectTitleById[q.projectId] ?? undefined) : undefined,
     })
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const viewUrl = new URL(url, window.location.origin)
+    viewUrl.searchParams.set('ref', 'internal')
+    window.open(viewUrl.toString(), '_blank', 'noopener,noreferrer')
   }
 
   return (

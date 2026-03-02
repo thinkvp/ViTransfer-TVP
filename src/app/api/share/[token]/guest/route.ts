@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import crypto from 'crypto'
 import { rateLimit } from '@/lib/rate-limit'
-import { signShareToken } from '@/lib/auth'
+import { signShareToken, getCurrentUserFromRequest } from '@/lib/auth'
 import { getShareTokenTtlSeconds } from '@/lib/settings'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
@@ -73,9 +73,10 @@ export async function POST(
       wasBlocked: false,
     })
 
-    // Track share page access for analytics
+    // Track share page access for analytics — skip for internal admin users testing the page
+    const requestingAdmin = await getCurrentUserFromRequest(request)
     const shareTokenPayload = jwt.decode(shareToken) as any
-    if (shareTokenPayload?.sessionId) {
+    if (!requestingAdmin && shareTokenPayload?.sessionId) {
       await trackSharePageAccess({
         projectId: project.id,
         accessMethod: 'GUEST',

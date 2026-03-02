@@ -299,14 +299,28 @@ export function getClientIpAddress(request: NextRequest): string {
 
   const trusted = getTrusted()
 
-  // Security hardening: forwarded headers are untrusted unless explicit proxy trust is configured.
-  // Without TRUSTED_PROXIES, client-supplied X-Forwarded-For/X-Real-IP can bypass IP-based controls.
+  // When TRUSTED_PROXIES is not configured, forwarded headers cannot be
+  // verified. In production behind a reverse proxy you should always set
+  // TRUSTED_PROXIES for accurate and spoof-resistant IP resolution.
+  //
+  // However, returning 'unknown' unconditionally when no trust list is present
+  // breaks local/dev deployments where the network infrastructure (Docker,
+  // local reverse proxy) legitimately injects forwarded headers. As a
+  // pragmatic fallback, use the left-most XFF entry (or x-real-ip) and log a
+  // one-time warning recommending TRUSTED_PROXIES configuration.
   if (trusted.length === 0) {
-    if (!untrustedForwardedWarningShown && (chain.length > 0 || !!realIp)) {
-      untrustedForwardedWarningShown = true
-      console.warn('[SECURITY] TRUSTED_PROXIES is not configured; ignoring forwarded IP headers for client IP resolution.')
+    if (chain.length > 0 || !!realIp) {
+      if (!untrustedForwardedWarningShown) {
+        untrustedForwardedWarningShown = true
+        console.warn(
+          '[SECURITY] TRUSTED_PROXIES is not configured. Forwarded IP headers ' +
+          '(X-Forwarded-For / X-Real-IP) are being used without proxy trust ' +
+          'verification. Set TRUSTED_PROXIES in your environment for accurate, ' +
+          'spoof-resistant IP resolution in production.'
+        )
+      }
     }
-    return 'unknown'
+    // Fall through to the same logic used when no trusted proxies match.
   }
 
   if (trusted.length > 0 && chain.length > 0) {

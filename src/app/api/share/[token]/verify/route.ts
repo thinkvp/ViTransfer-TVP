@@ -6,7 +6,7 @@ import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { getMaxAuthAttempts, getRateLimitSettings } from '@/lib/settings'
 import { getRedis } from '@/lib/redis'
-import { signShareToken } from '@/lib/auth'
+import { signShareToken, getCurrentUserFromRequest } from '@/lib/auth'
 import { getShareTokenTtlSeconds } from '@/lib/settings'
 import { trackSharePageAccess } from '@/lib/share-access-tracking'
 import { sendPushNotification } from '@/lib/push-notifications'
@@ -243,9 +243,10 @@ export async function POST(
       wasBlocked: false,
     })
 
-    // Track share page access for analytics
+    // Track share page access for analytics — skip for internal admin users testing the page
+    const requestingAdmin = await getCurrentUserFromRequest(request)
     const shareTokenPayload = jwt.decode(shareToken) as any
-    if (shareTokenPayload?.sessionId) {
+    if (!requestingAdmin && shareTokenPayload?.sessionId) {
       await trackSharePageAccess({
         projectId: project.id,
         accessMethod: 'PASSWORD',
