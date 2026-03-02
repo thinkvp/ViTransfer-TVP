@@ -247,15 +247,18 @@ export default function NotificationsBell() {
     }
   }, [])
 
-  const fetchPage = useCallback(async (params?: { before?: string | null; replace?: boolean; markSeen?: boolean }) => {
+  const fetchPage = useCallback(async (params?: { before?: string | null; replace?: boolean; markSeen?: boolean; silent?: boolean }) => {
     const before = params?.before ?? null
     const replace = params?.replace ?? false
     const markSeen = params?.markSeen ?? false
+    const silent = params?.silent ?? false
 
     setLoadError(null)
 
+    // In silent mode (background poll) skip the loading indicator to avoid
+    // flashing/scroll-reset while the panel is visible.
     const setter = replace ? setLoading : setLoadingMore
-    setter(true)
+    if (!silent) setter(true)
     try {
       const url = new URL('/api/notifications', window.location.origin)
       url.searchParams.set('limit', '20')
@@ -279,9 +282,13 @@ export default function NotificationsBell() {
         await markAllSeen(data.items)
       }
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'Failed to load notifications')
+      // Suppress errors during silent background polls so the user isn't
+      // bothered by transient network hiccups.
+      if (!silent) {
+        setLoadError(e instanceof Error ? e.message : 'Failed to load notifications')
+      }
     } finally {
-      setter(false)
+      if (!silent) setter(false)
     }
   }, [markAllSeen])
 
@@ -298,8 +305,9 @@ export default function NotificationsBell() {
     fetchPage({ replace: true })
 
     pollingRef.current = window.setInterval(() => {
-      // Lightweight refresh: just refetch first page to update badge.
-      fetchPage({ replace: true, markSeen: openRef.current })
+      // Silent refresh: update data and badge without triggering loading
+      // state, which avoids the flash & scroll-reset when the panel is open.
+      fetchPage({ replace: true, markSeen: openRef.current, silent: true })
     }, 30_000)
 
     return () => {
