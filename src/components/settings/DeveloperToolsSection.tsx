@@ -36,6 +36,16 @@ type NotificationBacklogResult = {
   dismissed?: number
 }
 
+type BullmqPurgeResult = {
+  ok: true
+  dryRun: boolean
+  totalCompleted: number
+  totalFailed: number
+  totalKeys: number
+  totalCleaned?: number
+  queues: Record<string, { completed: number; failed: number }>
+}
+
 type ProjectStorageYearMonthMigrationResult = {
   ok: true
   dryRun: boolean
@@ -93,6 +103,23 @@ export function DeveloperToolsSection({
   const [backlogLoading, setBacklogLoading] = useState(false)
   const [backlogResult, setBacklogResult] = useState<NotificationBacklogResult | null>(null)
   const [backlogError, setBacklogError] = useState<string | null>(null)
+
+  const [bullmqPurgeLoading, setBullmqPurgeLoading] = useState(false)
+  const [bullmqPurgeResult, setBullmqPurgeResult] = useState<BullmqPurgeResult | null>(null)
+  const [bullmqPurgeError, setBullmqPurgeError] = useState<string | null>(null)
+
+  async function runBullmqPurge(dryRun: boolean) {
+    setBullmqPurgeLoading(true)
+    setBullmqPurgeError(null)
+    try {
+      const res = await apiPost('/api/settings/purge-bullmq-jobs', { dryRun })
+      setBullmqPurgeResult(res as BullmqPurgeResult)
+    } catch (e: any) {
+      setBullmqPurgeError(e?.message || 'Failed to run BullMQ purge')
+    } finally {
+      setBullmqPurgeLoading(false)
+    }
+  }
 
   async function runBacklogPurge(dryRun: boolean) {
     setBacklogLoading(true)
@@ -441,6 +468,76 @@ export function DeveloperToolsSection({
                   }}
                 >
                   {backlogLoading ? 'Running…' : 'Dismiss backlog'}
+                </Button>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Purge stale BullMQ jobs</Label>
+                <p className="text-xs text-muted-foreground">
+                  Removes completed (older than 1 hour) and failed (older than 24 hours) jobs from all BullMQ
+                  queues in Redis. Use this to reclaim Redis memory after key bloat or if Redis AOF fsync
+                  warnings appear. Run a dry-run first to preview counts.
+                </p>
+
+                {bullmqPurgeError ? (
+                  <p className="text-xs text-destructive">{bullmqPurgeError}</p>
+                ) : null}
+
+                {bullmqPurgeResult ? (
+                  <div className="mt-2 space-y-1">
+                    {bullmqPurgeResult.dryRun ? (
+                      <>
+                        <p className="text-xs text-muted-foreground">Completed jobs: {bullmqPurgeResult.totalCompleted}</p>
+                        <p className="text-xs text-muted-foreground">Failed jobs: {bullmqPurgeResult.totalFailed}</p>
+                        <p className="text-xs text-muted-foreground">Total stale job keys: {bullmqPurgeResult.totalKeys}</p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Cleaned {bullmqPurgeResult.totalCleaned ?? 0} stale job keys from Redis
+                      </p>
+                    )}
+
+                    {Object.keys(bullmqPurgeResult.queues).length > 0 ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show per-queue breakdown
+                        </summary>
+                        <div className="mt-2">
+                          <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                            {Object.entries(bullmqPurgeResult.queues)
+                              .map(([name, counts]) => `${name}: ${counts.completed} completed, ${counts.failed} failed`)
+                              .join('\n')}
+                          </pre>
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={bullmqPurgeLoading}
+                  onClick={() => void runBullmqPurge(true)}
+                >
+                  {bullmqPurgeLoading ? 'Running\u2026' : 'Dry run'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={bullmqPurgeLoading}
+                  onClick={() => {
+                    if (!confirm('Purge all stale completed and failed BullMQ jobs from Redis? Active and waiting jobs are not affected.')) return
+                    void runBullmqPurge(false)
+                  }}
+                >
+                  {bullmqPurgeLoading ? 'Running\u2026' : 'Purge jobs'}
                 </Button>
               </div>
             </div>

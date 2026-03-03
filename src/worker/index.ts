@@ -283,6 +283,14 @@ async function main() {
   console.log('Setting up notification processing...')
   const notificationQueue = new Queue('notification-processing', {
     connection: getRedisForQueue(),
+    defaultJobOptions: {
+      removeOnComplete: {
+        age: 3600, // keep completed jobs for 1 hour
+      },
+      removeOnFail: {
+        age: 86400, // keep failed jobs for 24 hours
+      },
+    },
   })
 
   // Clean up any existing repeatable notification processor jobs (e.g. old every-minute schedule)
@@ -325,6 +333,8 @@ async function main() {
         pattern: '0 * * * *',
       },
       jobId: 'notification-processor',
+      removeOnComplete: true,
+      removeOnFail: true,
     }
   )
 
@@ -392,6 +402,8 @@ async function main() {
         pattern: '5 0 * * *',
       },
       jobId: 'auto-close-approved-projects',
+      removeOnComplete: true,
+      removeOnFail: true,
     }
   )
 

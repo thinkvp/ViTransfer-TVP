@@ -1,9 +1,10 @@
 import { prisma } from '../lib/db'
-import { downloadFile, uploadFile } from '../lib/storage'
+import { getFilePath, STORAGE_ROOT } from '../lib/storage'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite } from '../lib/ffmpeg'
 import type { VideoStatus } from '@prisma/client'
 import fs from 'fs'
 import path from 'path'
+import { mkdir } from 'fs/promises'
 import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
 
@@ -75,40 +76,55 @@ export function debugLog(message: string, data?: any) {
 }
 
 /**
- * Download video from storage and validate content
+ * Move a file from the worker temp directory to its final storage location.
+ * Uses atomic fs.rename when both paths are on the same filesystem (zero-cost),
+ * with a stream-copy + unlink fallback for cross-device (EXDEV) edge cases.
+ */
+async function moveToStorage(srcPath: string, destPath: string): Promise<void> {
+  const destDir = path.dirname(destPath)
+  await mkdir(destDir, { recursive: true })
+
+  try {
+    await fs.promises.rename(srcPath, destPath)
+  } catch (err: any) {
+    if (err?.code === 'EXDEV') {
+      // Cross-device fallback: stream-copy then remove original
+      const readStream = fs.createReadStream(srcPath)
+      const writeStream = fs.createWriteStream(destPath)
+      await pipeline(readStream, writeStream)
+      await fs.promises.unlink(srcPath).catch(() => {})
+    } else {
+      throw err
+    }
+  }
+}
+
+/**
+ * Resolve original video path in storage and validate content.
+ * Reads directly from STORAGE_ROOT — no temp copy needed.
  */
 export async function downloadAndValidateVideo(
   videoId: string,
   storagePath: string,
   tempFiles: TempFiles
 ): Promise<VideoInfo> {
-  debugLog('Starting download and validation...')
+  debugLog('Starting validation...')
 
-  // Download original file to temp location
-  const tempInputPath = path.join(TEMP_DIR, `${videoId}-original`)
-  tempFiles.input = tempInputPath
+  // Resolve the absolute path to the original file in storage root (no copy)
+  const inputPath = getFilePath(storagePath)
 
-  debugLog('Downloading from:', storagePath)
-  debugLog('Temp path:', tempInputPath)
-
-  const downloadStart = Date.now()
-  const downloadStream = await downloadFile(storagePath)
-  await pipeline(downloadStream, fs.createWriteStream(tempInputPath))
-  const downloadTime = Date.now() - downloadStart
-
-  console.log(`[WORKER] Downloaded original file for video ${videoId} in ${(downloadTime / 1000).toFixed(2)}s`)
+  debugLog('Reading original directly from:', inputPath)
 
   // Verify file exists and has content
-  const stats = fs.statSync(tempInputPath)
+  const stats = fs.statSync(inputPath)
   if (stats.size === 0) {
-    throw new Error('Downloaded file is empty')
+    throw new Error('Original file is empty')
   }
 
   const fileSize = stats.size
-  console.log(`[WORKER] Downloaded file size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`)
+  console.log(`[WORKER] Original file size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`)
 
   debugLog('File verification passed')
-  debugLog('Download speed:', (fileSize / 1024 / 1024 / (downloadTime / 1000)).toFixed(2) + ' MB/s')
 
   // Validate file content (magic bytes)
   debugLog('Validating magic bytes...')
@@ -120,7 +136,7 @@ export async function downloadAndValidateVideo(
 
   const sampleSize = 4100
   const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
-  const fileHandle = await fs.promises.open(tempInputPath, 'r')
+  const fileHandle = await fs.promises.open(inputPath, 'r')
   try {
     await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
   } finally {
@@ -143,14 +159,14 @@ export async function downloadAndValidateVideo(
   debugLog('Extracting video metadata...')
 
   const metadataStart = Date.now()
-  const metadata = await getVideoMetadata(tempInputPath)
+  const metadata = await getVideoMetadata(inputPath)
   const metadataTime = Date.now() - metadataStart
 
   console.log(`[WORKER] Video metadata:`, metadata)
   debugLog('Metadata extraction took:', (metadataTime / 1000).toFixed(2) + ' s')
 
   return {
-    path: tempInputPath,
+    path: inputPath,
     metadata,
     fileSize
   }
@@ -287,19 +303,20 @@ export async function processTimelinePreviews(
   const tempVttPath = path.join(tempDir, 'index.vtt')
   await fs.promises.writeFile(tempVttPath, vttLines.join('\n'), 'utf-8')
 
-  // Upload VTT + sprites to storage
+  // Move VTT + sprites to storage (atomic rename on same filesystem)
   const spritesPath = `projects/${projectId}/videos/${videoId}/timeline-previews`
   const vttPath = `${spritesPath}/index.vtt`
 
-  const vttStats = fs.statSync(tempVttPath)
-  await uploadFile(vttPath, fs.createReadStream(tempVttPath), vttStats.size, 'text/vtt')
+  const destDir = path.join(STORAGE_ROOT, ...spritesPath.split('/'))
+  await mkdir(destDir, { recursive: true })
+
+  await moveToStorage(tempVttPath, path.join(destDir, 'index.vtt'))
 
   const localFiles = await fs.promises.readdir(tempDir)
   const spriteFiles = localFiles.filter((f) => f.startsWith('sprite-') && f.endsWith('.jpg'))
   for (const spriteFile of spriteFiles) {
     const localSpritePath = path.join(tempDir, spriteFile)
-    const spriteStats = fs.statSync(localSpritePath)
-    await uploadFile(`${spritesPath}/${spriteFile}`, fs.createReadStream(localSpritePath), spriteStats.size, 'image/jpeg')
+    await moveToStorage(localSpritePath, path.join(destDir, spriteFile))
   }
 
   return { vttPath, spritesPath, ready: true }
@@ -398,22 +415,19 @@ export async function processPreview(
   const transcodeStats = fs.statSync(tempPreviewPath)
   debugLog('Transcoded file size:', (transcodeStats.size / 1024 / 1024).toFixed(2) + ' MB')
 
-  // Upload preview to storage
+  // Move preview to storage (atomic rename on same filesystem, stream-copy fallback)
   const previewPath = `projects/${projectId}/videos/${videoId}/preview-${settings.resolution}.mp4`
+  const previewFullPath = path.join(STORAGE_ROOT, ...previewPath.split('/'))
 
-  debugLog('Uploading preview to:', previewPath)
+  debugLog('Moving preview to:', previewFullPath)
 
-  const uploadStart = Date.now()
-  await uploadFile(
-    previewPath,
-    fs.createReadStream(tempPreviewPath),
-    transcodeStats.size,
-    'video/mp4'
-  )
-  const uploadTime = Date.now() - uploadStart
+  const moveStart = Date.now()
+  await moveToStorage(tempPreviewPath, previewFullPath)
+  // File has been moved — remove from tempFiles so cleanup doesn't try to delete a missing file
+  delete tempFiles.preview
+  const moveTime = Date.now() - moveStart
 
-  debugLog('Preview uploaded in:', (uploadTime / 1000).toFixed(2) + ' s')
-  debugLog('Upload speed:', (transcodeStats.size / 1024 / 1024 / (uploadTime / 1000)).toFixed(2) + ' MB/s')
+  debugLog('Preview moved in:', (moveTime / 1000).toFixed(2) + ' s')
 
   return previewPath
 }
@@ -446,23 +460,19 @@ export async function processThumbnail(
 
   console.log(`[WORKER] Generated thumbnail for video ${videoId} in ${(thumbTime / 1000).toFixed(2)}s`)
 
-  // Upload thumbnail
+  // Move thumbnail to storage (atomic rename on same filesystem, stream-copy fallback)
   const thumbnailPath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
-  const statsThumbnail = fs.statSync(tempThumbnailPath)
+  const thumbnailFullPath = path.join(STORAGE_ROOT, ...thumbnailPath.split('/'))
 
-  debugLog('Uploading thumbnail to:', thumbnailPath)
-  debugLog('Thumbnail file size:', (statsThumbnail.size / 1024).toFixed(2) + ' KB')
+  debugLog('Moving thumbnail to:', thumbnailFullPath)
 
-  const uploadStart = Date.now()
-  await uploadFile(
-    thumbnailPath,
-    fs.createReadStream(tempThumbnailPath),
-    statsThumbnail.size,
-    'image/jpeg'
-  )
-  const uploadTime = Date.now() - uploadStart
+  const moveStart = Date.now()
+  await moveToStorage(tempThumbnailPath, thumbnailFullPath)
+  // File has been moved — remove from tempFiles so cleanup doesn't try to delete a missing file
+  delete tempFiles.thumbnail
+  const moveTime = Date.now() - moveStart
 
-  debugLog('Thumbnail uploaded in:', (uploadTime / 1000).toFixed(2) + ' s')
+  debugLog('Thumbnail moved in:', (moveTime / 1000).toFixed(2) + ' s')
 
   return thumbnailPath
 }

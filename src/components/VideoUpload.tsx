@@ -6,33 +6,25 @@ import { Checkbox } from './ui/checkbox'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Textarea } from './ui/textarea'
-import { useRouter } from 'next/navigation'
-import { Upload, Pause, Play, X } from 'lucide-react'
-import * as tus from 'tus-js-client'
+import { Upload } from 'lucide-react'
 import { formatFileSize } from '@/lib/utils'
-import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
-import { getAccessToken } from '@/lib/token-store'
+import { apiFetch, apiPost } from '@/lib/api-client'
 import {
   ensureFreshUploadOnContextChange,
-  clearFileContext,
   clearTUSFingerprint,
   getUploadMetadata,
-  storeUploadMetadata,
   clearUploadMetadata,
 } from '@/lib/tus-context'
+import { useUploadManager } from '@/components/UploadManagerProvider'
 
 interface VideoUploadProps {
   projectId: string
-  videoName: string // Required video name for multi-video support
-  onUploadComplete?: () => void // Callback when upload completes successfully
+  videoName: string
+  onUploadComplete?: () => void
 
-  // Optional per-version notes stored on the Video record.
-  // If showVideoNotesField is false, this value is used but no input is rendered.
   videoNotes?: string
   showVideoNotesField?: boolean
 
-  // Per-version client approval toggle.
-  // Default should be enabled for new uploads.
   allowApproval?: boolean
   showAllowApprovalField?: boolean
 }
@@ -46,16 +38,11 @@ export default function VideoUpload({
   allowApproval: allowApprovalProp,
   showAllowApprovalField = true,
 }: VideoUploadProps) {
-  const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const uploadRef = useRef<tus.Upload | null>(null)
-  const videoIdRef = useRef<string | null>(null)
+  const { addUpload } = useUploadManager()
 
   const [file, setFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [paused, setPaused] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [uploadSpeed, setUploadSpeed] = useState(0)
+  const [submitting, setSubmitting] = useState(false)
   const [versionLabel, setVersionLabel] = useState('')
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
   const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? true)
@@ -74,31 +61,12 @@ export default function VideoUpload({
     }
   }, [allowApprovalProp])
 
-  // Warn before leaving page if upload is in progress
-  useEffect(() => {
-    if (uploading || paused) {
-      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        e.preventDefault()
-        e.returnValue = '' // Chrome requires returnValue to be set
-        return '' // Some browsers use the return value
-      }
-
-      window.addEventListener('beforeunload', handleBeforeUnload)
-
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload)
-      }
-    }
-  }, [uploading, paused])
-
   // Validate video file format
-  async function validateVideoFile(file: File): Promise<{ valid: boolean; error?: string }> {
-    // Check file size is not zero
-    if (file.size === 0) {
+  async function validateVideoFile(f: File): Promise<{ valid: boolean; error?: string }> {
+    if (f.size === 0) {
       return { valid: false, error: 'File is empty' }
     }
 
-    // Read first 12 bytes to check for MP4/MOV signature
     try {
       const headerBytes = await new Promise<Uint8Array>((resolve, reject) => {
         const reader = new FileReader()
@@ -110,49 +78,35 @@ export default function VideoUpload({
           }
         }
         reader.onerror = () => reject(new Error('Failed to read file'))
-        reader.readAsArrayBuffer(file.slice(0, 12))
+        reader.readAsArrayBuffer(f.slice(0, 12))
       })
 
-      // Check for valid MP4/MOV file signature
-      // MP4 files start with: 00 00 00 XX 66 74 79 70 (ftyp atom)
-      // where XX is the size of the atom (typically 18-20 bytes)
       if (headerBytes.length < 12) {
         return { valid: false, error: 'File is too small to be a valid video' }
       }
 
-      // Check for ftyp atom at position 4-8
-      const ftypSignature = String.fromCharCode(...headerBytes.subarray(4, 8))
-
-      if (ftypSignature === 'ftyp') {
-        return { valid: true }
-      }
-
-      // Also check for mdat atom (some MP4s start with this)
-      const mdatSignature = String.fromCharCode(...headerBytes.subarray(4, 8))
-      if (mdatSignature === 'mdat') {
-        return { valid: true }
-      }
-
-      // Check for other valid MP4 atoms
-      const validAtoms = ['wide', 'free', 'moov']
       const atomType = String.fromCharCode(...headerBytes.subarray(4, 8))
-      if (validAtoms.includes(atomType)) {
+      if (atomType === 'ftyp' || atomType === 'mdat' || ['wide', 'free', 'moov'].includes(atomType)) {
         return { valid: true }
       }
 
       return {
         valid: false,
-        error: 'File does not appear to be a valid MP4/MOV video. Please ensure you are uploading an unencrypted, standard MP4 video file.'
+        error: 'File does not appear to be a valid MP4/MOV video. Please ensure you are uploading an unencrypted, standard MP4 video file.',
       }
-    } catch (err) {
+    } catch {
       return { valid: false, error: 'Failed to read file. Please try again.' }
     }
   }
 
+  /**
+   * Validate, create the server-side video record, then hand off to the
+   * global UploadManager which keeps the TUS upload alive across page
+   * navigation.
+   */
   async function handleUpload() {
     if (!file) return
 
-    // Validate video name is provided
     if (!videoName || !videoName.trim()) {
       setError('Video name is required')
       return
@@ -167,14 +121,12 @@ export default function VideoUpload({
     }
     const contextKey = `${projectId}:${trimmedVideoName}:${trimmedVersionLabel || 'auto'}`
 
-    setUploading(true)
-    setProgress(0)
+    setSubmitting(true)
     setError(null)
 
     try {
-      // Step 0: Validate file format
+      // Validate file format
       const validation = await validateVideoFile(file)
-
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid video file')
       }
@@ -183,264 +135,73 @@ export default function VideoUpload({
       ensureFreshUploadOnContextChange(file, contextKey)
 
       const existingMetadata = getUploadMetadata(file)
-      let canResumeExisting =
+      let canResume =
         existingMetadata?.projectId === projectId &&
         !!existingMetadata.videoId &&
         existingMetadata?.targetName === trimmedVideoName &&
         (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
 
-      // Verify the server-side record still exists and is resumable before resuming
-      if (canResumeExisting) {
+      if (canResume) {
         try {
           const checkRes = await apiFetch(`/api/videos/${existingMetadata!.videoId}`)
           if (!checkRes.ok) {
-            // Record was deleted (e.g., cleanup worker, another device) — start fresh
             clearUploadMetadata(file)
             clearTUSFingerprint(file)
-            canResumeExisting = false
+            canResume = false
           } else {
             const videoData = await checkRes.json()
             if (videoData.status !== 'UPLOADING' && videoData.status !== 'ERROR') {
-              // Video moved past upload phase (PROCESSING/READY) — start fresh
               clearUploadMetadata(file)
               clearTUSFingerprint(file)
-              canResumeExisting = false
+              canResume = false
             }
           }
         } catch {
           clearUploadMetadata(file)
           clearTUSFingerprint(file)
-          canResumeExisting = false
+          canResume = false
         }
       }
 
-      let createdVideoRecord = false
-
-      // Step 1: Reuse existing video record if we have metadata, otherwise create a new one
-      if (canResumeExisting) {
-        videoIdRef.current = existingMetadata!.videoId
-        // Refresh metadata timestamp so it stays valid
-        storeUploadMetadata(file, {
-          videoId: existingMetadata!.videoId,
-          projectId,
-          versionLabel: existingMetadata?.versionLabel || trimmedVersionLabel,
-          targetName: trimmedVideoName,
-        })
+      let videoId: string
+      if (canResume) {
+        videoId = existingMetadata!.videoId
       } else {
-        const { videoId } = await apiPost('/api/videos', {
+        const res = await apiPost('/api/videos', {
           projectId,
           versionLabel: trimmedVersionLabel,
           videoNotes: trimmedVideoNotes,
           allowApproval: allowApproval === true,
           originalFileName: file.name,
           originalFileSize: file.size,
-          name: trimmedVideoName, // Include video name for multi-video support
+          name: trimmedVideoName,
         })
-        videoIdRef.current = videoId
-        createdVideoRecord = true
-
-        storeUploadMetadata(file, {
-          videoId,
-          projectId,
-          versionLabel: trimmedVersionLabel,
-          targetName: trimmedVideoName,
-        })
+        videoId = res.videoId
       }
 
-      // Step 2: Upload with TUS protocol
-      const startTime = Date.now()
-      let lastLoaded = 0
-      let lastTime = startTime
-
-      const upload = new tus.Upload(file, {
-        // TUS server endpoint (absolute URL for fingerprint consistency)
-        endpoint: `${window.location.origin}/api/uploads`,
-
-        // Retry configuration - exponential backoff
-        retryDelays: [0, 1000, 3000, 5000, 10000],
-
-        // Metadata
-        metadata: {
-          filename: file.name,
-          filetype: file.type || 'video/mp4',
-          videoId: videoIdRef.current!,
-        },
-
-        chunkSize: 50 * 1024 * 1024,
-
-        // Store upload URL in localStorage for resume after browser close
-        storeFingerprintForResuming: true,
-        removeFingerprintOnSuccess: true,
-
-        // Ensure auth header is sent for resume/HEAD requests too
-        onBeforeRequest: (req) => {
-          const xhr = req.getUnderlyingObject()
-          const token = getAccessToken()
-          if (token) {
-            if (xhr?.setRequestHeader) {
-              xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-            } else {
-              req.setHeader('Authorization', `Bearer ${token}`)
-            }
-          }
-        },
-
-        // Progress callback
-        onProgress: (bytesUploaded, bytesTotal) => {
-          const percentage = Math.round((bytesUploaded / bytesTotal) * 100)
-          setProgress(percentage)
-
-          // Calculate upload speed
-          const now = Date.now()
-          const timeDiff = (now - lastTime) / 1000 // seconds
-          const bytesDiff = bytesUploaded - lastLoaded
-
-          if (timeDiff > 0.5) { // Update every 0.5 seconds
-            const speedMBps = (bytesDiff / timeDiff) / (1024 * 1024)
-            const stableSpeed = speedMBps > 0.05 ? Math.round(speedMBps * 10) / 10 : 0
-            setUploadSpeed(stableSpeed)
-            lastLoaded = bytesUploaded
-            lastTime = now
-          }
-        },
-
-        // Success callback
-        onSuccess: () => {
-          setUploading(false)
-          setProgress(100)
-
-          // Clear file context since upload completed
-          clearFileContext(file)
-          clearUploadMetadata(file)
-          clearTUSFingerprint(file)
-
-          setFile(null)
-          setVersionLabel('')
-          setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
-          setAllowApproval(allowApprovalProp ?? true)
-          uploadRef.current = null
-          videoIdRef.current = null
-          router.refresh()
-          // Notify parent component
-          onUploadComplete?.()
-        },
-
-        // Error callback
-        onError: async (error) => {
-
-          // Extract meaningful error message
-          let errorMessage = 'Upload failed'
-          if (error.message) {
-            errorMessage = error.message
-          }
-
-          // Check if it's a network error
-          if (error.message?.includes('NetworkError') || error.message?.includes('Failed to fetch')) {
-            errorMessage = 'Network error. Please check your connection and try again.'
-          }
-
-          // Check if it's a server error
-          if (error.message?.includes('413')) {
-            errorMessage = 'File is too large. Please choose a smaller file.'
-          } else if (error.message?.includes('401') || error.message?.includes('403')) {
-            errorMessage = 'Authentication failed. Please log in again.'
-          } else if (error.message?.includes('404')) {
-            errorMessage = 'Upload endpoint not found. Check server logs for configuration issues.'
-          } else if (error.message?.includes('500')) {
-            errorMessage = 'Server error. Check server logs for details.'
-          }
-
-          const statusCode = (error as any)?.originalResponse?.getStatus?.()
-
-          // If we tried to resume an old session and it's gone, clear local resume data
-          if (canResumeExisting && (statusCode === 404 || statusCode === 410)) {
-            clearUploadMetadata(file)
-            clearTUSFingerprint(file)
-            errorMessage = 'Upload session expired. Please restart the upload.'
-          } else if (createdVideoRecord && videoIdRef.current) {
-            // Only clean up DB record if we created it in this attempt
-            try {
-              await apiDelete(`/api/videos/${videoIdRef.current}`)
-              videoIdRef.current = null
-            } catch {}
-            clearUploadMetadata(file)
-            clearTUSFingerprint(file)
-          }
-
-          setError(errorMessage)
-          setUploading(false)
-          uploadRef.current = null
-        },
+      // Hand off to the global upload manager — the upload continues
+      // even if the user navigates away from this page.
+      addUpload({
+        file,
+        projectId,
+        videoId,
+        videoName: trimmedVideoName,
+        versionLabel: trimmedVersionLabel,
+        onComplete: () => onUploadComplete?.(),
       })
 
-      const previousUploads = await upload.findPreviousUploads()
-      if (previousUploads.length > 0) {
-        upload.resumeFromPreviousUpload(previousUploads[0])
-      } else if (!createdVideoRecord && canResumeExisting) {
-        // We expected to resume but no session exists; clear stale metadata so next attempt starts fresh
-        clearUploadMetadata(file)
-        clearTUSFingerprint(file)
-      }
+      // Reset form
+      setFile(null)
+      setVersionLabel('')
+      setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
+      setAllowApproval(allowApprovalProp ?? true)
 
-      // Store upload reference for pause/resume
-      uploadRef.current = upload
-
-      // Start the upload
-      upload.start()
-
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Upload failed')
-      setUploading(false)
-    }
-  }
-
-  function handlePauseResume() {
-    if (!uploadRef.current) return
-
-    if (paused) {
-      // Resume upload
-      uploadRef.current.start()
-      setPaused(false)
-    } else {
-      // Pause upload
-      uploadRef.current.abort()
-      setPaused(true)
-    }
-  }
-
-  async function handleCancel() {
-    const currentVideoId = videoIdRef.current
-
-    if (uploadRef.current) {
-      uploadRef.current.abort(true) // true = permanent abort
-      uploadRef.current = null
-    }
-
-    // Delete the video record from database if it was created
-    if (currentVideoId) {
-      try {
-        await apiDelete(`/api/videos/${currentVideoId}`)
-      } catch {
-        // Upload-only users may not be allowed to hard-delete videos; fallback
-        // to marking the incomplete upload as failed.
-        try {
-          await apiPost(`/api/videos/${currentVideoId}/cancel-upload`, {})
-        } catch {}
-      }
-
-      videoIdRef.current = null
-      router.refresh()
-    }
-
-    setUploading(false)
-    setPaused(false)
-    setProgress(0)
-    setUploadSpeed(0)
-    setError(null)
-    if (file) {
-      clearUploadMetadata(file)
-      clearTUSFingerprint(file)
-      clearFileContext(file)
+      // Notify parent so the project page reflects the new UPLOADING record.
+      onUploadComplete?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -448,9 +209,7 @@ export default function VideoUpload({
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault()
     e.stopPropagation()
-    if (!uploading) {
-      setIsDragging(true)
-    }
+    if (!submitting) setIsDragging(true)
   }
 
   function handleDragLeave(e: React.DragEvent) {
@@ -464,9 +223,8 @@ export default function VideoUpload({
     e.stopPropagation()
     setIsDragging(false)
 
-    if (!uploading && e.dataTransfer.files.length > 0) {
+    if (!submitting && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0]
-      // Only accept video files
       if (droppedFile.type.startsWith('video/')) {
         setFile(droppedFile)
       } else {
@@ -504,7 +262,7 @@ export default function VideoUpload({
             value={versionLabel}
             onChange={(e) => setVersionLabel(e.target.value)}
             placeholder="Leave empty for auto-generated label (v1, v2, etc.)"
-            disabled={uploading}
+            disabled={submitting}
           />
         </div>
 
@@ -515,7 +273,7 @@ export default function VideoUpload({
               <Checkbox
                 checked={allowApproval}
                 onCheckedChange={(v) => setAllowApproval(Boolean(v))}
-                disabled={uploading}
+                disabled={submitting}
                 aria-label="Allow approval of version"
               />
               <span className={allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
@@ -537,7 +295,7 @@ export default function VideoUpload({
             value={videoNotes}
             onChange={(e) => setVideoNotes(e.target.value)}
             placeholder="Optional notes for this version"
-            disabled={uploading}
+            disabled={submitting}
             className="resize-none"
             rows={3}
             maxLength={500}
@@ -555,14 +313,14 @@ export default function VideoUpload({
             type="file"
             accept="video/*"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
-            disabled={uploading}
+            disabled={submitting}
             className="hidden"
           />
           <Button
             type="button"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={submitting}
             className="w-full sm:w-1/2"
           >
             <Upload className="w-4 h-4 mr-2" />
@@ -571,10 +329,10 @@ export default function VideoUpload({
           <Button
             type="button"
             onClick={handleUpload}
-            disabled={!file || uploading}
+            disabled={!file || submitting}
             className="w-full sm:w-1/2"
           >
-            {uploading ? 'Uploading...' : 'Upload Video'}
+            {submitting ? 'Starting…' : 'Upload Video'}
           </Button>
         </div>
         {file && (
@@ -583,62 +341,6 @@ export default function VideoUpload({
           </p>
         )}
       </div>
-
-      {/* Upload Progress */}
-      {uploading && (
-        <div className="space-y-3">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              {paused ? 'Paused' : uploadSpeed > 0 ? `Uploading... • ${uploadSpeed} MB/s` : 'Uploading...'}
-            </span>
-            <span className="font-medium">{progress}%</span>
-          </div>
-          <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
-            <div
-              className={`h-full transition-all ${paused ? 'bg-warning' : 'bg-primary'}`}
-              style={{
-                width: `${progress}%`,
-                backgroundImage: paused ? 'none' : 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.2) 10px, rgba(255,255,255,0.2) 20px)',
-                backgroundSize: '28px 28px',
-                animation: paused ? 'none' : 'move-stripes 1s linear infinite'
-              }}
-            />
-          </div>
-          {/* Pause/Resume and Cancel buttons */}
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handlePauseResume}
-              className="flex-1"
-            >
-              {paused ? (
-                <>
-                  <Play className="w-4 h-4 mr-2" />
-                  Resume
-                </>
-              ) : (
-                <>
-                  <Pause className="w-4 h-4 mr-2" />
-                  Pause
-                </>
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={handleCancel}
-              className="flex-1"
-            >
-              <X className="w-4 h-4 mr-2" />
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
     </div>
   )
 }

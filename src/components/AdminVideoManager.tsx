@@ -76,13 +76,13 @@ export default function AdminVideoManager({
     const wasExpanded = expandedGroup === name
 
     if (wasExpanded) {
-      // Collapse current video
+      // Collapse current video – keep showNewVersionForGroup so CardContent
+      // stays mounted (hidden) and the VideoUpload component preserves its
+      // TUS upload state (progress, speed, ETA).
       setExpandedGroup(null)
-      setShowNewVersionForGroup(null)
     } else {
       // Expand this video (and collapse any other)
       setExpandedGroup(name)
-      setShowNewVersionForGroup(null)
       // Notify parent when expanding a video
       if (onVideoSelect && videoGroups[name]) {
         onVideoSelect(name, videoGroups[name])

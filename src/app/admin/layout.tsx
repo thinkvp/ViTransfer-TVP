@@ -1,6 +1,7 @@
 'use client'
 
 import { AuthProvider } from '@/components/AuthProvider'
+import { UploadManagerProvider } from '@/components/UploadManagerProvider'
 import AdminHeader from '@/components/AdminHeader'
 import AdminMenuAccessGuard from '@/components/AdminMenuAccessGuard'
 import SessionMonitor from '@/components/SessionMonitor'
@@ -82,6 +83,7 @@ export default function AdminLayout({
 
   return (
     <AuthProvider requireAuth={true}>
+      <UploadManagerProvider>
       <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
         <div ref={headerRef}>
           <AdminHeader />
@@ -93,6 +95,7 @@ export default function AdminLayout({
         </div>
         <SessionMonitor />
       </div>
+      </UploadManagerProvider>
     </AuthProvider>
   )
 }

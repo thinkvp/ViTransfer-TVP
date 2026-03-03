@@ -1,7 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import * as tus from 'tus-js-client'
+import { useEffect, useRef, useState } from 'react'
 import { Upload, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -11,18 +10,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn, formatFileSize } from '@/lib/utils'
-import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
-import { getAccessToken } from '@/lib/token-store'
+import { apiFetch, apiPost } from '@/lib/api-client'
 import {
-  clearFileContext,
   clearTUSFingerprint,
   clearUploadMetadata,
   ensureFreshUploadOnContextChange,
   getUploadMetadata,
-  storeUploadMetadata,
 } from '@/lib/tus-context'
+import { useUploadManager } from '@/components/UploadManagerProvider'
 
-type UploadStatus = 'pending' | 'uploading' | 'success' | 'error'
+type UploadStatus = 'pending' | 'queued' | 'error'
 
 type QueuedVideo = {
   id: string
@@ -31,8 +28,6 @@ type QueuedVideo = {
   versionLabel: string
   videoNotes: string
   allowApproval: boolean
-  progress: number
-  uploadSpeed: number
   status: UploadStatus
   error: string | null
 }
@@ -95,18 +90,14 @@ export default function MultiVideoUploadModal({
   onUploadComplete?: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const currentTusRef = useRef<tus.Upload | null>(null)
-  const cancelRequestedRef = useRef(false)
-  const currentUploadRejectRef = useRef<((error: Error) => void) | null>(null)
-  const currentUploadItemIdRef = useRef<string | null>(null)
-  const currentVideoIdRef = useRef<string | null>(null)
+  const { addUpload } = useUploadManager()
 
   const [isDragging, setIsDragging] = useState(false)
   const [globalError, setGlobalError] = useState<string | null>(null)
   const [items, setItems] = useState<QueuedVideo[]>([])
+  const [submitting, setSubmitting] = useState(false)
 
-  const isUploadingAny = useMemo(() => items.some((i) => i.status === 'uploading'), [items])
-  const canUpload = items.length > 0 && !isUploadingAny
+  const canUpload = items.length > 0 && items.some((i) => i.status === 'pending') && !submitting
 
   useEffect(() => {
     if (!open) {
@@ -141,8 +132,6 @@ export default function MultiVideoUploadModal({
           versionLabel: '',
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
-          progress: 0,
-          uploadSpeed: 0,
           status: 'pending',
           error: null,
         })
@@ -160,50 +149,10 @@ export default function MultiVideoUploadModal({
     setItems((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
   }
 
-  function handleCancelCurrentUpload() {
-    cancelRequestedRef.current = true
-    const activeItemId = currentUploadItemIdRef.current
-    if (activeItemId) {
-      updateItem(activeItemId, { status: 'pending', progress: 0, uploadSpeed: 0, error: null })
-
-      // Clear TUS metadata for the cancelled file so a retry starts fresh
-      const activeItem = items.find((i) => i.id === activeItemId)
-      if (activeItem) {
-        clearUploadMetadata(activeItem.file)
-        clearTUSFingerprint(activeItem.file)
-      }
-    }
-
-    // Capture the videoId before clearing refs — we need it for server-side cleanup
-    const videoId = currentVideoIdRef.current
-    currentVideoIdRef.current = null
-
-    const rejectActive = currentUploadRejectRef.current
-    if (rejectActive) {
-      currentUploadRejectRef.current = null
-      rejectActive(new Error('Upload cancelled'))
-    }
-
-    const upload = currentTusRef.current
-    if (upload) {
-      currentTusRef.current = null
-      upload.abort(true)
-    }
-
-    // Directly mark the server-side video record as cancelled.
-    // abort(true) can skip onError entirely, so we cannot rely on
-    // the onError callback to do this cleanup.
-    if (videoId) {
-      apiDelete(`/api/videos/${videoId}`).catch(() => {
-        apiPost(`/api/videos/${videoId}/cancel-upload`, {}).catch(() => {})
-      })
-    }
-  }
-
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault()
     e.stopPropagation()
-    if (!isUploadingAny) setIsDragging(true)
+    if (!submitting) setIsDragging(true)
   }
 
   function handleDragLeave(e: React.DragEvent) {
@@ -216,271 +165,131 @@ export default function MultiVideoUploadModal({
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
-    if (isUploadingAny) return
+    if (submitting) return
     if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files)
   }
 
-  async function uploadOne(item: QueuedVideo) {
-    const file = item.file
-    const trimmedVideoName = item.videoName.trim()
-    const trimmedVersionLabel = item.versionLabel.trim()
-    const trimmedVideoNotes = item.videoNotes.trim()
-
-    if (!trimmedVideoName) {
-      throw new Error('Video name is required')
-    }
-    if (trimmedVideoNotes.length > 500) {
-      throw new Error('Version notes must be 500 characters or fewer')
-    }
-
-    const contextKey = `${projectId}:${trimmedVideoName}:${trimmedVersionLabel || 'auto'}`
-
-    // Step 0: Validate
-    const validation = await validateVideoFile(file)
-    if (!validation.valid) {
-      throw new Error(validation.error || 'Invalid video file')
-    }
-
-    // Check if file was uploaded to different project and clear TUS fingerprint if needed
-    ensureFreshUploadOnContextChange(file, contextKey)
-
-    const existingMetadata = getUploadMetadata(file)
-    let canResumeExisting =
-      existingMetadata?.projectId === projectId &&
-      !!existingMetadata.videoId &&
-      existingMetadata?.targetName === trimmedVideoName &&
-      (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
-
-    // Verify the server-side record still exists and is resumable before resuming
-    if (canResumeExisting) {
-      try {
-        const checkRes = await apiFetch(`/api/videos/${existingMetadata!.videoId}`)
-        if (!checkRes.ok) {
-          clearUploadMetadata(file)
-          clearTUSFingerprint(file)
-          canResumeExisting = false
-        } else {
-          const videoData = await checkRes.json()
-          if (videoData.status !== 'UPLOADING' && videoData.status !== 'ERROR') {
-            // Video moved past upload phase (PROCESSING/READY) — start fresh
-            clearUploadMetadata(file)
-            clearTUSFingerprint(file)
-            canResumeExisting = false
-          }
-        }
-      } catch {
-        clearUploadMetadata(file)
-        clearTUSFingerprint(file)
-        canResumeExisting = false
-      }
-    }
-
-    let createdVideoRecord = false
-    let videoId: string
-
-    if (canResumeExisting) {
-      videoId = existingMetadata!.videoId
-      currentVideoIdRef.current = videoId
-      storeUploadMetadata(file, {
-        videoId,
-        projectId,
-        versionLabel: existingMetadata?.versionLabel || trimmedVersionLabel,
-        targetName: trimmedVideoName,
-      })
-    } else {
-      const res = await apiPost('/api/videos', {
-        projectId,
-        versionLabel: trimmedVersionLabel,
-        videoNotes: trimmedVideoNotes,
-        allowApproval: item.allowApproval === true,
-        originalFileName: file.name,
-        originalFileSize: file.size,
-        name: trimmedVideoName,
-      })
-
-      videoId = res.videoId
-      createdVideoRecord = true
-      currentVideoIdRef.current = videoId
-
-      storeUploadMetadata(file, {
-        videoId,
-        projectId,
-        versionLabel: trimmedVersionLabel,
-        targetName: trimmedVideoName,
-      })
-    }
-
-    await new Promise<void>(async (resolve, reject) => {
-      let settled = false
-      const safeResolve = () => {
-        if (settled) return
-        settled = true
-        resolve()
-      }
-      const safeReject = (error: Error) => {
-        if (settled) return
-        settled = true
-        reject(error)
-      }
-
-      currentUploadRejectRef.current = safeReject
-      currentUploadItemIdRef.current = item.id
-
-      const startTime = Date.now()
-      let lastLoaded = 0
-      let lastTime = startTime
-
-      const upload = new tus.Upload(file, {
-        endpoint: `${window.location.origin}/api/uploads`,
-        retryDelays: [0, 1000, 3000, 5000, 10000],
-        chunkSize: 50 * 1024 * 1024,
-        storeFingerprintForResuming: true,
-        removeFingerprintOnSuccess: true,
-        metadata: {
-          filename: file.name,
-          filetype: file.type || 'video/mp4',
-          videoId,
-        },
-        onBeforeRequest: (req) => {
-          const xhr = req.getUnderlyingObject()
-          const token = getAccessToken()
-          if (token) {
-            if (xhr?.setRequestHeader) {
-              xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-            } else {
-              req.setHeader('Authorization', `Bearer ${token}`)
-            }
-          }
-        },
-        onProgress: (bytesUploaded, bytesTotal) => {
-          const percentage = Math.round((bytesUploaded / bytesTotal) * 100)
-          const now = Date.now()
-          const timeDiff = (now - lastTime) / 1000
-          const bytesDiff = bytesUploaded - lastLoaded
-          if (timeDiff > 0.5) {
-            const speedMBps = (bytesDiff / timeDiff) / (1024 * 1024)
-            const stableSpeed = speedMBps > 0.05 ? Math.round(speedMBps * 10) / 10 : 0
-            updateItem(item.id, { progress: percentage, uploadSpeed: stableSpeed })
-            lastLoaded = bytesUploaded
-            lastTime = now
-          } else {
-            updateItem(item.id, { progress: percentage })
-          }
-        },
-        onSuccess: () => {
-          clearFileContext(file)
-          clearUploadMetadata(file)
-          clearTUSFingerprint(file)
-          safeResolve()
-        },
-        onError: async (error) => {
-          if (cancelRequestedRef.current) {
-            // handleCancelCurrentUpload already cleared metadata,
-            // called cancel-upload, and rejected the Promise.
-            return
-          }
-
-          const statusCode = (error as any)?.originalResponse?.getStatus?.()
-
-          if (canResumeExisting && (statusCode === 404 || statusCode === 410)) {
-            clearUploadMetadata(file)
-            clearTUSFingerprint(file)
-          } else if (createdVideoRecord && videoId) {
-            try {
-              await apiDelete(`/api/videos/${videoId}`)
-            } catch {
-              try {
-                await apiPost(`/api/videos/${videoId}/cancel-upload`, {})
-              } catch {}
-            }
-            clearUploadMetadata(file)
-            clearTUSFingerprint(file)
-          }
-
-          safeReject(error instanceof Error ? error : new Error('Upload failed'))
-        },
-      })
-
-      try {
-        const previousUploads = await upload.findPreviousUploads()
-        if (previousUploads.length > 0) {
-          upload.resumeFromPreviousUpload(previousUploads[0])
-        } else if (!createdVideoRecord && canResumeExisting) {
-          clearUploadMetadata(file)
-          clearTUSFingerprint(file)
-        }
-      } catch {
-        // ignore
-      }
-
-      currentTusRef.current = upload
-      upload.start()
-    })
-    currentTusRef.current = null
-    currentUploadRejectRef.current = null
-    currentUploadItemIdRef.current = null
-    currentVideoIdRef.current = null
-  }
-
+  /**
+   * Validate all items, create server-side video records, then enqueue
+   * each file with the global UploadManager (which survives page navigation).
+   */
   async function handleUploadAll() {
     setGlobalError(null)
-    cancelRequestedRef.current = false
 
-    // Validate queue before starting
-    const firstInvalid = items.find((i) => !i.videoName.trim())
-    if (firstInvalid) {
-      updateItem(firstInvalid.id, { error: 'Video name is required' })
-      setGlobalError('Please fill in all required fields')
-      return
+    // ---- validation ----
+    const pending = items.filter((i) => i.status === 'pending')
+    for (const item of pending) {
+      if (!item.videoName.trim()) {
+        updateItem(item.id, { error: 'Video name is required' })
+        setGlobalError('Please fill in all required fields')
+        return
+      }
+      if ((item.videoNotes || '').trim().length > 500) {
+        updateItem(item.id, { error: 'Version notes must be 500 characters or fewer' })
+        setGlobalError('Please fix the errors below')
+        return
+      }
     }
 
-    let successCount = 0
-    let failureCount = 0
+    setSubmitting(true)
 
-    for (const item of items) {
-      if (cancelRequestedRef.current) break
-      if (item.status === 'success') {
-        successCount += 1
-        continue
+    // ---- validate file formats ----
+    for (const item of pending) {
+      const validation = await validateVideoFile(item.file)
+      if (!validation.valid) {
+        updateItem(item.id, { status: 'error', error: validation.error || 'Invalid video file' })
+        setGlobalError('Some files failed validation')
+        setSubmitting(false)
+        return
       }
+    }
 
-      updateItem(item.id, { status: 'uploading', error: null, progress: 0, uploadSpeed: 0 })
+    // ---- create video records + enqueue uploads ----
+    let enqueued = 0
+    for (const item of pending) {
+      const trimmedVideoName = item.videoName.trim()
+      const trimmedVersionLabel = item.versionLabel.trim()
+      const trimmedVideoNotes = item.videoNotes.trim()
+      const contextKey = `${projectId}:${trimmedVideoName}:${trimmedVersionLabel || 'auto'}`
+
       try {
-        await uploadOne(item)
-        updateItem(item.id, { status: 'success', progress: 100 })
-        successCount += 1
-      } catch (err: any) {
-        if (cancelRequestedRef.current) {
-          // handleCancelCurrentUpload already reset item to pending
-          break
+        ensureFreshUploadOnContextChange(item.file, contextKey)
+
+        const existingMetadata = getUploadMetadata(item.file)
+        let canResume =
+          existingMetadata?.projectId === projectId &&
+          !!existingMetadata.videoId &&
+          existingMetadata?.targetName === trimmedVideoName &&
+          (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
+
+        if (canResume) {
+          try {
+            const checkRes = await apiFetch(`/api/videos/${existingMetadata!.videoId}`)
+            if (!checkRes.ok) {
+              clearUploadMetadata(item.file)
+              clearTUSFingerprint(item.file)
+              canResume = false
+            } else {
+              const videoData = await checkRes.json()
+              if (videoData.status !== 'UPLOADING' && videoData.status !== 'ERROR') {
+                clearUploadMetadata(item.file)
+                clearTUSFingerprint(item.file)
+                canResume = false
+              }
+            }
+          } catch {
+            clearUploadMetadata(item.file)
+            clearTUSFingerprint(item.file)
+            canResume = false
+          }
         }
-        const message = typeof err?.message === 'string' && err.message.trim()
-          ? err.message
-          : 'Upload failed'
+
+        let videoId: string
+        if (canResume) {
+          videoId = existingMetadata!.videoId
+        } else {
+          const res = await apiPost('/api/videos', {
+            projectId,
+            versionLabel: trimmedVersionLabel,
+            videoNotes: trimmedVideoNotes,
+            allowApproval: item.allowApproval === true,
+            originalFileName: item.file.name,
+            originalFileSize: item.file.size,
+            name: trimmedVideoName,
+          })
+          videoId = res.videoId
+        }
+
+        addUpload({
+          file: item.file,
+          projectId,
+          videoId,
+          videoName: trimmedVideoName,
+          versionLabel: trimmedVersionLabel,
+          onComplete: () => onUploadComplete?.(),
+        })
+
+        updateItem(item.id, { status: 'queued' })
+        enqueued++
+      } catch (err: any) {
+        const message = typeof err?.message === 'string' && err.message.trim() ? err.message : 'Failed to start upload'
         updateItem(item.id, { status: 'error', error: message })
-        failureCount += 1
-        // continue with remaining
       }
     }
 
-    currentTusRef.current = null
+    setSubmitting(false)
 
-    if (successCount > 0 || cancelRequestedRef.current) {
-      // Refresh parent data: either new videos landed or cancelled uploads
-      // were marked as ERROR on the server and the list needs updating.
+    // Close modal if all items were successfully enqueued.
+    // Uploads continue in background via UploadManager.
+    if (enqueued > 0 && items.every((i) => i.status === 'queued' || i.status === 'error')) {
+      // Notify parent so the project page can reflect new UPLOADING records.
       onUploadComplete?.()
-    }
-
-    // Close only if everything succeeded with no cancellations.
-    if (failureCount === 0 && !cancelRequestedRef.current) {
       onOpenChange(false)
     }
-
-    cancelRequestedRef.current = false
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !isUploadingAny && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Add Video/s</DialogTitle>
@@ -518,13 +327,13 @@ export default function MultiVideoUploadModal({
                     if (e.target.files) addFiles(e.target.files)
                     e.currentTarget.value = ''
                   }}
-                  disabled={isUploadingAny}
+                  disabled={submitting}
                 />
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploadingAny}
+                  disabled={submitting}
                   className="w-full"
                 >
                   <Upload className="w-4 h-4 mr-2" />
@@ -537,23 +346,24 @@ export default function MultiVideoUploadModal({
           {items.length > 0 && (
             <div className="space-y-4">
               {items.map((item) => (
-                <div key={item.id} className="rounded-lg border border-border bg-card p-4">
+                <div key={item.id} className={cn('rounded-lg border border-border bg-card p-4', item.status === 'queued' && 'opacity-60')}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium truncate">{item.file.name}</div>
                       <div className="text-xs text-muted-foreground">{formatFileSize(item.file.size)}</div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => removeItem(item.id)}
-                      disabled={item.status === 'uploading'}
-                      title="Remove"
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
+                    {item.status === 'pending' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => removeItem(item.id)}
+                        title="Remove"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -563,7 +373,7 @@ export default function MultiVideoUploadModal({
                         id={`videoName-${item.id}`}
                         value={item.videoName}
                         onChange={(e) => updateItem(item.id, { videoName: e.target.value, error: null })}
-                        disabled={item.status === 'uploading'}
+                        disabled={item.status !== 'pending'}
                       />
                     </div>
 
@@ -574,7 +384,7 @@ export default function MultiVideoUploadModal({
                         value={item.versionLabel}
                         onChange={(e) => updateItem(item.id, { versionLabel: e.target.value })}
                         placeholder="Leave empty for auto-generated label (v1, v2, etc.)"
-                        disabled={item.status === 'uploading'}
+                        disabled={item.status !== 'pending'}
                       />
                     </div>
 
@@ -590,7 +400,7 @@ export default function MultiVideoUploadModal({
                         className="resize-none"
                         rows={3}
                         maxLength={500}
-                        disabled={item.status === 'uploading'}
+                        disabled={item.status !== 'pending'}
                       />
                     </div>
 
@@ -601,7 +411,7 @@ export default function MultiVideoUploadModal({
                           <Checkbox
                             checked={item.allowApproval}
                             onCheckedChange={(v) => updateItem(item.id, { allowApproval: Boolean(v) })}
-                            disabled={item.status === 'uploading'}
+                            disabled={item.status !== 'pending'}
                             aria-label="Allow approval of version"
                           />
                           <span className={item.allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
@@ -611,48 +421,15 @@ export default function MultiVideoUploadModal({
                       </div>
                     )}
 
-                    {(item.status === 'uploading' || item.status === 'success') && (
-                      <div className="sm:col-span-2 space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">
-                            {item.status === 'success' ? 'Uploaded' : 'Uploading...'}
+                    {item.status === 'queued' && (
+                      <div className="sm:col-span-2">
+                        <p className="text-sm text-muted-foreground flex items-center gap-2">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                           </span>
-                          <span className="font-medium">{item.progress}%</span>
-                        </div>
-                        <div className="relative h-3 w-full overflow-hidden rounded-full bg-secondary">
-                          <div
-                            className={cn('h-full transition-all', item.status === 'success' ? 'bg-success' : 'bg-primary')}
-                            style={{ width: `${item.progress}%` }}
-                          />
-                        </div>
-                        {item.status === 'uploading' && item.uploadSpeed > 0 && (
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>Speed: {item.uploadSpeed} MB/s</span>
-                            <span>
-                              {item.progress < 100 && (() => {
-                                const eta = Math.ceil((item.file.size / (1024 * 1024)) / item.uploadSpeed * (1 - item.progress / 100))
-                                if (eta <= 0) return 'Estimated: <1 second'
-                                if (eta < 60) return `Estimated: ${eta} second${eta === 1 ? '' : 's'}`
-                                const mins = Math.floor(eta / 60)
-                                const secs = eta % 60
-                                return secs > 0 ? `Estimated: ${mins} min ${secs} sec` : `Estimated: ${mins} min`
-                              })()}
-                            </span>
-                          </div>
-                        )}
-                        {item.status === 'uploading' && (
-                          <div className="flex justify-end pt-1">
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              onClick={handleCancelCurrentUpload}
-                            >
-                              <X className="w-3 h-3 mr-1" />
-                              Cancel Upload
-                            </Button>
-                          </div>
-                        )}
+                          Queued — uploading in background
+                        </p>
                       </div>
                     )}
 
@@ -669,11 +446,11 @@ export default function MultiVideoUploadModal({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isUploadingAny}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
           <Button type="button" onClick={handleUploadAll} disabled={!canUpload}>
-            Upload Video/s
+            {submitting ? 'Starting…' : 'Upload Video/s'}
           </Button>
         </DialogFooter>
       </DialogContent>

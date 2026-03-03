@@ -46,6 +46,7 @@ export default function SharePage() {
   const [loading, setLoading] = useState(false)
   const [sendingOtp, setSendingOtp] = useState(false)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [project, setProject] = useState<any>(null)
   const [comments, setComments] = useState<any[]>([])
   const [commentsLoading, setCommentsLoading] = useState(false)
@@ -352,6 +353,8 @@ export default function SharePage() {
 
     async function loadProject() {
       try {
+        setLoadError(null)
+
         const response = await apiFetch(`/api/share/${token}`, {
           cache: 'no-store',
           headers: !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined,
@@ -413,12 +416,20 @@ export default function SharePage() {
               fetchComments(projectData.shareToken)
             }
           }
+        } else {
+          // Unhandled status (500, 503, 429, etc.) — surface an error instead of
+          // leaving isPasswordProtected as null, which would show "Loading..." forever.
+          setIsPasswordProtected(false)
+          setIsAuthenticated(false)
+          setProject(null)
+          setLoadError('Unable to load this page right now. The server may be busy — please try again.')
         }
       } catch (error) {
         if (!isMounted) return
         setIsAuthenticated(false)
         setIsPasswordProtected(false)
         setProject(null)
+        setLoadError('Unable to connect. Please check your connection and try again.')
       }
     }
 
@@ -1076,6 +1087,30 @@ export default function SharePage() {
                 </Button>
               </>
             )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Show server error with retry
+  if (loadError) {
+    return (
+      <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
+        <Card className="bg-card border-border w-full max-w-md">
+          <CardContent className="py-12 text-center space-y-4">
+            <p className="text-foreground font-semibold">Temporarily Unavailable</p>
+            <p className="text-muted-foreground text-sm">{loadError}</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setLoadError(null)
+                setIsPasswordProtected(null)
+              }}
+            >
+              Try Again
+            </Button>
           </CardContent>
         </Card>
       </div>

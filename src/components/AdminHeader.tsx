@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
 import NotificationsBell from '@/components/NotificationsBell'
+import RunningJobsBell from '@/components/RunningJobsBell'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
@@ -96,6 +97,7 @@ export default function AdminHeader() {
             >
               <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
+            <RunningJobsBell />
             <NotificationsBell />
           </div>
         </div>

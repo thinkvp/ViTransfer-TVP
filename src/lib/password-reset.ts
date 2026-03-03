@@ -329,7 +329,9 @@ export async function resetPassword(
   // This forces re-authentication after password change
   const redis = getRedis()
   const revokedAtKey = `user:tokens:revoked_at:${userId}`
-  await redis.set(revokedAtKey, Date.now().toString())
+  // Expire after 7 days (matches REFRESH_TOKEN_DURATION) — any token older
+  // than this has already expired naturally and no longer needs revocation.
+  await redis.set(revokedAtKey, Date.now().toString(), 'EX', 7 * 24 * 60 * 60)
 
   return { success: true }
 }

@@ -1,11 +1,8 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { downloadFile } from '../lib/storage'
+import { getFilePath } from '../lib/storage'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
 import fs from 'fs'
-import path from 'path'
-import { pipeline } from 'stream/promises'
-import { TEMP_DIR } from './cleanup'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
@@ -29,7 +26,6 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
     console.log('[WORKER DEBUG] Asset job data:', JSON.stringify(job.data, null, 2))
   }
 
-  let tempFilePath: string | undefined
   const projectId = await (async () => {
     try {
       const asset = await prisma.videoAsset.findUnique({
@@ -43,24 +39,20 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
   })()
 
   try {
-    // Download asset to temp location
-    tempFilePath = path.join(TEMP_DIR, `${assetId}-asset`)
+    // Read magic bytes directly from storage — no temp copy needed
+    const filePath = getFilePath(storagePath)
 
     if (DEBUG) {
-      console.log('[WORKER DEBUG] Downloading asset from:', storagePath)
-      console.log('[WORKER DEBUG] Temp file path:', tempFilePath)
+      console.log('[WORKER DEBUG] Reading asset directly from:', filePath)
     }
-
-    const downloadStream = await downloadFile(storagePath)
-    await pipeline(downloadStream, fs.createWriteStream(tempFilePath))
 
     // Verify file exists and has content
-    const stats = fs.statSync(tempFilePath)
+    const stats = fs.statSync(filePath)
     if (stats.size === 0) {
-      throw new Error('Downloaded file is empty')
+      throw new Error('Asset file is empty')
     }
 
-    console.log(`[WORKER] Downloaded asset ${assetId}, size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`)
+    console.log(`[WORKER] Validating asset ${assetId}, size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`)
 
     // Validate magic bytes
     if (DEBUG) {
@@ -74,7 +66,7 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
 
     const sampleSize = 4100
     const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
-    const fileHandle = await fs.promises.open(tempFilePath, 'r')
+    const fileHandle = await fs.promises.open(filePath, 'r')
     try {
       await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
     } finally {
@@ -85,7 +77,7 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
 
     if (!fileType) {
       // Some files (like .prproj, .txt) don't have magic bytes
-      console.warn('[ASSET VALIDATION] Could not detect magic bytes for:', tempFilePath)
+      console.warn('[ASSET VALIDATION] Could not detect magic bytes for:', filePath)
 
       await prisma.videoAsset.update({
         where: { id: assetId },
@@ -170,17 +162,5 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
   } catch (error) {
     console.error(`[WORKER ERROR] Asset processing failed for ${assetId}:`, error)
     throw error
-  } finally {
-    // Cleanup temp file
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath)
-        if (DEBUG) {
-          console.log('[WORKER DEBUG] Cleaned up temp file:', tempFilePath)
-        }
-      } catch (cleanupError) {
-        console.error('[WORKER ERROR] Failed to cleanup temp file:', cleanupError)
-      }
-    }
   }
 }

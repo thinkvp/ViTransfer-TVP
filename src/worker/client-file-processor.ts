@@ -1,11 +1,8 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { downloadFile } from '../lib/storage'
+import { getFilePath } from '../lib/storage'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
 import fs from 'fs'
-import path from 'path'
-import { pipeline } from 'stream/promises'
-import { TEMP_DIR } from './cleanup'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -27,24 +24,20 @@ export async function processClientFile(job: Job<ClientFileProcessingJob>) {
     console.log('[WORKER DEBUG] Client file job data:', JSON.stringify(job.data, null, 2))
   }
 
-  let tempFilePath: string | undefined
-
   try {
-    tempFilePath = path.join(TEMP_DIR, `${clientFileId}-clientfile`)
+    // Read magic bytes directly from storage — no temp copy needed
+    const filePath = getFilePath(storagePath)
 
-    const downloadStream = await downloadFile(storagePath)
-    await pipeline(downloadStream, fs.createWriteStream(tempFilePath))
-
-    const stats = fs.statSync(tempFilePath)
+    const stats = fs.statSync(filePath)
     if (stats.size === 0) {
-      throw new Error('Downloaded file is empty')
+      throw new Error('Client file is empty')
     }
 
     const { fileTypeFromBuffer } = await import('file-type/core')
 
     const sampleSize = 4100
     const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
-    const fileHandle = await fs.promises.open(tempFilePath, 'r')
+    const fileHandle = await fs.promises.open(filePath, 'r')
     try {
       await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
     } finally {
@@ -112,13 +105,5 @@ export async function processClientFile(job: Job<ClientFileProcessingJob>) {
   } catch (error) {
     console.error(`[WORKER ERROR] Client file processing failed for ${clientFileId}:`, error)
     throw error
-  } finally {
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath)
-      } catch (cleanupError) {
-        console.error('[WORKER ERROR] Failed to cleanup temp file:', cleanupError)
-      }
-    }
   }
 }
