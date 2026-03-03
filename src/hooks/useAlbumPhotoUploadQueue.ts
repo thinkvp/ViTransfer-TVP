@@ -161,7 +161,7 @@ export function useAlbumPhotoUploadQueue({
             filetype: upload.file.type || 'application/octet-stream',
             photoId,
           },
-          chunkSize: 10 * 1024 * 1024,
+          chunkSize: 50 * 1024 * 1024,
           storeFingerprintForResuming: true,
           removeFingerprintOnSuccess: true,
 

@@ -4,7 +4,7 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
 
-const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
+export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
 // Legacy project-path redirect support:
 // Storage paths in DB are often under projects/{projectId}/...
@@ -385,6 +385,55 @@ export async function uploadFile(
       `Upload may have been corrupted.`
     )
   }
+}
+
+/**
+ * Move a file from an absolute source path (e.g. a TUS temp file) to a logical
+ * storage path (relative to STORAGE_ROOT), using an atomic fs.rename when the
+ * source and destination are on the same filesystem, or falling back to a
+ * stream-copy + unlink when they are not (EXDEV cross-device).
+ *
+ * The TUS .json sidecar for the source is also removed on success.
+ */
+export async function moveUploadedFile(
+  srcAbsPath: string,
+  destLogicalPath: string,
+  expectedSize: number,
+): Promise<void> {
+  const destFullPath = validatePath(destLogicalPath)
+  const destDir = path.dirname(destFullPath)
+
+  await mkdir(STORAGE_ROOT, { recursive: true })
+  await mkdir(destDir, { recursive: true })
+
+  try {
+    // Fast path: atomic rename — zero cost when src and dest share a filesystem.
+    // On Linux this is a single syscall (rename(2)) regardless of file size.
+    await fs.promises.rename(srcAbsPath, destFullPath)
+  } catch (err: any) {
+    if (err?.code === 'EXDEV') {
+      // Cross-device (different filesystem / mount point). Fall back to a streaming
+      // copy then remove the original.
+      const readStream = fs.createReadStream(srcAbsPath)
+      const writeStream = fs.createWriteStream(destFullPath)
+      await pipeline(readStream, writeStream)
+      await fs.promises.unlink(srcAbsPath).catch(() => {})
+    } else {
+      throw err
+    }
+  }
+
+  // Size sanity check — critical for the copy path; essentially free for rename.
+  const stats = await fs.promises.stat(destFullPath)
+  if (stats.size !== expectedSize) {
+    await fs.promises.unlink(destFullPath).catch(() => {})
+    throw new Error(
+      `File size mismatch after move: expected ${expectedSize} bytes, got ${stats.size} bytes.`
+    )
+  }
+
+  // Remove the TUS .json metadata sidecar (best-effort).
+  await fs.promises.unlink(`${srcAbsPath}.json`).catch(() => {})
 }
 
 export async function downloadFile(filePath: string): Promise<Readable> {

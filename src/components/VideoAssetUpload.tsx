@@ -345,7 +345,14 @@ export function VideoAssetUpload({ videoId, onUploadComplete }: VideoAssetUpload
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>Speed: {uploadSpeed} MB/s</span>
               <span>
-                {progress < 100 && !paused && `Estimated: ${Math.ceil((file!.size / (1024 * 1024)) / uploadSpeed - (file!.size * progress / 100 / (1024 * 1024)) / uploadSpeed)} seconds`}
+                {progress < 100 && !paused && (() => {
+                  const eta = Math.ceil((file!.size / (1024 * 1024)) / uploadSpeed * (1 - progress / 100))
+                  if (eta <= 0) return 'Estimated: <1 second'
+                  if (eta < 60) return `Estimated: ${eta} second${eta === 1 ? '' : 's'}`
+                  const mins = Math.floor(eta / 60)
+                  const secs = eta % 60
+                  return secs > 0 ? `Estimated: ${mins} min ${secs} sec` : `Estimated: ${mins} min`
+                })()}
               </span>
             </div>
           )}

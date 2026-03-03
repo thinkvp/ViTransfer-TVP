@@ -110,7 +110,11 @@ export function AlbumPhotoUploadItem({
                     const remainingBytes = upload.file.size * (1 - upload.progress / 100)
                     const seconds = remainingBytes / (upload.uploadSpeed * 1024 * 1024)
                     const eta = Math.max(0, Math.ceil(seconds))
-                    return eta > 0 ? `Estimated: ${eta} seconds` : 'Estimated: <1 second'
+                    if (eta <= 0) return 'Estimated: <1 second'
+                    if (eta < 60) return `Estimated: ${eta} second${eta === 1 ? '' : 's'}`
+                    const mins = Math.floor(eta / 60)
+                    const secs = eta % 60
+                    return secs > 0 ? `Estimated: ${mins} min ${secs} sec` : `Estimated: ${mins} min`
                   })()}
                 </span>
               </div>

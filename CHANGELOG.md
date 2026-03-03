@@ -5,6 +5,26 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-03-03
+
+### Added
+- **Processing progress percentage in video bar** — the PROCESSING progress bar in the video list now shows the actual FFmpeg transcode percentage (e.g. `42%`) alongside the "Processing previews..." label; the bar fills proportionally with a 1% minimum so there is always a visible indicator from the moment processing begins; normalises both the `0.0–1.0` float range stored during transcoding and the `100` completion sentinel
+- **Cancel Upload button in batch upload modal** — a "Cancel Upload" button appears in the `MultiVideoUploadModal` footer while a batch upload is in progress; clicking it immediately aborts the active TUS upload, resets the item back to pending state, and stops the remaining queue without closing the dialog, so the user can correct issues or close manually
+- **Upload speed and ETA in batch upload modal** — while a file is uploading in `MultiVideoUploadModal`, a `Speed: X MB/s` / `Estimated: Y seconds` row now appears beneath the progress bar for each active item, matching the display already present in the asset and file upload components
+- **UPLOADING status badge** — videos in `UPLOADING` status now display a neutral spinning `UPLOADING` badge in the same position as the `PROCESSING` / `QUEUED` badges in both the video list row and the `AdminVideoManager` group card header, making in-flight uploads visible rather than appearing as blank entries
+- **FAILED status badge** — videos in `ERROR` status now display a destructive `FAILED` badge in the video list row and `AdminVideoManager` group card header (previously these showed no badge at the group level)
+- **`POST /api/videos/[id]/cancel-upload` endpoint** — new endpoint that marks an `UPLOADING` or `ERROR` video record as `ERROR` with the reason `Upload cancelled before completion`; used as a fallback when the caller lacks the `projectsFullControl` permission required to hard-delete the video record, preventing ghost `UPLOADING` entries from persisting on the Projects page
+
+### Changed
+- **TUS temp files co-located with storage root** — the TUS server now stores upload chunk temp files in `STORAGE_ROOT/.tus-tmp` instead of `/tmp/vitransfer-tus-uploads`; because the temp directory is now on the same filesystem as the final storage location, the `onUploadFinish` handler uses an atomic `fs.rename` move instead of a full read/write copy, eliminating a complete extra copy of every uploaded file; a cross-device (`EXDEV`) fallback stream-copy is retained for edge cases
+- **Cancel cleans up incomplete video records** — on abort or TUS error, the upload components first attempt `DELETE /api/videos/:id`; if that returns 403 (insufficient permissions), they fall back to the new `cancel-upload` endpoint so the incomplete record is always resolved rather than left as a ghost
+
+### Fixed
+- **Upload ETA shown in minutes when over one minute** — all upload components (`MultiVideoUploadModal`, `VideoAssetUpload`, `VideoAssetUploadItem`, `AlbumPhotoUploadItem`) now format the remaining time estimate as `X min Y sec` (or `X min` when no seconds remainder) for ETAs of 60 seconds or more, replacing the raw seconds count that could reach into the thousands for large files
+- **Cancel Upload freezing the upload queue** — `tus.Upload.abort(true)` can silently skip the `onError` callback, leaving the queue's internal `await new Promise(…)` permanently unresolved and freezing all subsequent uploads; fixed by storing a direct reference to the Promise's `reject` function (`currentUploadRejectRef`) that `handleCancelCurrentUpload` calls immediately before issuing the TUS abort, with a `settled` boolean guard preventing double-settlement if `onError` also fires
+- **Ghost UPLOADING records persisting on Projects page after cancel** — `handleCancelCurrentUpload` now tracks the active `videoId` in a dedicated ref (`currentVideoIdRef`) and directly calls `DELETE /api/videos/:id` (falling back to `cancel-upload`) as a fire-and-forget before `abort(true)` is issued; this ensures the server-side record is always cleaned up regardless of whether the TUS `onError` callback fires
+- **Collapsing a video card during "Add New Version" upload cancels the upload** — the `CardContent` in `AdminVideoManager` was conditionally mounted with `{isExpanded && ...}`, so collapsing the card unmounted the `VideoUpload` component mid-upload, destroying all TUS state; the card content is now kept mounted (visually hidden via `hidden`) when an upload form is open for that group, so the upload survives collapse/expand and progress resumes exactly where it left off when the card is reopened
+
 ## [1.0.7] - 2026-03-02
 
 ### Added

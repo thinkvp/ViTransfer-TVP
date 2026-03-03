@@ -8,7 +8,11 @@ import fs from 'fs'
 import { Readable } from 'stream'
 import type { NextApiRequest, NextApiResponse } from 'next'
 
-const TUS_UPLOAD_DIR = '/tmp/vitransfer-tus-uploads'
+// Store TUS temp files inside STORAGE_ROOT so that the final "copy" to the
+// destination path is an atomic fs.rename (zero cost) rather than a full
+// re-read and re-write of potentially gigabytes of data.
+const _STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
+const TUS_UPLOAD_DIR = path.join(_STORAGE_ROOT, '.tus-tmp')
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_MAX_UPLOAD_SIZE_GB = 1
@@ -296,17 +300,8 @@ async function handleVideoUploadFinish(
 
   await validateVideoFile(tusFilePath, upload.metadata?.filename as string)
 
-  const { uploadFile, initStorage } = await import('@/lib/storage')
-  await initStorage()
-
-  const fileStream = (tusServer.datastore as any).read(upload.id)
-
-  await uploadFile(
-    video.originalStoragePath,
-    fileStream,
-    fileSize,
-    upload.metadata?.filetype as string || 'video/mp4'
-  )
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, video.originalStoragePath, fileSize)
 
   // Update video status to QUEUED — upload is complete and the job is waiting in the worker queue.
   // The worker will advance this to PROCESSING when it actually begins work.
@@ -327,8 +322,6 @@ async function handleVideoUploadFinish(
   })
 
   console.log(`[UPLOAD] Video ${videoId} queued for worker processing`)
-
-  await cleanupTUSFile(tusFilePath)
 
   return {}
 }
@@ -353,19 +346,11 @@ async function handleAssetUploadFinish(
 
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
-  const { uploadFile, initStorage } = await import('@/lib/storage')
-  await initStorage()
-
-  const fileStream = (tusServer.datastore as any).read(upload.id)
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, asset.storagePath, fileSize)
 
   // Do not trust client-supplied MIME from upload metadata; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
-  await uploadFile(
-    asset.storagePath,
-    fileStream,
-    fileSize,
-    actualFileType
-  )
 
   await prisma.videoAsset.update({
     where: { id: assetId },
@@ -385,8 +370,6 @@ async function handleAssetUploadFinish(
   })
 
   console.log(`[UPLOAD] Asset uploaded and queued for processing: ${assetId}`)
-
-  await cleanupTUSFile(tusFilePath)
 
   return {}
 }
@@ -411,19 +394,11 @@ async function handleClientFileUploadFinish(
 
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
-  const { uploadFile, initStorage } = await import('@/lib/storage')
-  await initStorage()
-
-  const fileStream = (tusServer.datastore as any).read(upload.id)
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, clientFile.storagePath, fileSize)
 
   // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
-  await uploadFile(
-    clientFile.storagePath,
-    fileStream,
-    fileSize,
-    actualFileType
-  )
 
   await prisma.clientFile.update({
     where: { id: clientFileId },
@@ -443,7 +418,6 @@ async function handleClientFileUploadFinish(
 
   console.log(`[UPLOAD] Client file uploaded and queued for processing: ${clientFileId}`)
 
-  await cleanupTUSFile(tusFilePath)
   return {}
 }
 
@@ -467,19 +441,11 @@ async function handleProjectFileUploadFinish(
 
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
-  const { uploadFile, initStorage } = await import('@/lib/storage')
-  await initStorage()
-
-  const fileStream = (tusServer.datastore as any).read(upload.id)
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, projectFile.storagePath, fileSize)
 
   // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
-  await uploadFile(
-    projectFile.storagePath,
-    fileStream,
-    fileSize,
-    actualFileType
-  )
 
   await prisma.projectFile.update({
     where: { id: projectFileId },
@@ -499,7 +465,6 @@ async function handleProjectFileUploadFinish(
 
   console.log(`[UPLOAD] Project file uploaded and queued for processing: ${projectFileId}`)
 
-  await cleanupTUSFile(tusFilePath)
   return {}
 }
 
@@ -523,13 +488,10 @@ async function handleProjectEmailUploadFinish(
 
   await validateEmlFile(tusFilePath, upload.metadata?.filename as string)
 
-  const { uploadFile, initStorage } = await import('@/lib/storage')
-  await initStorage()
-
-  const fileStream = (tusServer.datastore as any).read(upload.id)
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, email.rawStoragePath, fileSize)
 
   const actualFileType = 'message/rfc822'
-  await uploadFile(email.rawStoragePath, fileStream, fileSize, actualFileType)
 
   await prisma.projectEmail.update({
     where: { id: projectEmailId },
@@ -551,7 +513,6 @@ async function handleProjectEmailUploadFinish(
 
   console.log(`[UPLOAD] Project email uploaded and queued for processing: ${projectEmailId}`)
 
-  await cleanupTUSFile(tusFilePath)
   return {}
 }
 
@@ -576,13 +537,10 @@ async function handleAlbumPhotoUploadFinish(
 
   await validateAlbumPhotoFile(tusFilePath, upload.metadata?.filename as string)
 
-  const { uploadFile, initStorage } = await import('@/lib/storage')
-  await initStorage()
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, photo.storagePath, fileSize)
 
-  const fileStream = (tusServer.datastore as any).read(upload.id)
   const actualFileType = 'image/jpeg'
-
-  await uploadFile(photo.storagePath, fileStream, fileSize, actualFileType)
 
   const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
 
@@ -603,6 +561,8 @@ async function handleAlbumPhotoUploadFinish(
     where: { id: photo.albumId },
     data: { status: 'PROCESSING' },
   }).catch(() => {})
+
+  await cleanupTUSFile(tusFilePath).catch(() => {}) // no-op if already moved; cleans up any orphaned sidecar
 
   console.log(`[UPLOAD] Album photo uploaded and marked READY: ${photoId}`)
 

@@ -409,18 +409,27 @@ export default function VideoUpload({
   }
 
   async function handleCancel() {
+    const currentVideoId = videoIdRef.current
+
     if (uploadRef.current) {
       uploadRef.current.abort(true) // true = permanent abort
       uploadRef.current = null
     }
 
     // Delete the video record from database if it was created
-    if (videoIdRef.current) {
+    if (currentVideoId) {
       try {
-        await apiDelete(`/api/videos/${videoIdRef.current}`)
-        videoIdRef.current = null
-        router.refresh()
-      } catch {}
+        await apiDelete(`/api/videos/${currentVideoId}`)
+      } catch {
+        // Upload-only users may not be allowed to hard-delete videos; fallback
+        // to marking the incomplete upload as failed.
+        try {
+          await apiPost(`/api/videos/${currentVideoId}/cancel-upload`, {})
+        } catch {}
+      }
+
+      videoIdRef.current = null
+      router.refresh()
     }
 
     setUploading(false)
@@ -580,7 +589,7 @@ export default function VideoUpload({
         <div className="space-y-3">
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">
-              {paused ? 'Paused' : 'Uploading...'}
+              {paused ? 'Paused' : uploadSpeed > 0 ? `Uploading... • ${uploadSpeed} MB/s` : 'Uploading...'}
             </span>
             <span className="font-medium">{progress}%</span>
           </div>
@@ -595,14 +604,6 @@ export default function VideoUpload({
               }}
             />
           </div>
-          {uploadSpeed > 0 && (
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Speed: {uploadSpeed} MB/s</span>
-              <span>
-                {progress < 100 && !paused && `Estimated: ${Math.ceil((file!.size / (1024 * 1024)) / uploadSpeed - (file!.size * progress / 100 / (1024 * 1024)) / uploadSpeed)} seconds`}
-              </span>
-            </div>
-          )}
           {/* Pause/Resume and Cancel buttons */}
           <div className="flex gap-2">
             <Button

@@ -160,8 +160,10 @@ export default function AdminVideoManager({
         const latestVideo = groupVideos.sort((a, b) => b.version - a.version)[0]
         const approvedCount = groupVideos.filter(v => v.approved).length
         const hasApprovedVideos = approvedCount > 0
+        const hasUploading = groupVideos.some((v) => v?.status === 'UPLOADING')
         const hasProcessing = groupVideos.some((v) => v?.status === 'PROCESSING')
         const hasQueued = groupVideos.some((v) => v?.status === 'QUEUED')
+        const hasFailed = groupVideos.some((v) => v?.status === 'ERROR')
 
         return (
           <Card key={groupName} className="overflow-hidden">
@@ -223,6 +225,12 @@ export default function AdminVideoManager({
                 </div>
                 {editingGroupName !== groupName && (
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {hasUploading && (
+                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 border border-border bg-secondary text-foreground">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground/80" />
+                        UPLOADING
+                      </span>
+                    )}
                     {hasQueued && (
                       <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-warning-visible text-warning border-2 border-warning-visible">
                         QUEUED
@@ -232,6 +240,11 @@ export default function AdminVideoManager({
                       <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-primary-visible text-primary border-2 border-primary-visible">
                         <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
                         PROCESSING
+                      </span>
+                    )}
+                    {hasFailed && (
+                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
+                        FAILED
                       </span>
                     )}
                     {isExpanded ? (
@@ -244,8 +257,8 @@ export default function AdminVideoManager({
               </div>
             </CardHeader>
 
-            {isExpanded && (
-              <CardContent className="border-t border-border pt-0 space-y-4">
+            {(isExpanded || showNewVersionForGroup === groupName) && (
+              <CardContent className={cn("border-t border-border pt-0 space-y-4", !isExpanded && "hidden")}>
                 {/* Upload new version for this video */}
                 {projectStatus !== 'APPROVED' && (
                   <div className="mt-4">

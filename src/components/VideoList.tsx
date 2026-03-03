@@ -369,21 +369,23 @@ export default function VideoList({
             {/* Action icons - right side on all screen sizes */}
             {editingId !== video.id && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {/* Only show status badge for QUEUED, PROCESSING, and ERROR states */}
-                {(video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') && (
+                {/* Show status badge for non-ready states */}
+                {(video.status === 'UPLOADING' || video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') && (
                   <span
                     className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 ${
-                      video.status === 'QUEUED'
+                      video.status === 'UPLOADING'
+                        ? 'bg-secondary text-foreground border border-border'
+                        : video.status === 'QUEUED'
                         ? 'bg-warning-visible text-warning border-2 border-warning-visible'
                         : video.status === 'PROCESSING'
                         ? 'bg-primary-visible text-primary border-2 border-primary-visible'
                         : 'bg-destructive-visible text-destructive border-2 border-destructive-visible'
                     }`}
                   >
-                    {video.status === 'PROCESSING' && (
+                    {(video.status === 'UPLOADING' || video.status === 'PROCESSING') && (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
                     )}
-                    {video.status}
+                    {video.status === 'ERROR' ? 'FAILED' : video.status}
                   </span>
                 )}
                   {isAdmin && effectiveCanApprove && video.status === 'READY' && (
@@ -515,19 +517,29 @@ export default function VideoList({
 
           {video.status === 'PROCESSING' && (
             <div className="space-y-1">
-              <div className="flex justify-between text-xs">
-                <span>Processing previews...</span>
-              </div>
-              <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
-                <div
-                  className="h-full w-full bg-primary animate-striped"
-                  style={{
-                    backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.2) 10px, rgba(255,255,255,0.2) 20px)',
-                    backgroundSize: '28px 28px',
-                    animation: 'move-stripes 1s linear infinite'
-                  }}
-                />
-              </div>
+              {(() => {
+                const rawProg = (video as any).processingProgress ?? 0
+                const pct = Math.min(99, Math.round(rawProg < 1 ? rawProg * 100 : rawProg))
+                return (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span>Processing previews...</span>
+                      {pct > 0 && <span className="font-medium">{pct}%</span>}
+                    </div>
+                    <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
+                      <div
+                        className="h-full bg-primary transition-all"
+                        style={{
+                          width: `${Math.max(1, pct)}%`,
+                          backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.2) 10px, rgba(255,255,255,0.2) 20px)',
+                          backgroundSize: '28px 28px',
+                          animation: 'move-stripes 1s linear infinite'
+                        }}
+                      />
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           )}
 
