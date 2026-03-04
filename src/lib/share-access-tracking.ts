@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import { getSecuritySettings } from './video-access'
 import { sendPushNotification } from './push-notifications'
 import { getClientIpAddress } from './utils'
+import { isLikelyAdminIp } from './admin-ip-match'
 
 export async function trackSharePageAccess(params: {
   projectId: string
@@ -27,6 +28,14 @@ export async function trackSharePageAccess(params: {
   // Get IP address using the centralised helper (respects TRUSTED_PROXIES, CF headers, etc.)
   const ipAddress = getClientIpAddress(request)
   const userAgent = request.headers.get('user-agent') || undefined
+
+  // Best-effort: skip tracking when the visitor's IP matches a known internal user.
+  // This catches admins accessing the share page without an admin JWT in the request
+  // (e.g. opening it in a separate tab or clicking "Continue as Guest").
+  const likelyAdmin = await isLikelyAdminIp(ipAddress).catch(() => false)
+  if (likelyAdmin) {
+    return
+  }
 
   try {
     // Get project name for notification

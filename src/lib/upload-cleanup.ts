@@ -2,7 +2,8 @@ import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
 
-const TUS_UPLOAD_DIR = '/tmp/vitransfer-tus-uploads'
+const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
+const TUS_UPLOAD_DIR = path.join(STORAGE_ROOT, '.tus-tmp')
 const MAX_AGE_HOURS = 24 // Remove files older than 24 hours
 
 /**

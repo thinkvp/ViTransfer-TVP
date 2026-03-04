@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-04
+
+### Added
+- **Mobile hamburger navigation menu** — the admin header nav links are now hidden behind a `Menu`-icon `DropdownMenu` on screens narrower than the `md` breakpoint; the full inline nav is still shown on `md` and above; this prevents the nav from collapsing into an awkwardly scrollable row on phones and tablets
+
+### Changed
+- **"Project Ready for Review" email video list improvements** — videos with multiple versions are now consolidated onto a single line (e.g. `Day 1 - Session 3 v1 v2`) instead of one line per version; videos and albums are listed in alphabetical order; any video group that has at least one approved version now shows a green `Approved` pill next to the title; the defunct duplicate "Ready to view" card (dead-code variable) has been removed from the template
+- **Running Jobs completed jobs linger for 10 minutes** — recently completed uploads in the Running Jobs dropdown now auto-dismiss after 10 minutes instead of 8 seconds, giving users a longer window to review finished items
+- **Running Jobs poll rate increases when dropdown is open** — the `GET /api/running-jobs` endpoint is now polled every 5 seconds while the Running Jobs dropdown is open, and every 10 seconds when it is closed, providing more responsive progress updates during active use without increasing background traffic
+- **Header dropdown buttons highlight while open** — the `RunningJobsBell`, `NotificationsBell`, and mobile nav trigger buttons now apply `data-[state=open]` accent-colour classes so the button visually stays "pressed" while its dropdown is open; Radix `onCloseAutoFocus` is also suppressed on both dropdowns so focus is blurred rather than retained (which previously left a visible focus ring on the button after closing)
+- **Running Jobs rows navigate to the project page** — clicking anywhere on an upload or processing job row (other than the pause/resume/cancel/dismiss icon buttons) closes the dropdown and navigates to `/admin/projects/[projectId]`; the action buttons stop event propagation so they are unaffected
+
+### Fixed
+- **Admin IP suppression applied to guest share access tracking** — `trackSharePageAccess` now calls `isLikelyAdminIp` (same helper used by the sales doc view page) before writing a `SharePageAccess` record or firing the push notification; previously, an admin clicking "Continue as Guest" on a share page would trigger a "A client accessed the share page" bell notification and analytics record because the client-side guest POST request carries no admin JWT header — `getCurrentUserFromRequest` returned null, so the existing JWT guard was ineffective; the IP-based fallback now correctly suppresses tracking for internal users regardless of how they entered the share page
+- **Stale TUS temp-directory path in upload cleanup script** — `upload-cleanup.ts` still referenced the old `/tmp/vitransfer-tus-uploads` path after the v1.0.8 change that moved TUS chunk files to `STORAGE_ROOT/.tus-tmp`; the script now derives the same path from `STORAGE_ROOT`, so stale partial-upload files are correctly purged during scheduled cleanup
+
 ## [1.0.9] - 2026-03-04
 
 ### Added

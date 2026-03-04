@@ -84,6 +84,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             name: true,
             versionLabel: true,
             status: true,
+            approved: true,
           },
           orderBy: { createdAt: 'desc' }
         },
@@ -642,7 +643,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             clientName: recipient.name || 'Client',
             projectTitle: project.title,
             shareUrl,
-            readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel })),
+            readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel, approved: v.approved })),
             readyAlbums,
             notes: trimmedNotes ? trimmedNotes : null,
             isPasswordProtected,

@@ -130,8 +130,15 @@ async function main() {
 			projectTitle: 'Winter Campaign',
 			shareUrl: 'http://localhost:3000/share/demo',
 			readyVideos: [
-				{ name: 'Cut A', versionLabel: 'v3' },
-				{ name: 'Cut B', versionLabel: 'v1' },
+				{ name: 'Day 1 - Session 3', versionLabel: 'v1', approved: false },
+				{ name: 'Day 1 - Session 3', versionLabel: 'v2', approved: false },
+				{ name: 'Cut A', versionLabel: 'v3', approved: true },
+				{ name: 'Cut B', versionLabel: 'v1', approved: false },
+				{ name: 'Promo Reel', versionLabel: 'v2', approved: true },
+			],
+			readyAlbums: [
+				{ name: 'Behind the Scenes', photoCount: 24 },
+				{ name: 'Day 1 Photos', photoCount: 46 },
 			],
 			isPasswordProtected: false,
 			trackingToken: undefined,

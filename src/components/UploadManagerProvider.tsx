@@ -68,6 +68,8 @@ export type UploadManagerContextType = {
   resumeUpload: (id: string) => void
   /** Remove a finished (success / error) job from the list. */
   dismissUpload: (id: string) => void
+  /** Notify the provider when the Running Jobs dropdown opens/closes (adjusts poll rate). */
+  setDropdownOpen: (open: boolean) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -223,9 +225,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           )
         } catch {}
 
-        // Auto-remove successful jobs after 8 seconds.
+        // Auto-remove successful jobs after 10 minutes.
         const jobId = next.id
-        setTimeout(() => removeJob(jobId), 8000)
+        setTimeout(() => removeJob(jobId), 600_000)
 
         processNextRef.current()
       },
@@ -294,6 +296,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   // ------ poll server-side processing jobs ------
 
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+
   useEffect(() => {
     let active = true
 
@@ -310,12 +314,12 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     }
 
     poll()
-    const interval = setInterval(poll, 10_000)
+    const interval = setInterval(poll, dropdownOpen ? 5_000 : 10_000)
     return () => {
       active = false
       clearInterval(interval)
     }
-  }, [])
+  }, [dropdownOpen])
 
   // ------ public API ------
 
@@ -441,6 +445,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         pauseUpload,
         resumeUpload,
         dismissUpload,
+        setDropdownOpen,
       }}
     >
       {children}

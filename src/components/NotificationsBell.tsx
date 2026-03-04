@@ -120,6 +120,7 @@ export default function NotificationsBell() {
   const pollingRef = useRef<number | null>(null)
   const itemsRef = useRef<NotificationRow[]>([])
   const openRef = useRef(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   // Browser push subscription state
   const [pushSupported, setPushSupported] = useState(false)
@@ -323,17 +324,22 @@ export default function NotificationsBell() {
         if (value) {
           // Ensure we have fresh content when opening.
           fetchPage({ replace: true, markSeen: true })
+        } else {
+          // Radix returns focus to the trigger on close; blur it so we don't
+          // show a "highlight" only after closing.
+          window.setTimeout(() => triggerRef.current?.blur(), 0)
         }
       }}
     >
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           type="button"
           variant="outline"
           size="icon"
           aria-label="Notifications"
           title="Notifications"
-          className="relative p-2 w-9 sm:w-10"
+          className="relative p-2 w-9 sm:w-10 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:border-primary/50"
         >
           <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
           {unreadCount > 0 ? (
@@ -348,6 +354,7 @@ export default function NotificationsBell() {
         align="end"
         side="bottom"
         sideOffset={8}
+        onCloseAutoFocus={(e) => e.preventDefault()}
         className="!p-0 w-[92vw] sm:w-[420px] max-w-[92vw] h-[80dvh] max-h-[80dvh] overflow-hidden data-[state=open]:!animate-none data-[state=closed]:!animate-none"
       >
         <div className="flex h-full flex-col">

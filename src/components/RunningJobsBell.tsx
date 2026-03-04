@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Activity, CheckCircle2, Loader2, Pause, Play, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useUploadManager, type UploadJob, type ProcessingJob } from '@/components/UploadManagerProvider'
+import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -34,12 +35,15 @@ function formatEta(job: UploadJob): string | null {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function UploadJobRow({ job }: { job: UploadJob }) {
+function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projectId: string) => void }) {
   const { cancelUpload, pauseUpload, resumeUpload, dismissUpload } = useUploadManager()
   const eta = formatEta(job)
 
   return (
-    <div className="px-4 py-3 space-y-2">
+    <div
+      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      onClick={() => onNavigate(job.projectId)}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground truncate">{job.videoName}</div>
@@ -47,7 +51,7 @@ function UploadJobRow({ job }: { job: UploadJob }) {
             {job.fileName} · {formatSize(job.fileSize)}
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
           {job.status === 'uploading' && (
             <button
               type="button"
@@ -138,11 +142,14 @@ function UploadJobRow({ job }: { job: UploadJob }) {
   )
 }
 
-function ProcessingJobRow({ job }: { job: ProcessingJob }) {
+function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate: (projectId: string) => void }) {
   const progressPercent = Math.min(Math.round((job.processingProgress ?? 0) * 100), 100)
 
   return (
-    <div className="px-4 py-3 space-y-2">
+    <div
+      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      onClick={() => onNavigate(job.projectId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-foreground truncate">{job.videoName}</div>
         <div className="text-[11px] text-muted-foreground truncate">{job.projectName}</div>
@@ -183,8 +190,19 @@ function ProcessingJobRow({ job }: { job: ProcessingJob }) {
 // ---------------------------------------------------------------------------
 
 export default function RunningJobsBell() {
-  const { uploads, processingJobs, totalActiveCount } = useUploadManager()
+  const { uploads, processingJobs, totalActiveCount, setDropdownOpen } = useUploadManager()
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const router = useRouter()
+
+  function handleNavigate(projectId: string) {
+    setOpen(false)
+    router.push(`/admin/projects/${projectId}`)
+  }
+
+  useEffect(() => {
+    setDropdownOpen(open)
+  }, [open, setDropdownOpen])
 
   const activeUploads = uploads.filter(
     (u) => u.status === 'queued' || u.status === 'uploading' || u.status === 'paused',
@@ -193,15 +211,26 @@ export default function RunningJobsBell() {
   const hasAnything = activeUploads.length > 0 || finishedUploads.length > 0 || processingJobs.length > 0
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(value) => {
+        setOpen(value)
+        if (!value) {
+          // Radix returns focus to the trigger on close; blur it so we don't
+          // show a "highlight" only after closing.
+          window.setTimeout(() => triggerRef.current?.blur(), 0)
+        }
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           type="button"
           variant="outline"
           size="icon"
           aria-label="Running Jobs"
           title="Running Jobs"
-          className="relative p-2 w-9 sm:w-10"
+          className="relative p-2 w-9 sm:w-10 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:border-primary/50"
         >
           <Activity className="h-4 w-4 sm:h-5 sm:w-5" />
           {totalActiveCount > 0 ? (
@@ -216,6 +245,7 @@ export default function RunningJobsBell() {
         align="end"
         side="bottom"
         sideOffset={8}
+        onCloseAutoFocus={(e) => e.preventDefault()}
         className="!p-0 w-[92vw] sm:w-[400px] max-w-[92vw] max-h-[70dvh] overflow-hidden data-[state=open]:!animate-none data-[state=closed]:!animate-none"
       >
         <div className="flex flex-col max-h-[70dvh]">
@@ -251,7 +281,7 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {activeUploads.map((job) => (
-                        <UploadJobRow key={job.id} job={job} />
+                        <UploadJobRow key={job.id} job={job} onNavigate={handleNavigate} />
                       ))}
                     </div>
                   </div>
@@ -265,7 +295,7 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {processingJobs.map((job) => (
-                        <ProcessingJobRow key={job.id} job={job} />
+                        <ProcessingJobRow key={job.id} job={job} onNavigate={handleNavigate} />
                       ))}
                     </div>
                   </div>
@@ -279,7 +309,7 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {finishedUploads.map((job) => (
-                        <UploadJobRow key={job.id} job={job} />
+                        <UploadJobRow key={job.id} job={job} onNavigate={handleNavigate} />
                       ))}
                     </div>
                   </div>

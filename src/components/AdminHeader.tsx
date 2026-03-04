@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -11,6 +11,8 @@ import RunningJobsBell from '@/components/RunningJobsBell'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 
 export default function AdminHeader() {
   const { user, logout } = useAuth()
@@ -58,7 +60,47 @@ export default function AdminHeader() {
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-6 flex-1 min-w-0">
-            <nav className="flex gap-1 sm:gap-2 overflow-x-auto">
+            {/* Mobile: hamburger menu for main nav */}
+            <div className="md:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Main menu"
+                    title="Main menu"
+                    className="p-2 w-9 sm:w-10 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:border-primary/50"
+                  >
+                    <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="bottom" sideOffset={8} onCloseAutoFocus={(e) => e.preventDefault()}>
+                  {navLinks.map((link) => {
+                    const Icon = link.icon
+                    const isActive = pathname === link.href || (link.href !== '/admin/projects' && pathname?.startsWith(link.href))
+                    return (
+                      <DropdownMenuItem
+                        key={link.href}
+                        asChild
+                        className={cn(
+                          'cursor-pointer gap-2',
+                          isActive && 'bg-accent text-accent-foreground'
+                        )}
+                      >
+                        <Link href={link.href} className="flex items-center gap-2">
+                          {Icon && <Icon className="w-4 h-4" />}
+                          <span>{link.label}</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {/* Desktop: inline nav */}
+            <nav className="hidden md:flex gap-1 sm:gap-2 overflow-x-auto">
               {navLinks.map((link) => {
                 const Icon = link.icon
                 const isActive = pathname === link.href || (link.href !== '/admin/projects' && pathname?.startsWith(link.href))

@@ -1728,7 +1728,7 @@ export async function renderProjectGeneralNotificationEmail({
   clientName: string
   projectTitle: string
   shareUrl: string
-  readyVideos?: Array<{ name: string; versionLabel: string }>
+  readyVideos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
   readyAlbums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
@@ -1745,12 +1745,24 @@ export async function renderProjectGeneralNotificationEmail({
       </div>`
     : ''
 
-  const videosList = readyVideos.length > 0
-    ? `<div style="${emailCardStyle({ paddingPx: 14, borderRadiusPx: 10, marginBottomPx: 14 })}">
-        <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-bottom:6px;">Ready to view</div>
-        ${readyVideos.map(v => `<div style="font-size:15px; color:${EMAIL_THEME.text}; padding:4px 0;">${escapeHtml(v.name)} ${emailVersionPillHtml(v.versionLabel, resolved.accentColor, resolved.accentTextMode)}</div>`).join('')}
-      </div>`
-    : ''
+  // Group videos by name, combining all version labels onto one line, sorted A→Z
+  const videoGroupMap = new Map<string, { versionLabels: string[]; anyApproved: boolean }>()
+  for (const v of readyVideos) {
+    const g = videoGroupMap.get(v.name)
+    if (g) {
+      g.versionLabels.push(v.versionLabel)
+      if (v.approved) g.anyApproved = true
+    } else {
+      videoGroupMap.set(v.name, { versionLabels: [v.versionLabel], anyApproved: !!v.approved })
+    }
+  }
+  const videoGroups = Array.from(videoGroupMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(([name, { versionLabels, anyApproved }]) => ({ name, versionLabels, anyApproved }))
+
+  const sortedAlbums = [...readyAlbums].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
+  const approvedPillHtml = `<span style="display:inline-block;background:#dcfce7;color:#166534;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;vertical-align:middle;">Approved</span>`
 
   const headerGradient = resolved.emailHeaderColor
   const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
@@ -1777,21 +1789,21 @@ export async function renderProjectGeneralNotificationEmail({
         Your project is ready for review. Click below to view and leave feedback.
       </p>
       ${renderNotesCard(notes, { cardStyle: notesCardStyle, cardTitleStyle: notesCardTitleStyle })}
-      ${readyVideos.length > 0 || readyAlbums.length > 0 ? `
+      ${videoGroups.length > 0 || sortedAlbums.length > 0 ? `
         <div style="${emailCardStyle({ paddingPx: 20, borderRadiusPx: 8, marginBottomPx: 24 })}">
           <div style="${emailCardTitleStyle()}">Ready to View</div>
-          ${readyVideos.length > 0 ? `
+          ${videoGroups.length > 0 ? `
             <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
-            ${readyVideos.map(v => `
+            ${videoGroups.map(g => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
-                &#8226; ${escapeHtml(v.name)} ${emailVersionPillHtml(v.versionLabel, resolved.accentColor, resolved.accentTextMode)}
+                &#8226; ${escapeHtml(g.name)}${g.versionLabels.map(label => ` ${emailVersionPillHtml(label, resolved.accentColor, resolved.accentTextMode)}`).join('')}${g.anyApproved ? ` ${approvedPillHtml}` : ''}
               </div>
             `).join('')}
           ` : ''}
 
-          ${readyAlbums.length > 0 ? `
-            <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:${readyVideos.length > 0 ? 14 : 2}px; margin-bottom:8px;">Albums</div>
-            ${readyAlbums.map(a => `
+          ${sortedAlbums.length > 0 ? `
+            <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:${videoGroups.length > 0 ? 14 : 2}px; margin-bottom:8px;">Albums</div>
+            ${sortedAlbums.map(a => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
                 &#8226; ${escapeHtml(a.name)} <span style="color:${EMAIL_THEME.textMuted};">(${Number(a.photoCount) || 0} photos)</span>
               </div>
@@ -1828,7 +1840,7 @@ export async function sendProjectGeneralNotificationEmail({
   clientName: string
   projectTitle: string
   shareUrl: string
-  readyVideos?: Array<{ name: string; versionLabel: string }>
+  readyVideos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
   readyAlbums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
