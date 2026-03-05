@@ -5,6 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-03-05
+
+### Fixed
+- **Large video processing no longer crashes the worker** — transcoding a multi-GB video (e.g. 6+ GB / 90+ minutes) caused the FFmpeg `onProgress` callback to fire hundreds of concurrent `prisma.video.update()` calls, exhausting the Prisma connection pool (limit 17, timeout 10 s) with error `P2024`; the unhandled error crashed the Node.js process, the container restarted, BullMQ detected a stalled job and re-queued it, and the cycle repeated indefinitely — the logs show the same video picked up 6+ times with interleaved output before finally failing with "job stalled more than allowable limit"; fixed by (1) throttling progress DB writes to at most once every 3 seconds with an in-flight guard so only one query is active at a time, (2) catching and logging any progress-update error instead of letting it bubble up as an unhandled rejection, and (3) configuring the BullMQ video worker with `lockDuration: 600 000 ms` (10 min, auto-renewed every 5 min), `stalledInterval: 300 000 ms`, and `maxStalledCount: 2` so that long-running transcodes are not prematurely declared stalled
+
+## [1.1.1] - 2026-03-05
+
+### Fixed
+- **Notification bell hides internal fields and uses human-readable labels** — the bell dropdown no longer shows raw database field names (`viewUrl`, `salesQuoteId`, `clientName`, etc.) in notification detail lines; `viewUrl`, `salesQuoteId`, and `salesInvoiceId` are now hidden (navigation is handled by clicking the notification row), and remaining fields are mapped to clean labels (`clientName` → "Client", `quoteNumber` → "Quote", `invoiceNumber` → "Invoice", `projectTitle` → "Project"); any unknown camelCase or underscore-separated field name is automatically converted to Title Case words as a fallback
+- **Unaccepting a quote now shows the correct "Opened" status immediately** — the `PATCH` response from `patchSalesQuote` does not include `hasOpenedEmail` (a derived field computed from email open-tracking records); previously, clicking Unaccept on the Quotes page would momentarily display "Sent" because the optimistic update had no email-open context, reverting to "Opened" only after a full page refresh; the `hasOpenedEmail` flag from the original quote row is now preserved when applying the unaccept update locally
+
 ## [1.1.0] - 2026-03-04
 
 ### Added

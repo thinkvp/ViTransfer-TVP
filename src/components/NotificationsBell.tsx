@@ -44,7 +44,28 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
   function isHiddenDetailKey(key: string): boolean {
     if (key.startsWith('__')) return true
     const normalizedKey = key.toLowerCase().replace(/[_\-\s]/g, '')
-    return normalizedKey === 'salesdocid' || normalizedKey === 'salesdoctype'
+    return (
+      normalizedKey === 'salesdocid' ||
+      normalizedKey === 'salesdoctype' ||
+      normalizedKey === 'salesquoteid' ||
+      normalizedKey === 'salesinvoiceid' ||
+      normalizedKey === 'viewurl'
+    )
+  }
+
+  // Map raw field names to human-readable labels.
+  function humanLabel(key: string): string {
+    const normalizedKey = key.toLowerCase().replace(/[_\-\s]/g, '')
+    if (normalizedKey === 'clientname') return 'Client'
+    if (normalizedKey === 'quotenumber') return 'Quote'
+    if (normalizedKey === 'invoicenumber') return 'Invoice'
+    if (normalizedKey === 'projecttitle' || normalizedKey === 'projectname') return 'Project'
+    if (normalizedKey === 'quoteamount' || normalizedKey === 'invoiceamount' || normalizedKey === 'amount') return 'Amount'
+    // Fall back to splitting camelCase / underscores into Title Case words.
+    return key
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_\-]+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
   }
 
   const entries: Array<[string, any]> = details && typeof details === 'object'
@@ -54,15 +75,17 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
   const lines: Array<[string, string]> = entries
     .filter(([key]) => !isHiddenDetailKey(key))
     .map(([key, value]): [string, string] => {
-      if (value === null || value === undefined) return [key, '']
-      if (typeof value === 'string') return [key, value]
+      const label = humanLabel(key)
+      if (value === null || value === undefined) return [label, '']
+      if (typeof value === 'string') return [label, value]
       try {
-        return [key, JSON.stringify(value)]
+        return [label, JSON.stringify(value)]
       } catch {
-        return [key, String(value)]
+        return [label, String(value)]
       }
     })
     .filter(([key, value]) => {
+      // key is now a human-readable label; use lowercase-no-spaces for comparisons.
       const normalizedKey = key.toLowerCase().replace(/[_\-\s]/g, '')
       const valueText = typeof value === 'string' ? value : String(value)
 

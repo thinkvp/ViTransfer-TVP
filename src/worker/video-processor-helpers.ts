@@ -393,6 +393,11 @@ export async function processPreview(
 
   const transcodeStart = Date.now()
 
+  // Throttle progress DB writes to avoid exhausting the Prisma connection pool.
+  // FFmpeg emits progress many times per second; we only persist every 3 seconds.
+  let lastProgressUpdate = 0
+  let progressWriteInFlight = false
+
   await transcodeVideo({
     inputPath,
     outputPath: tempPreviewPath,
@@ -402,10 +407,25 @@ export async function processPreview(
     onProgress: async (progress) => {
       debugLog(`Transcode progress: ${(progress * 100).toFixed(1)}%`)
 
-      await prisma.video.update({
-        where: { id: videoId },
-        data: { processingProgress: progress * PROGRESS_WEIGHTS.transcode },
-      })
+      const now = Date.now()
+      // Skip if another write is still in flight or if less than 3 s since last write
+      // Always allow the final progress update (progress >= 1)
+      if (progressWriteInFlight || (now - lastProgressUpdate < 3000 && progress < 1)) {
+        return
+      }
+
+      progressWriteInFlight = true
+      lastProgressUpdate = now
+      try {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: { processingProgress: progress * PROGRESS_WEIGHTS.transcode },
+        })
+      } catch (err) {
+        console.error(`[WORKER] Failed to update progress for ${videoId}:`, err)
+      } finally {
+        progressWriteInFlight = false
+      }
     },
   })
 

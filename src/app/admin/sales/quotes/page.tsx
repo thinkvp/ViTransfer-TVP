@@ -20,7 +20,7 @@ import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/l
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getCurrencySymbol } from '@/lib/sales/currency'
-import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Loader2, Send, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
@@ -39,6 +39,8 @@ export default function SalesQuotesPage() {
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [sendTarget, setSendTarget] = useState<SalesQuoteWithVersion | null>(null)
+  const [acceptBusyId, setAcceptBusyId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -253,6 +255,9 @@ export default function SalesQuotesPage() {
   }
 
   const onAccept = async (q: SalesQuoteWithVersion) => {
+    if (acceptBusyId === q.id) return
+    setActionError(null)
+    setAcceptBusyId(q.id)
     try {
       const next =
         q.status === 'ACCEPTED'
@@ -267,16 +272,28 @@ export default function SalesQuotesPage() {
               version: q.version,
             })
 
-      setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
-      setSendTarget((prev) => (prev?.id === next.id ? next : prev))
+      // The PATCH response doesn't include hasOpenedEmail (a derived field from email
+      // tracking). When unaccepting a quote that was previously SENT+opened, we must
+      // preserve hasOpenedEmail so the effective status shows 'Opened' immediately
+      // instead of reverting to 'Sent' until the next full data refresh.
+      const merged: SalesQuoteWithVersion = { ...next, hasOpenedEmail: q.hasOpenedEmail }
+
+      setQuotes((prev) => prev.map((x) => (x.id === merged.id ? merged : x)))
+      setSendTarget((prev) => (prev?.id === merged.id ? merged : prev))
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update quote'
+      console.error('Failed to accept/unaccept quote:', e)
       if (msg === 'Conflict') {
-        alert('This quote was updated in another session. Reloading.')
+        setActionError('This quote was updated in another session. Reloading…')
         setTick((v) => v + 1)
         return
       }
+      setActionError(msg)
+      // Keep the legacy alert for now so errors are still visible even if the
+      // table is scrolled away from the banner.
       alert(msg)
+    } finally {
+      setAcceptBusyId((current) => (current === q.id ? null : current))
     }
   }
 
@@ -403,6 +420,9 @@ export default function SalesQuotesPage() {
               </DropdownMenu>
             </div>
           </div>
+          {actionError ? (
+            <div className="mt-3 text-sm text-red-600">{actionError}</div>
+          ) : null}
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -536,12 +556,24 @@ export default function SalesQuotesPage() {
                                 type="button"
                                 size="icon"
                                 variant="outline"
-                                onClick={() => onAccept(row.quote)}
-                                disabled={row.effectiveStatus === 'CLOSED'}
-                                title={row.quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept'}
-                                aria-label={row.quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept'}
+                                onClick={() => void onAccept(row.quote)}
+                                disabled={row.effectiveStatus === 'CLOSED' || acceptBusyId === row.quote.id}
+                                title={
+                                  row.effectiveStatus === 'CLOSED'
+                                    ? 'Quote is closed'
+                                    : (acceptBusyId === row.quote.id
+                                      ? 'Updating…'
+                                      : (row.quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept'))
+                                }
+                                aria-label={
+                                  acceptBusyId === row.quote.id
+                                    ? 'Updating quote status'
+                                    : (row.quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept')
+                                }
                               >
-                                <BadgeCheck className="h-4 w-4" />
+                                {acceptBusyId === row.quote.id
+                                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                                  : <BadgeCheck className="h-4 w-4" />}
                               </Button>
 
                               <Button

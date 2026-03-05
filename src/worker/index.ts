@@ -102,9 +102,21 @@ async function main() {
     })
   }
 
+  // Large videos (multi-GB, 60+ min) can transcode for a very long time.
+  // Use a generous lockDuration so BullMQ doesn't prematurely declare the job
+  // stalled while FFmpeg is still running.  Auto-renewal fires every
+  // lockDuration / 2 (= 5 min).  stalledInterval controls how often *other*
+  // workers check for stalled jobs; maxStalledCount limits restart loops.
+  const LOCK_DURATION_MS = 10 * 60 * 1000      // 10 minutes
+  const STALLED_INTERVAL_MS = 5 * 60 * 1000     // 5 minutes
+  const MAX_STALLED_COUNT = 2
+
   const worker = new Worker<VideoProcessingJob>('video-processing', processVideo, {
     connection: getRedisForQueue(),
     concurrency,
+    lockDuration: LOCK_DURATION_MS,
+    stalledInterval: STALLED_INTERVAL_MS,
+    maxStalledCount: MAX_STALLED_COUNT,
     limiter: {
       max: concurrency * 10,
       duration: 60000,
@@ -115,6 +127,9 @@ async function main() {
     console.log('[WORKER DEBUG] BullMQ worker created with config:', {
       queue: 'video-processing',
       concurrency,
+      lockDuration: LOCK_DURATION_MS,
+      stalledInterval: STALLED_INTERVAL_MS,
+      maxStalledCount: MAX_STALLED_COUNT,
       limiter: {
         max: concurrency * 10,
         duration: 60000
