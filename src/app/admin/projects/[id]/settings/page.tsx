@@ -402,14 +402,14 @@ export default function ProjectSettingsPage() {
         clientNotificationDay: clientNotificationSchedule === 'WEEKLY' ? clientNotificationDay : null,
       }
 
-      // Detect changes to processing settings
+      // Detect changes to processing settings that require a full reprocess
+      // (timeline preview toggle is handled separately — no reprocess needed)
       const currentWatermarkText = useCustomWatermark ? watermarkText : null
       const processingSettingsChanged =
         title !== originalSettings.title ||
         previewResolution !== originalSettings.previewResolution ||
         watermarkEnabled !== originalSettings.watermarkEnabled ||
-        currentWatermarkText !== originalSettings.watermarkText ||
-        timelinePreviewsEnabled !== originalSettings.timelinePreviewsEnabled
+        currentWatermarkText !== originalSettings.watermarkText
 
       // If processing settings changed, show modal
       if (processingSettingsChanged) {
@@ -419,7 +419,7 @@ export default function ProjectSettingsPage() {
         return
       }
 
-      // Otherwise save normally
+      // Otherwise save normally (timeline preview change handled inside saveSettings)
       await saveSettings(updates)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings')
@@ -444,6 +444,21 @@ export default function ProjectSettingsPage() {
       // Reprocess videos if requested
       if (shouldReprocess) {
         await reprocessVideos()
+      }
+
+      // Handle timeline previews toggle independently of full reprocess.
+      // Turning OFF  → delete existing sprites from disk + clear DB fields.
+      // Turning ON   → queue lightweight timeline-only generation jobs.
+      const timelineToggleChanged =
+        updates.timelinePreviewsEnabled !== originalSettings.timelinePreviewsEnabled
+      if (timelineToggleChanged) {
+        try {
+          const action = updates.timelinePreviewsEnabled ? 'generate' : 'remove'
+          await apiPost(`/api/projects/${projectId}/timeline-previews`, { action })
+        } catch (err) {
+          console.error('Error managing timeline previews:', err)
+          // Non-fatal — settings were saved, previews can be retried
+        }
       }
 
       setSuccess(true)

@@ -5,6 +5,14 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-03-05
+
+### Changed
+- **Timeline preview toggle no longer triggers a full video reprocess** — the "Enable Timeline Previews" switch in project settings previously detected as a processing-settings change and showed the same ReprocessModal as watermark or resolution changes, offering "Save Without Reprocessing" or "Save & Reprocess"; the toggle is now handled entirely outside that flow: turning it **OFF** immediately deletes sprite directories from storage and clears the three timeline DB fields (`timelinePreviewsReady`, `timelinePreviewVttPath`, `timelinePreviewSpritesPath`) for every video in the project without any modal; turning it **ON** queues a lightweight timeline-only background job for each READY video that does not already have previews — the worker downloads the original source file, generates sprite sheets and the WebVTT index, updates the DB, and exits, leaving the video in READY status throughout so clients can keep watching uninterrupted; backed by a new `POST /api/projects/[id]/timeline-previews` endpoint (`action: 'remove' | 'generate'`) and a new `timelineOnly` code path in the video worker that skips all transcode and thumbnail stages
+
+### Fixed
+- **`TypeError: Invalid state: Controller is already closed` errors in streaming routes** — 11 API endpoints that wrap a Node.js `ReadStream` in a Web `ReadableStream` were vulnerable to a race condition where the runtime called `controller.enqueue()` / `controller.error()` / `controller.close()` after the controller had already been closed; two patterns triggered this: (1) pull-based routes where the runtime issues one final `pull()` after the `end` event has already called `close()`, and (2) push-based routes where the client disconnects, `cancel()` destroys the underlying Node.js stream, the stream emits a trailing `error` event, and the `error` handler calls `controller.error()` on an already-closed controller; all 11 affected routes are now guarded by a `closed` boolean that is set to `true` on the first `close()` / `error()` call and checked before every subsequent controller interaction; affected routes: `api/content/[token]`, `api/content/photo/[token]`, `api/videos/[id]/download`, `api/videos/[id]/assets/[assetId]`, `api/projects/[id]/emails/[emailId]/attachments/[attachmentId]`, `api/projects/[id]/files/[fileId]`, `api/comments/[id]/files/[fileId]`, `api/clients/[id]/files/[fileId]`, `api/branding/favicon`, `api/branding/logo`, `api/branding/dark-logo`
+
 ## [1.1.2] - 2026-03-05
 
 ### Added

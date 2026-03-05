@@ -37,6 +37,7 @@ function isValidMimeType(value: unknown): value is string {
  */
 function createWebReadableStream(fileStream: ReadStream): ReadableStream {
   let ended = false
+  let closed = false
 
   return new ReadableStream({
     start() {
@@ -46,7 +47,12 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
     },
 
     pull(controller) {
+      // Guard: the runtime may call pull() one extra time after the controller
+      // was already closed by a previous onEnd/onError callback, which would
+      // throw ERR_INVALID_STATE ("Controller is already closed").
+      if (closed) return
       if (ended) {
+        closed = true
         controller.close()
         return
       }
@@ -55,18 +61,26 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
         const onData = (chunk: Buffer | string) => {
           cleanup()
           fileStream.pause()
-          controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+          if (!closed) {
+            controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+          }
           resolve()
         }
         const onEnd = () => {
           cleanup()
           ended = true
-          controller.close()
+          if (!closed) {
+            closed = true
+            controller.close()
+          }
           resolve()
         }
         const onError = (err: Error) => {
           cleanup()
-          controller.error(err)
+          if (!closed) {
+            closed = true
+            controller.error(err)
+          }
           resolve()
         }
         const cleanup = () => {
@@ -83,6 +97,7 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
     },
 
     cancel() {
+      closed = true
       fileStream.destroy()
     },
   })

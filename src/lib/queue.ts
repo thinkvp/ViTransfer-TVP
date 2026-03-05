@@ -14,6 +14,8 @@ export interface VideoProcessingJob {
   videoId: string
   originalStoragePath: string
   projectId: string
+  /** When true, skip transcode/thumbnail and only generate timeline preview sprites. */
+  timelineOnly?: boolean
 }
 
 export interface AssetProcessingJob {

@@ -31,7 +31,13 @@ import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs,
  * 7. Cleanup temporary files
  */
 export async function processVideo(job: Job<VideoProcessingJob>) {
-  const { videoId, originalStoragePath, projectId } = job.data
+  const { videoId, originalStoragePath, projectId, timelineOnly } = job.data
+
+  // Timeline-only mode: skip transcode/thumbnail, just generate sprites.
+  // The video stays in READY status — no interruption to viewing.
+  if (timelineOnly) {
+    return processTimelineOnly(videoId, originalStoragePath, projectId)
+  }
 
   console.log(`[WORKER] Processing video ${videoId}`)
 
@@ -151,6 +157,60 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     // Release active job slot so remaining jobs can scale up threads.
     decrementActiveVideoJobs()
     // Always cleanup temp files (success or failure)
+    await cleanupTempFiles(tempFiles)
+  }
+}
+
+/**
+ * Timeline-only processing: generate sprite sheets and VTT file without
+ * touching the video's transcoded preview, thumbnail, or status.
+ * The video stays in READY status so clients can keep watching it.
+ */
+async function processTimelineOnly(
+  videoId: string,
+  originalStoragePath: string,
+  projectId: string
+) {
+  console.log(`[WORKER] Timeline-only generation for video ${videoId}`)
+  const tempFiles: TempFiles = {}
+  const processingStart = Date.now()
+
+  incrementActiveVideoJobs()
+  try {
+    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+
+    const timelineResult = await processTimelinePreviews(
+      videoId,
+      projectId,
+      videoInfo.path,
+      videoInfo.metadata,
+      tempFiles
+    )
+
+    if (timelineResult?.ready) {
+      await prisma.video.update({
+        where: { id: videoId },
+        data: {
+          timelinePreviewsReady: true,
+          timelinePreviewVttPath: timelineResult.vttPath,
+          timelinePreviewSpritesPath: timelineResult.spritesPath,
+        },
+      })
+      console.log(`[WORKER] Timeline previews generated for video ${videoId}`)
+    } else {
+      console.warn(`[WORKER] Timeline preview generation returned no result for ${videoId}`)
+    }
+
+    await recalculateAndStoreProjectTotalBytes(projectId)
+
+    const totalTime = Date.now() - processingStart
+    console.log(`[WORKER] Timeline-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
+  } catch (error) {
+    // Don't mark the video as ERROR — it's still READY. Just log the failure.
+    console.error(`[WORKER] Timeline-only generation failed for ${videoId}:`, error)
+    throw error
+  } finally {
+    decrementActiveVideoJobs()
     await cleanupTempFiles(tempFiles)
   }
 }

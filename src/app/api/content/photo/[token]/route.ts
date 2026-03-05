@@ -13,13 +13,21 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 function createWebReadableStream(fileStream: NodeJS.ReadableStream): ReadableStream {
+  let closed = false
   return new ReadableStream({
     start(controller) {
-      fileStream.on('data', (chunk) => controller.enqueue(chunk))
-      fileStream.on('end', () => controller.close())
-      fileStream.on('error', (err) => controller.error(err))
+      fileStream.on('data', (chunk) => {
+        if (!closed) controller.enqueue(chunk)
+      })
+      fileStream.on('end', () => {
+        if (!closed) { closed = true; controller.close() }
+      })
+      fileStream.on('error', (err) => {
+        if (!closed) { closed = true; controller.error(err) }
+      })
     },
     cancel() {
+      closed = true
       ;(fileStream as any).destroy?.()
     },
   })

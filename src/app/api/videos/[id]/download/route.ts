@@ -82,11 +82,14 @@ export async function GET(
     fileStream.pause()
 
     let ended = false
+    let closed = false
     fileStream.once('end', () => { ended = true })
 
     const readableStream = new ReadableStream({
       pull(controller) {
+        if (closed) return
         if (ended) {
+          closed = true
           controller.close()
           return
         }
@@ -95,18 +98,26 @@ export async function GET(
           const onData = (chunk: Buffer | string) => {
             cleanup()
             fileStream.pause()
-            controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+            if (!closed) {
+              controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+            }
             resolve()
           }
           const onEnd = () => {
             cleanup()
             ended = true
-            controller.close()
+            if (!closed) {
+              closed = true
+              controller.close()
+            }
             resolve()
           }
           const onError = (err: Error) => {
             cleanup()
-            controller.error(err)
+            if (!closed) {
+              closed = true
+              controller.error(err)
+            }
             resolve()
           }
           const cleanup = () => {
@@ -122,6 +133,7 @@ export async function GET(
         })
       },
       cancel() {
+        closed = true
         fileStream.destroy()
       },
     })
