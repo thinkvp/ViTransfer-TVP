@@ -40,6 +40,7 @@ export type ProcessingJob = {
   videoName: string
   status: 'UPLOADING' | 'QUEUED' | 'PROCESSING'
   processingProgress: number
+  processingPhase: string | null
 }
 
 export type StartUploadConfig = {

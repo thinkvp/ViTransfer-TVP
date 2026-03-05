@@ -16,6 +16,7 @@ import {
   debugLog
 } from './video-processor-helpers'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation } from '@/lib/cpu-config'
 
 /**
  * Main video processing orchestrator
@@ -41,10 +42,23 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
   const tempFiles: TempFiles = {}
   const processingStart = Date.now()
 
+  // Track this job so FFmpeg can dynamically scale threads based on active jobs.
+  incrementActiveVideoJobs()
+  const alloc = getCpuAllocation()
+  const activeNow = getActiveVideoJobs()
+  const dynamicThreads = Math.min(
+    Math.floor(alloc.budgetThreads / Math.max(1, activeNow)),
+    12
+  )
+  console.log(
+    `[WORKER] Video ${videoId}: active jobs ${activeNow}/${alloc.videoWorkerConcurrency}, ` +
+    `dynamic FFmpeg threads: ${dynamicThreads} (budget ${alloc.budgetThreads})`
+  )
+
   try {
     // Stage 1: Advance status from QUEUED → PROCESSING now that the worker has claimed the job
     console.log(`[WORKER] Setting video ${videoId} to PROCESSING status`)
-    await updateVideoStatus(videoId, 'PROCESSING', 0)
+    await updateVideoStatus(videoId, 'PROCESSING', 0, 'transcode')
 
     // Stage 2: Download and validate video
     const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
@@ -76,15 +90,20 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     )
 
     // Stage 6.5: Generate timeline previews (optional)
+    // Uses the original video file (not the transcoded preview) for best quality.
     let timelineResult: { vttPath: string; spritesPath: string; ready: boolean } | null = null
-    if (settings.timelinePreviewsEnabled && tempFiles.preview) {
+    if (settings.timelinePreviewsEnabled) {
+      console.log(`[WORKER] Starting timeline preview generation for video ${videoId}`)
       timelineResult = await processTimelinePreviews(
         videoId,
         projectId,
-        tempFiles.preview,
+        videoInfo.path,
         videoInfo.metadata,
         tempFiles
       )
+      if (timelineResult?.ready) {
+        console.log(`[WORKER] Timeline previews generated for video ${videoId}`)
+      }
     }
 
     // Stage 7: Finalize - update database with results
@@ -129,6 +148,8 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     throw error
 
   } finally {
+    // Release active job slot so remaining jobs can scale up threads.
+    decrementActiveVideoJobs()
     // Always cleanup temp files (success or failure)
     await cleanupTempFiles(tempFiles)
   }

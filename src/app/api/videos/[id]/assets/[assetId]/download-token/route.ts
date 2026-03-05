@@ -54,14 +54,18 @@ export async function POST(
       }
     }
 
-    // Generate video access token (we use video access tokens for assets too); tag admin sessions
+    // Generate video access token (we use video access tokens for assets too); tag admin sessions.
+    // Use a dedicated cache key ('asset-download') and a generous 2-hour TTL so that large
+    // file downloads on slow connections aren't interrupted by the normal session timeout.
+    const DOWNLOAD_TOKEN_TTL = 2 * 60 * 60 // 2 hours
     const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
     const token = await generateVideoAccessToken(
       videoId,
       project.id,
-      'original',
+      'asset-download',
       request,
-      sessionId
+      sessionId,
+      DOWNLOAD_TOKEN_TTL
     )
 
     // Return download URL with asset ID parameter

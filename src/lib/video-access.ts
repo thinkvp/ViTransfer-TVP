@@ -136,14 +136,16 @@ function isSameSiteReferer(refererHost: string, requestHost: string): boolean {
  * @param quality - Quality level (thumbnail, preview720, preview1080, original)
  * @param request - NextRequest for IP address extraction
  * @param sessionId - Session ID for binding token to specific session
- * @returns Base64url-encoded access token valid for client session timeout duration
+ * @param ttlOverrideSeconds - Optional TTL override (e.g. for download tokens that need to outlive the session timeout)
+ * @returns Base64url-encoded access token valid for the specified or default TTL
  */
 export async function generateVideoAccessToken(
   videoId: string,
   projectId: string,
   quality: string,
   request: NextRequest,
-  sessionId: string
+  sessionId: string,
+  ttlOverrideSeconds?: number
 ): Promise<string> {
   const redis = getRedis()
 
@@ -169,7 +171,7 @@ export async function generateVideoAccessToken(
     createdAt: Date.now(),
   }
 
-  const ttlSeconds = await getClientSessionTimeoutSeconds()
+  const ttlSeconds = ttlOverrideSeconds ?? await getClientSessionTimeoutSeconds()
 
   await redis.setex(
     `video_access:${token}`,

@@ -561,6 +561,7 @@ model Video {
   status             VideoStatus @default(UPLOADING)
   uploadProgress     Int         @default(0) // 0-100 percentage
   processingProgress Float       @default(0)
+  processingPhase    String?     // Current processing phase: 'transcode' | 'thumbnail' | 'timeline'
   processingError    String?
 
   // Preview versions (watermarked)

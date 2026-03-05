@@ -76,16 +76,50 @@ export async function GET(
     const originalFilename = video.originalFileName || 'video.mp4'
     const safeFilename = sanitizeFilenameForHeader(originalFilename)
 
-    // CRITICAL FIX: Stream file instead of loading into memory
-    // This prevents OOM crashes with large video files
+    // Stream file with proper backpressure so large downloads don't buffer
+    // the entire file in memory when the client is on a slow connection.
     const fileStream = createReadStream(fullPath)
+    fileStream.pause()
 
-    // Convert Node.js stream to Web API ReadableStream
+    let ended = false
+    fileStream.once('end', () => { ended = true })
+
     const readableStream = new ReadableStream({
-      start(controller) {
-        fileStream.on('data', (chunk) => controller.enqueue(chunk))
-        fileStream.on('end', () => controller.close())
-        fileStream.on('error', (err) => controller.error(err))
+      pull(controller) {
+        if (ended) {
+          controller.close()
+          return
+        }
+
+        return new Promise<void>((resolve) => {
+          const onData = (chunk: Buffer | string) => {
+            cleanup()
+            fileStream.pause()
+            controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+            resolve()
+          }
+          const onEnd = () => {
+            cleanup()
+            ended = true
+            controller.close()
+            resolve()
+          }
+          const onError = (err: Error) => {
+            cleanup()
+            controller.error(err)
+            resolve()
+          }
+          const cleanup = () => {
+            fileStream.removeListener('data', onData)
+            fileStream.removeListener('end', onEnd)
+            fileStream.removeListener('error', onError)
+          }
+
+          fileStream.once('data', onData)
+          fileStream.once('end', onEnd)
+          fileStream.once('error', onError)
+          fileStream.resume()
+        })
       },
       cancel() {
         fileStream.destroy()

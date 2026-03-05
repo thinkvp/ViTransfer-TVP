@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.1.1",
+  "version": "1.0.7",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,7 @@
     "start:standalone": "node .next/standalone/server.js",
     "check:rbac": "node scripts/check-rbac-gates.mjs",
     "lint": "eslint .",
-    "postinstall": "prisma generate && node scripts/ensure-prisma-client.mjs",
+    "postinstall": "patch-package && prisma generate && node scripts/ensure-prisma-client.mjs || prisma generate && node scripts/ensure-prisma-client.mjs",
     "worker": "tsx src/worker/index.ts",
     "preview:emails": "tsx scripts/render-email-previews.ts"
   },
@@ -67,6 +67,7 @@
     "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
+    "patch-package": "^8.0.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.18",
     "tsx": "^4.20.6",

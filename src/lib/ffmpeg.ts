@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
-import { getCpuAllocation } from './cpu-config'
+import { getCpuAllocation, getDynamicThreadsPerJob } from './cpu-config'
 
 // Debug mode - outputs verbose FFmpeg logs
 // Enable with: DEBUG_WORKER=true environment variable
@@ -221,8 +221,10 @@ export async function generateTimelineSprite(options: TimelineSpriteOptions): Pr
   const tileExpr = `tile=${tileColumns}x${tileRows}`
   const filter = `${fpsExpr},${scaleExpr},${tileExpr}`
 
+  // Dynamic thread scaling: use more threads when fewer jobs are active.
   const cpuAllocation = getCpuAllocation()
-  const threads = cpuAllocation.timelineThreadsPerJob
+  const dynamic = getDynamicThreadsPerJob()
+  const threads = dynamic.threads
 
   // Note: -frames:v 1 because tile outputs a single sprite image.
   const args = [
@@ -243,6 +245,7 @@ export async function generateTimelineSprite(options: TimelineSpriteOptions): Pr
       availableThreads: cpuAllocation.effectiveThreads,
       budgetThreads: cpuAllocation.budgetThreads,
       threadsPerJob: threads,
+      activeJobs: dynamic.activeJobs,
     })
     console.log('[FFMPEG DEBUG] Executing:', 'nice -n 10', ffmpegPath, args.join(' '))
   }
@@ -294,17 +297,19 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     })
   }
 
-  // Centralized CPU allocation coordinates worker concurrency with FFmpeg threads.
-  // This prevents multi-video processing from multiplying into full CPU saturation.
+  // Dynamic CPU allocation: when fewer jobs are active than max concurrency,
+  // each job gets a larger share of the thread budget so a lone transcode
+  // uses more CPU rather than leaving cores idle.
   const cpuAllocation = getCpuAllocation()
-  const threads = cpuAllocation.ffmpegThreadsPerJob
+  const dynamic = getDynamicThreadsPerJob()
+  const threads = dynamic.threads
 
-  // Optimize preset based on available threads.
+  // Optimize preset based on the static per-job thread allocation.
   // Fewer threads -> use a faster preset to keep turnaround reasonable.
   let preset = 'fast'
-  if (threads <= 2) {
+  if (cpuAllocation.ffmpegThreadsPerJob <= 2) {
     preset = 'faster'
-  } else if (threads <= 4) {
+  } else if (cpuAllocation.ffmpegThreadsPerJob <= 4) {
     preset = 'fast'
   } else {
     preset = 'medium'
@@ -314,6 +319,7 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     console.log('[FFMPEG DEBUG] CPU optimization:', {
       availableThreads: cpuAllocation.effectiveThreads,
       budgetThreads: cpuAllocation.budgetThreads,
+      activeJobs: dynamic.activeJobs,
       selectedPreset: preset,
       threads
     })

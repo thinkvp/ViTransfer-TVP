@@ -23,9 +23,11 @@ export const THUMBNAIL_CONFIG = {
   max: 10           // Maximum 10 seconds
 } as const
 
-export const PROGRESS_WEIGHTS = {
-  transcode: 0.8,   // Transcoding is 80% of total progress
-  thumbnail: 0.2    // Thumbnail is remaining 20%
+// Phase names written to Video.processingPhase for the Running Jobs UI.
+export const PROCESSING_PHASES = {
+  transcode: 'transcode',
+  thumbnail: 'thumbnail',
+  timeline:  'timeline',
 } as const
 
 export const VALID_VIDEO_TYPES = [
@@ -263,6 +265,10 @@ export async function processTimelinePreviews(
   const spriteCount = Math.ceil(totalDuration / segmentDurationSeconds)
   const vttLines: string[] = ['WEBVTT', '']
 
+  // Each phase tracks its own 0→1 progress independently.
+  let lastTimelineProgressUpdate = 0
+  let timelineProgressInFlight = false
+
   for (let spriteIndex = 0; spriteIndex < spriteCount; spriteIndex++) {
     const segmentStart = spriteIndex * segmentDurationSeconds
     const remaining = Math.max(0, totalDuration - segmentStart)
@@ -282,6 +288,30 @@ export async function processTimelinePreviews(
       tileRows,
       frameWidth,
     })
+
+    // Update progress: each sprite is a fraction of the timeline phase (0→1)
+    const spriteProgress = (spriteIndex + 1) / spriteCount
+
+    const now = Date.now()
+    if (!timelineProgressInFlight && (now - lastTimelineProgressUpdate >= 2000 || spriteIndex === spriteCount - 1)) {
+      timelineProgressInFlight = true
+      lastTimelineProgressUpdate = now
+      try {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: {
+            processingProgress: spriteProgress,
+            processingPhase: PROCESSING_PHASES.timeline,
+          },
+        })
+      } catch (err) {
+        console.error(`[WORKER] Failed to update timeline progress for ${videoId}:`, err)
+      } finally {
+        timelineProgressInFlight = false
+      }
+    }
+
+    debugLog(`Timeline sprite ${spriteIndex + 1}/${spriteCount} generated (${Math.round(spriteProgress * 100)}%)`)
 
     // Generate VTT cues for each tile in the sprite
     for (let frameIndex = 0; frameIndex < framesPerSprite; frameIndex++) {
@@ -419,7 +449,10 @@ export async function processPreview(
       try {
         await prisma.video.update({
           where: { id: videoId },
-          data: { processingProgress: progress * PROGRESS_WEIGHTS.transcode },
+          data: {
+            processingProgress: progress,
+            processingPhase: PROCESSING_PHASES.transcode,
+          },
         })
       } catch (err) {
         console.error(`[WORKER] Failed to update progress for ${videoId}:`, err)
@@ -480,6 +513,19 @@ export async function processThumbnail(
 
   console.log(`[WORKER] Generated thumbnail for video ${videoId} in ${(thumbTime / 1000).toFixed(2)}s`)
 
+  // Update progress to reflect thumbnail completion (instant phase, just mark done)
+  try {
+    await prisma.video.update({
+      where: { id: videoId },
+      data: {
+        processingProgress: 1,
+        processingPhase: PROCESSING_PHASES.thumbnail,
+      },
+    })
+  } catch (err) {
+    console.error(`[WORKER] Failed to update thumbnail progress for ${videoId}:`, err)
+  }
+
   // Move thumbnail to storage (atomic rename on same filesystem, stream-copy fallback)
   const thumbnailPath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
   const thumbnailFullPath = path.join(STORAGE_ROOT, ...thumbnailPath.split('/'))
@@ -526,6 +572,7 @@ export async function finalizeVideo(
   const updateData: any = {
     status: 'READY',
     processingProgress: 100,
+    processingPhase: null,
     // Keep custom thumbnails; only overwrite system-generated ones
     thumbnailPath: hasCustomThumbnail ? existingThumbnail?.thumbnailPath : thumbnailPath,
     duration: metadata.duration,
@@ -561,13 +608,18 @@ export async function finalizeVideo(
 export async function updateVideoStatus(
   videoId: string,
   status: VideoStatus,
-  progress: number
+  progress: number,
+  phase?: string | null
 ): Promise<void> {
   debugLog(`Updating video status to ${status}...`)
 
   await prisma.video.update({
     where: { id: videoId },
-    data: { status, processingProgress: progress },
+    data: {
+      status,
+      processingProgress: progress,
+      ...(phase !== undefined ? { processingPhase: phase } : {}),
+    },
   })
 
   debugLog(`Database updated to ${status} status`)

@@ -58,6 +58,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
+COPY patches ./patches
 
 RUN if [ -f package-lock.json ]; then \
             npm ci --legacy-peer-deps; \
@@ -106,13 +107,15 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
+COPY patches ./patches
 
 ENV NODE_ENV=production
 RUN if [ -f package-lock.json ]; then \
             npm ci --omit=dev --legacy-peer-deps; \
         else \
             npm install --omit=dev --legacy-peer-deps; \
-        fi
+        fi && \
+    npx patch-package@8.0.1
 
 # ========================================
 # App image

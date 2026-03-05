@@ -17,6 +17,54 @@ export interface CpuAllocation {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Dynamic thread scaling — when fewer jobs are active than max concurrency,
+// each running FFmpeg process is allowed more threads so idle CPU budget
+// isn't wasted.  The counter is process-global (worker is single-process).
+// ---------------------------------------------------------------------------
+let _activeVideoJobs = 0
+
+/** Call when a video processing job starts (before FFmpeg). */
+export function incrementActiveVideoJobs(): void {
+  _activeVideoJobs++
+}
+
+/** Call when a video processing job finishes or fails (in `finally`). */
+export function decrementActiveVideoJobs(): void {
+  _activeVideoJobs = Math.max(0, _activeVideoJobs - 1)
+}
+
+/** Current number of active video processing jobs. */
+export function getActiveVideoJobs(): number {
+  return _activeVideoJobs
+}
+
+/**
+ * Return the number of FFmpeg threads a single job should use *right now*,
+ * taking the current active-job count into account.
+ *
+ * Formula: `floor(budgetThreads / max(1, activeJobs))`, clamped to
+ * `[1, MAX_FFMPEG_THREADS_PER_JOB]`.
+ *
+ * If `FFMPEG_THREADS_PER_JOB` env override is set it is treated as a hard
+ * ceiling — dynamic scaling can go up to that value but never above it.
+ */
+export function getDynamicThreadsPerJob(): { threads: number; activeJobs: number } {
+  const alloc = getCpuAllocation()
+  const active = Math.max(1, _activeVideoJobs)
+
+  // When an explicit override exists, it acts as a ceiling
+  const ceiling = alloc.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB
+
+  const threads = clampInt(
+    Math.floor(alloc.budgetThreads / active),
+    1,
+    ceiling
+  )
+
+  return { threads, activeJobs: active }
+}
+
 function parsePositiveIntEnv(name: string): number | undefined {
   const raw = process.env[name]
   if (!raw) return undefined
@@ -103,7 +151,8 @@ export function logCpuAllocation(allocation: CpuAllocation): void {
   console.log(`[CPU CONFIG] Available threads: ${allocation.effectiveThreads}`)
   console.log(`[CPU CONFIG] Budget (videos/sprites): ${allocation.budgetThreads} (~${Math.round(DEFAULT_VIDEO_CPU_BUDGET_FRACTION * 100)}%)`)
   console.log(`[CPU CONFIG] Video worker concurrency: ${allocation.videoWorkerConcurrency}`)
-  console.log(`[CPU CONFIG] FFmpeg threads/job: ${allocation.ffmpegThreadsPerJob}`)
+  console.log(`[CPU CONFIG] FFmpeg threads/job (static baseline): ${allocation.ffmpegThreadsPerJob}`)
+  console.log(`[CPU CONFIG] FFmpeg threads/job (dynamic range): ${allocation.ffmpegThreadsPerJob}–${Math.min(allocation.budgetThreads, allocation.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB)} (scales up when fewer jobs are active)`)
   console.log(`[CPU CONFIG] Estimated max FFmpeg threads used: ${allocation.maxThreadsUsedEstimate}/${allocation.effectiveThreads} (~${utilizationPercent}%)`)
 
   if (overrideParts.length > 0) {

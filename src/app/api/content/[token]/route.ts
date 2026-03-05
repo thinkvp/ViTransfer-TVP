@@ -23,15 +23,65 @@ function isValidMimeType(value: unknown): value is string {
 }
 
 /**
- * Convert Node.js ReadStream to Web ReadableStream
+ * Convert Node.js ReadStream to Web ReadableStream with proper backpressure.
+ *
+ * The previous push-based implementation fired controller.enqueue() as fast as
+ * the disk could read, never pausing the Node.js stream. For a 1 GB file on a
+ * slow client connection the Web ReadableStream internal queue would grow
+ * unbounded in memory, causing OOM errors or HTTP-layer timeouts that forced
+ * the client to retry the download from scratch.
+ *
+ * This pull-based approach only reads the next chunk from disk when the
+ * consumer (browser) is ready for more data, keeping memory flat regardless of
+ * file size and transfer speed.
  */
 function createWebReadableStream(fileStream: ReadStream): ReadableStream {
+  let ended = false
+
   return new ReadableStream({
-    start(controller) {
-      fileStream.on('data', (chunk) => controller.enqueue(chunk))
-      fileStream.on('end', () => controller.close())
-      fileStream.on('error', (err) => controller.error(err))
+    start() {
+      // Pause immediately — we only resume inside pull().
+      fileStream.pause()
+      fileStream.once('end', () => { ended = true })
     },
+
+    pull(controller) {
+      if (ended) {
+        controller.close()
+        return
+      }
+
+      return new Promise<void>((resolve) => {
+        const onData = (chunk: Buffer | string) => {
+          cleanup()
+          fileStream.pause()
+          controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+          resolve()
+        }
+        const onEnd = () => {
+          cleanup()
+          ended = true
+          controller.close()
+          resolve()
+        }
+        const onError = (err: Error) => {
+          cleanup()
+          controller.error(err)
+          resolve()
+        }
+        const cleanup = () => {
+          fileStream.removeListener('data', onData)
+          fileStream.removeListener('end', onEnd)
+          fileStream.removeListener('error', onError)
+        }
+
+        fileStream.once('data', onData)
+        fileStream.once('end', onEnd)
+        fileStream.once('error', onError)
+        fileStream.resume()
+      })
+    },
+
     cancel() {
       fileStream.destroy()
     },
@@ -85,6 +135,14 @@ export async function GET(
     const rawTokenData = await redis.get(tokenKey)
 
     if (!rawTokenData) {
+      // Distinguish expired download tokens from invalid tokens so clients
+      // see a helpful message instead of a generic "Access denied".
+      if (isDownload) {
+        return NextResponse.json(
+          { error: 'Download link has expired. Please go back and try downloading again.' },
+          { status: 410 }
+        )
+      }
       return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 

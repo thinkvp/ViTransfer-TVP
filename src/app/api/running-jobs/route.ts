@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
         name: true,
         status: true,
         processingProgress: true,
+        processingPhase: true,
         projectId: true,
         project: {
           select: {
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
       videoName: v.name,
       status: v.status,
       processingProgress: v.processingProgress ?? 0,
+      processingPhase: v.processingPhase ?? null,
     }))
 
     return NextResponse.json({ jobs })

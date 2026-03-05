@@ -145,6 +145,14 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
 function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate: (projectId: string) => void }) {
   const progressPercent = Math.min(Math.round((job.processingProgress ?? 0) * 100), 100)
 
+  // Phase label is driven by Video.processingPhase written by the worker.
+  let phaseLabel = 'Processing…'
+  switch (job.processingPhase) {
+    case 'transcode': phaseLabel = 'Processing previews…'; break
+    case 'thumbnail': phaseLabel = 'Generating thumbnail…'; break
+    case 'timeline':  phaseLabel = 'Generating timeline previews…'; break
+  }
+
   return (
     <div
       className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
@@ -172,7 +180,7 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
             ) : (
               <>
                 <Loader2 className="w-3 h-3 animate-spin" />
-                Processing previews…
+                {phaseLabel}
               </>
             )}
           </span>
