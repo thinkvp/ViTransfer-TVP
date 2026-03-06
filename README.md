@@ -43,11 +43,21 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
   <br><em>Detailed project view with video versions, comments, and approval workflow</em>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/Running Jobs.jpg" alt="Running Jobs" width="800">
+  <br><em>Running Jobs monitor showing active uploads, queued processing, live progress, and job controls</em>
+</p>
+
 ### Client Share Experience
 
 <p align="center">
   <img src="docs/screenshots/Share Page - Client View - Desktop.jpg" alt="Share Page Desktop" width="800">
   <br><em>Client share page on desktop with video player and timestamped comments</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Open Other Current Projects.jpg" alt="Project Switching" width="800">
+  <br><em>Authenticated clients can jump between other current projects for the same client directly from the share page</em>
 </p>
 
 <p align="center">
@@ -118,6 +128,7 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 
 ### Authentication & Access Control
 - **Flexible Share Authentication** — Password protection, email OTP codes, both methods, or no authentication with optional guest mode
+- **Client Project Switching** — Authenticated share-page recipients can switch between other current projects for the same client, with global and per-project controls plus status-based restrictions
 - **WebAuthn Passkeys** — Modern passwordless login for admin accounts with multi-device support
 - **Guest Mode** — View-only guest access with optional restriction to latest version only
 - **Session Management** — Configurable timeouts, IP binding, and automatic session invalidation on security changes
@@ -135,6 +146,7 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 
 ### Admin Features
 - **Multi-User Support** — Multiple admin accounts with JWT authentication and optional WebAuthn passkey support
+- **Running Jobs Monitor** — Admin header activity center for active uploads and server-side processing with live progress bars, ETA, pause/resume/cancel controls, queued vs processing state, and per-job thread allocation
 - **Analytics Dashboard** — Track page visits and download events per project and video with engagement metrics
 - **Security Dashboard** — IP/domain blocklists, rate-limit visibility, event tracking, and one-click unblock
 - **Asset Management** — Attach images, audio, subtitles, project files (Premiere, DaVinci Resolve, Final Cut), and documents with magic byte validation
@@ -171,6 +183,14 @@ Built-in customer relationship management and invoicing capabilities:
 
 ### Export Feedback and Import in NLE
 - **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
+
+### Client Project Switching
+Authenticated recipients can move between active projects for the same client without asking for a fresh link each time:
+- **Share-Page Project Picker** — Opens other current projects from the same client directly inside the authenticated share experience
+- **Password and OTP Support** — Available to authenticated recipients using password or OTP access modes
+- **Global and Per-Project Controls** — Admins can enable or disable switching platform-wide by default and override it per project
+- **Status-Aware Restrictions** — Automatically blocks switching into `NOT_STARTED` and `CLOSED` projects and excludes guest sessions
+- **Server-Side Enforcement** — Both source and destination projects are validated before a switch is allowed
 
 ### Guest Video Links
 Per-video shareable links for targeted distribution:
@@ -244,6 +264,7 @@ Enhanced tools for project communication and notification management:
 ### Additional Notifications & Analytics
 - **Analytics Page Overhaul** — Added tracking of Video Views, improved inaccurate page/unique visits count, separated Video Downloads and Video Asset downloads for a more accurate understanding of client activity.
 - **In-App Notification Bell** — Real-time notification center in admin header with unread badge count, auto-polling (30s intervals), click-to-navigate links, and persistent read/unread state tracking. Covers client comments, video approvals, sales events, and security alerts.
+- **Running Jobs Monitor** — Dedicated admin activity dropdown that tracks uploads and worker processing separately, keeps uploads running across page navigation, shows queued and active jobs with per-phase progress, and exposes pause/resume/cancel controls in one place.
 - **Email Tracking** — Optional tracking pixels for email open analytics (can be disabled globally). ⚠️ **Legal Notice:** Email tracking regulations vary by jurisdiction. Some regions (e.g., GDPR in EU, CPRA in California) require explicit consent before tracking email opens. Check your local laws and privacy regulations before enabling this feature. You are responsible for ensuring compliance with applicable privacy laws.
 - **Payment Reminders** — Automated invoice payment reminder emails
 

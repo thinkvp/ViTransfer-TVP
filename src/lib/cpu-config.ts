@@ -1,10 +1,10 @@
 import os from 'os'
 
-const DEFAULT_VIDEO_CPU_BUDGET_FRACTION = 0.5
 const MAX_FFMPEG_THREADS_PER_JOB = 12
 
 export interface CpuAllocation {
   effectiveThreads: number
+  reservedSystemThreads: number
   budgetThreads: number
   videoWorkerConcurrency: number
   ffmpegThreadsPerJob: number
@@ -78,6 +78,11 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(value)))
 }
 
+function getReservedSystemThreads(effectiveThreads: number): number {
+  if (effectiveThreads <= 4) return 2
+  return 4
+}
+
 function getDesiredVideoConcurrency(effectiveThreads: number): number {
   // Mirrors the fork's existing heuristic (previously based on cores).
   if (effectiveThreads <= 4) return 1
@@ -88,7 +93,8 @@ function getDesiredVideoConcurrency(effectiveThreads: number): number {
 /**
  * Centralized CPU allocation for video processing.
  *
- * Goal: keep FFmpeg workload (videos + timeline sprites) around ~50% of available CPU threads.
+ * Goal: reserve a small number of CPU threads for the OS/app stack and allow
+ * FFmpeg workload (videos + timeline sprites) to use the remaining threads.
  *
  * Why env-based?
  * - In containers, `os.cpus().length` can reflect host CPU, not the container quota.
@@ -102,7 +108,11 @@ export function getCpuAllocation(): CpuAllocation {
   const detectedThreads = os.cpus().length
   const effectiveThreads = overrideCpuThreads ?? detectedThreads
 
-  const budgetThreads = Math.max(1, Math.floor(effectiveThreads * DEFAULT_VIDEO_CPU_BUDGET_FRACTION))
+  const reservedSystemThreads = Math.min(
+    Math.max(0, effectiveThreads - 1),
+    getReservedSystemThreads(effectiveThreads)
+  )
+  const budgetThreads = Math.max(1, effectiveThreads - reservedSystemThreads)
 
   const desiredConcurrency = getDesiredVideoConcurrency(effectiveThreads)
   const videoWorkerConcurrency = overrideConcurrency
@@ -130,6 +140,7 @@ export function getCpuAllocation(): CpuAllocation {
 
   return {
     effectiveThreads,
+    reservedSystemThreads,
     budgetThreads,
     videoWorkerConcurrency,
     ffmpegThreadsPerJob,
@@ -157,7 +168,8 @@ export function logCpuAllocation(allocation: CpuAllocation): void {
     overrideParts.push(`TIMELINE_FFMPEG_THREADS_PER_JOB=${allocation.overrides.TIMELINE_FFMPEG_THREADS_PER_JOB}`)
 
   console.log(`[CPU CONFIG] Available threads: ${allocation.effectiveThreads}`)
-  console.log(`[CPU CONFIG] Budget (videos/sprites): ${allocation.budgetThreads} (~${Math.round(DEFAULT_VIDEO_CPU_BUDGET_FRACTION * 100)}%)`)
+  console.log(`[CPU CONFIG] Reserved for system/app: ${allocation.reservedSystemThreads}`)
+  console.log(`[CPU CONFIG] Budget (videos/sprites): ${allocation.budgetThreads}`)
   console.log(`[CPU CONFIG] Video worker concurrency: ${allocation.videoWorkerConcurrency}`)
   console.log(`[CPU CONFIG] FFmpeg threads/job (static baseline): ${allocation.ffmpegThreadsPerJob}`)
   console.log(`[CPU CONFIG] FFmpeg threads/job (dynamic range): ${allocation.ffmpegThreadsPerJob}–${Math.min(allocation.budgetThreads, allocation.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB)} (scales up when fewer jobs are active)`)

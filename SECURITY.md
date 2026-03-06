@@ -95,7 +95,7 @@ docker scout cves thinkvp/vitransfer-tvp-worker:latest
 ```bash
 docker pull thinkvp/vitransfer-tvp-app:latest
 docker pull thinkvp/vitransfer-tvp-worker:latest
-docker-compose up -d
+docker compose up -d
 ```
 
 **2. Run security scans:**

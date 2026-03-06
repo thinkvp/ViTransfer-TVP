@@ -1436,8 +1436,12 @@ export default function SharePage() {
         </div>
       </div>
 
-      <Dialog open={switchProjectsOpen} onOpenChange={setSwitchProjectsOpen}>
-        <DialogContent className="max-w-[95vw] sm:max-w-lg">
+      <Dialog modal={false} open={switchProjectsOpen} onOpenChange={setSwitchProjectsOpen}>
+        <DialogContent
+          className="max-w-[95vw] sm:max-w-lg"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Other Current Projects</DialogTitle>
           </DialogHeader>

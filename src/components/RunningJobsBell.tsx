@@ -31,6 +31,23 @@ function formatEta(job: UploadJob): string | null {
   return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
 }
 
+function VideoNameWithLabel({
+  videoName,
+  versionLabel,
+}: {
+  videoName: string
+  versionLabel?: string | null
+}) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-2">
+      <div className="min-w-0 truncate text-sm font-medium text-foreground">{videoName}</div>
+      {versionLabel ? (
+        <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">{versionLabel}</div>
+      ) : null}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -46,7 +63,7 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-foreground truncate">{job.videoName}</div>
+          <VideoNameWithLabel videoName={job.videoName} versionLabel={job.versionLabel} />
           <div className="text-[11px] text-muted-foreground truncate">
             {job.fileName} · {formatSize(job.fileSize)}
           </div>
@@ -165,7 +182,7 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
       onClick={() => onNavigate(job.projectId)}
     >
       <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground truncate">{job.videoName}</div>
+        <VideoNameWithLabel videoName={job.videoName} versionLabel={job.versionLabel} />
         <div className="text-[11px] text-muted-foreground truncate">{job.projectName}</div>
       </div>
 

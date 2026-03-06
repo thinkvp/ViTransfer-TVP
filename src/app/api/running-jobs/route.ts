@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation } from '@/lib/cpu-config'
+import { getVideoQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         name: true,
+        versionLabel: true,
         status: true,
         processingProgress: true,
         processingPhase: true,
@@ -64,10 +66,54 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'asc' },
     })
 
+    const videoIds = new Set(videos.map((video) => video.id))
+    const queueStatusByVideoId = new Map<string, 'QUEUED' | 'PROCESSING'>()
+
+    if (videoIds.size > 0) {
+      const videoQueue = getVideoQueue()
+      const [activeJobs, queuedJobs] = await Promise.all([
+        videoQueue.getJobs(['active']),
+        videoQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      ])
+
+      for (const job of activeJobs) {
+        const queuedVideoId = job.data?.videoId
+        if (queuedVideoId && videoIds.has(queuedVideoId)) {
+          queueStatusByVideoId.set(queuedVideoId, 'PROCESSING')
+        }
+      }
+
+      for (const job of queuedJobs) {
+        const queuedVideoId = job.data?.videoId
+        if (queuedVideoId && videoIds.has(queuedVideoId) && !queueStatusByVideoId.has(queuedVideoId)) {
+          queueStatusByVideoId.set(queuedVideoId, 'QUEUED')
+        }
+      }
+    }
+
+    const resolvedJobs = videos.map((video) => {
+      const processingPhase = video.processingPhase ?? null
+      const queueStatus = queueStatusByVideoId.get(video.id)
+
+      let status = video.status
+      if (video.status === 'READY' && processingPhase) {
+        status = queueStatus ?? ((video.processingProgress ?? 0) > 0 ? 'PROCESSING' : 'QUEUED')
+      }
+
+      return {
+        id: video.id,
+        projectId: video.projectId,
+        projectName: video.project.title,
+        videoName: video.name,
+        versionLabel: video.versionLabel,
+        status,
+        processingProgress: status === 'QUEUED' ? 0 : (video.processingProgress ?? 0),
+        processingPhase,
+      }
+    })
+
     const alloc = getCpuAllocation()
-    const activeProcessingCount = videos.filter(
-      (v) => v.status === 'PROCESSING' || (v.status === 'READY' && v.processingPhase),
-    ).length
+    const activeProcessingCount = resolvedJobs.filter((job) => job.status === 'PROCESSING').length
     const dynamicThreadsPerJob = activeProcessingCount > 0
       ? Math.max(
           1,
@@ -78,25 +124,18 @@ export async function GET(request: NextRequest) {
         )
       : alloc.ffmpegThreadsPerJob
 
-    const jobs = videos.map((v) => {
-      const processingPhase = v.processingPhase ?? null
-      const isActive = v.status === 'PROCESSING' || (v.status === 'READY' && processingPhase === 'timeline')
+    const jobs = resolvedJobs.map((job) => {
+      const isActive = job.status === 'PROCESSING'
 
       let allocatedThreads: number | null = null
       if (isActive) {
-        allocatedThreads = processingPhase === 'thumbnail'
+        allocatedThreads = job.processingPhase === 'thumbnail'
           ? alloc.timelineThreadsPerJob
           : dynamicThreadsPerJob
       }
 
       return {
-        id: v.id,
-        projectId: v.projectId,
-        projectName: v.project.title,
-        videoName: v.name,
-        status: v.status,
-        processingProgress: v.processingProgress ?? 0,
-        processingPhase,
+        ...job,
         allocatedThreads,
         threadBudget: allocatedThreads ? alloc.budgetThreads : null,
       }

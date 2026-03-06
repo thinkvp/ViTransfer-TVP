@@ -23,6 +23,7 @@ export type UploadJob = {
   projectId: string
   videoId: string
   videoName: string
+  versionLabel: string | null
   fileName: string
   fileSize: number
   progress: number
@@ -38,6 +39,7 @@ export type ProcessingJob = {
   projectId: string
   projectName: string
   videoName: string
+  versionLabel: string | null
   status: 'UPLOADING' | 'QUEUED' | 'PROCESSING' | 'READY'
   processingProgress: number
   processingPhase: string | null
@@ -131,6 +133,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         projectId: j.projectId,
         videoId: j.videoId,
         videoName: j.videoName,
+        versionLabel: j.versionLabel,
         fileName: j.fileName,
         fileSize: j.fileSize,
         progress: j.progress,
@@ -342,6 +345,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         projectId: config.projectId,
         videoId: config.videoId,
         videoName: config.videoName,
+        versionLabel: config.versionLabel || null,
         fileName: config.file.name,
         fileSize: config.file.size,
         file: config.file,
