@@ -5,6 +5,7 @@ import { getRedisForQueue } from './redis'
 let videoQueueInstance: Queue<VideoProcessingJob> | null = null
 let assetQueueInstance: Queue<AssetProcessingJob> | null = null
 let clientFileQueueInstance: Queue<ClientFileProcessingJob> | null = null
+let userFileQueueInstance: Queue<UserFileProcessingJob> | null = null
 let projectFileQueueInstance: Queue<ProjectFileProcessingJob> | null = null
 let projectEmailQueueInstance: Queue<ProjectEmailProcessingJob> | null = null
 let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
@@ -26,6 +27,12 @@ export interface AssetProcessingJob {
 
 export interface ClientFileProcessingJob {
   clientFileId: string
+  storagePath: string
+  expectedCategory?: string
+}
+
+export interface UserFileProcessingJob {
+  userFileId: string
   storagePath: string
   expectedCategory?: string
 }
@@ -130,6 +137,33 @@ export function getClientFileQueue(): Queue<ClientFileProcessingJob> {
     })
   }
   return clientFileQueueInstance
+}
+
+export function getUserFileQueue(): Queue<UserFileProcessingJob> {
+  // Don't create queue during build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!userFileQueueInstance) {
+    userFileQueueInstance = new Queue<UserFileProcessingJob>('user-file-processing', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+  return userFileQueueInstance
 }
 
 export function getProjectFileQueue(): Queue<ProjectFileProcessingJob> {

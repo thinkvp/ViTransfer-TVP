@@ -350,6 +350,7 @@ export async function GET(
         guest: false,
         sessionId,
         authMode: projectMeta.authMode,
+        accessMethod: projectMeta.authMode === 'NONE' ? 'NONE' : undefined,
         ttlSeconds: shareTtlSeconds,
       })
       responseBody.shareToken = shareToken

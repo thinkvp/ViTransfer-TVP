@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
@@ -9,6 +9,7 @@ import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
+import { processUserFile } from './user-file-processor'
 import { processProjectFile } from './project-file-processor'
 import { processProjectEmail } from './project-email-processor'
 import { processAlbumPhotoSocial } from './album-photo-social-processor'
@@ -199,6 +200,29 @@ async function main() {
   })
 
   console.log('[WORKER] Client file processing worker started')
+
+  // Create user file processing worker
+  const userFileWorker = new Worker<UserFileProcessingJob>('user-file-processing', processUserFile, {
+    connection: getRedisForQueue(),
+    concurrency: concurrency * 2,
+  })
+
+  userFileWorker.on('completed', (job) => {
+    console.log(`[WORKER] User file job ${job.id} completed successfully`)
+  })
+
+  userFileWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] User file job ${job?.id} failed:`, err)
+    if (DEBUG) {
+      console.error('[WORKER DEBUG] User file job failure details:', {
+        jobId: job?.id,
+        jobData: job?.data,
+        error: err instanceof Error ? err.stack : err,
+      })
+    }
+  })
+
+  console.log('[WORKER] User file processing worker started')
 
   // Create project file processing worker
   const projectFileWorker = new Worker<ProjectFileProcessingJob>('project-file-processing', processProjectFile, {

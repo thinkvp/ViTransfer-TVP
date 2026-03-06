@@ -129,12 +129,27 @@ export async function POST(
     const videoQueue = getVideoQueue()
 
     for (const video of readyVideos) {
-      await videoQueue.add('process-video', {
-        videoId: video.id,
-        originalStoragePath: video.originalStoragePath,
-        projectId,
-        timelineOnly: true,
+      // Mark the video so it appears in Running Jobs while staying READY for viewing.
+      // If queueing fails, immediately clear the marker so it does not get stuck.
+      await prisma.video.update({
+        where: { id: video.id },
+        data: { processingPhase: 'timeline', processingProgress: 0 },
       })
+
+      try {
+        await videoQueue.add('process-video', {
+          videoId: video.id,
+          originalStoragePath: video.originalStoragePath,
+          projectId,
+          timelineOnly: true,
+        })
+      } catch (error) {
+        await prisma.video.update({
+          where: { id: video.id },
+          data: { processingPhase: null, processingProgress: 0 },
+        }).catch(() => {})
+        throw error
+      }
     }
 
     return NextResponse.json({

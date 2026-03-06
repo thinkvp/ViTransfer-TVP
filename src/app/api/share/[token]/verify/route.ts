@@ -106,6 +106,7 @@ export async function POST(
       where: { slug: token },
       select: {
         id: true,
+        title: true,
         sharePassword: true,
       },
     })
@@ -182,10 +183,11 @@ export async function POST(
       await sendPushNotification({
         type: 'FAILED_SHARE_PASSWORD',
         projectId: project.id,
+        projectName: project.title || 'Unknown Project',
         title: 'Failed Share Password Attempt',
         message: 'Incorrect share password entered',
         details: {
-          'Share Token': token,
+          'Project': project.title || 'Unknown Project',
           'Attempt': count,
           'Max Attempts': MAX_FAILED_ATTEMPTS,
           'IP Address': ipAddress,
@@ -228,6 +230,7 @@ export async function POST(
       projectId: project.id,
       permissions: ['view', 'comment', 'download'],
       guest: false,
+      accessMethod: 'PASSWORD',
       ttlSeconds: shareTokenTtl,
     })
 

@@ -16,6 +16,7 @@ model User {
   username     String?  @unique
   password     String
   name         String?
+  notes        String?
   displayColor String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   role         UserRole @default(ADMIN)
   appRoleId    String
@@ -41,6 +42,7 @@ model User {
   salesInvoiceRevisions SalesInvoiceRevision[]
 
   webPushSubscriptions WebPushSubscription[]
+  files                UserFile[]
 
   projectViewSettings UserProjectViewSettings[]
 }
@@ -135,6 +137,27 @@ model ClientFile {
   @@index([clientId, category])
 }
 
+model UserFile {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fileName    String
+  fileSize    BigInt
+  fileType    String
+  storagePath String
+  category    String?
+
+  uploadedBy     String?
+  uploadedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, category])
+}
+
 enum UserRole {
   ADMIN
 }
@@ -151,6 +174,7 @@ model Project {
   authMode        String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
   guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
   guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
+  allowAuthenticatedProjectSwitching Boolean @default(true) // Allow password/OTP recipients to switch to other current client projects and back
 
   // Project Type
   enableVideos Boolean @default(true)
@@ -783,6 +807,7 @@ model Settings {
   // Default project behavior
   defaultAllowClientDeleteComments   Boolean @default(false)
   defaultAllowClientUploadFiles      Boolean @default(false) // Default toggle for client file uploads
+  defaultAllowAuthenticatedProjectSwitching Boolean @default(true) // Default toggle for authenticated client project switching
   defaultMaxClientUploadAllocationMB Int     @default(1000) // Default total allowed client comment-attachment uploads per project (0 = unlimited)
 
   // Project Behavior
@@ -1477,6 +1502,10 @@ model VideoAnalytics {
   // Share session ID for mapping to a recipient (best-effort)
   sessionId String?
 
+  // Authentication metadata captured at the time of the event
+  accessMethod String?
+  email        String?
+
   createdAt DateTime @default(now())
 
   @@index([projectId, createdAt])
@@ -1577,8 +1606,17 @@ model SharePageAccess {
   // Authentication method used: OTP, PASSWORD, GUEST
   accessMethod String
 
+  // ACCESS = page opened, SWITCH_AWAY = viewer switched from this project to another client project
+  eventType String @default("ACCESS")
+
   // Email address (only for OTP authentication)
   email String?
+
+  // Optional origin project title when arriving via project switching
+  originProjectTitle String?
+
+  // Optional target project title when leaving this project via project switching
+  targetProjectTitle String?
 
   // JWT session ID for unique session tracking
   sessionId String
@@ -1591,6 +1629,7 @@ model SharePageAccess {
 
   @@index([projectId, createdAt])
   @@index([projectId, accessMethod])
+  @@index([projectId, eventType])
   @@index([sessionId])
 }
 

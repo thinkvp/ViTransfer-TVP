@@ -17,6 +17,8 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultAllowClientDeleteComments: (value: boolean) => void
   defaultAllowClientUploadFiles: boolean
   setDefaultAllowClientUploadFiles: (value: boolean) => void
+  defaultAllowAuthenticatedProjectSwitching: boolean
+  setDefaultAllowAuthenticatedProjectSwitching: (value: boolean) => void
   defaultMaxClientUploadAllocationMB: number | ''
   setDefaultMaxClientUploadAllocationMB: (value: number | '') => void
   show: boolean
@@ -36,6 +38,8 @@ export function VideoProcessingSettingsSection({
   setDefaultAllowClientDeleteComments,
   defaultAllowClientUploadFiles,
   setDefaultAllowClientUploadFiles,
+  defaultAllowAuthenticatedProjectSwitching,
+  setDefaultAllowAuthenticatedProjectSwitching,
   defaultMaxClientUploadAllocationMB,
   setDefaultMaxClientUploadAllocationMB,
   show,
@@ -65,22 +69,22 @@ export function VideoProcessingSettingsSection({
       {show && (
         <CardContent className="space-y-4 border-t pt-4">
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <Label htmlFor="resolution">Default Preview Resolution</Label>
-            <select
-              id="resolution"
-              value={defaultPreviewResolution}
-              onChange={(e) => setDefaultPreviewResolution(e.target.value)}
-              className="w-full px-3 py-2 text-sm sm:text-base bg-background text-foreground border border-border rounded-md"
-            >
-              <option value="720p">720p (1280x720 or 720x1280 for vertical)</option>
-              <option value="1080p">1080p (1920x1080 or 1080x1920 for vertical)</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              New projects will use this resolution by default. Can be overridden per project.
-            </p>
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="resolution">Default Preview Resolution</Label>
+              <select
+                id="resolution"
+                value={defaultPreviewResolution}
+                onChange={(e) => setDefaultPreviewResolution(e.target.value)}
+                className="w-full px-3 py-2 text-sm sm:text-base bg-background text-foreground border border-border rounded-md"
+              >
+                <option value="720p">720p (1280x720 or 720x1280 for vertical)</option>
+                <option value="1080p">1080p (1920x1080 or 1080x1920 for vertical)</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                New projects will use this resolution by default. Can be overridden per project.
+              </p>
+            </div>
 
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label htmlFor="watermarkEnabled">Enable Watermarks</Label>
@@ -142,10 +146,8 @@ export function VideoProcessingSettingsSection({
                 onCheckedChange={setDefaultAllowClientDeleteComments}
               />
             </div>
-          </div>
 
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
               <div className="space-y-0.5">
                 <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files while commenting</Label>
                 <p className="text-xs text-muted-foreground">
@@ -180,6 +182,20 @@ export function VideoProcessingSettingsSection({
                 />
                 <span className="text-sm text-muted-foreground">MB</span>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="defaultAllowAuthenticatedProjectSwitching">Allow authenticated clients to switch between other current projects</Label>
+                <p className="text-xs text-muted-foreground">
+                  Password and OTP recipients can switch between this client&apos;s other current projects when both projects allow it.
+                </p>
+              </div>
+              <Switch
+                id="defaultAllowAuthenticatedProjectSwitching"
+                checked={defaultAllowAuthenticatedProjectSwitching}
+                onCheckedChange={setDefaultAllowAuthenticatedProjectSwitching}
+              />
             </div>
           </div>
         </CardContent>

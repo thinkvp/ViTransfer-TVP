@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-03-05
+
+### Added
+- **Authenticated client project switching** — password and OTP recipients on client share pages can now switch between other current projects for the same client when the target project is in an allowed active status; guest users are excluded, and switching remains blocked for `NOT_STARTED` and `CLOSED` projects
+- **Project-switching controls in settings** — added a global default toggle in Admin Settings → Default Project Settings and a per-project toggle in Project Settings → Security so admins can disable project switching platform-wide or on individual projects; server-side enforcement checks both source and destination projects
+- **Internal user notes and file storage** — admin user records now support freeform notes plus uploaded internal files such as agreements, insurance certificates, and rate sheets, backed by new user-file APIs, uploads, and worker validation
+
+### Changed
+- **Share-page analytics now record project-switch flow explicitly** — switching into a project records an arrival event with the origin project name, and switching away records a matching "changed to" event on the project being left; password sessions are labeled as Password User and OTP sessions continue to preserve the authenticated email address
+- **Installation docs now standardize on `docker compose`** — README and installation instructions now use the Docker Compose v2 CLI form consistently and clarify that the setup scripts are optional convenience helpers, not a requirement; admins can still generate and manage their own secrets manually if preferred
+- **FFmpeg CPU limits now align much more closely with the configured thread budget** — the worker already budgets against logical CPU threads (not physical cores), but FFmpeg could still over-parallelize internally; preview transcodes now cap both decode and encode thread usage explicitly, and all FFmpeg paths pin `-filter_threads 1` so lightweight filter graphs do not silently spawn a full-CPU pool; timeline generation still scales dynamically with the active-job count, while thumbnail extraction uses the auxiliary `TIMELINE_FFMPEG_THREADS_PER_JOB` allocation
+
+### Fixed
+- **Timeline-only regen jobs now appear correctly in Running Jobs** — toggling "Enable Timeline Previews" on in project settings queues timeline-only worker jobs while the video stays in `READY` for uninterrupted playback; the Running Jobs endpoint now includes `READY` videos with a non-null `processingPhase`, the queueing path marks them as `timeline` immediately, and the worker clears that marker on completion or failure so jobs do not get stuck in the dropdown if queueing or processing fails
+- **Reprocessed videos show correct QUEUED → PROCESSING progression** — the `POST /api/projects/[id]/reprocess` endpoint (triggered by watermark or resolution changes) was setting all videos to `PROCESSING` immediately, even when the worker had not yet picked them up; this made every video look like it was actively being encoded in Running Jobs, hiding the true queue depth; the endpoint now sets `QUEUED` (matching the upload flow) and lets the worker advance to `PROCESSING` when it begins work
+- **Running Jobs now shows accurate per-job thread allocation** — the dropdown now displays badges such as `(4/8 threads)` beside active processing phases, including timeline-only `READY` jobs; the API computes the allocation per job/phase so thumbnails, transcodes, and timeline generation each report the thread count they actually use instead of sharing one approximate global value
+- **Scheduled internal comment digests now fail cleanly when nobody can receive them** — if a project has no assigned users with notifications enabled, the queued digest is now marked skipped with a recorded reason instead of remaining pending indefinitely
+
 ## [1.1.3] - 2026-03-05
 
 ### Changed

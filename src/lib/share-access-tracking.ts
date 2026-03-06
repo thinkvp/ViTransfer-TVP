@@ -8,11 +8,23 @@ import { isLikelyAdminIp } from './admin-ip-match'
 export async function trackSharePageAccess(params: {
   projectId: string
   accessMethod: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE'
+  eventType?: 'ACCESS' | 'SWITCH_AWAY'
   email?: string
+  originProjectTitle?: string
+  targetProjectTitle?: string
   sessionId: string
   request: NextRequest
 }) {
-  const { projectId, accessMethod, email, sessionId, request } = params
+  const {
+    projectId,
+    accessMethod,
+    eventType = 'ACCESS',
+    email,
+    originProjectTitle,
+    targetProjectTitle,
+    sessionId,
+    request,
+  } = params
 
   // Check if analytics tracking is enabled
   const settings = await getSecuritySettings()
@@ -33,6 +45,7 @@ export async function trackSharePageAccess(params: {
   // This catches admins accessing the share page without an admin JWT in the request
   // (e.g. opening it in a separate tab or clicking "Continue as Guest").
   const likelyAdmin = await isLikelyAdminIp(ipAddress).catch(() => false)
+
   if (likelyAdmin) {
     return
   }
@@ -48,7 +61,10 @@ export async function trackSharePageAccess(params: {
       data: {
         projectId,
         accessMethod,
+        eventType,
         email,
+        originProjectTitle,
+        targetProjectTitle,
         sessionId,
         ipAddress,
         userAgent,
@@ -73,11 +89,13 @@ export async function trackSharePageAccess(params: {
       type: 'SHARE_ACCESS',
       projectId,
       projectName: project?.title || 'Unknown Project',
-      title: 'Share Page Accessed',
-      message: `A client accessed the share page`,
+      title: eventType === 'SWITCH_AWAY' ? 'Client Switched Project' : 'Share Page Accessed',
+      message: eventType === 'SWITCH_AWAY' ? 'A client switched to another project' : 'A client accessed the share page',
       details: {
         'Project': project?.title || 'Unknown Project',
         'Access Method': accessMethodDescription,
+        ...(originProjectTitle ? { 'Origin Project': originProjectTitle } : {}),
+        ...(targetProjectTitle ? { 'Target Project': targetProjectTitle } : {}),
         'IP Address': ipAddress,
       },
     })

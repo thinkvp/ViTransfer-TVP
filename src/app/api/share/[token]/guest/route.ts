@@ -58,6 +58,7 @@ export async function POST(
       permissions: ['view'],
       guest: true,
       sessionId: crypto.randomBytes(16).toString('base64url'),
+      accessMethod: 'GUEST',
       ttlSeconds,
     })
 

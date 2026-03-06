@@ -44,6 +44,7 @@ export async function GET(
         email: true,
         username: true,
         name: true,
+        notes: true,
         displayColor: true,
         role: true,
         appRoleId: true,
@@ -98,7 +99,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { email, username, name, displayColor, password, oldPassword, appRoleId } = body
+    const { email, username, name, notes, displayColor, password, oldPassword, appRoleId } = body
 
     // Build update data
     const updateData: any = {}
@@ -146,6 +147,10 @@ export async function PATCH(
 
     if (name !== undefined) {
       updateData.name = name
+    }
+
+    if (notes !== undefined) {
+      updateData.notes = typeof notes === 'string' && notes.trim() ? notes.trim() : null
     }
 
     if (displayColor !== undefined) {
@@ -286,6 +291,7 @@ export async function PATCH(
         email: true,
         username: true,
         name: true,
+        notes: true,
         displayColor: true,
         role: true,
         appRoleId: true,

@@ -39,8 +39,11 @@ interface AlbumStats {
 interface AuthActivity {
   id: string
   type: 'AUTH'
+  eventType: 'ACCESS' | 'SWITCH_AWAY'
   accessMethod: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE'
   email: string | null
+  originProjectTitle: string | null
+  targetProjectTitle: string | null
   ipAddress: string | null
   createdAt: Date
 }
@@ -211,7 +214,14 @@ function getPhotoVariantLabel(variant?: string | null): string {
 }
 
 function getMainText(event: Activity): string {
-  if (event.type === 'AUTH') return `${getAuthVisitorLabel(event)} accessed project`
+  if (event.type === 'AUTH') {
+    if (event.eventType === 'SWITCH_AWAY' && event.targetProjectTitle) {
+      return `${getAuthVisitorLabel(event)} changed to ${event.targetProjectTitle}`
+    }
+    return event.originProjectTitle
+      ? `${getAuthVisitorLabel(event)} arrived from ${event.originProjectTitle}`
+      : `${getAuthVisitorLabel(event)} accessed project`
+  }
   if (event.type === 'VIEW') return `${getViewVisitorLabel(event)} viewed "${event.videoName} (${event.versionLabel})"`
   if (event.type === 'ALBUM_DOWNLOAD') return `${event.albumName} - ${getPhotoVariantLabel(event.variant)}`
   if (event.type === 'PHOTO_DOWNLOAD') return `${event.photoFileName || 'Photo'} from ${event.albumName} - ${getPhotoVariantLabel(event.variant)}`

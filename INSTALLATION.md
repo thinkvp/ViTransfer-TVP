@@ -4,6 +4,8 @@ Step-by-step instructions for installing ViTransfer-TVP on various platforms.
 
 > **Architecture:** linux/amd64 only. ARM64 is not supported.
 
+> **Compose command note:** this guide uses `docker compose` because ViTransfer-TVP targets Docker Compose v2 (the current Docker CLI plugin). The older `docker-compose` standalone binary is considered legacy and may not be present on newer Docker installs.
+
 ## Quick Install (5 Minutes)
 
 ### Automated Setup (Recommended)
@@ -21,7 +23,7 @@ chmod +x setup.sh
 ./setup.sh
 
 # 3. Start
-docker-compose up -d
+docker compose up -d
 
 # 4. Access
 # Open http://localhost:4321
@@ -39,7 +41,7 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP
 .\setup.ps1
 
 # 3. Start
-docker-compose up -d
+docker compose up -d
 
 # 4. Access
 # Open http://localhost:4321
@@ -66,7 +68,7 @@ openssl rand -base64 64   # → JWT_REFRESH_SECRET
 openssl rand -base64 64   # → SHARE_TOKEN_SECRET
 
 # 4. Start
-docker-compose up -d
+docker compose up -d
 
 # 5. Access
 # Open http://localhost:4321
@@ -121,6 +123,8 @@ The script will:
 - Ask for optional settings (port, timezone, HTTPS)
 - Create a ready-to-use `.env` file
 
+If you would rather manage secrets yourself, skip the setup script and use the manual configuration flow below. The setup scripts are only convenience helpers.
+
 **Option B: Manual Configuration**
 
 Create `.env` from template:
@@ -174,10 +178,12 @@ openssl rand -base64 64   # → SHARE_TOKEN_SECRET
 
 **Important:** Use hex (`openssl rand -hex 32`) for `POSTGRES_PASSWORD` and `REDIS_PASSWORD`. Base64 output contains `+/=` characters that can break database connection URLs.
 
+You may also substitute your own securely generated values from your preferred password manager, secret-management system, or key-generation tooling, as long as they meet the required formats above.
+
 ### Step 4: Start Services
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 First startup takes 2-5 minutes:
@@ -190,7 +196,7 @@ First startup takes 2-5 minutes:
 
 Check services are running:
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 You should see all services "Up":
@@ -204,7 +210,7 @@ vitransfer-redis      Up (healthy)
 
 View logs if needed:
 ```bash
-docker-compose logs -f app
+docker compose logs -f app
 ```
 
 ### Step 6: Access ViTransfer-TVP
@@ -244,11 +250,11 @@ Email is required for: OTP authentication, notification digests, and payment rem
 ### "Service not healthy"
 ```bash
 # Check specific service logs
-docker-compose logs postgres
-docker-compose logs redis
+docker compose logs postgres
+docker compose logs redis
 
 # Restart services
-docker-compose restart
+docker compose restart
 ```
 
 ### "Can't connect to database"
@@ -257,11 +263,11 @@ docker-compose restart
 # Should be: postgresql://vitransfer:PASSWORD@postgres:5432/vitransfer?schema=public
 
 # Check PostgreSQL is running
-docker-compose ps postgres
+docker compose ps postgres
 
 # Reset if needed
-docker-compose down -v  # WARNING: Deletes all data!
-docker-compose up -d
+docker compose down -v  # WARNING: Deletes all data!
+docker compose up -d
 ```
 
 ### "Uploads fail"
@@ -273,43 +279,43 @@ df -h
 ls -la ./
 
 # Check logs
-docker-compose logs app | grep upload
+docker compose logs app | grep upload
 ```
 
 ### "Can't login"
 - Verify `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`
 - Check there are no extra spaces
-- Try restarting: `docker-compose restart app`
+- Try restarting: `docker compose restart app`
 
 ### "HTTPS lockout"
 - Set `HTTPS_ENABLED=false` in `.env`
-- Run `docker-compose restart app`
+- Run `docker compose restart app`
 - The env var always overrides database settings
 
 ## Updating
 
 ```bash
 # Backup first!
-docker-compose down
+docker compose down
 # Back up your postgres data and uploads volumes
 
 # Update
-docker-compose pull
-docker-compose up -d
+docker compose pull
+docker compose up -d
 
 # Database migrations run automatically
 # Verify
-docker-compose logs -f app
+docker compose logs -f app
 ```
 
 ## Uninstalling
 
 ```bash
 # Stop and remove containers
-docker-compose down
+docker compose down
 
 # Remove volumes (WARNING: Deletes all data!)
-docker-compose down -v
+docker compose down -v
 
 # Remove images
 docker rmi thinkvp/vitransfer-tvp-app:latest thinkvp/vitransfer-tvp-worker:latest postgres:17-alpine redis:8-alpine
@@ -317,7 +323,7 @@ docker rmi thinkvp/vitransfer-tvp-app:latest thinkvp/vitransfer-tvp-worker:lates
 
 ## Getting Help
 
-- Check logs: `docker-compose logs`
+- Check logs: `docker compose logs`
 - GitHub Issues: [thinkvp/ViTransfer-TVP](https://github.com/thinkvp/ViTransfer-TVP/issues)
 - README.md: Full documentation
 

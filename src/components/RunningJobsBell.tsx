@@ -153,6 +153,12 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
     case 'timeline':  phaseLabel = 'Generating timeline previews…'; break
   }
 
+  // Thread allocation badge: e.g. "(4/8 threads)"
+  const threadBadge =
+    job.allocatedThreads && job.threadBudget
+      ? ` (${job.allocatedThreads}/${job.threadBudget} threads)`
+      : ''
+
   return (
     <div
       className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
@@ -181,10 +187,13 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
               <>
                 <Loader2 className="w-3 h-3 animate-spin" />
                 {phaseLabel}
+                {threadBadge && (
+                  <span className="text-muted-foreground/70">{threadBadge}</span>
+                )}
               </>
             )}
           </span>
-          {job.status === 'PROCESSING' && progressPercent > 0 && (
+          {job.status !== 'QUEUED' && progressPercent > 0 && (
             <span>{progressPercent}%</span>
           )}
         </div>

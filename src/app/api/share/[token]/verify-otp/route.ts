@@ -219,6 +219,8 @@ export async function POST(
       projectId: project.id,
       permissions: ['view', 'comment', 'download'],
       guest: false,
+      accessMethod: 'OTP',
+      email: email.toLowerCase().trim(),
       ttlSeconds: shareTokenTtl,
     })
 

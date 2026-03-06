@@ -7,10 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiPatch, apiPost, apiDelete, apiFetch } from '@/lib/api-client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/components/AuthProvider'
+import { UserFileUpload } from '@/components/UserFileUpload'
+import { UserFileList } from '@/components/UserFileList'
 import { formatDate } from '@/lib/utils'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
@@ -37,6 +40,7 @@ export default function EditUserPage() {
     email: '',
     username: '',
     name: '',
+    notes: '',
     displayColor: '#22C55E',
     appRoleId: 'role_admin',
     oldPassword: '',
@@ -46,6 +50,7 @@ export default function EditUserPage() {
 
   const [roles, setRoles] = useState<Role[]>([])
   const [rolesLoading, setRolesLoading] = useState(true)
+  const [fileRefresh, setFileRefresh] = useState(0)
 
   // PassKey state
   const [passkeyAvailable, setPasskeyAvailable] = useState(false)
@@ -64,6 +69,7 @@ export default function EditUserPage() {
         email: data.user.email,
         username: data.user.username || '',
         name: data.user.name || '',
+        notes: data.user.notes || '',
         displayColor: data.user.displayColor || '#22C55E',
         appRoleId: data.user.appRoleId || 'role_admin',
         oldPassword: '',
@@ -256,6 +262,7 @@ export default function EditUserPage() {
         email: formData.email,
         username: formData.username || null,
         name: formData.name || null,
+        notes: formData.notes.trim() ? formData.notes.trim() : null,
         displayColor: formData.displayColor || null,
         appRoleId: formData.appRoleId,
       }
@@ -281,7 +288,7 @@ export default function EditUserPage() {
 
   return (
     <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-4xl mx-auto space-y-6">
         <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
@@ -382,8 +389,15 @@ export default function EditUserPage() {
                 <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
               </div>
 
-              {/* Empty cell to maintain grid alignment */}
-              <div className="hidden md:block" />
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  rows={4}
+                />
+              </div>
             </div>
 
             <div className="border-t pt-4 mt-6">
@@ -597,6 +611,20 @@ export default function EditUserPage() {
               </Button>
             </div>
           </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Files</CardTitle>
+            <p className="text-sm text-muted-foreground">Store agreements, rates, insurances and other docs</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <UserFileUpload
+              userId={userId}
+              onUploadComplete={() => setFileRefresh((value) => value + 1)}
+            />
+            <UserFileList userId={userId} refreshTrigger={fileRefresh} />
           </CardContent>
         </Card>
       </div>

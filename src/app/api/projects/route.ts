@@ -416,6 +416,7 @@ export async function POST(request: NextRequest) {
         defaultTimelinePreviewsEnabled: true,
         defaultAllowClientDeleteComments: true,
         defaultAllowClientUploadFiles: true,
+        defaultAllowAuthenticatedProjectSwitching: true,
         defaultMaxClientUploadAllocationMB: true,
       },
     })
@@ -444,6 +445,7 @@ export async function POST(request: NextRequest) {
           restrictCommentsToLatestVersion: isShareOnly ? false : (restrictCommentsToLatestVersion || false),
           allowClientDeleteComments: isShareOnly ? false : (allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false),
           allowClientUploadFiles: isShareOnly ? false : (settings?.defaultAllowClientUploadFiles ?? false),
+          allowAuthenticatedProjectSwitching: isShareOnly ? false : (settings?.defaultAllowAuthenticatedProjectSwitching ?? true),
           maxClientUploadAllocationMB: settings?.defaultMaxClientUploadAllocationMB ?? 1000,
           status: isShareOnly ? 'SHARE_ONLY' : 'NOT_STARTED',
           hideFeedback: isShareOnly ? true : false,

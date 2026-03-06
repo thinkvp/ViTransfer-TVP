@@ -105,11 +105,15 @@ export async function POST(
         filesToDelete.map(filePath => deleteFile(filePath))
       )
 
-      // Reset video status and clear preview paths
+      // Reset video status and clear preview paths.
+      // Use QUEUED (not PROCESSING) so the worker advances the status
+      // when it actually picks up the job — matching the upload flow.
       await prisma.video.update({
         where: { id: video.id },
         data: {
-          status: 'PROCESSING',
+          status: 'QUEUED',
+          processingProgress: 0,
+          processingPhase: null,
           preview720Path: null,
           preview1080Path: null,
           // Keep custom thumbnails; regenerate only system thumbnails

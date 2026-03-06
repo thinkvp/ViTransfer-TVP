@@ -31,6 +31,9 @@ interface VideoSidebarProps {
   hasDarkLogo?: boolean
   /** Main company domain — makes the logo a clickable link (opens in new tab) */
   mainCompanyDomain?: string | null
+  showProjectHeadingLabel?: boolean
+  showProjectSwitcher?: boolean
+  onProjectSwitcherOpen?: () => void
 }
 
 // Helper function to calculate thumbnail dimensions maintaining aspect ratio within 16:9
@@ -83,6 +86,9 @@ export default function VideoSidebar({
   hasLogo = false,
   hasDarkLogo = false,
   mainCompanyDomain,
+  showProjectHeadingLabel = false,
+  showProjectSwitcher = false,
+  onProjectSwitcherOpen,
 }: VideoSidebarProps) {
   const { isDark } = useTheme()
   const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
@@ -192,6 +198,8 @@ export default function VideoSidebar({
     setIsResizing(true)
   }
 
+  const canOpenProjectSwitcher = showProjectSwitcher && typeof onProjectSwitcherOpen === 'function'
+
   return (
     <>
       {/* Desktop Sidebar */}
@@ -231,10 +239,24 @@ export default function VideoSidebar({
             </div>
           )}
           {heading && (
-            <div className="p-4 border-b border-border">
+            <div className="p-4 border-b border-border space-y-3">
+              {showProjectHeadingLabel && (
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Project:
+                </div>
+              )}
               <h2 className="text-base font-semibold text-foreground truncate" title={heading}>
                 {heading}
               </h2>
+              {canOpenProjectSwitcher && (
+                <button
+                  type="button"
+                  onClick={onProjectSwitcherOpen}
+                  className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  View Other Projects
+                </button>
+              )}
             </div>
           )}
 
@@ -527,6 +549,25 @@ export default function VideoSidebar({
             'overflow-hidden transition-all duration-200',
             isMobileCollapsed ? 'max-h-0 opacity-0' : 'max-h-[500px] opacity-100'
           )}>
+            {heading && showProjectHeadingLabel && (
+              <div className="px-4 pt-4 pb-3 space-y-3 border-b border-border">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Project:
+                </div>
+                <h2 className="text-base font-semibold text-foreground break-words">
+                  {heading}
+                </h2>
+                {canOpenProjectSwitcher && (
+                  <button
+                    type="button"
+                    onClick={onProjectSwitcherOpen}
+                    className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    View Other Projects
+                  </button>
+                )}
+              </div>
+            )}
             <div className="overflow-x-auto">
               <div className="flex gap-3 p-3">
               {/* Videos */}

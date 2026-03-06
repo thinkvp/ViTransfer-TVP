@@ -486,8 +486,10 @@ export async function trackVideoAccess(params: {
   eventType: 'PAGE_VISIT' | 'DOWNLOAD_COMPLETE' | 'VIDEO_VIEW' | 'VIDEO_PLAY'
   assetId?: string // Single asset download
   assetIds?: string[] // Multiple assets downloaded as ZIP
+  accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE'
+  email?: string
 }) {
-  const { videoId, projectId, bandwidth, eventType, sessionId, assetId, assetIds } = params
+  const { videoId, projectId, bandwidth, eventType, sessionId, assetId, assetIds, accessMethod, email } = params
 
   const settings = await getSecuritySettings()
   if (!settings.trackAnalytics) {
@@ -509,6 +511,8 @@ export async function trackVideoAccess(params: {
       assetId,
       assetIds: assetIds ? JSON.stringify(assetIds) : undefined,
       sessionId,
+      accessMethod,
+      email,
       ipAddress,
     }
   })

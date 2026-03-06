@@ -94,6 +94,7 @@ export async function processInternalCommentNotifications() {
     const assignedUsers = await prisma.projectUser.findMany({
       where: {
         projectId: { in: projectIds },
+        receiveNotifications: true,
       },
       select: {
         projectId: true,
@@ -123,7 +124,22 @@ export async function processInternalCommentNotifications() {
     }
 
     const recipients = Array.from(usersById.values()).filter((u) => u.projects.length > 0)
-    if (recipients.length === 0) return
+    if (recipients.length === 0) {
+      const notificationIds = pendingNotifications.map((n) => n.id)
+
+      await prisma.notificationQueue.updateMany({
+        where: { id: { in: notificationIds } },
+        data: {
+          adminFailed: true,
+          lastError: 'Skipped: no eligible internal recipients',
+        },
+      })
+
+      console.log(
+        `[INTERNAL] No eligible recipients for ${notificationIds.length} notification(s); marking skipped`
+      )
+      return
+    }
 
     const period = getPeriodString(settings.adminNotificationSchedule)
     const notificationIds = pendingNotifications.map((n) => n.id)

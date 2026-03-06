@@ -91,6 +91,7 @@ const tusServer: Server = new Server({
       const videoId = upload.metadata?.videoId as string
       const assetId = upload.metadata?.assetId as string
       const clientFileId = upload.metadata?.clientFileId as string
+      const userFileId = upload.metadata?.userFileId as string
       const projectFileId = upload.metadata?.projectFileId as string
       const projectEmailId = upload.metadata?.projectEmailId as string
       const photoId = upload.metadata?.photoId as string
@@ -118,10 +119,10 @@ const tusServer: Server = new Server({
         }
       }
 
-      if (!videoId && !assetId && !clientFileId && !projectFileId && !projectEmailId && !photoId) {
+      if (!videoId && !assetId && !clientFileId && !userFileId && !projectFileId && !projectEmailId && !photoId) {
         throw {
           status_code: 400,
-          body: 'Missing required metadata: videoId, assetId, clientFileId, projectFileId, projectEmailId, or photoId'
+          body: 'Missing required metadata: videoId, assetId, clientFileId, userFileId, projectFileId, projectEmailId, or photoId'
         }
       }
 
@@ -173,6 +174,19 @@ const tusServer: Server = new Server({
           throw {
             status_code: 404,
             body: 'Client file record not found'
+          }
+        }
+      }
+
+      if (userFileId) {
+        const file = await prisma.userFile.findUnique({
+          where: { id: userFileId }
+        })
+
+        if (!file) {
+          throw {
+            status_code: 404,
+            body: 'User file record not found'
           }
         }
       }
@@ -235,6 +249,7 @@ const tusServer: Server = new Server({
     const videoId = upload.metadata?.videoId as string
     const assetId = upload.metadata?.assetId as string
     const clientFileId = upload.metadata?.clientFileId as string
+    const userFileId = upload.metadata?.userFileId as string
     const projectFileId = upload.metadata?.projectFileId as string
     const projectEmailId = upload.metadata?.projectEmailId as string
     const photoId = upload.metadata?.photoId as string
@@ -249,6 +264,8 @@ const tusServer: Server = new Server({
         return await handleAssetUploadFinish(tusFilePath, upload, assetId, tusServer, hardMaxBytes)
       } else if (clientFileId) {
         return await handleClientFileUploadFinish(tusFilePath, upload, clientFileId, tusServer, maxUploadSizeBytes)
+      } else if (userFileId) {
+        return await handleUserFileUploadFinish(tusFilePath, upload, userFileId, tusServer, maxUploadSizeBytes)
       } else if (projectFileId) {
         return await handleProjectFileUploadFinish(tusFilePath, upload, projectFileId, tusServer, maxUploadSizeBytes)
       } else if (projectEmailId) {
@@ -417,6 +434,51 @@ async function handleClientFileUploadFinish(
   })
 
   console.log(`[UPLOAD] Client file uploaded and queued for processing: ${clientFileId}`)
+
+  return {}
+}
+
+async function handleUserFileUploadFinish(
+  tusFilePath: string,
+  upload: any,
+  userFileId: string,
+  tusServer: any,
+  maxUploadSizeBytes: number
+) {
+  const userFile = await prisma.userFile.findUnique({
+    where: { id: userFileId }
+  })
+
+  if (!userFile) {
+    console.error(`[UPLOAD] User file not found: ${userFileId}`)
+    return {}
+  }
+
+  const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
+
+  await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
+
+  const { moveUploadedFile } = await import('@/lib/storage')
+  await moveUploadedFile(tusFilePath, userFile.storagePath, fileSize)
+
+  const actualFileType = 'application/octet-stream'
+
+  await prisma.userFile.update({
+    where: { id: userFileId },
+    data: {
+      fileType: actualFileType,
+    },
+  })
+
+  const { getUserFileQueue } = await import('@/lib/queue')
+  const q = getUserFileQueue()
+  await q.add('process-user-file', {
+    userFileId: userFile.id,
+    storagePath: userFile.storagePath,
+    expectedCategory: userFile.category ?? undefined,
+  })
+
+  console.log(`[UPLOAD] User file uploaded and queued for processing: ${userFileId}`)
 
   return {}
 }

@@ -49,6 +49,8 @@ interface SharePayload extends jwt.JwtPayload {
   guest: boolean
   recipientId?: string
   authMode?: string
+  accessMethod?: 'PASSWORD' | 'OTP' | 'GUEST' | 'NONE'
+  email?: string
   adminOverride?: boolean
 }
 
@@ -100,6 +102,8 @@ export function signShareToken(params: {
   sessionId?: string
   recipientId?: string
   authMode?: string
+  accessMethod?: 'PASSWORD' | 'OTP' | 'GUEST' | 'NONE'
+  email?: string
   adminOverride?: boolean
   ttlSeconds?: number
 }): string {
@@ -114,6 +118,8 @@ export function signShareToken(params: {
     sessionId,
     recipientId: params.recipientId,
     authMode: params.authMode,
+    accessMethod: params.accessMethod,
+    email: params.email,
     adminOverride: params.adminOverride,
   }
   return jwt.sign(payload, SHARE_TOKEN_SECRET, {

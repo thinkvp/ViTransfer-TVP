@@ -221,20 +221,27 @@ export async function generateTimelineSprite(options: TimelineSpriteOptions): Pr
   const tileExpr = `tile=${tileColumns}x${tileRows}`
   const filter = `${fpsExpr},${scaleExpr},${tileExpr}`
 
-  // Dynamic thread scaling: use more threads when fewer jobs are active.
+  // Use dynamic thread scaling so a lone timeline regen can use the full *budgeted*
+  // CPU allocation, while multiple concurrent jobs divide the same budget.
+  // The important constraint is that the budget is computed from a cgroup-aware
+  // CPU count (see cpu-config.ts), so it reflects container limits.
   const cpuAllocation = getCpuAllocation()
   const dynamic = getDynamicThreadsPerJob()
   const threads = dynamic.threads
 
   // Note: -frames:v 1 because tile outputs a single sprite image.
+  // `-threads` limits the decode/image-encode pipeline for this simple
+  // one-output command, while `-filter_threads 1` keeps the lightweight
+  // sprite filter graph from spinning up a pool sized to all visible CPUs.
   const args = [
     '-hide_banner',
     '-loglevel', DEBUG ? 'info' : 'error',
+    '-threads', threads.toString(),
     '-ss', `${Math.max(0, startTimeSeconds)}`,
     '-t', `${Math.max(0, durationSeconds)}`,
     '-i', inputPath,
     '-vf', filter,
-    '-threads', threads.toString(),
+    '-filter_threads', '1',
     '-frames:v', '1',
     '-q:v', '3',
     outputPath,
@@ -321,7 +328,7 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
       budgetThreads: cpuAllocation.budgetThreads,
       activeJobs: dynamic.activeJobs,
       selectedPreset: preset,
-      threads
+      threads,
     })
   }
 
@@ -376,15 +383,20 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     console.log('[FFMPEG DEBUG] Built filter complex:', filterComplex)
   }
 
-  // Build ffmpeg arguments with optimizations
+  // Build ffmpeg arguments with optimizations.
+  // `-threads` before `-i` applies to the decoder/input side; `-threads:v`
+  // before the output file caps the libx264 encoder as well.  Keeping
+  // `-filter_threads` at 1 prevents our lightweight filter graph from
+  // spawning a separate pool sized to all visible CPUs.
   const args = [
     '-v', 'verbose', // Enable verbose logging for debug
+    '-threads', threads.toString(),
     '-i', inputPath,
     '-vf', filterComplex,
+    '-filter_threads', '1',
     '-c:v', 'libx264',
     '-preset', preset,
     '-crf', '23', // Constant Rate Factor: 18-28 range (lower = better quality, 23 is default)
-    '-threads', threads.toString(),
     '-profile:v', 'high',
     '-level', '4.1',
     '-pix_fmt', 'yuv420p', // Ensure compatibility with all players (especially Safari/iOS)
@@ -394,6 +406,7 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     '-movflags', '+faststart', // Enable progressive download (moov atom at start)
     '-max_muxing_queue_size', '1024', // Prevent muxing errors on high-bitrate videos
     '-progress', 'pipe:2',
+    '-threads:v', threads.toString(),
     '-y', // Overwrite output file
     outputPath
   ]
@@ -512,10 +525,15 @@ export async function generateThumbnail(
     })
   }
 
+  const cpuAllocation = getCpuAllocation()
+  const thumbThreads = cpuAllocation.timelineThreadsPerJob
+
   const args = [
     '-v', 'verbose', // Enable verbose logging for debug
+    '-threads', thumbThreads.toString(),
     '-ss', timestamp.toString(), // Seek before input (faster - avoids decoding entire video)
     '-i', inputPath,
+    '-filter_threads', '1',
     '-vframes', '1', // Extract single frame
     '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease', // Maintain aspect ratio without padding
     '-q:v', '2', // High quality JPEG (1-31 scale, 2 = excellent quality)

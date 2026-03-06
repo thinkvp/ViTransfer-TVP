@@ -194,10 +194,17 @@ async function processTimelineOnly(
           timelinePreviewsReady: true,
           timelinePreviewVttPath: timelineResult.vttPath,
           timelinePreviewSpritesPath: timelineResult.spritesPath,
+          processingPhase: null,
+          processingProgress: 0,
         },
       })
       console.log(`[WORKER] Timeline previews generated for video ${videoId}`)
     } else {
+      // Clear the phase marker even if generation returned no result
+      await prisma.video.update({
+        where: { id: videoId },
+        data: { processingPhase: null, processingProgress: 0 },
+      })
       console.warn(`[WORKER] Timeline preview generation returned no result for ${videoId}`)
     }
 
@@ -207,6 +214,11 @@ async function processTimelineOnly(
     console.log(`[WORKER] Timeline-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
   } catch (error) {
     // Don't mark the video as ERROR — it's still READY. Just log the failure.
+    // Clear the phase marker so it drops out of Running Jobs.
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { processingPhase: null, processingProgress: 0 },
+    }).catch(() => {})
     console.error(`[WORKER] Timeline-only generation failed for ${videoId}:`, error)
     throw error
   } finally {

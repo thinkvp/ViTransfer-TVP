@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
         },
         sharePageAccesses: {
           select: {
+            eventType: true,
             accessMethod: true,
             sessionId: true,
           },
@@ -133,20 +134,21 @@ export async function GET(request: NextRequest) {
     const projectsWithAnalytics = projects.map(project => {
       const totalDownloads = project.analytics.length
       const displayName = project.companyName || project.recipients[0]?.name || project.recipients[0]?.email || 'Client'
+      const visitEvents = project.sharePageAccesses.filter(a => a.eventType !== 'SWITCH_AWAY')
 
       const readyVideos = project.videos.filter(v => v.status === 'READY')
 
       // Calculate unique sessions (unique users who accessed the share page)
       const uniqueSessions = new Set(
-        project.sharePageAccesses.map(a => a.sessionId)
+        visitEvents.map(a => a.sessionId)
       ).size
 
       // Count by access method
       const accessByMethod = {
-        OTP: project.sharePageAccesses.filter(a => a.accessMethod === 'OTP').length,
-        PASSWORD: project.sharePageAccesses.filter(a => a.accessMethod === 'PASSWORD').length,
-        GUEST: project.sharePageAccesses.filter(a => a.accessMethod === 'GUEST').length,
-        NONE: project.sharePageAccesses.filter(a => a.accessMethod === 'NONE').length,
+        OTP: visitEvents.filter(a => a.accessMethod === 'OTP').length,
+        PASSWORD: visitEvents.filter(a => a.accessMethod === 'PASSWORD').length,
+        GUEST: visitEvents.filter(a => a.accessMethod === 'GUEST').length,
+        NONE: visitEvents.filter(a => a.accessMethod === 'NONE').length,
       }
 
       // Compute the most recent genuine activity across event tables,
@@ -171,7 +173,7 @@ export async function GET(request: NextRequest) {
         videoCount: readyVideos.length,
         videos: project.videos,
         commentsCount: project._count.comments,
-        totalVisits: project.sharePageAccesses.length,
+        totalVisits: visitEvents.length,
         uniqueVisits: uniqueSessions,
         accessByMethod,
         totalDownloads,

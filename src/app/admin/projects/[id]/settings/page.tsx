@@ -88,12 +88,14 @@ interface Project {
   useFullTimecode: boolean
   allowClientDeleteComments: boolean
   allowClientUploadFiles: boolean
+  allowAuthenticatedProjectSwitching: boolean
   maxClientUploadAllocationMB: number
   sharePassword: string | null
   sharePasswordDecrypted: string | null
   authMode: string
   guestMode: boolean
   guestLatestOnly: boolean
+  globalAllowAuthenticatedProjectSwitching?: boolean
   previewResolution: string
   watermarkEnabled: boolean
   watermarkText: string | null
@@ -136,6 +138,7 @@ export default function ProjectSettingsPage() {
   const [useFullTimecode, setUseFullTimecode] = useState(false)
   const [allowClientDeleteComments, setAllowClientDeleteComments] = useState(false)
   const [allowClientUploadFiles, setAllowClientUploadFiles] = useState(false)
+  const [allowAuthenticatedProjectSwitching, setAllowAuthenticatedProjectSwitching] = useState(true)
   const [maxClientUploadAllocationMB, setMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [sharePassword, setSharePassword] = useState('')
   const [authMode, setAuthMode] = useState('PASSWORD')
@@ -226,6 +229,7 @@ export default function ProjectSettingsPage() {
         setUseFullTimecode(data.useFullTimecode ?? false)
         setAllowClientDeleteComments(data.allowClientDeleteComments ?? false)
         setAllowClientUploadFiles(data.allowClientUploadFiles ?? false)
+        setAllowAuthenticatedProjectSwitching(data.allowAuthenticatedProjectSwitching ?? true)
         setMaxClientUploadAllocationMB(data.maxClientUploadAllocationMB ?? 1000)
         setPreviewResolution(data.previewResolution)
         setWatermarkEnabled(data.watermarkEnabled ?? true)
@@ -386,6 +390,7 @@ export default function ProjectSettingsPage() {
         useFullTimecode,
         allowClientDeleteComments,
         allowClientUploadFiles,
+        allowAuthenticatedProjectSwitching,
         maxClientUploadAllocationMB: typeof maxClientUploadAllocationMB === 'number'
           ? maxClientUploadAllocationMB
           : parseInt(String(maxClientUploadAllocationMB), 10) || 0,
@@ -469,6 +474,7 @@ export default function ProjectSettingsPage() {
       if (refreshResponse.ok) {
         const refreshedData = await refreshResponse.json()
         setProject(refreshedData)
+        setAllowAuthenticatedProjectSwitching(refreshedData.allowAuthenticatedProjectSwitching ?? true)
         setWatermarkEnabled(refreshedData.watermarkEnabled ?? true)
         setWatermarkText(refreshedData.watermarkText || '')
         setUseCustomWatermark(!!refreshedData.watermarkText)
@@ -1240,6 +1246,26 @@ export default function ProjectSettingsPage() {
                     />
                   </div>
                 )}
+
+                <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
+                  <div className="space-y-0.5 flex-1">
+                    <Label htmlFor="allowAuthenticatedProjectSwitching">Allow authenticated clients to switch current projects</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Password and OTP recipients can switch from this project to other current client projects and vice-versa when both projects allow it.
+                    </p>
+                    {(project?.globalAllowAuthenticatedProjectSwitching ?? true) === false && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        This setting is currently disabled globally in Default Project Settings.
+                      </p>
+                    )}
+                  </div>
+                  <Switch
+                    id="allowAuthenticatedProjectSwitching"
+                    checked={allowAuthenticatedProjectSwitching}
+                    onCheckedChange={setAllowAuthenticatedProjectSwitching}
+                    disabled={(project?.globalAllowAuthenticatedProjectSwitching ?? true) === false}
+                  />
+                </div>
 
                 {authMode === 'NONE' && !guestMode && (
                   <div className="flex items-start gap-2 p-2 bg-warning-visible/50 border border-warning-visible rounded-md">

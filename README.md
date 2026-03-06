@@ -351,6 +351,8 @@ Team collaboration without cluttering client-facing comments:
 - 20GB+ free disk space (more for video storage)
 - **Architecture:** linux/amd64 only (ARM64 is not supported)
 
+> **Compose command note:** these docs use `docker compose` because the project targets Docker Compose v2 (the current Docker CLI plugin). The older `docker-compose` binary is legacy and may not be installed on newer Docker setups.
+
 ### Installation Method 1: Docker Hub (Recommended — 3 Minutes)
 
 **Pull pre-built images and run immediately:**
@@ -360,49 +362,31 @@ Team collaboration without cluttering client-facing comments:
 # Create directory
 mkdir vitransfer && cd vitransfer
 
-# Download docker-compose.yml and .env.example
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/docker-compose.yml
-curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/dev/.env.example
+# Download docker-compose.yml, .env.example, and the setup script
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/.env.example
+curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/setup.sh
 ```
 
 2. **Create and configure environment file**
 ```bash
-# Copy and edit the file
-cp .env.example .env
-nano .env
+# Generate .env interactively
+chmod +x setup.sh
+./setup.sh
 ```
 
-Generate **6 unique** secure values:
-```bash
-openssl rand -hex 32      # POSTGRES_PASSWORD (hex/URL-safe)
-openssl rand -hex 32      # REDIS_PASSWORD (hex/URL-safe)
-openssl rand -base64 32   # ENCRYPTION_KEY
-openssl rand -base64 64   # JWT_SECRET
-openssl rand -base64 64   # JWT_REFRESH_SECRET
-openssl rand -base64 64   # SHARE_TOKEN_SECRET
-```
-
-Replace each placeholder in `.env`:
-- `POSTGRES_PASSWORD=<<REPLACE_WITH_openssl_rand_hex_32>>`
-- `REDIS_PASSWORD=<<REPLACE_WITH_openssl_rand_hex_32>>`
-- `ENCRYPTION_KEY=<<REPLACE_WITH_openssl_rand_base64_32>>`
-- `JWT_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
-- `JWT_REFRESH_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
-- `SHARE_TOKEN_SECRET=<<REPLACE_WITH_openssl_rand_base64_64>>`
-
-**Default admin credentials** (change in production):
-- `ADMIN_EMAIL=admin@example.com`
-- `ADMIN_PASSWORD=Admin1234`
+If you prefer not to use the setup script, you can instead copy `.env.example` to `.env` and generate the required secrets manually. See [INSTALLATION.md](INSTALLATION.md) for the manual commands.
 
 3. **Start the application**
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 4. **Access ViTransfer-TVP**
 - Open http://localhost:4321 (or your configured port)
 - Login with your admin credentials
 - Complete setup in admin settings
+- On Windows, use [INSTALLATION.md](INSTALLATION.md) and run [setup.ps1](setup.ps1)
 
 ---
 
@@ -417,7 +401,14 @@ cd ViTransfer
 git checkout main
 ```
 
-2. **Follow steps 2-3 from Method 1 above** to configure your `.env` file
+2. **Generate `.env` using the setup script**
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+Or copy `.env.example` to `.env` and fill in the required values manually, including generating your own secrets/keys if you prefer not to use the helper script.
 
 3. **Build and start**
 
@@ -606,7 +597,7 @@ ViTransfer-TVP uses Alpine Linux and FFmpeg which may show CVEs in vulnerability
 
 ```bash
 # Docker volumes
-docker-compose down
+docker compose down
 tar -czf vitransfer-backup.tar.gz \
   /var/lib/docker/volumes/vitransfer_postgres-data \
   /var/lib/docker/volumes/vitransfer_uploads
@@ -618,10 +609,10 @@ tar -czf vitransfer-backup.tar.gz \
 
 ```bash
 # Pull latest images from Docker Hub
-docker-compose pull
+docker compose pull
 
 # Restart with new images
-docker-compose up -d
+docker compose up -d
 
 # Database migrations run automatically
 ```
@@ -641,9 +632,9 @@ docker-compose up -d
 ### Logs
 
 ```bash
-docker-compose logs app        # Application logs
-docker-compose logs worker     # Worker logs
-docker-compose logs -f         # Follow all logs
+docker compose logs app        # Application logs
+docker compose logs worker     # Worker logs
+docker compose logs -f         # Follow all logs
 ```
 
 ### Database Management
@@ -663,7 +654,7 @@ docker exec -i vitransfer-postgres psql -U vitransfer vitransfer < backup.sql
 
 ## Troubleshooting
 
-- Review logs: `docker-compose logs` (use `-f app` or `-f worker` for specific services)
+- Review logs: `docker compose logs` (use `-f app` or `-f worker` for specific services)
 - Verify `.env` matches your compose file
 - Ensure disk space is available: `df -h`
 - If uploads fail, confirm proxy/body size limits and retry with a small file

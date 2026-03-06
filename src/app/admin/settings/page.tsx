@@ -42,6 +42,7 @@ interface Settings {
   defaultWatermarkText: string | null
   defaultAllowClientDeleteComments: boolean | null
   defaultAllowClientUploadFiles: boolean | null
+  defaultAllowAuthenticatedProjectSwitching: boolean | null
   defaultMaxClientUploadAllocationMB: number | null
   autoApproveProject: boolean | null
   autoCloseApprovedProjectsEnabled?: boolean | null
@@ -157,6 +158,7 @@ export default function GlobalSettingsPage() {
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
   const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
+  const [defaultAllowAuthenticatedProjectSwitching, setDefaultAllowAuthenticatedProjectSwitching] = useState(true)
   const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
 
@@ -299,6 +301,7 @@ export default function GlobalSettingsPage() {
         setDefaultWatermarkText(data.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
+        setDefaultAllowAuthenticatedProjectSwitching(data.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(data.autoApproveProject ?? true)
         setAutoCloseApprovedProjectsEnabled(data.autoCloseApprovedProjectsEnabled ?? false)
@@ -524,6 +527,7 @@ export default function GlobalSettingsPage() {
         defaultWatermarkText: defaultWatermarkText || null,
         defaultAllowClientDeleteComments,
         defaultAllowClientUploadFiles,
+        defaultAllowAuthenticatedProjectSwitching,
         defaultMaxClientUploadAllocationMB: typeof defaultMaxClientUploadAllocationMB === 'number'
           ? defaultMaxClientUploadAllocationMB
           : parseInt(String(defaultMaxClientUploadAllocationMB), 10) || 0,
@@ -619,6 +623,7 @@ export default function GlobalSettingsPage() {
         setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
+        setDefaultAllowAuthenticatedProjectSwitching(refreshedData.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(refreshedData.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
         setAutoCloseApprovedProjectsEnabled(refreshedData.autoCloseApprovedProjectsEnabled ?? false)
@@ -931,6 +936,8 @@ export default function GlobalSettingsPage() {
             setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
             defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
             setDefaultAllowClientUploadFiles={setDefaultAllowClientUploadFiles}
+            defaultAllowAuthenticatedProjectSwitching={defaultAllowAuthenticatedProjectSwitching}
+            setDefaultAllowAuthenticatedProjectSwitching={setDefaultAllowAuthenticatedProjectSwitching}
             defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
             setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
             show={showVideoProcessing}

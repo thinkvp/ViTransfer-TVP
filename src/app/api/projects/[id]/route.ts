@@ -43,6 +43,7 @@ const updateProjectSchema = z.object({
   useFullTimecode: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
   allowClientUploadFiles: z.boolean().optional(),
+  allowAuthenticatedProjectSwitching: z.boolean().optional(),
   maxClientUploadAllocationMB: z.number().int().min(0).max(1000000).optional(),
   previewResolution: z.enum(['720p', '1080p', '2160p']).optional(),
   watermarkEnabled: z.boolean().optional(),
@@ -190,6 +191,11 @@ export async function GET(
     // Check SMTP configuration status
     const smtpConfigured = await isSmtpConfigured()
 
+    const globalSettings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { defaultAllowAuthenticatedProjectSwitching: true },
+    })
+
     // Determine fallback name for sanitization
     const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
     const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
@@ -262,6 +268,7 @@ export async function GET(
       comments: sanitizedComments,
       sharePassword: decryptedPassword,
       smtpConfigured,
+      globalAllowAuthenticatedProjectSwitching: globalSettings?.defaultAllowAuthenticatedProjectSwitching ?? true,
       assignedUsers:
         (project as any).assignedUsers
           ?.map((pu: any) => {
@@ -349,7 +356,7 @@ export async function PATCH(
 
     const currentProject = await prisma.project.findUnique({
       where: { id },
-      select: { status: true },
+      select: { status: true, enableVideos: true, enablePhotos: true },
     })
     if (!currentProject) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -605,6 +612,9 @@ export async function PATCH(
     }
     if (validatedBody.allowClientUploadFiles !== undefined) {
       updateData.allowClientUploadFiles = validatedBody.allowClientUploadFiles
+    }
+    if (validatedBody.allowAuthenticatedProjectSwitching !== undefined) {
+      updateData.allowAuthenticatedProjectSwitching = validatedBody.allowAuthenticatedProjectSwitching
     }
     if (validatedBody.maxClientUploadAllocationMB !== undefined) {
       updateData.maxClientUploadAllocationMB = validatedBody.maxClientUploadAllocationMB

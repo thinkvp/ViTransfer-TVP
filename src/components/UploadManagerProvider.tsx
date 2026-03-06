@@ -38,9 +38,11 @@ export type ProcessingJob = {
   projectId: string
   projectName: string
   videoName: string
-  status: 'UPLOADING' | 'QUEUED' | 'PROCESSING'
+  status: 'UPLOADING' | 'QUEUED' | 'PROCESSING' | 'READY'
   processingProgress: number
   processingPhase: string | null
+  allocatedThreads: number | null
+  threadBudget: number | null
 }
 
 export type StartUploadConfig = {
@@ -55,7 +57,7 @@ export type StartUploadConfig = {
 export type UploadManagerContextType = {
   /** Active / queued / recently-completed upload jobs. */
   uploads: UploadJob[]
-  /** Server-side QUEUED / PROCESSING videos (polled). */
+  /** Server-side queued/processing jobs, including READY timeline-only work (polled). */
   processingJobs: ProcessingJob[]
   /** Badge count: queued + uploading + paused + processing. */
   totalActiveCount: number

@@ -60,6 +60,8 @@ export async function POST(request: NextRequest) {
       request,
       quality: 'share-play',
       eventType: 'VIDEO_VIEW',
+      accessMethod: shareContext.accessMethod,
+      email: shareContext.accessMethod === 'OTP' ? shareContext.email : undefined,
     }).catch(() => {})
 
     return NextResponse.json({ tracked: true })

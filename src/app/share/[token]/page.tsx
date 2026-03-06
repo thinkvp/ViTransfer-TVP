@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams, usePathname, useSearchParams } from 'next/navigation'
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
@@ -13,17 +13,28 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
+import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
+
+type SwitchableProject = {
+  id: string
+  slug: string
+  title: string
+  status: string
+  updatedAt: string
+}
 
 export default function SharePage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const pathname = usePathname()
+  const router = useRouter()
   const token = params?.token as string
 
   const wantsAutoGuest = typeof pathname === 'string' && pathname.endsWith('/guest')
@@ -67,6 +78,11 @@ export default function SharePage() {
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
   const [shareToken, setShareToken] = useState<string | null>(null)
   const [isAdminSession, setIsAdminSession] = useState(false)
+  const [switchableProjects, setSwitchableProjects] = useState<SwitchableProject[]>([])
+  const [switchProjectsOpen, setSwitchProjectsOpen] = useState(false)
+  const [switchProjectsLoading, setSwitchProjectsLoading] = useState(false)
+  const [switchProjectsError, setSwitchProjectsError] = useState<string | null>(null)
+  const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const { isDark } = useTheme()
@@ -328,6 +344,116 @@ export default function SharePage() {
       setAlbumsLoading(false)
     }
   }, [token, shareToken, isAdminSession, project, storageKey])
+
+  const fetchSwitchableProjects = useCallback(async (tokenOverride?: string | null) => {
+    const authToken = tokenOverride || shareToken
+
+    if (!token || !project?.id || isGuest || isAdminSession) {
+      setSwitchableProjects([])
+      setSwitchProjectsError(null)
+      return
+    }
+
+    if (!authToken) {
+      setSwitchableProjects([])
+      return
+    }
+
+    setSwitchProjectsLoading(true)
+    setSwitchProjectsError(null)
+    try {
+      const response = await apiFetch(`/api/share/${token}/projects`, {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+
+      if (response.status === 401) {
+        const data = await response.json().catch(() => null)
+        saveShareToken(storageKey, null)
+        setShareToken(null)
+        setIsPasswordProtected(true)
+        setIsAuthenticated(false)
+        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        setSwitchableProjects([])
+        return
+      }
+
+      if (response.status === 403) {
+        setSwitchableProjects([])
+        return
+      }
+
+      if (!response.ok) {
+        setSwitchProjectsError('Unable to load other client projects right now.')
+        setSwitchableProjects([])
+        return
+      }
+
+      const data = await response.json()
+      setSwitchableProjects(Array.isArray(data?.projects) ? data.projects : [])
+    } catch {
+      setSwitchProjectsError('Unable to load other client projects right now.')
+      setSwitchableProjects([])
+    } finally {
+      setSwitchProjectsLoading(false)
+    }
+  }, [token, shareToken, storageKey, project?.id, isGuest, isAdminSession])
+
+  const handleProjectSwitch = useCallback(async (targetProject: SwitchableProject) => {
+    if (!shareToken || !token) return
+
+    setSwitchingProjectId(targetProject.id)
+    setSwitchProjectsError(null)
+    try {
+      const response = await apiFetch(`/api/share/${token}/projects`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${shareToken}`,
+        },
+        body: JSON.stringify({ projectId: targetProject.id }),
+      })
+
+      if (response.status === 401) {
+        const data = await response.json().catch(() => null)
+        saveShareToken(storageKey, null)
+        setShareToken(null)
+        setIsPasswordProtected(true)
+        setIsAuthenticated(false)
+        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        setSwitchProjectsOpen(false)
+        return
+      }
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.shareToken || !data?.project?.slug) {
+        setSwitchProjectsError((data && typeof data?.error === 'string') ? data.error : 'Unable to switch projects right now.')
+        return
+      }
+
+      saveShareToken(data.project.slug, data.shareToken)
+
+      const targetOtpStorageKey = `share-otp-email:${data.project.slug}`
+      try {
+        if (data.accessMethod === 'OTP' && typeof data.email === 'string' && data.email.trim()) {
+          sessionStorage.setItem(targetOtpStorageKey, data.email.trim().toLowerCase())
+        } else {
+          sessionStorage.removeItem(targetOtpStorageKey)
+        }
+      } catch {
+        // ignore session storage failures
+      }
+
+      setSwitchProjectsOpen(false)
+      router.push(`/share/${data.project.slug}`)
+    } catch {
+      setSwitchProjectsError('Unable to switch projects right now.')
+    } finally {
+      setSwitchingProjectId(null)
+    }
+  }, [router, shareToken, storageKey, token])
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
@@ -723,6 +849,16 @@ export default function SharePage() {
     if (!project) return
     void fetchAlbums()
   }, [project, shareToken, fetchAlbums])
+
+  useEffect(() => {
+    if (!project || !isAuthenticated) {
+      setSwitchableProjects([])
+      setSwitchProjectsError(null)
+      return
+    }
+
+    void fetchSwitchableProjects()
+  }, [project, isAuthenticated, fetchSwitchableProjects])
 
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault()
@@ -1175,6 +1311,12 @@ export default function SharePage() {
         activeVideoName={activeVideoName}
         onVideoSelect={handleVideoSelect}
         heading={project.title}
+        showProjectHeadingLabel={true}
+        showProjectSwitcher={switchableProjects.length > 0}
+        onProjectSwitcherOpen={() => {
+          setSwitchProjectsError(null)
+          setSwitchProjectsOpen(true)
+        }}
         hideApprovalGrouping={isGuest}
         albums={albums.map((a: any) => ({
           id: String(a.id),
@@ -1293,6 +1435,65 @@ export default function SharePage() {
           )}
         </div>
       </div>
+
+      <Dialog open={switchProjectsOpen} onOpenChange={setSwitchProjectsOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Other Current Projects</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Select another current project.
+            </p>
+
+            {switchProjectsError && (
+              <div className="rounded-lg border border-destructive-visible bg-destructive-visible p-3 text-sm text-destructive">
+                {switchProjectsError}
+              </div>
+            )}
+
+            {switchProjectsLoading ? (
+              <div className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+                Loading projects...
+              </div>
+            ) : switchableProjects.length === 0 ? (
+              <div className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+                No other current projects are available.
+              </div>
+            ) : (
+              <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+                {switchableProjects.map((switchableProject) => {
+                  const isSwitching = switchingProjectId === switchableProject.id
+                  return (
+                    <button
+                      key={switchableProject.id}
+                      type="button"
+                      onClick={() => void handleProjectSwitch(switchableProject)}
+                      disabled={Boolean(switchingProjectId)}
+                      className="w-full rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-2">
+                          <div className="font-medium text-foreground break-words">
+                            {switchableProject.title}
+                          </div>
+                          <span className={cn('inline-flex rounded-full px-2.5 py-1 text-xs font-medium', projectStatusBadgeClass(switchableProject.status))}>
+                            {projectStatusLabel(switchableProject.status)}
+                          </span>
+                        </div>
+                        <span className="text-sm text-primary">
+                          {isSwitching ? 'Opening...' : 'Open'}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

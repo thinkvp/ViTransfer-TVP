@@ -49,7 +49,8 @@ function normalizeDetails(details: any): { payloadTitle?: string; payloadMessage
       normalizedKey === 'salesdoctype' ||
       normalizedKey === 'salesquoteid' ||
       normalizedKey === 'salesinvoiceid' ||
-      normalizedKey === 'viewurl'
+      normalizedKey === 'viewurl' ||
+      normalizedKey === 'sharetoken'
     )
   }
 

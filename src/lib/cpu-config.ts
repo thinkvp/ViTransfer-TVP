@@ -14,6 +14,7 @@ export interface CpuAllocation {
     CPU_THREADS?: number
     VIDEO_WORKER_CONCURRENCY?: number
     FFMPEG_THREADS_PER_JOB?: number
+    TIMELINE_FFMPEG_THREADS_PER_JOB?: number
   }
 }
 
@@ -118,8 +119,12 @@ export function getCpuAllocation(): CpuAllocation {
     ? clampInt(overrideThreadsPerJob, 1, MAX_FFMPEG_THREADS_PER_JOB)
     : computedThreadsPerJob
 
-  // Keep sprites simple: same budget as transcode.
-  const timelineThreadsPerJob = ffmpegThreadsPerJob
+  // Auxiliary image extraction (currently thumbnails) can be tuned separately
+  // from main transcodes via TIMELINE_FFMPEG_THREADS_PER_JOB.
+  const overrideTimelineThreadsPerJob = parsePositiveIntEnv('TIMELINE_FFMPEG_THREADS_PER_JOB')
+  const timelineThreadsPerJob = overrideTimelineThreadsPerJob
+    ? clampInt(overrideTimelineThreadsPerJob, 1, MAX_FFMPEG_THREADS_PER_JOB)
+    : ffmpegThreadsPerJob
 
   const maxThreadsUsedEstimate = videoWorkerConcurrency * ffmpegThreadsPerJob
 
@@ -134,6 +139,7 @@ export function getCpuAllocation(): CpuAllocation {
       CPU_THREADS: overrideCpuThreads,
       VIDEO_WORKER_CONCURRENCY: overrideConcurrency,
       FFMPEG_THREADS_PER_JOB: overrideThreadsPerJob,
+      TIMELINE_FFMPEG_THREADS_PER_JOB: overrideTimelineThreadsPerJob,
     },
   }
 }
@@ -147,12 +153,15 @@ export function logCpuAllocation(allocation: CpuAllocation): void {
     overrideParts.push(`VIDEO_WORKER_CONCURRENCY=${allocation.overrides.VIDEO_WORKER_CONCURRENCY}`)
   if (allocation.overrides.FFMPEG_THREADS_PER_JOB)
     overrideParts.push(`FFMPEG_THREADS_PER_JOB=${allocation.overrides.FFMPEG_THREADS_PER_JOB}`)
+  if (allocation.overrides.TIMELINE_FFMPEG_THREADS_PER_JOB)
+    overrideParts.push(`TIMELINE_FFMPEG_THREADS_PER_JOB=${allocation.overrides.TIMELINE_FFMPEG_THREADS_PER_JOB}`)
 
   console.log(`[CPU CONFIG] Available threads: ${allocation.effectiveThreads}`)
   console.log(`[CPU CONFIG] Budget (videos/sprites): ${allocation.budgetThreads} (~${Math.round(DEFAULT_VIDEO_CPU_BUDGET_FRACTION * 100)}%)`)
   console.log(`[CPU CONFIG] Video worker concurrency: ${allocation.videoWorkerConcurrency}`)
   console.log(`[CPU CONFIG] FFmpeg threads/job (static baseline): ${allocation.ffmpegThreadsPerJob}`)
   console.log(`[CPU CONFIG] FFmpeg threads/job (dynamic range): ${allocation.ffmpegThreadsPerJob}–${Math.min(allocation.budgetThreads, allocation.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB)} (scales up when fewer jobs are active)`)
+  console.log(`[CPU CONFIG] Auxiliary image threads/job: ${allocation.timelineThreadsPerJob} (set TIMELINE_FFMPEG_THREADS_PER_JOB to override)`)
   console.log(`[CPU CONFIG] Estimated max FFmpeg threads used: ${allocation.maxThreadsUsedEstimate}/${allocation.effectiveThreads} (~${utilizationPercent}%)`)
 
   if (overrideParts.length > 0) {

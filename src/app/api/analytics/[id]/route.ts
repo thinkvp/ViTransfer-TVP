@@ -222,13 +222,14 @@ export async function GET(
     })
 
     // Calculate share page access stats
-    const uniqueSessions = new Set(project.sharePageAccesses.map(a => a.sessionId)).size
+    const visitEvents = project.sharePageAccesses.filter(a => a.eventType !== 'SWITCH_AWAY')
+    const uniqueSessions = new Set(visitEvents.map(a => a.sessionId)).size
 
     const accessByMethod = {
-      OTP: project.sharePageAccesses.filter(a => a.accessMethod === 'OTP').length,
-      PASSWORD: project.sharePageAccesses.filter(a => a.accessMethod === 'PASSWORD').length,
-      GUEST: project.sharePageAccesses.filter(a => a.accessMethod === 'GUEST').length,
-      NONE: project.sharePageAccesses.filter(a => a.accessMethod === 'NONE').length,
+      OTP: visitEvents.filter(a => a.accessMethod === 'OTP').length,
+      PASSWORD: visitEvents.filter(a => a.accessMethod === 'PASSWORD').length,
+      GUEST: visitEvents.filter(a => a.accessMethod === 'GUEST').length,
+      NONE: visitEvents.filter(a => a.accessMethod === 'NONE').length,
     }
 
     const accessBySessionId = new Map(
@@ -278,8 +279,11 @@ export async function GET(
     const authEvents = project.sharePageAccesses.map(access => ({
       id: access.id,
       type: 'AUTH' as const,
+      eventType: access.eventType,
       accessMethod: access.accessMethod,
       email: access.email,
+      originProjectTitle: access.originProjectTitle || null,
+      targetProjectTitle: access.targetProjectTitle || null,
       ipAddress: access.ipAddress || null,
       createdAt: access.createdAt,
     }))
@@ -325,8 +329,8 @@ export async function GET(
         type: 'VIEW' as const,
         videoName: view.video.name,
         versionLabel: view.video.versionLabel,
-        email: access?.email || null,
-        accessMethod: access?.accessMethod || null,
+        email: view.email || access?.email || null,
+        accessMethod: view.accessMethod || access?.accessMethod || null,
         ipAddress: view.ipAddress || null,
         createdAt: view.createdAt,
       }
@@ -454,7 +458,7 @@ export async function GET(
         status: project.status,
       },
       stats: {
-        totalVisits: project.sharePageAccesses.length,
+        totalVisits: visitEvents.length,
         uniqueVisits: uniqueSessions,
         guestVisits: accessByMethod.GUEST,
         accessByMethod,

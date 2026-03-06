@@ -125,6 +125,7 @@ export async function PATCH(request: NextRequest) {
       defaultWatermarkText,
       defaultAllowClientDeleteComments,
       defaultAllowClientUploadFiles,
+      defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
       autoCloseApprovedProjectsEnabled,
@@ -354,6 +355,13 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    if (defaultAllowAuthenticatedProjectSwitching !== undefined && typeof defaultAllowAuthenticatedProjectSwitching !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid value for defaultAllowAuthenticatedProjectSwitching. Must be a boolean.' },
+        { status: 400 }
+      )
+    }
+
     // Handle SMTP password update - only update if actually changed
     let passwordUpdate: string | null | undefined
     if (smtpPassword !== undefined) {
@@ -420,6 +428,7 @@ export async function PATCH(request: NextRequest) {
       defaultWatermarkText,
       defaultAllowClientDeleteComments,
       defaultAllowClientUploadFiles,
+      defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
       autoCloseApprovedProjectsEnabled,
@@ -476,6 +485,8 @@ export async function PATCH(request: NextRequest) {
         defaultPreviewResolution,
         defaultWatermarkText,
         defaultAllowClientDeleteComments,
+        defaultAllowClientUploadFiles,
+        defaultAllowAuthenticatedProjectSwitching,
         autoApproveProject,
         autoCloseApprovedProjectsEnabled,
         autoCloseApprovedProjectsAfterDays,
