@@ -7,7 +7,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { createProjectSchema, validateRequest } from '@/lib/validation'
 import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getSafeguardLimits } from '@/lib/settings'
-import { getRawStoragePath, setProjectRedirect } from '@/lib/storage'
+import { ensureProjectStorageLayout } from '@/lib/storage'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -533,18 +533,11 @@ export async function POST(request: NextRequest) {
     // Real data lives under projects/YYYY-MM/{projectId}. Legacy paths under projects/{projectId}/...
     // are resolved via the central redirect index file in projects/.
     try {
-      const createdAt = (project as any).createdAt ? new Date((project as any).createdAt) : new Date()
-      const yyyy = createdAt.getUTCFullYear()
-      const mm = String(createdAt.getUTCMonth() + 1).padStart(2, '0')
-      const ym = `${yyyy}-${mm}`
-
-      const targetRel = `projects/${ym}/${project.id}`
-      const targetAbs = getRawStoragePath(targetRel)
-      await fs.promises.mkdir(targetAbs, { recursive: true })
-
-      await setProjectRedirect(project.id, targetRel)
+      await ensureProjectStorageLayout(project.id, {
+        createdAt: (project as any).createdAt ?? null,
+      })
     } catch (e) {
-      console.warn('[PROJECT CREATE] Failed to initialize project storage folders:', e)
+      console.error('[PROJECT CREATE] Failed to initialize project storage folders:', e)
     }
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')

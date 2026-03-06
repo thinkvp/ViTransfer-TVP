@@ -21,6 +21,7 @@ type ProjectRedirectIndex = Record<string, string>
 
 let redirectIndexCache: ProjectRedirectIndex | null = null
 let redirectIndexCacheMtimeMs: number | null = null
+const projectLayoutEnsureCache = new Map<string, Promise<void>>()
 
 /**
  * Validate and sanitize file paths to prevent path traversal attacks
@@ -320,6 +321,105 @@ export async function removeProjectRedirect(
 function isValidYearMonth(v: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
 }
+
+function toYearMonthUTC(dateLike: Date): string {
+  const yyyy = dateLike.getUTCFullYear()
+  const mm = String(dateLike.getUTCMonth() + 1).padStart(2, '0')
+  return `${yyyy}-${mm}`
+}
+
+function findYearMonthProjectPathPosix(projectId: string): string | null {
+  try {
+    const projectsRootAbs = path.join(STORAGE_ROOT, 'projects')
+    if (!fs.existsSync(projectsRootAbs)) return null
+
+    const matches = fs.readdirSync(projectsRootAbs, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && isValidYearMonth(entry.name))
+      .map((entry) => entry.name)
+      .filter((ym) => {
+        const candidateAbs = path.join(projectsRootAbs, ym, projectId)
+        return fs.existsSync(candidateAbs) && fs.statSync(candidateAbs).isDirectory()
+      })
+      .sort()
+
+    if (matches.length === 0) return null
+    return `projects/${matches[0]}/${projectId}`
+  } catch {
+    return null
+  }
+}
+
+export async function ensureProjectStorageLayout(
+  projectId: string,
+  opts?: { createdAt?: Date | string | null }
+): Promise<void> {
+  const pid = String(projectId || '').trim()
+  if (!pid || pid === 'closed' || pid.startsWith('.')) return
+
+  const cached = projectLayoutEnsureCache.get(pid)
+  if (cached) {
+    await cached
+    return
+  }
+
+  const pending = (async () => {
+    const existingTarget =
+      readProjectRedirectTargetFromIndexPosix(pid) ||
+      readProjectRedirectTargetPosix(pid) ||
+      findYearMonthProjectPathPosix(pid)
+
+    if (existingTarget) {
+      await fs.promises.mkdir(path.join(STORAGE_ROOT, existingTarget), { recursive: true })
+      await setProjectRedirect(pid, existingTarget).catch(() => {})
+      return
+    }
+
+    try {
+      let createdAt: Date | null = null
+      if (opts?.createdAt) {
+        const candidate = opts.createdAt instanceof Date ? opts.createdAt : new Date(opts.createdAt)
+        if (!Number.isNaN(candidate.getTime())) {
+          createdAt = candidate
+        }
+      }
+
+      if (!createdAt) {
+        const { prisma } = await import('@/lib/db')
+        const project = await prisma.project.findUnique({
+          where: { id: pid },
+          select: { createdAt: true },
+        })
+        createdAt = project?.createdAt ?? null
+      }
+
+      if (!createdAt) return
+
+      const targetRel = `projects/${toYearMonthUTC(createdAt)}/${pid}`
+      await fs.promises.mkdir(path.join(STORAGE_ROOT, targetRel), { recursive: true })
+      await setProjectRedirect(pid, targetRel).catch(() => {})
+    } catch {
+      // Best-effort bootstrap only. Legacy paths continue to work if this fails.
+    }
+  })()
+
+  projectLayoutEnsureCache.set(pid, pending)
+  try {
+    await pending
+  } finally {
+    if (projectLayoutEnsureCache.get(pid) === pending) {
+      projectLayoutEnsureCache.delete(pid)
+    }
+  }
+}
+
+async function ensureProjectStorageLayoutForPath(filePath: string): Promise<void> {
+  const { posixNormalized } = validatePathBase(filePath)
+  const info = isLegacyProjectPath(posixNormalized)
+  if (!info) return
+
+  await ensureProjectStorageLayout(info.projectId)
+}
+
 function resolveRedirectedProjectPath(posixNormalized: string, baseFullPath: string): string | null {
   const info = isLegacyProjectPath(posixNormalized)
   if (!info) return null
@@ -331,7 +431,8 @@ function resolveRedirectedProjectPath(posixNormalized: string, baseFullPath: str
   // Prefer the central redirect index. Fall back to legacy per-project stub file.
   const targetPosix =
     readProjectRedirectTargetFromIndexPosix(info.projectId) ||
-    readProjectRedirectTargetPosix(info.projectId)
+    readProjectRedirectTargetPosix(info.projectId) ||
+    findYearMonthProjectPathPosix(info.projectId)
   if (!targetPosix) return null
 
   const redirectedPosix = info.remainder ? path.posix.join(targetPosix, info.remainder) : targetPosix
@@ -356,6 +457,7 @@ export async function uploadFile(
   size: number,
   contentType: string = 'application/octet-stream'
 ): Promise<void> {
+  await ensureProjectStorageLayoutForPath(filePath)
   const fullPath = validatePath(filePath)
   const dir = path.dirname(fullPath)
 
@@ -400,6 +502,7 @@ export async function moveUploadedFile(
   destLogicalPath: string,
   expectedSize: number,
 ): Promise<void> {
+  await ensureProjectStorageLayoutForPath(destLogicalPath)
   const destFullPath = validatePath(destLogicalPath)
   const destDir = path.dirname(destFullPath)
 

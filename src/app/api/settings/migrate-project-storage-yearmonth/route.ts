@@ -62,6 +62,102 @@ async function removePureRedirectStubFolder(opts: {
   }
 }
 
+async function isPureRedirectStubFolder(dirAbs: string): Promise<boolean> {
+  try {
+    if (!fs.existsSync(dirAbs)) return false
+    const st = fs.statSync(dirAbs)
+    if (!st.isDirectory()) return false
+
+    const children = await fs.promises.readdir(dirAbs).catch(() => [])
+    return children.length === 1 && children[0] === PROJECT_REDIRECT_FILENAME
+  } catch {
+    return false
+  }
+}
+
+async function mergeLegacyProjectFolderIntoTarget(opts: {
+  projectId: string
+  sourceAbs: string
+  targetAbs: string
+  dryRun: boolean
+  errors: Array<{ projectId?: string; path?: string; error: string }>
+}): Promise<void> {
+  const { projectId, sourceAbs, targetAbs, dryRun, errors } = opts
+
+  const entries = await fs.promises.readdir(sourceAbs, { withFileTypes: true }).catch((e: any) => {
+    errors.push({ projectId, path: sourceAbs, error: String(e?.message || e) })
+    return [] as fs.Dirent[]
+  })
+
+  if (entries.length === 0) return
+
+  if (!dryRun) {
+    await fs.promises.mkdir(targetAbs, { recursive: true })
+  }
+
+  for (const entry of entries) {
+    if (entry.name === PROJECT_REDIRECT_FILENAME) continue
+
+    const sourceChildAbs = path.join(sourceAbs, entry.name)
+    const targetChildAbs = path.join(targetAbs, entry.name)
+
+    try {
+      const targetExists = fs.existsSync(targetChildAbs)
+
+      if (entry.isDirectory()) {
+        if (!targetExists) {
+          if (!dryRun) {
+            await fs.promises.rename(sourceChildAbs, targetChildAbs)
+          }
+          continue
+        }
+
+        const targetStat = fs.statSync(targetChildAbs)
+        if (!targetStat.isDirectory()) {
+          errors.push({ projectId, path: targetChildAbs, error: 'Cannot merge legacy project folder: destination is not a directory' })
+          continue
+        }
+
+        await mergeLegacyProjectFolderIntoTarget({
+          projectId,
+          sourceAbs: sourceChildAbs,
+          targetAbs: targetChildAbs,
+          dryRun,
+          errors,
+        })
+
+        if (!dryRun && fs.existsSync(sourceChildAbs)) {
+          const remaining = await fs.promises.readdir(sourceChildAbs).catch(() => [])
+          if (remaining.length === 0) {
+            await fs.promises.rm(sourceChildAbs, { recursive: true, force: true })
+          }
+        }
+        continue
+      }
+
+      if (targetExists) {
+        errors.push({ projectId, path: targetChildAbs, error: 'Cannot merge legacy project file: destination already exists' })
+        continue
+      }
+
+      if (!dryRun) {
+        await fs.promises.mkdir(path.dirname(targetChildAbs), { recursive: true })
+        await fs.promises.rename(sourceChildAbs, targetChildAbs)
+      }
+    } catch (e: any) {
+      errors.push({ projectId, path: sourceChildAbs, error: String(e?.message || e) })
+    }
+  }
+
+  if (!dryRun && fs.existsSync(sourceAbs)) {
+    const remaining = await fs.promises.readdir(sourceAbs).catch(() => [])
+    const remainingNonStub = remaining.filter((name) => name !== PROJECT_REDIRECT_FILENAME)
+    if (remainingNonStub.length === 0) {
+      await fs.promises.rm(sourceAbs, { recursive: true, force: true })
+    }
+  }
+}
+
 async function pruneEmptyClosedFolders(dryRun: boolean, errors: Result['errors']) {
   let pruned = 0
   try {
@@ -179,19 +275,30 @@ export async function POST(request: NextRequest) {
 
     try {
       const targetExists = fs.existsSync(targetAbs) && fs.statSync(targetAbs).isDirectory()
-      if (targetExists) {
-        alreadyInYearMonthFolder++
+      const legacyExists = fs.existsSync(legacyAbs) && fs.statSync(legacyAbs).isDirectory()
+      const legacyIsPureStub = legacyExists ? await isPureRedirectStubFolder(legacyAbs) : false
 
-        // If an old per-project stub folder still exists, remove it (only if it's pure).
-        await removePureRedirectStubFolder({ projectId: p.id, dryRun, errors })
+      if (targetExists) {
+        if (legacyExists && !legacyIsPureStub) {
+          movedProjectIds.push(p.id)
+          movedProjects.push({ id: p.id, title: p.title })
+          movedFromLegacyRoot++
+          if (!dryRun) {
+            await mergeLegacyProjectFolderIntoTarget({
+              projectId: p.id,
+              sourceAbs: legacyAbs,
+              targetAbs,
+              dryRun,
+              errors,
+            })
+          }
+        } else {
+          alreadyInYearMonthFolder++
+        }
       } else {
         // If legacy root has a real folder (not just a redirect stub), move it.
-        const legacyExists = fs.existsSync(legacyAbs) && fs.statSync(legacyAbs).isDirectory()
         if (legacyExists) {
-          const children = await fs.promises.readdir(legacyAbs).catch(() => [])
-          const isPureStub = children.length === 1 && children[0] === PROJECT_REDIRECT_FILENAME
-
-          if (!isPureStub) {
+          if (!legacyIsPureStub) {
             movedProjectIds.push(p.id)
             movedProjects.push({ id: p.id, title: p.title })
             movedFromLegacyRoot++

@@ -318,7 +318,8 @@ export function DeveloperToolsSection({
                 <p className="text-xs text-muted-foreground">
                   Moves existing projects into <span className="font-mono">projects/YYYY-MM/&lt;projectId&gt;</span> based on their
                   created date, and ensures a redirect stub exists at <span className="font-mono">projects/&lt;projectId&gt;</span> so legacy
-                  storage paths still work.
+                  storage paths still work. If a project already has a YYYY-MM folder but newer files were written into the legacy root,
+                  the migration merges that misplaced content back into the correct folder.
                   Run a dry-run first to preview changes.
                 </p>
 
