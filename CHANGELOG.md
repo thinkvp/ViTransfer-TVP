@@ -5,6 +5,14 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-03-06
+
+### Added
+- **Live Client Activity monitor in the admin header** — added a new eye-icon dropdown to the left of Running Jobs that shows recently active client sessions, including share-page viewing, video streaming, video downloads, and asset downloads; clicking an item opens the relevant project for internal users
+
+### Changed
+- **Client activity is now tracked as short-lived live presence instead of analytics-only history** — share-page access and authenticated content requests now write lightweight Redis presence records for the last 2 minutes, allowing admins to see what clients are doing right now even when historical analytics collection is disabled; the new `GET /api/client-activity` endpoint applies the same project visibility and assignment filtering as other admin activity surfaces
+
 ## [1.1.5] - 2026-03-06
 
 ### Changed

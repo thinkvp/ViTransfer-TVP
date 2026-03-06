@@ -7,6 +7,7 @@ import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
+import { recordClientActivity } from '@/lib/client-activity'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -328,6 +329,28 @@ export async function GET(
 
     const isThumbnail = verifiedToken.quality === 'thumbnail'
     const isTimelineAsset = verifiedToken.quality === 'timeline-vtt' || verifiedToken.quality === 'timeline-sprite'
+
+    if (!isAdminRequest) {
+      const activityType = isDownload
+        ? (assetId ? 'DOWNLOADING_ASSET' : 'DOWNLOADING_VIDEO')
+        : (!isThumbnail && !isTimelineAsset ? 'STREAMING_VIDEO' : null)
+
+      if (activityType) {
+        await recordClientActivity({
+          sessionId,
+          projectId: video.projectId,
+          projectTitle: video.project.title,
+          videoId: video.id,
+          videoName: video.name,
+          assetId: assetId || null,
+          assetName: filename || null,
+          activityType,
+          ipAddress: getClientIpAddress(request) || null,
+          throttleKey: `${sessionId}:${video.id}:${assetId || verifiedToken.quality}:${activityType}`,
+          throttleSeconds: 15,
+        })
+      }
+    }
 
     if (isDownload && (isThumbnail || isTimelineAsset)) {
       return NextResponse.json({ error: 'Thumbnails cannot be downloaded directly' }, { status: 403 })

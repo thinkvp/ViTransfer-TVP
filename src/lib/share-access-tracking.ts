@@ -4,6 +4,7 @@ import { getSecuritySettings } from './video-access'
 import { sendPushNotification } from './push-notifications'
 import { getClientIpAddress } from './utils'
 import { isLikelyAdminIp } from './admin-ip-match'
+import { recordClientActivity } from './client-activity'
 
 export async function trackSharePageAccess(params: {
   projectId: string
@@ -26,11 +27,7 @@ export async function trackSharePageAccess(params: {
     request,
   } = params
 
-  // Check if analytics tracking is enabled
   const settings = await getSecuritySettings()
-  if (!settings.trackAnalytics) {
-    return
-  }
 
   // Avoid inflating metrics with admin activity (admin sessions prefixed with "admin:")
   if (sessionId?.startsWith('admin:')) {
@@ -51,11 +48,24 @@ export async function trackSharePageAccess(params: {
   }
 
   try {
-    // Get project name for notification
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: { title: true },
     })
+
+    await recordClientActivity({
+      sessionId,
+      projectId,
+      projectTitle: project?.title || null,
+      activityType: 'VIEWING_SHARE_PAGE',
+      accessMethod,
+      email: accessMethod === 'OTP' ? email || null : null,
+      ipAddress: ipAddress || null,
+    })
+
+    if (!settings.trackAnalytics) {
+      return
+    }
 
     await prisma.sharePageAccess.create({
       data: {
@@ -71,7 +81,6 @@ export async function trackSharePageAccess(params: {
       },
     })
 
-    // Send push notification for successful share page access
     let accessMethodDescription = ''
     if (accessMethod === 'OTP' && email) {
       accessMethodDescription = `OTP (${email})`
