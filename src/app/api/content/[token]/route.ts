@@ -455,8 +455,12 @@ export async function GET(
       const parts = range.replace(/bytes=/, '').split('-')
       const start = parseInt(parts[0], 10)
       const requestedEnd = parts[1] ? parseInt(parts[1], 10) : start + STREAM_CHUNK_SIZE - 1
-      // Cap chunk size so scrubbing doesn't request the entire remainder of the file
-      const end = Math.min(requestedEnd, start + STREAM_CHUNK_SIZE - 1, stat.size - 1)
+      const cappedEnd = isProbe
+        ? requestedEnd
+        : Math.min(requestedEnd, start + STREAM_CHUNK_SIZE - 1)
+      // Cap normal streaming chunk size so scrubbing doesn't request the entire remainder of the file.
+      // Probe requests are allowed to read the full requested range for connection testing.
+      const end = Math.min(cappedEnd, stat.size - 1)
       const chunksize = (end - start) + 1
 
       const fileStream = createReadStream(fullPath, { start, end, highWaterMark: STREAM_HIGH_WATER_MARK })

@@ -932,13 +932,6 @@ export function CommentSectionView({
     setShowDownloadOptions(true)
   }
 
-  const handleOpenSpeedTest = () => {
-    setShowVideoInfo(true)
-    if (canRunSpeedTest) {
-      void handleRunSpeedTest()
-    }
-  }
-
   const handleRunSpeedTest = async () => {
     if (!speedTestTargetUrl) {
       setSpeedTestError('Connection testing is not available for this version yet.')
@@ -1331,18 +1324,6 @@ export function CommentSectionView({
 
                   {showVideoActions ? (
                     <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
-                      {canRunSpeedTest ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 whitespace-nowrap"
-                          onClick={handleOpenSpeedTest}
-                          disabled={speedTestLoading}
-                        >
-                          {speedTestLoading ? 'Testing…' : 'Speed Test'}
-                        </Button>
-                      ) : null}
                       <Button
                         type="button"
                         variant="outline"
