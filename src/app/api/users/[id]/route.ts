@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth, getCurrentUserFromRequest } from '@/lib/auth'
 import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption'
-import { revokeAllUserTokens, clearUserRevocation } from '@/lib/token-revocation'
+import { revokeAllUserTokens } from '@/lib/token-revocation'
 import { rateLimit } from '@/lib/rate-limit'
 import { normalizeHexDisplayColor } from '@/lib/display-color'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -12,6 +12,18 @@ export const runtime = 'nodejs'
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
+
+type UserPatchBody = {
+  email?: string
+  username?: string | null
+  name?: string | null
+  notes?: string | null
+  displayColor?: string | null
+  password?: string
+  oldPassword?: string
+  appRoleId?: string
+  active?: boolean
+}
 
 // GET /api/users/[id] - Get user by ID
 export async function GET(
@@ -46,6 +58,7 @@ export async function GET(
         name: true,
         notes: true,
         displayColor: true,
+        active: true,
         role: true,
         appRoleId: true,
         appRole: {
@@ -98,14 +111,33 @@ export async function PATCH(
 
   try {
     const { id } = await params
-    const body = await request.json()
-    const { email, username, name, notes, displayColor, password, oldPassword, appRoleId } = body
+    const body = (await request.json()) as UserPatchBody
+    const { email, username, name, notes, displayColor, password, oldPassword, appRoleId, active } = body
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        active: true,
+        appRoleId: true,
+        appRole: { select: { isSystemAdmin: true } },
+      },
+    })
+
+    if (!targetUser) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
 
     // Build update data
     const updateData: any = {}
 
     // Track if security-sensitive fields changed
     let roleChanged = false
+    let activeChanged = false
+    let nextRoleIsSystemAdmin = targetUser.appRole?.isSystemAdmin === true
     
     if (email !== undefined) {
       // Check if email is already taken by another user
@@ -178,23 +210,10 @@ export async function PATCH(
         )
       }
 
-      const [current, nextRole] = await Promise.all([
-        prisma.user.findUnique({
-          where: { id },
-          select: { id: true, appRoleId: true, appRole: { select: { isSystemAdmin: true } } },
-        }),
-        prisma.role.findUnique({
-          where: { id: nextRoleId },
-          select: { id: true, isSystemAdmin: true },
-        }),
-      ])
-
-      if (!current) {
-        return NextResponse.json(
-          { error: 'User not found' },
-          { status: 404 }
-        )
-      }
+      const nextRole = await prisma.role.findUnique({
+        where: { id: nextRoleId },
+        select: { id: true, isSystemAdmin: true },
+      })
       if (!nextRole) {
         return NextResponse.json(
           { error: 'Invalid role' },
@@ -202,9 +221,11 @@ export async function PATCH(
         )
       }
 
-      if (current.appRoleId !== nextRole.id) {
+      nextRoleIsSystemAdmin = nextRole.isSystemAdmin === true
+
+      if (targetUser.appRoleId !== nextRole.id) {
         // Safeguard: prevent demoting the last system-admin user.
-        if (current.appRole?.isSystemAdmin && !nextRole.isSystemAdmin) {
+        if (targetUser.appRole?.isSystemAdmin && !nextRole.isSystemAdmin) {
           const systemAdminCount = await prisma.user.count({
             where: { appRole: { isSystemAdmin: true } },
           })
@@ -219,6 +240,28 @@ export async function PATCH(
         updateData.appRoleId = nextRole.id
         roleChanged = true
       }
+    }
+
+    if (active !== undefined) {
+      if (typeof active !== 'boolean') {
+        return NextResponse.json(
+          { error: 'Active must be a boolean' },
+          { status: 400 }
+        )
+      }
+
+      if (nextRoleIsSystemAdmin && active === false) {
+        return NextResponse.json(
+          { error: 'Admin accounts cannot be disabled' },
+          { status: 400 }
+        )
+      }
+
+      updateData.active = nextRoleIsSystemAdmin ? true : active
+      activeChanged = targetUser.active !== updateData.active
+    } else if (nextRoleIsSystemAdmin && targetUser.active !== true) {
+      updateData.active = true
+      activeChanged = true
     }
 
     // Track if password is being changed (for session regeneration)
@@ -293,6 +336,7 @@ export async function PATCH(
         name: true,
         notes: true,
         displayColor: true,
+        active: true,
         role: true,
         appRoleId: true,
         appRole: {
@@ -336,6 +380,19 @@ export async function PATCH(
         securityMessage = securityMessage
           ? `${securityMessage} Role changed - user will need to log in again.`
           : 'Role changed - user will need to log in again to reflect new permissions.'
+      }
+    }
+
+    if (activeChanged) {
+      if (user.active === false) {
+        await revokeAllUserTokens(user.id)
+        securityMessage = securityMessage
+          ? `${securityMessage} Account disabled - user has been signed out.`
+          : 'Account disabled - user has been signed out.'
+      } else {
+        securityMessage = securityMessage
+          ? `${securityMessage} Account re-enabled.`
+          : 'Account re-enabled.'
       }
     }
 

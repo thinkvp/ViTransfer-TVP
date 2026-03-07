@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiPatch, apiPost, apiDelete, apiFetch } from '@/lib/api-client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { useAuth } from '@/components/AuthProvider'
 import { UserFileUpload } from '@/components/UserFileUpload'
 import { UserFileList } from '@/components/UserFileList'
@@ -33,6 +34,7 @@ export default function EditUserPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [currentUser, setCurrentUser] = useState<any>(null)
+  const [togglingActive, setTogglingActive] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -228,6 +230,25 @@ export default function EditUserPage() {
     }
   }
 
+  const handleToggleActive = useCallback(async (nextActive: boolean) => {
+    if (!currentUser || currentUser.appRole?.isSystemAdmin) return
+
+    setError('')
+    setTogglingActive(true)
+
+    const previousUser = currentUser
+    setCurrentUser({ ...currentUser, active: nextActive })
+
+    try {
+      await apiPatch(`/api/users/${userId}`, { active: nextActive })
+    } catch (err: any) {
+      setCurrentUser(previousUser)
+      setError(err?.message || 'Failed to update user')
+    } finally {
+      setTogglingActive(false)
+    }
+  }, [currentUser, userId])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -287,26 +308,39 @@ export default function EditUserPage() {
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-x-hidden">
+      <div className="max-w-4xl mx-auto space-y-6 min-w-0">
         <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>User Details</CardTitle>
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle>User Details</CardTitle>
+            </div>
+            {currentUser?.appRole?.isSystemAdmin !== true && (
+              <div className="flex items-center justify-end gap-2 shrink-0">
+                <span className="text-sm text-muted-foreground">Active</span>
+                <Switch
+                  checked={Boolean(currentUser?.active)}
+                  disabled={loading || togglingActive}
+                  onCheckedChange={(checked) => void handleToggleActive(checked)}
+                  aria-label="Toggle user active"
+                />
+              </div>
+            )}
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit}>
+          <CardContent className="min-w-0">
+            <form onSubmit={handleSubmit} className="min-w-0">
             {error && (
               <div className="bg-destructive-visible border-2 border-destructive-visible text-destructive font-medium px-4 py-3 rounded mb-4">
                 {error}
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 min-w-0">
               {/* Row 1: Email | Full Name */}
               <div className="space-y-2">
                 <Label htmlFor="email">Email *</Label>
@@ -344,7 +378,7 @@ export default function EditUserPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="displayColor">Display Colour</Label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3 min-w-0 sm:flex-nowrap">
                   <input
                     id="displayColor"
                     type="color"
@@ -358,7 +392,7 @@ export default function EditUserPage() {
                     value={formData.displayColor}
                     onChange={(e) => setFormData({ ...formData, displayColor: e.target.value })}
                     placeholder="#RRGGBB"
-                    className="max-w-[140px]"
+                    className="w-full sm:max-w-[140px]"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -429,8 +463,8 @@ export default function EditUserPage() {
                 {/* New Password */}
                 <div className="space-y-2">
                   <Label htmlFor="password">New Password</Label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
+                  <div className="flex flex-wrap gap-2 min-w-0 sm:flex-nowrap">
+                    <div className="relative min-w-0 flex-1">
                       <Input
                         id="password"
                         type={showPassword ? "text" : "password"}
@@ -452,6 +486,7 @@ export default function EditUserPage() {
                       variant="outline"
                       size="icon"
                       onClick={generateRandomPassword}
+                      className="flex-shrink-0"
                       title="Generate new password"
                     >
                       <RefreshCw className="w-4 h-4" />
@@ -461,6 +496,7 @@ export default function EditUserPage() {
                       variant="outline"
                       size="icon"
                       onClick={copyPassword}
+                      className="flex-shrink-0"
                       title="Copy password"
                     >
                       {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
@@ -594,18 +630,19 @@ export default function EditUserPage() {
               )}
             </div>
 
-            <div className="flex gap-3 pt-6 justify-end">
+            <div className="flex flex-col-reverse gap-3 pt-6 justify-end sm:flex-row">
               <Button
                 type="button"
                 variant="outline"
                 size="lg"
+                className="w-full sm:w-auto"
                 onClick={() => router.push('/admin/users')}
                 disabled={loading}
               >
                 <X className="w-4 h-4 mr-2" />
                 <span>Cancel</span>
               </Button>
-              <Button type="submit" variant="default" size="lg" disabled={loading}>
+              <Button type="submit" variant="default" size="lg" className="w-full sm:w-auto" disabled={loading}>
                 <Save className="w-4 h-4 mr-2" />
                 <span>{loading ? 'Saving...' : 'Save Changes'}</span>
               </Button>

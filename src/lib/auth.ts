@@ -15,6 +15,7 @@ export interface AuthUser {
   email: string
   name: string | null
   role: string
+  active?: boolean
   appRoleId?: string
   appRoleName?: string
   appRoleIsSystemAdmin?: boolean
@@ -216,9 +217,24 @@ export async function refreshAdminTokens(params: {
     }
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
+  const user = await prisma.user.findFirst({
+    where: { id: payload.userId, active: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      active: true,
+      appRoleId: true,
+      appRole: {
+        select: {
+          id: true,
+          name: true,
+          isSystemAdmin: true,
+          permissions: true,
+        },
+      },
+    },
   })
   if (!user) {
     await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
@@ -265,6 +281,7 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
   try {
     const user = await prisma.user.findFirst({
       where: {
+        active: true,
         OR: [{ email: usernameOrEmail }, { username: usernameOrEmail }],
       },
       select: {
@@ -272,6 +289,7 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
         email: true,
         name: true,
         role: true,
+        active: true,
         appRoleId: true,
         appRole: {
           select: {
@@ -300,6 +318,7 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
       email: user.email,
       name: user.name,
       role: user.role,
+      active: user.active,
       appRoleId: user.appRoleId,
       appRoleName: user.appRole?.name ?? null,
       appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
@@ -317,13 +336,14 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
   const payload = await verifyAdminAccessToken(bearer)
   if (!payload) return null
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
+  const user = await prisma.user.findFirst({
+    where: { id: payload.userId, active: true },
     select: {
       id: true,
       email: true,
       name: true,
       role: true,
+      active: true,
       appRoleId: true,
       appRole: {
         select: {
@@ -347,6 +367,7 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
     email: user.email,
     name: user.name,
     role: user.role,
+    active: user.active,
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,
     appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
@@ -363,13 +384,14 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   const payload = await verifyAdminAccessToken(token)
   if (!payload) return null
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
+  const user = await prisma.user.findFirst({
+    where: { id: payload.userId, active: true },
     select: {
       id: true,
       email: true,
       name: true,
       role: true,
+      active: true,
       appRoleId: true,
       appRole: {
         select: {
@@ -393,6 +415,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     email: user.email,
     name: user.name,
     role: user.role,
+    active: user.active,
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,
     appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
@@ -489,13 +512,14 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
   if (!adminHeader) return null
   const payload = await verifyAdminAccessToken(adminHeader)
   if (!payload) return null
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
+  const user = await prisma.user.findFirst({
+    where: { id: payload.userId, active: true },
     select: {
       id: true,
       email: true,
       name: true,
       role: true,
+      active: true,
       appRoleId: true,
       appRole: {
         select: {
@@ -517,6 +541,7 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
     email: user.email,
     name: user.name,
     role: user.role,
+    active: user.active,
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,
     appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,

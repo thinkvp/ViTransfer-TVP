@@ -14,6 +14,7 @@ type ClientActivityRow = {
   projectTitle: string | null
   videoId: string | null
   videoName: string | null
+  versionLabel: string | null
   assetId: string | null
   assetName: string | null
   activityType: 'VIEWING_SHARE_PAGE' | 'STREAMING_VIDEO' | 'DOWNLOADING_VIDEO' | 'DOWNLOADING_ASSET'
@@ -72,7 +73,12 @@ function ActivityRow({ activity, onNavigate }: { activity: ClientActivityRow; on
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="truncate text-sm font-medium text-foreground">{getPrimaryLabel(activity)}</div>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <div className="min-w-0 truncate text-sm font-medium text-foreground">{getPrimaryLabel(activity)}</div>
+            {activity.videoName && activity.versionLabel ? (
+              <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">{activity.versionLabel}</div>
+            ) : null}
+          </div>
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <span className="inline-flex h-2 w-2 rounded-full bg-primary" />
             <span>{getActivityLabel(activity)}</span>

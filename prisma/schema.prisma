@@ -19,6 +19,7 @@ model User {
   notes        String?
   displayColor String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   role         UserRole @default(ADMIN)
+  active       Boolean  @default(true)
   appRoleId    String
   appRole      Role     @relation(fields: [appRoleId], references: [id])
   createdAt    DateTime @default(now())
@@ -45,6 +46,8 @@ model User {
   files                UserFile[]
 
   projectViewSettings UserProjectViewSettings[]
+
+  @@index([active])
 }
 
 model Role {

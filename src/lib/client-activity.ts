@@ -18,6 +18,7 @@ export type ClientActivityRecord = {
   projectTitle: string | null
   videoId: string | null
   videoName: string | null
+  versionLabel: string | null
   assetId: string | null
   assetName: string | null
   activityType: ClientActivityType
@@ -34,6 +35,7 @@ type RecordClientActivityInput = {
   projectTitle?: string | null
   videoId?: string | null
   videoName?: string | null
+  versionLabel?: string | null
   assetId?: string | null
   assetName?: string | null
   activityType: ClientActivityType
@@ -99,6 +101,7 @@ export async function recordClientActivity(input: RecordClientActivityInput): Pr
       projectTitle: input.projectTitle ?? existing?.projectTitle ?? null,
       videoId: input.videoId ?? existing?.videoId ?? null,
       videoName: input.videoName ?? existing?.videoName ?? null,
+      versionLabel: input.versionLabel ?? existing?.versionLabel ?? null,
       assetId: input.assetId ?? existing?.assetId ?? null,
       assetName: input.assetName ?? existing?.assetName ?? null,
       activityType: input.activityType,

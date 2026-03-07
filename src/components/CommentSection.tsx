@@ -12,7 +12,7 @@ import CommentInput from './CommentInput'
 import ThemeToggle from './ThemeToggle'
 import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
-import { formatDate, formatTimestamp, formatDateTime } from '@/lib/utils'
+import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -67,6 +67,68 @@ interface CommentSectionProps {
 }
 
 type CommentManagement = ReturnType<typeof useCommentManagement>
+
+type VideoSpeedTestResult = {
+  measuredAt: number
+  latencyMs: number
+  sampleBytes: number
+  sampleDurationMs: number
+  bytesPerSecond: number
+  megabitsPerSecond: number
+  estimatedSeconds: number | null
+  fileSizeBytes: number | null
+}
+
+const SPEED_TEST_PING_BYTES = 64 * 1024
+const SPEED_TEST_SAMPLE_BYTES = 32 * 1024 * 1024
+
+function buildProbeUrl(url: string): string {
+  return url.includes('?') ? `${url}&probe=true` : `${url}?probe=true`
+}
+
+function parseVideoFileSize(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
+function formatMbps(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return 'N/A'
+  return value >= 100 ? `${value.toFixed(0)} Mbps` : `${value.toFixed(1)} Mbps`
+}
+
+function formatEta(seconds: number | null): string {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return 'N/A'
+
+  const roundedSeconds = Math.round(seconds)
+  const hours = Math.floor(roundedSeconds / 3600)
+  const minutes = Math.floor((roundedSeconds % 3600) / 60)
+  const secs = roundedSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${secs}s`
+  }
+  return `${secs}s`
+}
+
+function getSpeedAssessment(megabitsPerSecond: number): string {
+  if (!Number.isFinite(megabitsPerSecond) || megabitsPerSecond <= 0) {
+    return 'Connection test unavailable.'
+  }
+  if (megabitsPerSecond < 5) {
+    return 'Very slow path to the server. Large downloads or streams may take a long time.'
+  }
+  if (megabitsPerSecond < 20) {
+    return 'Usable, but larger previews or downloads may feel slow over this connection.'
+  }
+  return 'Connection looks healthy for playback and download from this browser.'
+}
 
 export function CommentSectionView({
   projectId,
@@ -195,6 +257,9 @@ export function CommentSectionView({
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
   const showFrames = useFullTimecode
   const [showVideoInfo, setShowVideoInfo] = useState(false)
+  const [speedTestResult, setSpeedTestResult] = useState<VideoSpeedTestResult | null>(null)
+  const [speedTestLoading, setSpeedTestLoading] = useState(false)
+  const [speedTestError, setSpeedTestError] = useState<string | null>(null)
   const [guestLinkDialogOpen, setGuestLinkDialogOpen] = useState(false)
   const [guestLinkGenerating, setGuestLinkGenerating] = useState(false)
   const [guestLinkRefreshing, setGuestLinkRefreshing] = useState(false)
@@ -774,6 +839,25 @@ export function CommentSectionView({
   const headerVideo = currentVideo || latestSelectableVideo
   const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
   const approvalEnabledForHeaderVideo = Boolean((headerVideo as any)?.allowApproval)
+  const speedTestStorageKey = useMemo(() => {
+    if (!headerVideo?.id) return null
+    return `video-speed-test:${headerVideo.id}`
+  }, [headerVideo?.id])
+  const headerVideoFileSizeBytes = parseVideoFileSize((headerVideo as any)?.originalFileSize)
+  const speedTestTargetUrl = useMemo(() => {
+    const downloadUrl = typeof (headerVideo as any)?.downloadUrl === 'string'
+      ? String((headerVideo as any).downloadUrl)
+      : ''
+    const streamUrl1080p = typeof (headerVideo as any)?.streamUrl1080p === 'string'
+      ? String((headerVideo as any).streamUrl1080p)
+      : ''
+    const streamUrl720p = typeof (headerVideo as any)?.streamUrl720p === 'string'
+      ? String((headerVideo as any).streamUrl720p)
+      : ''
+
+    return downloadUrl || streamUrl1080p || streamUrl720p || ''
+  }, [headerVideo])
+  const canRunSpeedTest = Boolean(speedTestTargetUrl)
 
   const showOlderVersionNote = Boolean(
     !restrictToLatestVersion &&
@@ -799,6 +883,37 @@ export function CommentSectionView({
     setOpenDownloadAfterApprove(false)
   }, [openDownloadAfterApprove, headerVideo, isAdminView])
 
+  useEffect(() => {
+    if (!showVideoInfo || !speedTestStorageKey) {
+      setSpeedTestResult(null)
+      setSpeedTestError(null)
+      return
+    }
+
+    try {
+      const raw = sessionStorage.getItem(speedTestStorageKey)
+      if (!raw) {
+        setSpeedTestResult(null)
+        setSpeedTestError(null)
+        return
+      }
+
+      const parsed = JSON.parse(raw) as VideoSpeedTestResult
+      if (!parsed?.measuredAt || Date.now() - parsed.measuredAt > 60 * 60 * 1000) {
+        sessionStorage.removeItem(speedTestStorageKey)
+        setSpeedTestResult(null)
+        setSpeedTestError(null)
+        return
+      }
+
+      setSpeedTestResult(parsed)
+      setSpeedTestError(null)
+    } catch {
+      setSpeedTestResult(null)
+      setSpeedTestError(null)
+    }
+  }, [showVideoInfo, speedTestStorageKey])
+
   const handleSelectVideoVersion = (videoId: string) => {
     // Update comments immediately
     window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
@@ -815,6 +930,102 @@ export function CommentSectionView({
     if (!video) return
     if (!(video as any).approved) return
     setShowDownloadOptions(true)
+  }
+
+  const handleOpenSpeedTest = () => {
+    setShowVideoInfo(true)
+    if (canRunSpeedTest) {
+      void handleRunSpeedTest()
+    }
+  }
+
+  const handleRunSpeedTest = async () => {
+    if (!speedTestTargetUrl) {
+      setSpeedTestError('Connection testing is not available for this version yet.')
+      return
+    }
+
+    const probeUrl = buildProbeUrl(speedTestTargetUrl)
+
+    setSpeedTestLoading(true)
+    setSpeedTestError(null)
+
+    try {
+      const latencyStart = performance.now()
+      const latencyResponse = await fetch(probeUrl, {
+        headers: {
+          Range: `bytes=0-${SPEED_TEST_PING_BYTES - 1}`,
+        },
+        cache: 'no-store',
+      })
+
+      if (!latencyResponse.ok && latencyResponse.status !== 206) {
+        throw new Error('The server could not start the connection test.')
+      }
+
+      const latencyMs = performance.now() - latencyStart
+      const latencyReader = latencyResponse.body?.getReader()
+      if (latencyReader) {
+        await latencyReader.read().catch(() => undefined)
+        await latencyReader.cancel().catch(() => undefined)
+      }
+
+      const sampleStart = performance.now()
+      const sampleResponse = await fetch(probeUrl, {
+        headers: {
+          Range: `bytes=0-${SPEED_TEST_SAMPLE_BYTES - 1}`,
+        },
+        cache: 'no-store',
+      })
+
+      if (!sampleResponse.ok && sampleResponse.status !== 206) {
+        throw new Error('The server could not complete the download sample.')
+      }
+
+      const reader = sampleResponse.body?.getReader()
+      if (!reader) {
+        throw new Error('The browser could not read the download sample.')
+      }
+
+      let bytesRead = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        bytesRead += value.byteLength
+      }
+
+      const sampleDurationMs = performance.now() - sampleStart
+      if (bytesRead <= 0 || sampleDurationMs <= 0) {
+        throw new Error('No download data was received during the test.')
+      }
+
+      const bytesPerSecond = bytesRead / (sampleDurationMs / 1000)
+      const megabitsPerSecond = (bytesPerSecond * 8) / (1024 * 1024)
+      const result: VideoSpeedTestResult = {
+        measuredAt: Date.now(),
+        latencyMs,
+        sampleBytes: bytesRead,
+        sampleDurationMs,
+        bytesPerSecond,
+        megabitsPerSecond,
+        estimatedSeconds: headerVideoFileSizeBytes ? headerVideoFileSizeBytes / bytesPerSecond : null,
+        fileSizeBytes: headerVideoFileSizeBytes,
+      }
+
+      setSpeedTestResult(result)
+      if (speedTestStorageKey) {
+        try {
+          sessionStorage.setItem(speedTestStorageKey, JSON.stringify(result))
+        } catch {
+          // ignore storage failures
+        }
+      }
+    } catch (error) {
+      setSpeedTestResult(null)
+      setSpeedTestError(error instanceof Error ? error.message : 'Connection test failed.')
+    } finally {
+      setSpeedTestLoading(false)
+    }
   }
 
   const handleApproveSelected = async () => {
@@ -1120,6 +1331,18 @@ export function CommentSectionView({
 
                   {showVideoActions ? (
                     <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
+                      {canRunSpeedTest ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 whitespace-nowrap"
+                          onClick={handleOpenSpeedTest}
+                          disabled={speedTestLoading}
+                        >
+                          {speedTestLoading ? 'Testing…' : 'Speed Test'}
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="outline"
@@ -1147,6 +1370,10 @@ export function CommentSectionView({
                               <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
                             </div>
                             <div className="flex justify-between">
+                              <span className="text-muted-foreground">File Size:</span>
+                              <span className="font-medium">{headerVideoFileSizeBytes ? formatFileSize(headerVideoFileSizeBytes) : 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
                               <span className="text-muted-foreground">Resolution:</span>
                               <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
                             </div>
@@ -1166,6 +1393,56 @@ export function CommentSectionView({
                               <span className="text-muted-foreground">Upload Date:</span>
                               <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
                             </div>
+
+                            {canRunSpeedTest ? (
+                              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <div className="font-medium text-foreground">Connection Test</div>
+                                    <div className="text-xs text-muted-foreground">
+                                      Tests the current browser path using a 32 MB range request from the best available video source.
+                                    </div>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => void handleRunSpeedTest()}
+                                    disabled={speedTestLoading}
+                                  >
+                                    {speedTestLoading ? 'Testing…' : speedTestResult ? 'Retest' : 'Run Test'}
+                                  </Button>
+                                </div>
+
+                                {speedTestError ? (
+                                  <div className="text-xs text-destructive">{speedTestError}</div>
+                                ) : null}
+
+                                {speedTestResult ? (
+                                  <div className="space-y-2 text-xs sm:text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Average Speed:</span>
+                                      <span className="font-medium">{formatMbps(speedTestResult.megabitsPerSecond)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Latency:</span>
+                                      <span className="font-medium">{Math.round(speedTestResult.latencyMs)} ms</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Sample Size:</span>
+                                      <span className="font-medium">{formatFileSize(speedTestResult.sampleBytes)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Est. Full Download:</span>
+                                      <span className="font-medium">{formatEta(speedTestResult.estimatedSeconds)}</span>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {getSpeedAssessment(speedTestResult.megabitsPerSecond)}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                       </DialogContent>

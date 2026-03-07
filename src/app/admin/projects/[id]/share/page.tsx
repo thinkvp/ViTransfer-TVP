@@ -120,19 +120,13 @@ export default function AdminSharePage() {
           }
 
           if (video.approved) {
-            const shouldStreamOriginal = isWatermarkEnabled
             const responseOriginal = await apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=original&sessionId=${sessionId}`)
             if (responseOriginal.ok) {
               const dataOriginal = await responseOriginal.json()
               downloadToken = dataOriginal.token
 
-              if (shouldStreamOriginal) {
-                streamToken720p = dataOriginal.token
-                streamToken1080p = dataOriginal.token
-              } else {
-                streamToken720p = streamToken720p || dataOriginal.token
-                streamToken1080p = streamToken1080p || dataOriginal.token
-              }
+              streamToken720p = streamToken720p || dataOriginal.token
+              streamToken1080p = streamToken1080p || dataOriginal.token
             }
           }
 
@@ -942,6 +936,7 @@ function AdminShareFeedbackGrid({
               onApprove={undefined}
               hideDownloadButton={true}
               commentsForTimeline={management.comments as any}
+              disableFullscreenCommentsUI={commentsDisabled}
               fillContainer
               pinControlsToBottom={!commentInputInRightColumn && !commentsDisabled}
             />

@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
         username: true,
         name: true,
         displayColor: true,
+        active: true,
         role: true,
         appRoleId: true,
         appRole: {
@@ -208,6 +209,7 @@ export async function POST(request: NextRequest) {
         username: true,
         name: true,
         displayColor: true,
+        active: true,
         role: true,
         appRoleId: true,
         appRole: {

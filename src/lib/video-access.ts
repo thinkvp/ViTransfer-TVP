@@ -10,6 +10,7 @@ type SecuritySettingsResult = {
   hotlinkProtection: string
   ipRateLimit: number
   sessionRateLimit: number
+  shareSessionRateLimit: number
   trackSecurityLogs: boolean
   trackAnalytics: boolean
 }
@@ -20,6 +21,7 @@ const securitySettingsCache: CachedValue<SecuritySettingsResult> = {
     hotlinkProtection: 'LOG_ONLY',
     ipRateLimit: 1000,
     sessionRateLimit: 600,
+    shareSessionRateLimit: 300,
     trackSecurityLogs: true,
     trackAnalytics: true
   },
@@ -594,6 +596,7 @@ export async function getSecuritySettings() {
       hotlinkProtection: true,
       ipRateLimit: true,
       sessionRateLimit: true,
+      shareSessionRateLimit: true,
       trackSecurityLogs: true,
       trackAnalytics: true,
       updatedAt: true
@@ -604,6 +607,7 @@ export async function getSecuritySettings() {
     hotlinkProtection: settings?.hotlinkProtection || 'LOG_ONLY',
     ipRateLimit: settings?.ipRateLimit || 1000,
     sessionRateLimit: settings?.sessionRateLimit || 600,
+    shareSessionRateLimit: settings?.shareSessionRateLimit || 300,
     trackSecurityLogs: settings?.trackSecurityLogs ?? true,
     trackAnalytics: settings?.trackAnalytics ?? true
   }

@@ -68,6 +68,10 @@ interface VideoPlayerProps {
   // Useful for minimal “player-only” viewers.
   disableCommentsUI?: boolean
 
+  // Optional: disables only the fullscreen comments toggle/open behavior.
+  // Useful when comments remain visible elsewhere, but leaving new comments is disabled.
+  disableFullscreenCommentsUI?: boolean
+
   // Optional: when true, VideoPlayer will fill its parent height (non-fullscreen)
   // and allow the video area to flex/shrink to fit available space.
   fitToContainerHeight?: boolean
@@ -113,6 +117,7 @@ export default function VideoPlayer({
   hideDownloadButton = false, // Default to false (show download button)
   commentsForTimeline = [],
   disableCommentsUI = false,
+  disableFullscreenCommentsUI = false,
   fitToContainerHeight = false,
   viewportHeightOffsetPx,
   controlsBottomPaddingPx,
@@ -542,6 +547,17 @@ export default function VideoPlayer({
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+
+    if (disableFullscreenCommentsUI) {
+      setIsFullscreenChatOpen(false)
+      window.dispatchEvent(
+        new CustomEvent('fullscreenChatSetOpen', {
+          detail: { open: false },
+        })
+      )
+      return
+    }
+
     window.dispatchEvent(
       new CustomEvent('videoFullscreenStateChanged', {
         detail: { isInFullscreen },
@@ -567,7 +583,7 @@ export default function VideoPlayer({
         })
       )
     }
-  }, [canShowTimelineHover, isInFullscreen, isFullscreenChatOpen])
+  }, [canShowTimelineHover, disableFullscreenCommentsUI, isInFullscreen, isFullscreenChatOpen])
 
   useEffect(() => {
     if (!isPseudoFullscreen) return
@@ -1721,7 +1737,7 @@ export default function VideoPlayer({
                 </>
               )}
 
-              {isInFullscreen && canShowTimelineHover && !disableCommentsUI && !isGuest && (
+              {isInFullscreen && canShowTimelineHover && !disableCommentsUI && !disableFullscreenCommentsUI && !isGuest && (
                 <Button
                   type="button"
                   variant={isFullscreenChatOpen ? 'default' : 'outline'}

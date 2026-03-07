@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-03-07
+
+### Added
+- **Connection speed test in Video Information panel** — a new "Speed Test" button appears in the comment panel header for any video with a playable stream; clicking it opens the Video Information dialog and immediately runs a two-phase test: a 64 KB ping to measure latency followed by a 32 MB byte-range download to measure throughput; results show average speed (Mbps), latency (ms), the actual bytes sampled, an estimated full-file download time, and a qualitative assessment of the connection; results are cached in `sessionStorage` per video for one hour so re-opening the panel restores the last reading without re-running; the test sources the best available URL in priority order — approved download token, 1080p preview stream, 720p preview stream — so it works on all video versions, not just approved ones
+- **User active/inactive toggle** — admin users (excluding system admins) can now be suspended from the Users list and from the Edit User page; toggling to inactive immediately revokes all current tokens and signs the user out of every active session; re-enabling restores normal access on next login; system admin accounts cannot be disabled; backed by a new `active` boolean column on the `User` table (default `true`, indexed) with a matching database migration
+
+### Changed
+- **Approved video token fetching always prefers preview streams for playback** — when a video is approved, the share page and admin share page now always request separate 720p/1080p preview tokens alongside the original download token; the original-quality token is used only as the `downloadUrl` and as a playback fallback when preview streams are absent; the previous watermark branch that forced original-quality streams for both playback and download is removed, so watermarked approved videos now always play back from the lower-bandwidth preview
+- **Share session rate limiting is now separate from admin session rate limiting** — `GET /api/content/[token]` now reads `shareSessionRateLimit` from security settings (default 300 req/min) for non-admin sessions instead of sharing the same `sessionRateLimit` counter used by admins; download chunk size reduced from 50 MB to 16 MB to keep per-chunk transfer times manageable on slow connections
+- **Fullscreen comment input suppressed after approval** — once a project or video is approved, the floating fullscreen comment overlay on the video player is hidden and its toggle button is removed; backed by a new `disableFullscreenCommentsUI` prop on `VideoPlayer` passed down from both share and admin share pages when `commentsDisabled` is true
+
+### Fixed
+- **Passkey sign-in now returns full RBAC role and permissions** — `verifyPasskeyAuthentication` previously returned a stripped `AuthUser` with no `appRoleId`, `appRoleName`, or `permissions`, causing passkey-authenticated users to lose their role-based menu visibility and access controls until they re-authenticated via password; the credential query now fetches the full role object and the returned result includes all fields matching the password/OTP login path
+- **Video worker now routes processed files through the storage abstraction** — `processTimelinePreviews`, `processPreview`, and `processThumbnail` previously constructed absolute paths directly from `STORAGE_ROOT`, bypassing the year-month redirect index; they now call `moveUploadedFile` from the storage layer so all processed files are written to (and remain discoverable via) the correct logical path regardless of storage layout
+
+### Security
+- **Disabled users are blocked across all authentication paths** — `verifyCredentials` (password and OTP login), `refreshAdminTokens` (token refresh), `getCurrentUserFromRequest`, `getCurrentUser`, `getAdminOverrideFromRequest`, and `verifyPasskeyAuthentication` all now filter by `active: true`; disabling an account immediately invalidates all existing access and refresh tokens so the user is signed out of every session without waiting for token expiry
+
 ## [1.1.6] - 2026-03-06
 
 ### Added

@@ -1,10 +1,9 @@
 import { prisma } from '../lib/db'
-import { getFilePath, STORAGE_ROOT } from '../lib/storage'
+import { getFilePath, moveUploadedFile } from '../lib/storage'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite } from '../lib/ffmpeg'
 import type { VideoStatus } from '@prisma/client'
 import fs from 'fs'
 import path from 'path'
-import { mkdir } from 'fs/promises'
 import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
 
@@ -84,7 +83,7 @@ export function debugLog(message: string, data?: any) {
  */
 async function moveToStorage(srcPath: string, destPath: string): Promise<void> {
   const destDir = path.dirname(destPath)
-  await mkdir(destDir, { recursive: true })
+  await fs.promises.mkdir(destDir, { recursive: true })
 
   try {
     await fs.promises.rename(srcPath, destPath)
@@ -99,6 +98,11 @@ async function moveToStorage(srcPath: string, destPath: string): Promise<void> {
       throw err
     }
   }
+}
+
+async function moveTempFileToLogicalStorage(srcPath: string, destLogicalPath: string): Promise<void> {
+  const stats = await fs.promises.stat(srcPath)
+  await moveUploadedFile(srcPath, destLogicalPath, stats.size)
 }
 
 /**
@@ -337,16 +341,13 @@ export async function processTimelinePreviews(
   const spritesPath = `projects/${projectId}/videos/${videoId}/timeline-previews`
   const vttPath = `${spritesPath}/index.vtt`
 
-  const destDir = path.join(STORAGE_ROOT, ...spritesPath.split('/'))
-  await mkdir(destDir, { recursive: true })
-
-  await moveToStorage(tempVttPath, path.join(destDir, 'index.vtt'))
+  await moveTempFileToLogicalStorage(tempVttPath, vttPath)
 
   const localFiles = await fs.promises.readdir(tempDir)
   const spriteFiles = localFiles.filter((f) => f.startsWith('sprite-') && f.endsWith('.jpg'))
   for (const spriteFile of spriteFiles) {
     const localSpritePath = path.join(tempDir, spriteFile)
-    await moveToStorage(localSpritePath, path.join(destDir, spriteFile))
+    await moveTempFileToLogicalStorage(localSpritePath, `${spritesPath}/${spriteFile}`)
   }
 
   return { vttPath, spritesPath, ready: true }
@@ -470,12 +471,11 @@ export async function processPreview(
 
   // Move preview to storage (atomic rename on same filesystem, stream-copy fallback)
   const previewPath = `projects/${projectId}/videos/${videoId}/preview-${settings.resolution}.mp4`
-  const previewFullPath = path.join(STORAGE_ROOT, ...previewPath.split('/'))
 
-  debugLog('Moving preview to:', previewFullPath)
+  debugLog('Moving preview to logical path:', previewPath)
 
   const moveStart = Date.now()
-  await moveToStorage(tempPreviewPath, previewFullPath)
+  await moveTempFileToLogicalStorage(tempPreviewPath, previewPath)
   // File has been moved — remove from tempFiles so cleanup doesn't try to delete a missing file
   delete tempFiles.preview
   const moveTime = Date.now() - moveStart
@@ -528,12 +528,11 @@ export async function processThumbnail(
 
   // Move thumbnail to storage (atomic rename on same filesystem, stream-copy fallback)
   const thumbnailPath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
-  const thumbnailFullPath = path.join(STORAGE_ROOT, ...thumbnailPath.split('/'))
 
-  debugLog('Moving thumbnail to:', thumbnailFullPath)
+  debugLog('Moving thumbnail to logical path:', thumbnailPath)
 
   const moveStart = Date.now()
-  await moveToStorage(tempThumbnailPath, thumbnailFullPath)
+  await moveTempFileToLogicalStorage(tempThumbnailPath, thumbnailPath)
   // File has been moved — remove from tempFiles so cleanup doesn't try to delete a missing file
   delete tempFiles.thumbnail
   const moveTime = Date.now() - moveStart

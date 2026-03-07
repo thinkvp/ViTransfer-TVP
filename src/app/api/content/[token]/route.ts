@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 
 const STREAM_HIGH_WATER_MARK = 1 * 1024 * 1024 // 1MB stream buffer
 const STREAM_CHUNK_SIZE = 4 * 1024 * 1024 // 4MB chunks for smooth scrubbing/streaming
-const DOWNLOAD_CHUNK_SIZE = 50 * 1024 * 1024 // 50MB chunks
+const DOWNLOAD_CHUNK_SIZE = 16 * 1024 * 1024 // 16MB chunks – keeps transfer time per chunk under ~25s at 5 Mbps
 
 function isValidMimeType(value: unknown): value is string {
   if (typeof value !== 'string') return false
@@ -121,6 +121,7 @@ export async function GET(
     const { token } = await params
     const { searchParams } = new URL(request.url)
     const isDownload = searchParams.get('download') === 'true'
+    const isProbe = searchParams.get('probe') === 'true'
     const assetId = searchParams.get('assetId')
 
     const securitySettings = await getSecuritySettings()
@@ -192,7 +193,10 @@ export async function GET(
     if (sessionCount === 1) {
       await redis.expire(sessionCounterKey, 60)
     }
-    if (sessionCount > securitySettings.sessionRateLimit) {
+    const effectiveSessionLimit = isAdminRequest
+      ? securitySettings.sessionRateLimit
+      : securitySettings.shareSessionRateLimit
+    if (sessionCount > effectiveSessionLimit) {
       await logSecurityEvent({
         type: 'RATE_LIMIT_HIT',
         severity: 'INFO',
@@ -254,6 +258,7 @@ export async function GET(
     let filePath: string | null = null
     let filename: string | null = null
     let contentType = 'video/mp4'
+    const canServeOriginal = Boolean(originalPath && (isAdminRequest || video.approved))
 
     // Handle asset download
     if (assetId && isDownload) {
@@ -305,13 +310,14 @@ export async function GET(
 
         filePath = `${spritesBasePath}/${spriteFile}`
         contentType = 'image/jpeg'
-      } else if (isDownload && isAdminRequest && originalPath) {
-        // Admin downloads should always use the original file, even before approval
-        filePath = originalPath
-      } else if (video.approved && originalPath) {
-        filePath = originalPath
-      } else {
-        filePath = video.preview1080Path || video.preview720Path
+      } else if (verifiedToken.quality === 'original' || verifiedToken.quality === 'download') {
+        if (canServeOriginal) {
+          filePath = originalPath
+        }
+      } else if (verifiedToken.quality === '1080p') {
+        filePath = video.preview1080Path || video.preview720Path || (canServeOriginal ? originalPath : null)
+      } else if (verifiedToken.quality === '720p') {
+        filePath = video.preview720Path || video.preview1080Path || (canServeOriginal ? originalPath : null)
       }
     }
 
@@ -330,7 +336,7 @@ export async function GET(
     const isThumbnail = verifiedToken.quality === 'thumbnail'
     const isTimelineAsset = verifiedToken.quality === 'timeline-vtt' || verifiedToken.quality === 'timeline-sprite'
 
-    if (!isAdminRequest) {
+    if (!isAdminRequest && !isProbe) {
       const activityType = isDownload
         ? (assetId ? 'DOWNLOADING_ASSET' : 'DOWNLOADING_VIDEO')
         : (!isThumbnail && !isTimelineAsset ? 'STREAMING_VIDEO' : null)
@@ -342,6 +348,7 @@ export async function GET(
           projectTitle: video.project.title,
           videoId: video.id,
           videoName: video.name,
+          versionLabel: video.versionLabel || null,
           assetId: assetId || null,
           assetName: filename || null,
           activityType,
@@ -358,7 +365,9 @@ export async function GET(
 
     const range = request.headers.get('range')
 
-    const cacheControl = (isThumbnail || isTimelineAsset)
+    const cacheControl = isProbe
+      ? 'private, no-store, must-revalidate'
+      : (isThumbnail || isTimelineAsset)
       ? 'private, no-store, must-revalidate'
       : 'public, max-age=3600'
 
@@ -375,7 +384,7 @@ export async function GET(
       }
 
       const trackDownloadOnce = async () => {
-        if (!isAdminRequest) {
+        if (!isAdminRequest && !isProbe) {
           await trackVideoAccess({
             videoId: verifiedToken.videoId,
             projectId: verifiedToken.projectId,

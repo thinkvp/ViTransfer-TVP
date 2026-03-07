@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { defaultRolePermissions, normalizeRolePermissions, type RolePermissions } from '@/lib/rbac'
 import { PROJECT_STATUS_OPTIONS, projectStatusBadgeClass, type ProjectStatus } from '@/lib/project-status'
 import { cn, formatDateTime } from '@/lib/utils'
@@ -20,6 +21,7 @@ interface User {
   username: string | null
   name: string | null
   displayColor: string | null
+  active: boolean
   appRoleId: string
   appRole: { id: string; name: string; isSystemAdmin: boolean }
   createdAt: string
@@ -105,6 +107,7 @@ export default function UsersPage() {
   const [roleDialogOpen, setRoleDialogOpen] = useState(false)
   const [roleDialogMode, setRoleDialogMode] = useState<'create' | 'edit'>('create')
   const [roleDialogError, setRoleDialogError] = useState('')
+  const [updatingUserIds, setUpdatingUserIds] = useState<Set<string>>(new Set())
   const [activeRoleId, setActiveRoleId] = useState<string | null>(null)
   const [roleName, setRoleName] = useState('')
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => defaultRolePermissions())
@@ -147,6 +150,30 @@ export default function UsersPage() {
       void fetchUsersAndRoles()
     } catch (err: any) {
       alert(err.message)
+    }
+  }
+
+  const setUserActive = async (userId: string, nextActive: boolean) => {
+    const targetUser = users.find((user) => user.id === userId)
+    if (!targetUser || targetUser.appRole?.isSystemAdmin) return
+
+    setError('')
+    setUpdatingUserIds((prev) => new Set(prev).add(userId))
+
+    const previousUsers = users
+    setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, active: nextActive } : user)))
+
+    try {
+      await apiPatch(`/api/users/${userId}`, { active: nextActive })
+    } catch (err: any) {
+      setUsers(previousUsers)
+      setError(err?.message || 'Failed to update user')
+    } finally {
+      setUpdatingUserIds((prev) => {
+        const next = new Set(prev)
+        next.delete(userId)
+        return next
+      })
     }
   }
 
@@ -283,11 +310,11 @@ export default function UsersPage() {
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px] sm:min-w-[160px]">User</th>
-                        <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px] hidden md:table-cell">Username</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[180px] hidden md:table-cell">Email</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[100px] sm:min-w-[140px]">Role</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[160px] hidden md:table-cell">Last Login</th>
                         <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[80px] hidden md:table-cell">Colour</th>
+                        <th scope="col" className="px-2 sm:px-3 py-2 text-center text-xs font-medium text-muted-foreground w-[76px] sm:w-[84px]">Active</th>
                         <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-muted-foreground w-[50px] sm:w-[64px] whitespace-nowrap">Actions</th>
                       </tr>
                     </thead>
@@ -308,9 +335,6 @@ export default function UsersPage() {
                         >
                           <td className="px-3 py-2">
                             <div className="font-medium truncate">{user.name || user.username || user.email}</div>
-                          </td>
-                          <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
-                            <div className="truncate max-w-[220px]">{user.username ? `@${user.username}` : '—'}</div>
                           </td>
                           <td className="px-3 py-2 hidden md:table-cell text-muted-foreground">
                             <div className="truncate max-w-[320px]">{user.email}</div>
@@ -337,6 +361,26 @@ export default function UsersPage() {
                                 aria-label={user.displayColor ? `Display colour ${user.displayColor}` : 'Display colour'}
                               />
                             </div>
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-center">
+                            {user.appRole?.isSystemAdmin ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <div
+                                className="inline-flex items-center justify-center"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label="Toggle user active"
+                              >
+                                <Switch
+                                  checked={Boolean(user.active)}
+                                  disabled={updatingUserIds.has(user.id)}
+                                  onCheckedChange={(checked) => void setUserActive(user.id, checked)}
+                                />
+                              </div>
+                            )}
                           </td>
                           <td className="px-2 py-2 text-right">
                             <div className="inline-flex items-center gap-2">

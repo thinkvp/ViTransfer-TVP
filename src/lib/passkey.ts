@@ -40,6 +40,7 @@ import { getRedis } from './redis'
 import { getWebAuthnConfig } from './settings'
 import { logSecurityEvent } from './video-access'
 import type { AuthUser } from './auth'
+import { adminAllPermissions, normalizeRolePermissions } from './rbac'
 
 /**
  * Challenge storage constants
@@ -382,6 +383,16 @@ export async function verifyPasskeyAuthentication(
             email: true,
             name: true,
             role: true,
+            active: true,
+            appRoleId: true,
+            appRole: {
+              select: {
+                id: true,
+                name: true,
+                isSystemAdmin: true,
+                permissions: true,
+              },
+            },
           },
         },
       },
@@ -391,6 +402,13 @@ export async function verifyPasskeyAuthentication(
       return {
         success: false,
         error: 'PassKey not found.',
+      }
+    }
+
+    if (credential.user.active !== true) {
+      return {
+        success: false,
+        error: 'PassKey authentication failed. Please try again.',
       }
     }
 
@@ -446,7 +464,7 @@ export async function verifyPasskeyAuthentication(
       details: {
         userId: credential.user.id,
         email: credential.user.email,
-        role: credential.user.role,
+        role: credential.user.appRole?.name ?? credential.user.role,
         credentialId: credential.id,
         deviceType: credential.deviceType,
       },
@@ -459,6 +477,11 @@ export async function verifyPasskeyAuthentication(
         email: credential.user.email,
         name: credential.user.name,
         role: credential.user.role,
+        active: credential.user.active,
+        appRoleId: credential.user.appRoleId,
+        appRoleName: credential.user.appRole?.name ?? null,
+        appRoleIsSystemAdmin: credential.user.appRole?.isSystemAdmin ?? false,
+        permissions: (credential.user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(credential.user.appRole?.permissions)),
       },
     }
   } catch (error) {
