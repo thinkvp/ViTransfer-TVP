@@ -7,6 +7,8 @@ export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
 
+const COUNTED_DOWNLOAD_EVENT_TYPES = ['DOWNLOAD_COMPLETE', 'DOWNLOAD_SUCCEEDED']
+
 // GET /api/analytics - Get analytics for all projects
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAuth(request)
@@ -65,7 +67,7 @@ export async function GET(request: NextRequest) {
           },
         },
         analytics: {
-          where: { eventType: 'DOWNLOAD_COMPLETE' },
+          where: { eventType: { in: COUNTED_DOWNLOAD_EVENT_TYPES } },
           select: {
             eventType: true,
           },

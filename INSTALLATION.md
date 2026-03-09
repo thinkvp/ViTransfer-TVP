@@ -229,6 +229,18 @@ docker compose logs -f app
 For production use with a custom domain, set up a reverse proxy with HTTPS.
 Tested with Cloudflare Tunnels — set `CLOUDFLARE_TUNNEL=true` in `.env`.
 
+When your app sits behind a reverse proxy, set `TRUSTED_PROXIES` in `.env` to the IP address(es) of your proxy. This ensures rate limiting, IP blocklisting, and security event logs all see the real client IP instead of the proxy's IP.
+
+```env
+# Example — replace with your actual proxy IP(s)
+TRUSTED_PROXIES=192.168.1.1
+
+# Multiple proxies (comma-separated)
+TRUSTED_PROXIES=192.168.1.1,10.0.0.1
+```
+
+If this is not set, the app will fall back to the left-most `X-Forwarded-For` value with a console warning. This works for development but is not recommended for production.
+
 ### Configure Email (Optional)
 
 1. Go to Settings > Email Configuration

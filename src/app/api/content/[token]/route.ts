@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyVideoAccessToken, detectHotlinking, trackVideoAccess, logSecurityEvent, getSecuritySettings } from '@/lib/video-access'
+import { verifyVideoAccessToken, detectHotlinking, logSecurityEvent, getSecuritySettings } from '@/lib/video-access'
 import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync, ReadStream } from 'fs'
@@ -8,6 +8,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
 import { recordClientActivity } from '@/lib/client-activity'
+import { registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -36,7 +37,15 @@ function isValidMimeType(value: unknown): value is string {
  * consumer (browser) is ready for more data, keeping memory flat regardless of
  * file size and transfer speed.
  */
-function createWebReadableStream(fileStream: ReadStream): ReadableStream {
+function createWebReadableStream(
+  fileStream: ReadStream,
+  hooks?: {
+    onBytes?: (bytes: number) => void
+    onComplete?: () => void
+    onError?: (error: Error) => void
+    onCancel?: () => void
+  },
+): ReadableStream {
   let ended = false
   let closed = false
 
@@ -62,8 +71,10 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
         const onData = (chunk: Buffer | string) => {
           cleanup()
           fileStream.pause()
+          const output = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
           if (!closed) {
-            controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+            hooks?.onBytes?.(output.byteLength)
+            controller.enqueue(output)
           }
           resolve()
         }
@@ -72,6 +83,7 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
           ended = true
           if (!closed) {
             closed = true
+            hooks?.onComplete?.()
             controller.close()
           }
           resolve()
@@ -80,6 +92,7 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
           cleanup()
           if (!closed) {
             closed = true
+            hooks?.onError?.(err)
             controller.error(err)
           }
           resolve()
@@ -98,6 +111,9 @@ function createWebReadableStream(fileStream: ReadStream): ReadableStream {
     },
 
     cancel() {
+      if (!closed && !ended) {
+        hooks?.onCancel?.()
+      }
       closed = true
       fileStream.destroy()
     },
@@ -123,6 +139,8 @@ export async function GET(
     const isDownload = searchParams.get('download') === 'true'
     const isProbe = searchParams.get('probe') === 'true'
     const assetId = searchParams.get('assetId')
+    const rawDownloadId = searchParams.get('downloadId')
+    const downloadId = rawDownloadId && rawDownloadId.trim().length > 0 ? rawDownloadId.trim() : null
 
     const securitySettings = await getSecuritySettings()
 
@@ -373,9 +391,9 @@ export async function GET(
 
     if (isDownload) {
       // Use asset filename if available, otherwise generate from video info
-      const rawFilename = filename || (video.approved
-        ? video.originalFileName
-        : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`)
+      const rawFilename = filename
+        || video.originalFileName
+        || `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
       const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
 
       // For non-asset streams, determine Content-Type based on quality
@@ -383,28 +401,54 @@ export async function GET(
         contentType = isThumbnail ? 'image/jpeg' : (isTimelineAsset ? contentType : 'video/mp4')
       }
 
-      const trackDownloadOnce = async () => {
-        if (!isAdminRequest && !isProbe) {
-          await trackVideoAccess({
-            videoId: verifiedToken.videoId,
-            projectId: verifiedToken.projectId,
-            sessionId,
-            tokenId: token,
-            request,
-            quality: verifiedToken.quality,
-            bandwidth: stat.size,
-            eventType: 'DOWNLOAD_COMPLETE',
-            assetId: assetId || undefined,
-          }).catch(() => {})
+      const shouldTrackDownload = Boolean(downloadId && !isAdminRequest && !isProbe)
+
+      if (shouldTrackDownload) {
+        await registerTrackedDownload({
+          downloadId: downloadId!,
+          projectId: verifiedToken.projectId,
+          videoId: verifiedToken.videoId,
+          videoName: video.name,
+          versionLabel: video.versionLabel || null,
+          assetId: assetId || null,
+          fileSizeBytes: stat.size,
+          sessionId,
+          ipAddress: getClientIpAddress(request) || null,
+        }).catch(() => undefined)
+      }
+
+      const createDownloadTrackingHooks = (rangeStart: number) => {
+        if (!shouldTrackDownload || !downloadId) {
+          return undefined
+        }
+
+        let bytesSent = 0
+        let flushed = false
+        const flush = () => {
+          if (flushed) return
+          flushed = true
+          if (bytesSent <= 0) return
+          void recordTrackedDownloadProgress({
+            downloadId,
+            rangeStart,
+            bytesSent,
+          }).catch(() => undefined)
+        }
+
+        return {
+          onBytes: (bytes: number) => {
+            bytesSent += bytes
+          },
+          onComplete: flush,
+          onError: flush,
+          onCancel: flush,
         }
       }
 
       // If no Range header, stream entire file with 200 so downloads aren't truncated
       if (!range) {
-        await trackDownloadOnce()
-
         const fileStream = createReadStream(fullPath, { highWaterMark: STREAM_HIGH_WATER_MARK })
-        const readableStream = createWebReadableStream(fileStream)
+        const readableStream = createWebReadableStream(fileStream, createDownloadTrackingHooks(0))
 
         return new NextResponse(readableStream, {
           headers: {
@@ -428,12 +472,8 @@ export async function GET(
       const end = Math.min(requestedEnd, start + DOWNLOAD_CHUNK_SIZE - 1, stat.size - 1)
       const chunksize = (end - start) + 1
 
-      if (start === 0) {
-        await trackDownloadOnce()
-      }
-
       const fileStream = createReadStream(fullPath, { start, end, highWaterMark: STREAM_HIGH_WATER_MARK })
-      const readableStream = createWebReadableStream(fileStream)
+      const readableStream = createWebReadableStream(fileStream, createDownloadTrackingHooks(start))
 
       return new NextResponse(readableStream, {
         status: 206,

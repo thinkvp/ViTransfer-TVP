@@ -3,6 +3,7 @@ import { VideoProcessingJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import {
   TempFiles,
+  isVideoRecordMissingError,
   downloadAndValidateVideo,
   fetchProcessingSettings,
   calculateOutputDimensions,
@@ -11,12 +12,13 @@ import {
   processTimelinePreviews,
   finalizeVideo,
   updateVideoStatus,
+  updateVideoRecord,
   cleanupTempFiles,
   handleProcessingError,
   debugLog
 } from './video-processor-helpers'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation } from '@/lib/cpu-config'
+import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
 
 /**
  * Main video processing orchestrator
@@ -52,10 +54,7 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
   incrementActiveVideoJobs()
   const alloc = getCpuAllocation()
   const activeNow = getActiveVideoJobs()
-  const dynamicThreads = Math.min(
-    Math.floor(alloc.budgetThreads / Math.max(1, activeNow)),
-    12
-  )
+  const { threads: dynamicThreads } = getDynamicThreadsPerJob()
   console.log(
     `[WORKER] Video ${videoId}: active jobs ${activeNow}/${alloc.videoWorkerConcurrency}, ` +
     `dynamic FFmpeg threads: ${dynamicThreads} (budget ${alloc.budgetThreads})`
@@ -123,23 +122,27 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
 
     // Persist timeline preview paths/ready flag (do not block READY if generation skipped)
     if (settings.timelinePreviewsEnabled && timelineResult?.ready) {
-      await prisma.video.update({
-        where: { id: videoId },
-        data: {
+      const updated = await updateVideoRecord(
+        videoId,
+        {
           timelinePreviewsReady: true,
           timelinePreviewVttPath: timelineResult.vttPath,
           timelinePreviewSpritesPath: timelineResult.spritesPath,
         },
-      })
+        { context: 'persisting timeline preview paths', ignoreMissing: true }
+      )
+      if (!updated) return
     } else {
-      await prisma.video.update({
-        where: { id: videoId },
-        data: {
+      const updated = await updateVideoRecord(
+        videoId,
+        {
           timelinePreviewsReady: false,
           timelinePreviewVttPath: null,
           timelinePreviewSpritesPath: null,
         },
-      })
+        { context: 'clearing timeline preview paths', ignoreMissing: true }
+      )
+      if (!updated) return
     }
 
     await recalculateAndStoreProjectTotalBytes(projectId)
@@ -149,6 +152,11 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     console.log(`[WORKER] Successfully processed video ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
 
   } catch (error) {
+    if (isVideoRecordMissingError(error)) {
+      console.warn(`[WORKER] Video ${videoId} was deleted during processing; aborting job cleanup updates.`)
+      return
+    }
+
     // Handle error - update database and log
     await handleProcessingError(videoId, error)
     throw error
@@ -188,23 +196,27 @@ async function processTimelineOnly(
     )
 
     if (timelineResult?.ready) {
-      await prisma.video.update({
-        where: { id: videoId },
-        data: {
+      const updated = await updateVideoRecord(
+        videoId,
+        {
           timelinePreviewsReady: true,
           timelinePreviewVttPath: timelineResult.vttPath,
           timelinePreviewSpritesPath: timelineResult.spritesPath,
           processingPhase: null,
           processingProgress: 0,
         },
-      })
+        { context: 'finalizing timeline-only preview generation', ignoreMissing: true }
+      )
+      if (!updated) return
       console.log(`[WORKER] Timeline previews generated for video ${videoId}`)
     } else {
       // Clear the phase marker even if generation returned no result
-      await prisma.video.update({
-        where: { id: videoId },
-        data: { processingPhase: null, processingProgress: 0 },
-      })
+      const updated = await updateVideoRecord(
+        videoId,
+        { processingPhase: null, processingProgress: 0 },
+        { context: 'clearing timeline-only phase marker', ignoreMissing: true }
+      )
+      if (!updated) return
       console.warn(`[WORKER] Timeline preview generation returned no result for ${videoId}`)
     }
 
@@ -215,10 +227,11 @@ async function processTimelineOnly(
   } catch (error) {
     // Don't mark the video as ERROR — it's still READY. Just log the failure.
     // Clear the phase marker so it drops out of Running Jobs.
-    await prisma.video.update({
-      where: { id: videoId },
-      data: { processingPhase: null, processingProgress: 0 },
-    }).catch(() => {})
+    await updateVideoRecord(
+      videoId,
+      { processingPhase: null, processingProgress: 0 },
+      { context: 'clearing failed timeline-only phase marker', ignoreMissing: true }
+    ).catch(() => undefined)
     console.error(`[WORKER] Timeline-only generation failed for ${videoId}:`, error)
     throw error
   } finally {

@@ -28,6 +28,12 @@ const cachedSafeguardLimits: CachedValue<SafeguardLimits> = {
   expiresAt: 0,
 }
 
+export function invalidateSecuritySettingsCaches() {
+  cachedRateLimits.expiresAt = 0
+  cachedSessionTimeout.expiresAt = 0
+  cachedSafeguardLimits.expiresAt = 0
+}
+
 /**
  * Get the company name from settings
  * Returns 'Studio' as default if not set
@@ -221,43 +227,22 @@ export async function getClientSessionTimeoutSeconds(): Promise<number> {
 }
 
 /**
- * Check if HTTPS enforcement is enabled
- *
- * Priority: Environment variable (HTTPS_ENABLED) > Database setting > Default (true)
- *
- * IMPORTANT: Environment variable ALWAYS takes precedence - this is the escape hatch!
- * If you get locked out on localhost, set HTTPS_ENABLED=false in docker-compose.yml (or docker-compose.build.yml)
- *
- * When HTTPS is OFF:
- * - No HSTS header
- * - Use for: localhost, internal LAN (set HTTPS_ENABLED=false in docker-compose)
- *
- * When HTTPS is ON (default for security):
- * - HSTS header enabled (forces browser to use HTTPS)
- * - Use for: production deployments with HTTPS (direct or reverse proxy)
- */
-/**
- * Initialize security settings from environment variables on container startup
- * This should be called once when the application starts
+ * Initialize security settings on container startup.
+ * Ensures default security settings row exists in the database.
  */
 export async function initializeSecuritySettings() {
   try {
-    const envValue = process.env.HTTPS_ENABLED
+    // Ensure the security settings row exists (does not overwrite existing values)
+    await prisma.securitySettings.upsert({
+      where: { id: 'default' },
+      update: {},
+      create: { id: 'default' },
+    })
 
-    if (envValue !== undefined) {
-      const httpsEnabled = envValue === 'true' || envValue === '1'
-
-      // Update database with environment variable value
-      await prisma.securitySettings.upsert({
-        where: { id: 'default' },
-        update: { httpsEnabled },
-        create: { id: 'default', httpsEnabled },
-      })
-
-      console.log(`[INIT] HTTPS_ENABLED environment variable detected. Set database value to: ${httpsEnabled}`)
-    }
+    const httpsMode = isHttpsEnabled()
+    console.log(`[INIT] HTTPS mode: ${httpsMode ? 'enabled' : 'disabled'} (from HTTPS_ENABLED env var, default: false)`)
   } catch (error) {
-    console.error('[INIT] Error initializing security settings from environment:', error)
+    console.error('[INIT] Error initializing security settings:', error)
   }
 }
 
@@ -273,21 +258,19 @@ export async function getMaxAuthAttempts(): Promise<number> {
   }
 }
 
-export async function isHttpsEnabled(): Promise<boolean> {
-  try {
-    // Read from database (env var is synced to DB on startup via initializeSecuritySettings)
-    const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
-      select: { httpsEnabled: true },
-    })
-
-    // Default to true for production security
-    return settings?.httpsEnabled ?? true
-  } catch (error) {
-    console.error('Error checking HTTPS enabled status:', error)
-    // Default to true even on error for security
-    return true
-  }
+/**
+ * Check if HTTPS mode is enabled.
+ *
+ * Single source of truth: the HTTPS_ENABLED environment variable.
+ * This controls both transport headers (via next.config.js at startup)
+ * and passkey/WebAuthn origin validation (via this function at runtime).
+ *
+ * Default: false (safe for local/HTTP development).
+ * Set HTTPS_ENABLED=true in docker-compose for production HTTPS deployments.
+ */
+export function isHttpsEnabled(): boolean {
+  const envValue = process.env.HTTPS_ENABLED
+  return envValue === 'true' || envValue === '1'
 }
 
 export async function getRateLimitSettings(): Promise<{
@@ -420,7 +403,7 @@ export async function getWebAuthnConfig(): Promise<{
 export async function isPasskeyConfigured(): Promise<boolean> {
   try {
     const config = await getWebAuthnConfig()
-    const httpsEnabled = await isHttpsEnabled()
+    const httpsEnabled = isHttpsEnabled()
 
     const isLocalhost =
       config.rpID === 'localhost' ||
@@ -454,7 +437,7 @@ export async function getPasskeyConfigStatus(): Promise<{
 }> {
   try {
     const config = await getWebAuthnConfig()
-    const httpsEnabled = await isHttpsEnabled()
+    const httpsEnabled = isHttpsEnabled()
 
     const isLocalhost =
       config.rpID === 'localhost' ||

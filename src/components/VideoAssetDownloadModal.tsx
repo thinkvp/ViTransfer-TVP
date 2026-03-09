@@ -6,6 +6,7 @@ import { X, Download, FileIcon, Loader2, CheckCircle, FileVideo, Image, Music, F
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { getAccessToken } from '@/lib/token-store'
+import { withDownloadTracking } from '@/lib/download-url'
 
 interface VideoAsset {
   id: string
@@ -197,7 +198,7 @@ export function VideoAssetDownloadModal({
 
   const triggerDownload = (url: string) => {
     const link = document.createElement('a')
-    link.href = url
+    link.href = withDownloadTracking(url)
     link.download = ''
     link.rel = 'noopener'
     link.style.display = 'none'

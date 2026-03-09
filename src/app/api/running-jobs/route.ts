@@ -3,12 +3,11 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
-import { getCpuAllocation } from '@/lib/cpu-config'
+import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
+import { getRedis } from '@/lib/redis'
 import { getVideoQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
-
-const MAX_FFMPEG_THREADS_PER_JOB = 12
 
 /**
  * GET /api/running-jobs
@@ -112,17 +111,22 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    await loadCpuConfigOverrides(getRedis())
     const alloc = getCpuAllocation()
     const activeProcessingCount = resolvedJobs.filter((job) => job.status === 'PROCESSING').length
-    const dynamicThreadsPerJob = activeProcessingCount > 0
-      ? Math.max(
-          1,
-          Math.min(
-            Math.floor(alloc.budgetThreads / activeProcessingCount),
-            alloc.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB,
-          ),
-        )
-      : alloc.ffmpegThreadsPerJob
+    const configuredThreadPool = alloc.maxThreadsUsedEstimate
+
+    let dynamicThreadsPerJob: number
+    if (!alloc.dynamicThreadAllocation || activeProcessingCount === 0) {
+      // Dynamic scaling is off or no active jobs — use the static baseline
+      dynamicThreadsPerJob = alloc.ffmpegThreadsPerJob
+    } else {
+      // Scale up when fewer jobs are active, capped at the configured FFmpeg pool
+      dynamicThreadsPerJob = Math.max(
+        1,
+        Math.min(Math.floor(configuredThreadPool / activeProcessingCount), configuredThreadPool),
+      )
+    }
 
     const jobs = resolvedJobs.map((job) => {
       const isActive = job.status === 'PROCESSING'
@@ -137,7 +141,7 @@ export async function GET(request: NextRequest) {
       return {
         ...job,
         allocatedThreads,
-        threadBudget: allocatedThreads ? alloc.budgetThreads : null,
+        threadBudget: allocatedThreads ? configuredThreadPool : null,
       }
     })
 

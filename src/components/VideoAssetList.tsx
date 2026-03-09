@@ -19,6 +19,7 @@ import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { AssetCopyMoveModal } from './AssetCopyMoveModal'
+import { withDownloadTracking } from '@/lib/download-url'
 
 interface VideoAsset {
   id: string
@@ -176,7 +177,7 @@ export function VideoAssetList({
 
   const triggerDownload = (url: string) => {
     const link = document.createElement('a')
-    link.href = url
+    link.href = withDownloadTracking(url)
     link.download = ''
     link.rel = 'noopener'
     link.style.display = 'none'

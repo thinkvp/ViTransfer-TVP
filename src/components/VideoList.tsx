@@ -13,6 +13,7 @@ import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, C
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
+import { withDownloadTracking } from '@/lib/download-url'
 
 interface VideoListProps {
   videos: Video[]
@@ -111,6 +112,9 @@ export default function VideoList({
     // Perform deletion in background without blocking UI
     apiDelete(`/api/videos/${videoId}`)
       .then(() => {
+        try {
+          window.dispatchEvent(new CustomEvent('video-deleted', { detail: { videoId } }))
+        } catch {}
         // Refresh in background
         onRefresh?.()
       })
@@ -286,7 +290,7 @@ export default function VideoList({
 
   const triggerDownload = (url: string) => {
     const link = document.createElement('a')
-    link.href = url
+    link.href = withDownloadTracking(url)
     link.download = ''
     link.rel = 'noopener'
     link.style.display = 'none'

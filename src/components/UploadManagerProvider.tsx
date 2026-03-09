@@ -85,6 +85,7 @@ type InternalJob = UploadJob & {
   file: File
   tusUpload: tus.Upload | null
   onComplete?: () => void
+  cancelled?: boolean
   /** Speed-calculation scratch */
   _lastLoaded: number
   _lastTime: number
@@ -202,6 +203,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         }
       },
       onProgress: (bytesUploaded, bytesTotal) => {
+        if (next.cancelled) return
         const percentage = Math.round((bytesUploaded / bytesTotal) * 100)
         const now = Date.now()
         const job = jobsRef.current.find((j) => j.id === next.id)
@@ -217,6 +219,11 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         }
       },
       onSuccess: () => {
+        if (next.cancelled) {
+          activeIdRef.current = null
+          processNextRef.current()
+          return
+        }
         clearFileContext(next.file)
         clearUploadMetadata(next.file)
         clearTUSFingerprint(next.file)
@@ -238,6 +245,12 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         processNextRef.current()
       },
       onError: async (error) => {
+        if (next.cancelled) {
+          activeIdRef.current = null
+          processNextRef.current()
+          return
+        }
+
         let errorMessage = error.message || 'Upload failed'
         if (error.message?.includes('NetworkError') || error.message?.includes('Failed to fetch')) {
           errorMessage = 'Network error — check your connection.'
@@ -356,6 +369,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         createdAt: Date.now(),
         tusUpload: null,
         onComplete: config.onComplete,
+        cancelled: false,
         _lastLoaded: 0,
         _lastTime: 0,
       }
@@ -376,6 +390,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     (id: string) => {
       const job = jobsRef.current.find((j) => j.id === id)
       if (!job) return
+
+       job.cancelled = true
 
       if (job.tusUpload) {
         try {
@@ -398,6 +414,33 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     },
     [removeJob],
   )
+
+  useEffect(() => {
+    const handleExternalVideoDelete = (event: Event) => {
+      const videoId = (event as CustomEvent<{ videoId?: string }>).detail?.videoId
+      if (!videoId) return
+
+      const job = jobsRef.current.find((j) => j.videoId === videoId)
+      if (!job) return
+
+      job.cancelled = true
+      if (job.tusUpload) {
+        try {
+          job.tusUpload.abort(true)
+        } catch {}
+      }
+
+      clearUploadMetadata(job.file)
+      clearTUSFingerprint(job.file)
+      clearFileContext(job.file)
+
+      removeJob(job.id)
+      processNextRef.current()
+    }
+
+    window.addEventListener('video-deleted', handleExternalVideoDelete as EventListener)
+    return () => window.removeEventListener('video-deleted', handleExternalVideoDelete as EventListener)
+  }, [removeJob])
 
   const pauseUpload = useCallback(
     (id: string) => {

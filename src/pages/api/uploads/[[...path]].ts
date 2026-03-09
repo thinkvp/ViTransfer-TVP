@@ -310,6 +310,7 @@ async function handleVideoUploadFinish(
 
   if (!video) {
     console.error(`[UPLOAD] Video not found: ${videoId}`)
+    await cleanupTUSFile(tusFilePath)
     return {}
   }
 

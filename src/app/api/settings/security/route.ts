@@ -3,7 +3,9 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { invalidateAllSessions, clearAllRateLimits } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
+import { invalidateSecuritySettingsCaches, isHttpsEnabled } from '@/lib/settings'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { invalidateSecuritySettingsCache } from '@/lib/video-access'
 export const runtime = 'nodejs'
 
 
@@ -73,7 +75,10 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const response = NextResponse.json(settings)
+    const response = NextResponse.json({
+      ...settings,
+      httpsEnabled: isHttpsEnabled(),
+    })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response
@@ -102,7 +107,6 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json()
 
     const {
-      httpsEnabled,
       hotlinkProtection,
       ipRateLimit,
       sessionRateLimit,
@@ -141,6 +145,33 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    if (hotlinkProtection !== undefined && !['DISABLED', 'LOG_ONLY', 'BLOCK_STRICT'].includes(hotlinkProtection)) {
+      return NextResponse.json(
+        { error: 'Hotlink protection must be DISABLED, LOG_ONLY, or BLOCK_STRICT' },
+        { status: 400 }
+      )
+    }
+
+    if (ipRateLimit !== undefined && ipRateLimit !== null) {
+      const val = parseInt(ipRateLimit, 10)
+      if (isNaN(val) || val <= 0 || val > 10000) {
+        return NextResponse.json(
+          { error: 'IP rate limit must be between 1 and 10000 requests per window' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (sessionRateLimit !== undefined && sessionRateLimit !== null) {
+      const val = parseInt(sessionRateLimit, 10)
+      if (isNaN(val) || val <= 0 || val > 5000) {
+        return NextResponse.json(
+          { error: 'Admin session rate limit must be between 1 and 5000 requests per window' },
+          { status: 400 }
+        )
+      }
+    }
+
     if (shareSessionRateLimit !== undefined && shareSessionRateLimit !== null) {
       const val = parseInt(shareSessionRateLimit, 10)
       if (isNaN(val) || val <= 0 || val > 2000) {
@@ -153,12 +184,19 @@ export async function PATCH(request: NextRequest) {
 
     if (shareTokenTtlSeconds !== undefined && shareTokenTtlSeconds !== null) {
       const val = parseInt(shareTokenTtlSeconds, 10)
-      if (isNaN(val) || val <= 60 || val > 24 * 60 * 60) {
+      if (isNaN(val) || val < 60 || val > 24 * 60 * 60) {
         return NextResponse.json(
           { error: 'Share token TTL must be between 60 seconds and 86400 seconds' },
           { status: 400 }
         )
       }
+    }
+
+    if (sessionTimeoutUnit !== undefined && !['MINUTES', 'HOURS', 'DAYS', 'WEEKS'].includes(sessionTimeoutUnit)) {
+      return NextResponse.json(
+        { error: 'Session timeout unit must be MINUTES, HOURS, DAYS, or WEEKS' },
+        { status: 400 }
+      )
     }
 
     const validatePositiveInt = (value: any, label: string, max = 100_000) => {
@@ -194,7 +232,6 @@ export async function PATCH(request: NextRequest) {
     const settings = await prisma.securitySettings.upsert({
       where: { id: 'default' },
       update: {
-        httpsEnabled: httpsEnabled ?? false,
         hotlinkProtection,
         ipRateLimit: ipRateLimit ? parseInt(ipRateLimit, 10) : 1000,
         sessionRateLimit: sessionRateLimit ? parseInt(sessionRateLimit, 10) : 600,
@@ -226,7 +263,6 @@ export async function PATCH(request: NextRequest) {
       },
       create: {
         id: 'default',
-        httpsEnabled: httpsEnabled ?? false,
         hotlinkProtection,
         ipRateLimit: ipRateLimit ? parseInt(ipRateLimit, 10) : 1000,
         sessionRateLimit: sessionRateLimit ? parseInt(sessionRateLimit, 10) : 600,
@@ -257,6 +293,9 @@ export async function PATCH(request: NextRequest) {
             : 50,
       },
     })
+
+    invalidateSecuritySettingsCaches()
+    await invalidateSecuritySettingsCache()
 
     // SECURITY: Invalidate sessions when security settings change
     let invalidationLog: string[] = []

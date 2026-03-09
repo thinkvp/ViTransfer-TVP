@@ -9,7 +9,6 @@ interface SecuritySettingsSectionProps {
   showSecuritySettings: boolean
   setShowSecuritySettings: (value: boolean) => void
   httpsEnabled: boolean
-  setHttpsEnabled: (value: boolean) => void
   hotlinkProtection: string
   setHotlinkProtection: (value: string) => void
   ipRateLimit: string
@@ -61,7 +60,6 @@ export function SecuritySettingsSection({
   showSecuritySettings,
   setShowSecuritySettings,
   httpsEnabled,
-  setHttpsEnabled,
   hotlinkProtection,
   setHotlinkProtection,
   ipRateLimit,
@@ -198,45 +196,27 @@ export function SecuritySettingsSection({
             </div>
           </div>
 
-          {/* HTTPS Enforcement */}
+          {/* HTTPS Mode (read-only, controlled by HTTPS_ENABLED env var) */}
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2 flex-1">
                 <Lock className="w-5 h-5 text-primary flex-shrink-0" />
-                <Label htmlFor="httpsEnabled" className="text-base font-semibold">
-                  HTTPS Enforcement
+                <Label className="text-base font-semibold">
+                  HTTPS Mode
                 </Label>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Switch
-                  id="httpsEnabled"
-                  checked={httpsEnabled}
-                  onCheckedChange={setHttpsEnabled}
-                />
-                <span className="text-sm font-medium whitespace-nowrap">{httpsEnabled ? 'ON' : 'OFF'}</span>
-              </div>
+              <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${httpsEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' : 'bg-muted text-muted-foreground'}`}>
+                {httpsEnabled ? 'Enabled' : 'Disabled'}
+              </span>
             </div>
 
             <div className="space-y-2 text-sm">
               <p className="text-muted-foreground">
-                <strong>OFF:</strong> Use for local deployments with HTTP
+                Controlled by the <code className="bg-background px-1 py-0.5 rounded text-[11px]">HTTPS_ENABLED</code> environment variable. This determines transport security headers (HSTS, upgrade-insecure-requests) and passkey/WebAuthn origin validation.
               </p>
               <p className="text-muted-foreground">
-                <strong>ON:</strong> Use for production deployments with HTTPS
+                To change, set <code className="bg-background px-1 py-0.5 rounded text-[11px]">HTTPS_ENABLED=true</code> or <code className="bg-background px-1 py-0.5 rounded text-[11px]">HTTPS_ENABLED=false</code> in your <code className="bg-background px-1 py-0.5 rounded text-[11px]">.env</code> or <code className="bg-background px-1 py-0.5 rounded text-[11px]">docker-compose.yml</code> and restart the container.
               </p>
-
-              {httpsEnabled && (
-                <div className="mt-3 p-3 bg-blue-50 border-2 border-blue-100 dark:bg-blue-950 dark:border-blue-900 rounded-md">
-                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2">
-                    When HTTPS is enabled, the following are enforced:
-                  </p>
-                  <ul className="text-xs text-blue-600 dark:text-blue-400 space-y-1 list-disc list-inside">
-                    <li>Cookies use <code className="bg-background px-1 py-0.5 rounded">secure: true</code> (only sent over HTTPS)</li>
-                    <li>HSTS header enabled (forces browser to use HTTPS)</li>
-                    <li>Enhanced security for all sessions and authentication</li>
-                  </ul>
-                </div>
-              )}
             </div>
           </div>
 

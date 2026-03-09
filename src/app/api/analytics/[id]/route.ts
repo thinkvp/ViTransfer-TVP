@@ -7,6 +7,39 @@ export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
 
+const COUNTED_DOWNLOAD_EVENT_TYPES = ['DOWNLOAD_COMPLETE', 'DOWNLOAD_SUCCEEDED']
+const DOWNLOAD_ACTIVITY_EVENT_TYPES = ['DOWNLOAD_COMPLETE', 'DOWNLOAD_SUCCEEDED', 'DOWNLOAD_FAILED']
+
+function getDownloadDetails(value: unknown): {
+  averageMbps: number | null
+  bytesTransferred: number | null
+  durationMs: number | null
+  failed: boolean
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      averageMbps: null,
+      bytesTransferred: null,
+      durationMs: null,
+      failed: false,
+    }
+  }
+
+  const details = value as Record<string, unknown>
+  return {
+    averageMbps: typeof details.averageMbps === 'number' && Number.isFinite(details.averageMbps)
+      ? details.averageMbps
+      : null,
+    bytesTransferred: typeof details.bytesTransferred === 'number' && Number.isFinite(details.bytesTransferred)
+      ? details.bytesTransferred
+      : null,
+    durationMs: typeof details.durationMs === 'number' && Number.isFinite(details.durationMs)
+      ? details.durationMs
+      : null,
+    failed: details.failed === true,
+  }
+}
+
 // GET /api/analytics/[id] - Get detailed analytics for a specific project
 export async function GET(
   request: NextRequest,
@@ -62,7 +95,7 @@ export async function GET(
           orderBy: { createdAt: 'desc' },
         },
         analytics: {
-          where: { eventType: { in: ['DOWNLOAD_COMPLETE', 'VIDEO_VIEW', 'VIDEO_PLAY', 'VIDEO_APPROVED', 'VIDEO_UNAPPROVED'] } },
+          where: { eventType: { in: [...DOWNLOAD_ACTIVITY_EVENT_TYPES, 'VIDEO_VIEW', 'VIDEO_PLAY', 'VIDEO_APPROVED', 'VIDEO_UNAPPROVED'] } },
           orderBy: { createdAt: 'desc' },
           include: {
             video: {
@@ -150,15 +183,16 @@ export async function GET(
       return acc
     }, {} as Record<string, typeof project.videos>)
 
-    const downloadAnalytics = project.analytics.filter(a => a.eventType === 'DOWNLOAD_COMPLETE')
-    const videoDownloadAnalytics = downloadAnalytics.filter(a => !a.assetId && !a.assetIds)
+    const countedDownloadAnalytics = project.analytics.filter(a => COUNTED_DOWNLOAD_EVENT_TYPES.includes(a.eventType))
+    const downloadActivityAnalytics = project.analytics.filter(a => DOWNLOAD_ACTIVITY_EVENT_TYPES.includes(a.eventType))
+    const videoDownloadAnalytics = countedDownloadAnalytics.filter(a => !a.assetId && !a.assetIds)
     const guestLinkViewAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_VIEW')
     const sharePlayAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_PLAY')
     const approvalAnalytics = project.analytics.filter(a => a.eventType === 'VIDEO_APPROVED' || a.eventType === 'VIDEO_UNAPPROVED')
     const allViewAnalytics = [...guestLinkViewAnalytics, ...sharePlayAnalytics]
 
     const assetDownloadCountsByVideoId = new Map<string, Map<string, number>>()
-    for (const download of downloadAnalytics) {
+    for (const download of countedDownloadAnalytics) {
       const videoId = download.videoId
       if (!videoId) continue
 
@@ -288,10 +322,11 @@ export async function GET(
       createdAt: access.createdAt,
     }))
 
-    const downloadEvents = downloadAnalytics.map(download => {
+    const downloadEvents = downloadActivityAnalytics.map(download => {
       const access = download.sessionId ? accessBySessionId.get(download.sessionId) : undefined
       let assetFileName: string | undefined
       let assetFileNames: string[] | undefined
+      const details = getDownloadDetails((download as any).details)
 
       if (download.assetId) {
         // Single asset download
@@ -308,12 +343,16 @@ export async function GET(
       return {
         id: download.id,
         type: 'DOWNLOAD' as const,
+        eventType: download.eventType as 'DOWNLOAD_COMPLETE' | 'DOWNLOAD_SUCCEEDED' | 'DOWNLOAD_FAILED',
         videoName: download.video.name,
         versionLabel: download.video.versionLabel,
         assetId: download.assetId,
         assetIds: download.assetIds ? JSON.parse(download.assetIds) : undefined,
         assetFileName,
         assetFileNames,
+        averageMbps: details.averageMbps,
+        bytesTransferred: details.bytesTransferred,
+        durationMs: details.durationMs,
         email: access?.accessMethod === 'OTP' ? access.email || null : null,
         accessMethod: access?.accessMethod || null,
         ipAddress: download.ipAddress || null,

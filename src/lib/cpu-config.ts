@@ -10,12 +10,66 @@ export interface CpuAllocation {
   ffmpegThreadsPerJob: number
   timelineThreadsPerJob: number
   maxThreadsUsedEstimate: number
+  dynamicThreadAllocation: boolean
   overrides: {
     CPU_THREADS?: number
     VIDEO_WORKER_CONCURRENCY?: number
     FFMPEG_THREADS_PER_JOB?: number
     TIMELINE_FFMPEG_THREADS_PER_JOB?: number
   }
+}
+
+// ---------------------------------------------------------------------------
+// Redis-backed overrides — the admin settings page can persist CPU config
+// overrides to Redis so the worker process picks them up without needing
+// env-var changes or container restarts.  The overrides are loaded
+// asynchronously and cached in process-level variables so the synchronous
+// getCpuAllocation() can read them.
+// ---------------------------------------------------------------------------
+export const CPU_CONFIG_REDIS_KEY = 'cpu:config'
+
+export interface CpuConfigOverrides {
+  ffmpegThreadsPerJob?: number
+  videoWorkerConcurrency?: number
+  dynamicThreadAllocation?: boolean
+}
+
+let _cachedOverrides: CpuConfigOverrides = {}
+
+/**
+ * Load CPU config overrides from Redis into process-level cache.
+ * Call periodically in the worker (e.g. every 60s) and on startup.
+ */
+export async function loadCpuConfigOverrides(redis: { hgetall: (key: string) => Promise<Record<string, string>> }): Promise<CpuConfigOverrides> {
+  try {
+    const raw = await redis.hgetall(CPU_CONFIG_REDIS_KEY)
+    if (!raw || Object.keys(raw).length === 0) {
+      _cachedOverrides = {}
+      return _cachedOverrides
+    }
+
+    _cachedOverrides = {}
+    if (raw.ffmpegThreadsPerJob) {
+      const v = parseInt(raw.ffmpegThreadsPerJob, 10)
+      if (Number.isFinite(v) && v > 0) _cachedOverrides.ffmpegThreadsPerJob = v
+    }
+    if (raw.videoWorkerConcurrency) {
+      const v = parseInt(raw.videoWorkerConcurrency, 10)
+      if (Number.isFinite(v) && v > 0) _cachedOverrides.videoWorkerConcurrency = v
+    }
+    if (raw.dynamicThreadAllocation !== undefined) {
+      _cachedOverrides.dynamicThreadAllocation = raw.dynamicThreadAllocation !== 'false'
+    }
+    return _cachedOverrides
+  } catch (error) {
+    console.error('[CPU CONFIG] Failed to load overrides from Redis:', error)
+    return _cachedOverrides
+  }
+}
+
+/** Get the currently cached Redis overrides (synchronous). */
+export function getCachedCpuConfigOverrides(): CpuConfigOverrides {
+  return _cachedOverrides
 }
 
 // ---------------------------------------------------------------------------
@@ -44,23 +98,27 @@ export function getActiveVideoJobs(): number {
  * Return the number of FFmpeg threads a single job should use *right now*,
  * taking the current active-job count into account.
  *
- * Formula: `floor(budgetThreads / max(1, activeJobs))`, clamped to
- * `[1, MAX_FFMPEG_THREADS_PER_JOB]`.
+ * Formula: `floor(configuredFfmpegPool / max(1, activeJobs))`, where the
+ * configured pool is `ffmpegThreadsPerJob * videoWorkerConcurrency`.
  *
- * If `FFMPEG_THREADS_PER_JOB` env override is set it is treated as a hard
- * ceiling — dynamic scaling can go up to that value but never above it.
+ * This means a single running job can consume the full configured FFmpeg
+ * allocation, while multiple concurrent jobs divide that same configured pool.
  */
 export function getDynamicThreadsPerJob(): { threads: number; activeJobs: number } {
   const alloc = getCpuAllocation()
   const active = Math.max(1, _activeVideoJobs)
 
-  // When an explicit override exists, it acts as a ceiling
-  const ceiling = alloc.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB
+  // When dynamic allocation is disabled, always use the static baseline
+  if (!alloc.dynamicThreadAllocation) {
+    return { threads: alloc.ffmpegThreadsPerJob, activeJobs: active }
+  }
+
+  const configuredPool = Math.max(1, alloc.maxThreadsUsedEstimate)
 
   const threads = clampInt(
-    Math.floor(alloc.budgetThreads / active),
+    Math.floor(configuredPool / active),
     1,
-    ceiling
+    configuredPool
   )
 
   return { threads, activeJobs: active }
@@ -100,7 +158,7 @@ function getDesiredVideoConcurrency(effectiveThreads: number): number {
  * - In containers, `os.cpus().length` can reflect host CPU, not the container quota.
  * - These settings are infra-level controls, not per-project settings.
  */
-export function getCpuAllocation(): CpuAllocation {
+export function getCpuAllocation(redisOverrides: CpuConfigOverrides = _cachedOverrides): CpuAllocation {
   const overrideCpuThreads = parsePositiveIntEnv('CPU_THREADS')
   const overrideConcurrency = parsePositiveIntEnv('VIDEO_WORKER_CONCURRENCY')
   const overrideThreadsPerJob = parsePositiveIntEnv('FFMPEG_THREADS_PER_JOB')
@@ -115,8 +173,10 @@ export function getCpuAllocation(): CpuAllocation {
   const budgetThreads = Math.max(1, effectiveThreads - reservedSystemThreads)
 
   const desiredConcurrency = getDesiredVideoConcurrency(effectiveThreads)
-  const videoWorkerConcurrency = overrideConcurrency
-    ? clampInt(overrideConcurrency, 1, 999)
+  // Redis override → env override → computed default
+  const effectiveConcurrencyOverride = redisOverrides.videoWorkerConcurrency ?? overrideConcurrency
+  const videoWorkerConcurrency = effectiveConcurrencyOverride
+    ? clampInt(effectiveConcurrencyOverride, 1, 999)
     : clampInt(desiredConcurrency, 1, budgetThreads)
 
   const computedThreadsPerJob = clampInt(
@@ -125,8 +185,10 @@ export function getCpuAllocation(): CpuAllocation {
     MAX_FFMPEG_THREADS_PER_JOB
   )
 
-  const ffmpegThreadsPerJob = overrideThreadsPerJob
-    ? clampInt(overrideThreadsPerJob, 1, MAX_FFMPEG_THREADS_PER_JOB)
+  // Redis override → env override → computed default
+  const effectiveThreadsPerJobOverride = redisOverrides.ffmpegThreadsPerJob ?? overrideThreadsPerJob
+  const ffmpegThreadsPerJob = effectiveThreadsPerJobOverride
+    ? clampInt(effectiveThreadsPerJobOverride, 1, MAX_FFMPEG_THREADS_PER_JOB)
     : computedThreadsPerJob
 
   // Auxiliary image extraction (currently thumbnails) can be tuned separately
@@ -138,6 +200,8 @@ export function getCpuAllocation(): CpuAllocation {
 
   const maxThreadsUsedEstimate = videoWorkerConcurrency * ffmpegThreadsPerJob
 
+  const dynamicThreadAllocation = redisOverrides.dynamicThreadAllocation ?? true
+
   return {
     effectiveThreads,
     reservedSystemThreads,
@@ -146,10 +210,11 @@ export function getCpuAllocation(): CpuAllocation {
     ffmpegThreadsPerJob,
     timelineThreadsPerJob,
     maxThreadsUsedEstimate,
+    dynamicThreadAllocation,
     overrides: {
       CPU_THREADS: overrideCpuThreads,
-      VIDEO_WORKER_CONCURRENCY: overrideConcurrency,
-      FFMPEG_THREADS_PER_JOB: overrideThreadsPerJob,
+      VIDEO_WORKER_CONCURRENCY: effectiveConcurrencyOverride,
+      FFMPEG_THREADS_PER_JOB: effectiveThreadsPerJobOverride,
       TIMELINE_FFMPEG_THREADS_PER_JOB: overrideTimelineThreadsPerJob,
     },
   }
@@ -172,7 +237,10 @@ export function logCpuAllocation(allocation: CpuAllocation): void {
   console.log(`[CPU CONFIG] Budget (videos/sprites): ${allocation.budgetThreads}`)
   console.log(`[CPU CONFIG] Video worker concurrency: ${allocation.videoWorkerConcurrency}`)
   console.log(`[CPU CONFIG] FFmpeg threads/job (static baseline): ${allocation.ffmpegThreadsPerJob}`)
-  console.log(`[CPU CONFIG] FFmpeg threads/job (dynamic range): ${allocation.ffmpegThreadsPerJob}–${Math.min(allocation.budgetThreads, allocation.overrides.FFMPEG_THREADS_PER_JOB ?? MAX_FFMPEG_THREADS_PER_JOB)} (scales up when fewer jobs are active)`)
+  const dynamicMaxThreads = allocation.dynamicThreadAllocation
+    ? allocation.maxThreadsUsedEstimate
+    : allocation.ffmpegThreadsPerJob
+  console.log(`[CPU CONFIG] FFmpeg threads/job (dynamic range): ${allocation.ffmpegThreadsPerJob}–${dynamicMaxThreads} (scales up when fewer jobs are active)`)
   console.log(`[CPU CONFIG] Auxiliary image threads/job: ${allocation.timelineThreadsPerJob} (set TIMELINE_FFMPEG_THREADS_PER_JOB to override)`)
   console.log(`[CPU CONFIG] Estimated max FFmpeg threads used: ${allocation.maxThreadsUsedEstimate}/${allocation.effectiveThreads} (~${utilizationPercent}%)`)
 

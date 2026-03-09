@@ -34,6 +34,7 @@ const TOKEN_CACHE_MAX_ENTRIES = 500
 type CachedTokenEntry = CachedValue<VideoAccessToken>
 const tokenVerificationCache = new Map<string, CachedTokenEntry>()
 const TOKEN_REV_VERSION_KEY = 'video_token_rev_version'
+const SECURITY_SETTINGS_REDIS_KEY = 'app:security_settings'
 
 // Cache parsed trusted proxies for TOKEN_IP_MISMATCH handling.
 // Keyed by raw env var so changes are picked up automatically.
@@ -574,8 +575,7 @@ export async function getSecuritySettings() {
 
   // Check Redis cache (shared across instances)
   const redis = getRedis()
-  const REDIS_KEY = 'app:security_settings'
-  const cached = await redis.get(REDIS_KEY)
+  const cached = await redis.get(SECURITY_SETTINGS_REDIS_KEY)
 
   if (cached) {
     try {
@@ -585,7 +585,7 @@ export async function getSecuritySettings() {
       return parsed
     } catch (error) {
       console.error('[SECURITY_SETTINGS] Failed to parse cached settings, ignoring cache:', error)
-      await redis.del(REDIS_KEY).catch(() => {})
+      await redis.del(SECURITY_SETTINGS_REDIS_KEY).catch(() => {})
     }
   }
 
@@ -618,11 +618,18 @@ export async function getSecuritySettings() {
   securitySettingsCache.version = settings?.updatedAt?.toISOString()
 
   // Cache in Redis (best-effort)
-  await redis.setex(REDIS_KEY, 300, JSON.stringify(value)).catch((error) => {
+  await redis.setex(SECURITY_SETTINGS_REDIS_KEY, 300, JSON.stringify(value)).catch((error) => {
     console.error('[SECURITY_SETTINGS] Failed to cache in Redis:', error)
   })
 
   return value
+}
+
+export async function invalidateSecuritySettingsCache(): Promise<void> {
+  securitySettingsCache.expiresAt = 0
+  securitySettingsCache.version = undefined
+  const redis = getRedis()
+  await redis.del(SECURITY_SETTINGS_REDIS_KEY).catch(() => undefined)
 }
 
 const BLOCKLIST_CACHE_TTL = 300 // 5 minutes

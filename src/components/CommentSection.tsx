@@ -15,6 +15,7 @@ import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 import {
   Select,
@@ -80,10 +81,23 @@ type VideoSpeedTestResult = {
 }
 
 const SPEED_TEST_PING_BYTES = 64 * 1024
-const SPEED_TEST_SAMPLE_BYTES = 32 * 1024 * 1024
+const SPEED_TEST_DURATION_MS = 10_000
+const SPEED_TEST_RANGE_BYTES = 64 * 1024 * 1024
 
-function buildProbeUrl(url: string): string {
-  return url.includes('?') ? `${url}&probe=true` : `${url}?probe=true`
+const SPEED_TEST_ENDPOINT = '/api/connection-test'
+
+function parseContentRangeTotal(value: string | null): number | null {
+  if (!value) return null
+
+  const match = value.match(/^bytes\s+\d+-\d+\/(\d+|\*)$/i)
+  if (!match || match[1] === '*') return null
+
+  const parsed = Number(match[1])
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function parseVideoFileSize(value: unknown): number | null {
@@ -128,6 +142,18 @@ function getSpeedAssessment(megabitsPerSecond: number): string {
     return 'Usable, but larger previews or downloads may feel slow over this connection.'
   }
   return 'Connection looks healthy for playback and download from this browser.'
+}
+
+function getSpeedTestRequestHeaders(rangeValue: string, shareToken: string | null): HeadersInit {
+  const headers = new Headers({
+    Range: rangeValue,
+  })
+
+  if (shareToken) {
+    headers.set('Authorization', `Bearer ${shareToken}`)
+  }
+
+  return headers
 }
 
 export function CommentSectionView({
@@ -260,6 +286,7 @@ export function CommentSectionView({
   const [speedTestResult, setSpeedTestResult] = useState<VideoSpeedTestResult | null>(null)
   const [speedTestLoading, setSpeedTestLoading] = useState(false)
   const [speedTestError, setSpeedTestError] = useState<string | null>(null)
+  const [speedTestProgress, setSpeedTestProgress] = useState(0)
   const [guestLinkDialogOpen, setGuestLinkDialogOpen] = useState(false)
   const [guestLinkGenerating, setGuestLinkGenerating] = useState(false)
   const [guestLinkRefreshing, setGuestLinkRefreshing] = useState(false)
@@ -844,20 +871,7 @@ export function CommentSectionView({
     return `video-speed-test:${headerVideo.id}`
   }, [headerVideo?.id])
   const headerVideoFileSizeBytes = parseVideoFileSize((headerVideo as any)?.originalFileSize)
-  const speedTestTargetUrl = useMemo(() => {
-    const downloadUrl = typeof (headerVideo as any)?.downloadUrl === 'string'
-      ? String((headerVideo as any).downloadUrl)
-      : ''
-    const streamUrl1080p = typeof (headerVideo as any)?.streamUrl1080p === 'string'
-      ? String((headerVideo as any).streamUrl1080p)
-      : ''
-    const streamUrl720p = typeof (headerVideo as any)?.streamUrl720p === 'string'
-      ? String((headerVideo as any).streamUrl720p)
-      : ''
-
-    return downloadUrl || streamUrl1080p || streamUrl720p || ''
-  }, [headerVideo])
-  const canRunSpeedTest = Boolean(speedTestTargetUrl)
+  const canRunSpeedTest = Boolean(headerVideo)
 
   const showOlderVersionNote = Boolean(
     !restrictToLatestVersion &&
@@ -933,27 +947,46 @@ export function CommentSectionView({
   }
 
   const handleRunSpeedTest = async () => {
-    if (!speedTestTargetUrl) {
+    if (!headerVideo) {
       setSpeedTestError('Connection testing is not available for this version yet.')
       return
     }
 
-    const probeUrl = buildProbeUrl(speedTestTargetUrl)
-
     setSpeedTestLoading(true)
+    setSpeedTestProgress(0)
+    setSpeedTestResult(null)
     setSpeedTestError(null)
+
+    const testStart = performance.now()
+    const progressTimer = window.setInterval(() => {
+      const elapsedMs = performance.now() - testStart
+      setSpeedTestProgress((current) => Math.max(
+        current,
+        Math.min(95, Math.round((elapsedMs / SPEED_TEST_DURATION_MS) * 100))
+      ))
+    }, 150)
 
     try {
       const latencyStart = performance.now()
-      const latencyResponse = await fetch(probeUrl, {
-        headers: {
-          Range: `bytes=0-${SPEED_TEST_PING_BYTES - 1}`,
-        },
-        cache: 'no-store',
-      })
+      const latencyResponse = await (isAdminView
+        ? apiFetch(SPEED_TEST_ENDPOINT, {
+            headers: getSpeedTestRequestHeaders(`bytes=0-${SPEED_TEST_PING_BYTES - 1}`, null),
+            cache: 'no-store',
+          })
+        : fetch(SPEED_TEST_ENDPOINT, {
+            headers: getSpeedTestRequestHeaders(`bytes=0-${SPEED_TEST_PING_BYTES - 1}`, shareToken),
+            cache: 'no-store',
+          }))
 
       if (!latencyResponse.ok && latencyResponse.status !== 206) {
         throw new Error('The server could not start the connection test.')
+      }
+
+      setSpeedTestProgress((current) => Math.max(current, 5))
+
+      let measuredTotalBytes = parseContentRangeTotal(latencyResponse.headers.get('Content-Range'))
+      if (!measuredTotalBytes) {
+        measuredTotalBytes = headerVideoFileSizeBytes
       }
 
       const latencyMs = performance.now() - latencyStart
@@ -964,27 +997,82 @@ export function CommentSectionView({
       }
 
       const sampleStart = performance.now()
-      const sampleResponse = await fetch(probeUrl, {
-        headers: {
-          Range: `bytes=0-${SPEED_TEST_SAMPLE_BYTES - 1}`,
-        },
-        cache: 'no-store',
-      })
-
-      if (!sampleResponse.ok && sampleResponse.status !== 206) {
-        throw new Error('The server could not complete the download sample.')
-      }
-
-      const reader = sampleResponse.body?.getReader()
-      if (!reader) {
-        throw new Error('The browser could not read the download sample.')
-      }
-
       let bytesRead = 0
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        bytesRead += value.byteLength
+      let nextRangeStart = 0
+      let totalBytes = measuredTotalBytes
+      const sampleDeadline = sampleStart + SPEED_TEST_DURATION_MS
+
+      while (performance.now() < sampleDeadline) {
+        const requestStart = totalBytes && nextRangeStart >= totalBytes ? 0 : nextRangeStart
+        const requestEnd = totalBytes
+          ? Math.min(requestStart + SPEED_TEST_RANGE_BYTES - 1, totalBytes - 1)
+          : requestStart + SPEED_TEST_RANGE_BYTES - 1
+
+        const controller = new AbortController()
+        let timedOut = false
+        const remainingMs = Math.max(1, Math.ceil(sampleDeadline - performance.now()))
+        const timeoutId = window.setTimeout(() => {
+          timedOut = true
+          controller.abort()
+        }, remainingMs)
+
+        try {
+          const sampleResponse = await (isAdminView
+            ? apiFetch(SPEED_TEST_ENDPOINT, {
+                headers: getSpeedTestRequestHeaders(`bytes=${requestStart}-${requestEnd}`, null),
+                cache: 'no-store',
+                signal: controller.signal,
+              })
+            : fetch(SPEED_TEST_ENDPOINT, {
+                headers: getSpeedTestRequestHeaders(`bytes=${requestStart}-${requestEnd}`, shareToken),
+                cache: 'no-store',
+                signal: controller.signal,
+              }))
+
+          if (!sampleResponse.ok && sampleResponse.status !== 206) {
+            throw new Error('The server could not complete the connection test.')
+          }
+
+          totalBytes = parseContentRangeTotal(sampleResponse.headers.get('Content-Range')) ?? totalBytes
+          setSpeedTestProgress((current) => Math.max(
+            current,
+            Math.min(95, Math.round(((performance.now() - testStart) / SPEED_TEST_DURATION_MS) * 100))
+          ))
+
+          const reader = sampleResponse.body?.getReader()
+          if (!reader) {
+            throw new Error('The browser could not read the connection test response.')
+          }
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              bytesRead += value.byteLength
+            }
+          } catch (error) {
+            if (!timedOut && !isAbortError(error)) {
+              throw error
+            }
+          } finally {
+            clearTimeout(timeoutId)
+            await reader.cancel().catch(() => undefined)
+          }
+        } catch (error) {
+          clearTimeout(timeoutId)
+          if (!timedOut && !isAbortError(error)) {
+            throw error
+          }
+        }
+
+        if (timedOut || performance.now() >= sampleDeadline) {
+          break
+        }
+
+        nextRangeStart = requestEnd + 1
+        if (totalBytes && nextRangeStart >= totalBytes) {
+          nextRangeStart = 0
+        }
       }
 
       const sampleDurationMs = performance.now() - sampleStart
@@ -1005,6 +1093,7 @@ export function CommentSectionView({
         fileSizeBytes: headerVideoFileSizeBytes,
       }
 
+      setSpeedTestProgress(100)
       setSpeedTestResult(result)
       if (speedTestStorageKey) {
         try {
@@ -1017,6 +1106,7 @@ export function CommentSectionView({
       setSpeedTestResult(null)
       setSpeedTestError(error instanceof Error ? error.message : 'Connection test failed.')
     } finally {
+      clearInterval(progressTimer)
       setSpeedTestLoading(false)
     }
   }
@@ -1381,7 +1471,7 @@ export function CommentSectionView({
                                   <div>
                                     <div className="font-medium text-foreground">Connection Test</div>
                                     <div className="text-xs text-muted-foreground">
-                                      Tests the current browser path using a 32 MB range request from the best available video source.
+                                      Runs a 10 second transfer test from the best available video source and measures how much data this browser can pull over that path.
                                     </div>
                                   </div>
                                   <Button
@@ -1399,6 +1489,16 @@ export function CommentSectionView({
                                   <div className="text-xs text-destructive">{speedTestError}</div>
                                 ) : null}
 
+                                {speedTestLoading ? (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                      <span>Measuring browser-to-server throughput...</span>
+                                      <span className="tabular-nums">{speedTestProgress}%</span>
+                                    </div>
+                                    <Progress value={speedTestProgress} className="h-2" />
+                                  </div>
+                                ) : null}
+
                                 {speedTestResult ? (
                                   <div className="space-y-2 text-xs sm:text-sm">
                                     <div className="flex justify-between">
@@ -1411,7 +1511,7 @@ export function CommentSectionView({
                                     </div>
                                     <div className="flex justify-between">
                                       <span className="text-muted-foreground">Sample Size:</span>
-                                      <span className="font-medium">{formatFileSize(speedTestResult.sampleBytes)}</span>
+                                      <span className="font-medium">{formatFileSize(speedTestResult.sampleBytes)} in {Math.max(1, Math.round(speedTestResult.sampleDurationMs / 1000))}s</span>
                                     </div>
                                     <div className="flex justify-between">
                                       <span className="text-muted-foreground">Est. Full Download:</span>

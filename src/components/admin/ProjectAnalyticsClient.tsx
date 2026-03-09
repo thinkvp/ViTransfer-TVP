@@ -51,12 +51,16 @@ interface AuthActivity {
 interface DownloadActivity {
   id: string
   type: 'DOWNLOAD'
+  eventType: 'DOWNLOAD_COMPLETE' | 'DOWNLOAD_SUCCEEDED' | 'DOWNLOAD_FAILED'
   videoName: string
   versionLabel: string
   assetId?: string | null
   assetIds?: string[]
   assetFileName?: string
   assetFileNames?: string[]
+  averageMbps?: number | null
+  bytesTransferred?: number | null
+  durationMs?: number | null
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   ipAddress: string | null
@@ -213,6 +217,23 @@ function getPhotoVariantLabel(variant?: string | null): string {
   return variant === 'social' ? 'Social Media Sized' : 'Full Resolution'
 }
 
+function formatDownloadSpeed(value?: number | null): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null
+  }
+  return value >= 100 ? `${value.toFixed(0)} Mbps` : `${value.toFixed(1)} Mbps`
+}
+
+function getDownloadSubject(event: DownloadActivity): string {
+  if (event.assetFileName) {
+    return `${event.assetFileName} from ${event.videoName} (${event.versionLabel})`
+  }
+  if (event.assetFileNames && event.assetFileNames.length > 0) {
+    return `${event.videoName} (${event.versionLabel}) asset ZIP`
+  }
+  return `${event.videoName} (${event.versionLabel})`
+}
+
 function getMainText(event: Activity): string {
   if (event.type === 'AUTH') {
     if (event.eventType === 'SWITCH_AWAY' && event.targetProjectTitle) {
@@ -230,11 +251,19 @@ function getMainText(event: Activity): string {
   if (event.type === 'EMAIL') return getEmailActionLabel(event.description, 'sent')
   if (event.type === 'EMAIL_OPEN') return getEmailActionLabel(event.description, 'opened')
   if (event.type === 'STATUS_CHANGE') return `Status changed from ${projectStatusLabel(event.previousStatus)} to ${projectStatusLabel(event.currentStatus)}`
-  // DOWNLOAD
   const dl = event as DownloadActivity
-  return dl.assetFileName
-    ? `${dl.assetFileName} from ${dl.videoName} (${dl.versionLabel})`
-    : `${dl.videoName} (${dl.versionLabel})`
+  if (dl.eventType === 'DOWNLOAD_FAILED') {
+    return `${getDownloadSubject(dl)} download failed`
+  }
+
+  const speedLabel = formatDownloadSpeed(dl.averageMbps)
+  if (dl.eventType === 'DOWNLOAD_SUCCEEDED' && speedLabel) {
+    return `${getDownloadSubject(dl)} downloaded successfully (avg. speed ${speedLabel})`
+  }
+  if (dl.eventType === 'DOWNLOAD_SUCCEEDED') {
+    return `${getDownloadSubject(dl)} downloaded successfully`
+  }
+  return `${getDownloadSubject(dl)} downloaded`
 }
 
 interface AnalyticsData {
@@ -715,6 +744,18 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                         ) : event.type === 'STATUS_CHANGE' ? null : (
                           (event as DownloadActivity).assetFileNames && (event as DownloadActivity).assetFileNames!.length > 0 ? (
                             <div className="space-y-3">
+                              {((event as DownloadActivity).eventType === 'DOWNLOAD_SUCCEEDED' || (event as DownloadActivity).eventType === 'DOWNLOAD_FAILED') && (
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-semibold text-foreground min-w-[80px]">Result</span>
+                                  <div className="flex-1 text-sm text-muted-foreground">
+                                    {(event as DownloadActivity).eventType === 'DOWNLOAD_FAILED'
+                                      ? 'Failed'
+                                      : formatDownloadSpeed((event as DownloadActivity).averageMbps)
+                                      ? `Succeeded at ${formatDownloadSpeed((event as DownloadActivity).averageMbps)}`
+                                      : 'Succeeded'}
+                                  </div>
+                                </div>
+                              )}
                               <div className="flex items-start gap-2">
                                 <span className="text-xs font-semibold text-foreground min-w-[80px]">Content</span>
                                 <div className="flex-1">
@@ -759,7 +800,9 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                           ? 'bg-lime-800 text-lime-200'
                                         : event.type === 'EMAIL' || event.type === 'EMAIL_OPEN'
                                           ? 'bg-warning-visible text-warning'
-                                        : 'bg-success-visible text-success'
+                                        : (event as DownloadActivity).eventType === 'DOWNLOAD_FAILED'
+                                          ? 'bg-destructive/15 text-destructive'
+                                          : 'bg-success-visible text-success'
                                     }`}
                                   >
                                   {event.type === 'AUTH' ? (
@@ -811,11 +854,13 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                   ) : (
                                     <>
                                       <Download className="w-3 h-3 inline mr-1" />
-                                      {(event as DownloadActivity).assetIds
-                                        ? 'ZIP'
-                                        : (event as DownloadActivity).assetId
-                                          ? 'Asset'
-                                          : 'Video'}
+                                      {(event as DownloadActivity).eventType === 'DOWNLOAD_FAILED'
+                                        ? 'Download Failed'
+                                        : (event as DownloadActivity).assetIds
+                                          ? 'ZIP Download'
+                                          : (event as DownloadActivity).assetId
+                                            ? 'Asset Download'
+                                            : 'Video Download'}
                                     </>
                                   )}
                                   </span>

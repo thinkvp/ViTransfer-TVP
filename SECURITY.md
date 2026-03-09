@@ -117,6 +117,7 @@ docker scout cves thinkvp/vitransfer-tvp-worker:latest
 - Set secure `ENCRYPTION_KEY` and `JWT_SECRET` values
 - Use strong admin passwords (12+ characters)
 - Run behind a reverse proxy (Nginx, Traefik, Caddy)
+- Set `TRUSTED_PROXIES` to your proxy IP(s) so rate limiting and IP blocklists resolve real client IPs (see [README.md](README.md#trusted-proxies-trusted_proxies))
 - Enable rate limiting at the reverse proxy level
 - Keep Docker images updated
 

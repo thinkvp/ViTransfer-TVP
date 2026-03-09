@@ -11,6 +11,7 @@ import { VideoProcessingSettingsSection } from '@/components/settings/VideoProce
 import { ProjectBehaviorSection } from '@/components/settings/ProjectBehaviorSection'
 import { DeveloperToolsSection } from '@/components/settings/DeveloperToolsSection'
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
+import { CpuConfigurationSection } from '@/components/settings/CpuConfigurationSection'
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
 import { AdminBrowserPushSection } from '@/components/settings/AdminBrowserPushSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
@@ -245,6 +246,18 @@ export default function GlobalSettingsPage() {
   const [showPushNotifications, setShowPushNotifications] = useState(false)
   const [showBrowserPush, setShowBrowserPush] = useState(false)
 
+  // CPU Configuration state
+  const [showCpuConfig, setShowCpuConfig] = useState(false)
+  const [cpuDetectedThreads, setCpuDetectedThreads] = useState(0)
+  const [cpuBudgetThreads, setCpuBudgetThreads] = useState(0)
+  const [cpuReservedSystemThreads, setCpuReservedSystemThreads] = useState(0)
+  const [cpuMaxFfmpegThreadsPerJob, setCpuMaxFfmpegThreadsPerJob] = useState(12)
+  const [cpuFfmpegThreadsPerJob, setCpuFfmpegThreadsPerJob] = useState('')
+  const [cpuVideoWorkerConcurrency, setCpuVideoWorkerConcurrency] = useState('')
+  const [cpuDynamicThreadAllocation, setCpuDynamicThreadAllocation] = useState(true)
+  const [cpuDefaultFfmpegThreadsPerJob, setCpuDefaultFfmpegThreadsPerJob] = useState(2)
+  const [cpuDefaultVideoWorkerConcurrency, setCpuDefaultVideoWorkerConcurrency] = useState(1)
+
   const [recalcProjectDataLoading, setRecalcProjectDataLoading] = useState(false)
   const [recalcProjectDataResult, setRecalcProjectDataResult] = useState<string | null>(null)
 
@@ -367,6 +380,33 @@ export default function GlobalSettingsPage() {
           setPushNotifySalesInvoicePaid(pushData.notifySalesInvoicePaid ?? true)
           setPushNotifyPasswordResetRequested(pushData.notifyPasswordResetRequested ?? true)
           setPushNotifyPasswordResetSuccess(pushData.notifyPasswordResetSuccess ?? true)
+        }
+
+        // Load CPU configuration
+        const cpuResponse = await apiFetch('/api/settings/cpu')
+        if (cpuResponse.ok) {
+          const cpuData = await cpuResponse.json()
+          setCpuDetectedThreads(cpuData.system?.detectedThreads || 0)
+          setCpuBudgetThreads(cpuData.system?.budgetThreads || 0)
+          setCpuReservedSystemThreads(cpuData.system?.reservedSystemThreads || 0)
+          setCpuMaxFfmpegThreadsPerJob(cpuData.system?.maxFfmpegThreadsPerJob || 12)
+          setCpuDefaultFfmpegThreadsPerJob(cpuData.current?.ffmpegThreadsPerJob || 2)
+          setCpuDefaultVideoWorkerConcurrency(cpuData.current?.videoWorkerConcurrency || 1)
+          setCpuFfmpegThreadsPerJob(
+            cpuData.overrides?.ffmpegThreadsPerJob != null
+              ? String(cpuData.overrides.ffmpegThreadsPerJob)
+              : ''
+          )
+          setCpuVideoWorkerConcurrency(
+            cpuData.overrides?.videoWorkerConcurrency != null
+              ? String(cpuData.overrides.videoWorkerConcurrency)
+              : ''
+          )
+          setCpuDynamicThreadAllocation(
+            cpuData.overrides?.dynamicThreadAllocation != null
+              ? cpuData.overrides.dynamicThreadAllocation
+              : cpuData.current?.dynamicThreadAllocation ?? true
+          )
         }
       } catch (err) {
         setError('Failed to load settings')
@@ -496,6 +536,28 @@ export default function GlobalSettingsPage() {
     setSuccess(false)
 
     try {
+      const parsedCpuThreadsPerJob = cpuFfmpegThreadsPerJob.trim()
+        ? parseInt(cpuFfmpegThreadsPerJob, 10)
+        : cpuDefaultFfmpegThreadsPerJob
+      const parsedCpuConcurrency = cpuVideoWorkerConcurrency.trim()
+        ? parseInt(cpuVideoWorkerConcurrency, 10)
+        : cpuDefaultVideoWorkerConcurrency
+
+      if (!Number.isFinite(parsedCpuThreadsPerJob) || parsedCpuThreadsPerJob < 1 || parsedCpuThreadsPerJob > cpuMaxFfmpegThreadsPerJob) {
+        throw new Error(`FFmpeg threads per job must be between 1 and ${cpuMaxFfmpegThreadsPerJob}.`)
+      }
+
+      if (!Number.isFinite(parsedCpuConcurrency) || parsedCpuConcurrency < 1 || parsedCpuConcurrency > 20) {
+        throw new Error('Concurrent jobs must be between 1 and 20.')
+      }
+
+      const estimatedCpuThreads = parsedCpuThreadsPerJob * parsedCpuConcurrency
+      if (cpuDetectedThreads > 0 && estimatedCpuThreads > cpuDetectedThreads) {
+        throw new Error(
+          `CPU Configuration would use ${estimatedCpuThreads} threads, which exceeds the detected system limit of ${cpuDetectedThreads}. Reduce FFmpeg threads per job or concurrent jobs.`
+        )
+      }
+
       const updates = {
         companyName: companyName || null,
         companyLogoMode: companyLogoMode || 'NONE',
@@ -546,7 +608,6 @@ export default function GlobalSettingsPage() {
 
       // Save security settings
       const securityUpdates = {
-        httpsEnabled,
         hotlinkProtection,
         ipRateLimit: parseInt(ipRateLimit, 10) || 1000,
         sessionRateLimit: parseInt(sessionRateLimit, 10) || 600,
@@ -589,6 +650,23 @@ export default function GlobalSettingsPage() {
       }
 
       await apiPatch('/api/settings/push-notifications', pushUpdates)
+
+      // Save CPU configuration
+      const cpuUpdates: Record<string, any> = {
+        dynamicThreadAllocation: cpuDynamicThreadAllocation,
+      }
+      if (cpuFfmpegThreadsPerJob.trim()) {
+        cpuUpdates.ffmpegThreadsPerJob = parseInt(cpuFfmpegThreadsPerJob, 10)
+      } else {
+        cpuUpdates.ffmpegThreadsPerJob = null
+      }
+      if (cpuVideoWorkerConcurrency.trim()) {
+        cpuUpdates.videoWorkerConcurrency = parseInt(cpuVideoWorkerConcurrency, 10)
+      } else {
+        cpuUpdates.videoWorkerConcurrency = null
+      }
+
+      await apiPatch('/api/settings/cpu', cpuUpdates)
 
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
@@ -923,6 +1001,23 @@ export default function GlobalSettingsPage() {
             setShow={setShowEmailSettings}
           />
 
+          <CpuConfigurationSection
+            show={showCpuConfig}
+            setShow={setShowCpuConfig}
+            detectedThreads={cpuDetectedThreads}
+            budgetThreads={cpuBudgetThreads}
+            reservedSystemThreads={cpuReservedSystemThreads}
+            maxFfmpegThreadsPerJob={cpuMaxFfmpegThreadsPerJob}
+            ffmpegThreadsPerJob={cpuFfmpegThreadsPerJob}
+            setFfmpegThreadsPerJob={setCpuFfmpegThreadsPerJob}
+            videoWorkerConcurrency={cpuVideoWorkerConcurrency}
+            setVideoWorkerConcurrency={setCpuVideoWorkerConcurrency}
+            dynamicThreadAllocation={cpuDynamicThreadAllocation}
+            setDynamicThreadAllocation={setCpuDynamicThreadAllocation}
+            defaultFfmpegThreadsPerJob={cpuDefaultFfmpegThreadsPerJob}
+            defaultVideoWorkerConcurrency={cpuDefaultVideoWorkerConcurrency}
+          />
+
           <VideoProcessingSettingsSection
             defaultPreviewResolution={defaultPreviewResolution}
             setDefaultPreviewResolution={setDefaultPreviewResolution}
@@ -1008,7 +1103,6 @@ export default function GlobalSettingsPage() {
             showSecuritySettings={showSecuritySettings}
             setShowSecuritySettings={setShowSecuritySettings}
             httpsEnabled={httpsEnabled}
-            setHttpsEnabled={setHttpsEnabled}
             hotlinkProtection={hotlinkProtection}
             setHotlinkProtection={setHotlinkProtection}
             ipRateLimit={ipRateLimit}

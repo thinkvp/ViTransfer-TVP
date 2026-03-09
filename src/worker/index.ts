@@ -2,10 +2,10 @@ import { Worker, Queue } from 'bullmq'
 import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
-import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
+import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import os from 'os'
-import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
+import { getCpuAllocation, logCpuAllocation, loadCpuConfigOverrides } from '../lib/cpu-config'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
@@ -18,6 +18,7 @@ import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processInternalCommentNotifications } from './internal-comment-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
+import { cleanupStaleTrackedDownloads } from '@/lib/download-tracking'
 import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
@@ -60,6 +61,9 @@ async function hasRetriableNotificationFailures(): Promise<boolean> {
 
 async function main() {
   console.log('[WORKER] Initializing video processing worker...')
+
+  // Load Redis-backed CPU overrides before computing allocation.
+  await loadCpuConfigOverrides(getRedis())
 
   // Centralized CPU allocation coordinates worker concurrency with FFmpeg thread usage.
   const cpuAllocation = getCpuAllocation()
@@ -735,11 +739,31 @@ async function main() {
     await cleanupOldTempFiles()
   }, ONE_HOUR_MS)
 
+  const downloadCleanupInterval = setInterval(async () => {
+    const cleaned = await cleanupStaleTrackedDownloads().catch((error) => {
+      console.error('Scheduled download tracking cleanup failed:', error)
+      return 0
+    })
+
+    if (cleaned > 0) {
+      console.log(`[DOWNLOAD] Marked ${cleaned} stale download(s) as failed`)
+    }
+  }, 60 * 1000)
+
+  // Periodically refresh Redis-backed CPU overrides so admin changes take
+  // effect without a container restart (threads per job only; concurrency
+  // changes still require restart).
+  const cpuConfigRefreshInterval = setInterval(async () => {
+    await loadCpuConfigOverrides(getRedis()).catch(() => undefined)
+  }, 60 * 1000)
+
   // Handle shutdown gracefully
   process.on('SIGTERM', async () => {
     console.log('SIGTERM received, closing workers...')
     clearInterval(tusCleanupInterval)
     clearInterval(tempCleanupInterval)
+    clearInterval(downloadCleanupInterval)
+    clearInterval(cpuConfigRefreshInterval)
     await Promise.all([
       worker.close(),
       assetWorker.close(),
@@ -757,6 +781,8 @@ async function main() {
     console.log('SIGINT received, closing workers...')
     clearInterval(tusCleanupInterval)
     clearInterval(tempCleanupInterval)
+    clearInterval(downloadCleanupInterval)
+    clearInterval(cpuConfigRefreshInterval)
     await Promise.all([
       worker.close(),
       assetWorker.close(),

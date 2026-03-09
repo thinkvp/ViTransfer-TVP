@@ -4,9 +4,10 @@ import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
-import { logSecurityEvent, trackVideoAccess } from '@/lib/video-access'
+import { logSecurityEvent } from '@/lib/video-access'
 import archiver from 'archiver'
-import { Readable } from 'stream'
+import { PassThrough, Readable } from 'stream'
+import { failTrackedDownloadNow, registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,6 +22,9 @@ export async function GET(
 ) {
   try {
     const { token } = await params
+    const { searchParams } = new URL(request.url)
+    const rawDownloadId = searchParams.get('downloadId')
+    const downloadId = rawDownloadId && rawDownloadId.trim().length > 0 ? rawDownloadId.trim() : null
 
     // Rate limit by IP
     const rateLimitResult = await rateLimit(request, {
@@ -76,17 +80,19 @@ export async function GET(
       return NextResponse.json({ error: 'No valid assets found' }, { status: 404 })
     }
 
-    // Track download analytics (sessionId check handles admin filtering automatically)
-    if (sessionId) {
-      await trackVideoAccess({
-        videoId,
+    const shouldTrackDownload = Boolean(downloadId && sessionId && !sessionId.startsWith('admin:'))
+    if (shouldTrackDownload) {
+      await registerTrackedDownload({
+        downloadId: downloadId!,
         projectId,
+        videoId,
+        videoName: video.name,
+        versionLabel: video.versionLabel || null,
+        assetIds,
+        fileSizeBytes: null,
         sessionId,
-        request,
-        quality: 'assets',
-        eventType: 'DOWNLOAD_COMPLETE',
-        assetIds: assetIds,
-      }).catch(() => {})
+        ipAddress: getClientIpAddress(request) || null,
+      }).catch(() => undefined)
     }
 
     // Create ZIP archive with streaming (no memory buffer)
@@ -111,11 +117,50 @@ export async function GET(
       }
     }
 
-    // Finalize archive (must be called before streaming)
+    const output = new PassThrough()
+    let bytesSent = 0
+    let finalized = false
+
+    const flushSuccess = () => {
+      if (finalized || !shouldTrackDownload || !downloadId) return
+      finalized = true
+      void recordTrackedDownloadProgress({
+        downloadId,
+        rangeStart: 0,
+        bytesSent,
+        completeOnRequestEnd: true,
+      }).catch(() => undefined)
+    }
+
+    const flushFailure = (reason: string) => {
+      if (finalized || !shouldTrackDownload || !downloadId) return
+      finalized = true
+      if (bytesSent > 0) {
+        void recordTrackedDownloadProgress({
+          downloadId,
+          rangeStart: 0,
+          bytesSent,
+        }).catch(() => undefined)
+      }
+      void failTrackedDownloadNow(downloadId, reason).catch(() => undefined)
+    }
+
+    output.on('data', (chunk: Buffer | string) => {
+      bytesSent += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength
+    })
+    output.once('end', flushSuccess)
+    output.once('error', () => flushFailure('stream_error'))
+    output.once('close', () => {
+      if (!finalized) {
+        flushFailure('connection_closed')
+      }
+    })
+
+    archive.pipe(output)
     archive.finalize()
 
     // Convert Node.js readable stream to Web ReadableStream
-    const readableStream = Readable.toWeb(archive as any) as ReadableStream
+    const readableStream = Readable.toWeb(output as any) as ReadableStream
 
     // Generate filename
     const sanitizedVideoName = video.name.replace(/[^a-zA-Z0-9._-]/g, '_')

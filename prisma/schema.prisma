@@ -1490,7 +1490,7 @@ model VideoAnalytics {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  // Event types: PAGE_VISIT, DOWNLOAD_COMPLETE
+  // Event types: PAGE_VISIT, DOWNLOAD_COMPLETE (legacy), DOWNLOAD_SUCCEEDED, DOWNLOAD_FAILED
   eventType String
 
   // Optional: Single asset ID for individual asset downloads
@@ -1508,6 +1508,9 @@ model VideoAnalytics {
   // Authentication metadata captured at the time of the event
   accessMethod String?
   email        String?
+
+  // Additional context for richer analytics entries (speed, failure reason, etc.)
+  details Json?
 
   createdAt DateTime @default(now())
 

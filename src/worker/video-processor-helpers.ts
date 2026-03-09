@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile } from '../lib/storage'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite } from '../lib/ffmpeg'
-import type { VideoStatus } from '@prisma/client'
+import { Prisma, type VideoStatus } from '@prisma/client'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -73,6 +73,50 @@ export function debugLog(message: string, data?: any) {
     console.log(`[WORKER DEBUG] ${message}`, data)
   } else {
     console.log(`[WORKER DEBUG] ${message}`)
+  }
+}
+
+export class VideoRecordMissingError extends Error {
+  constructor(videoId: string, context?: string) {
+    super(`Video ${videoId} was removed during processing${context ? ` (${context})` : ''}`)
+    this.name = 'VideoRecordMissingError'
+  }
+}
+
+function isVideoRecordNotFound(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025'
+}
+
+export function isVideoRecordMissingError(error: unknown): error is VideoRecordMissingError {
+  return error instanceof VideoRecordMissingError
+}
+
+export async function updateVideoRecord(
+  videoId: string,
+  data: Prisma.VideoUpdateInput,
+  options?: {
+    context?: string
+    ignoreMissing?: boolean
+  }
+): Promise<boolean> {
+  try {
+    await prisma.video.update({
+      where: { id: videoId },
+      data,
+    })
+    return true
+  } catch (error) {
+    if (!isVideoRecordNotFound(error)) {
+      throw error
+    }
+
+    const contextSuffix = options?.context ? ` during ${options.context}` : ''
+    if (options?.ignoreMissing) {
+      console.warn(`[WORKER] Video ${videoId} no longer exists${contextSuffix}; skipping update`)
+      return false
+    }
+
+    throw new VideoRecordMissingError(videoId, options?.context)
   }
 }
 
@@ -269,6 +313,15 @@ export async function processTimelinePreviews(
   const spriteCount = Math.ceil(totalDuration / segmentDurationSeconds)
   const vttLines: string[] = ['WEBVTT', '']
 
+  await updateVideoRecord(
+    videoId,
+    {
+      processingProgress: 0,
+      processingPhase: PROCESSING_PHASES.timeline,
+    },
+    { context: 'starting timeline preview generation', ignoreMissing: false }
+  )
+
   // Each phase tracks its own 0→1 progress independently.
   let lastTimelineProgressUpdate = 0
   let timelineProgressInFlight = false
@@ -301,13 +354,14 @@ export async function processTimelinePreviews(
       timelineProgressInFlight = true
       lastTimelineProgressUpdate = now
       try {
-        await prisma.video.update({
-          where: { id: videoId },
-          data: {
+        await updateVideoRecord(
+          videoId,
+          {
             processingProgress: spriteProgress,
             processingPhase: PROCESSING_PHASES.timeline,
           },
-        })
+          { context: 'updating timeline preview progress', ignoreMissing: true }
+        )
       } catch (err) {
         console.error(`[WORKER] Failed to update timeline progress for ${videoId}:`, err)
       } finally {
@@ -448,13 +502,14 @@ export async function processPreview(
       progressWriteInFlight = true
       lastProgressUpdate = now
       try {
-        await prisma.video.update({
-          where: { id: videoId },
-          data: {
+        await updateVideoRecord(
+          videoId,
+          {
             processingProgress: progress,
             processingPhase: PROCESSING_PHASES.transcode,
           },
-        })
+          { context: 'updating transcode progress', ignoreMissing: true }
+        )
       } catch (err) {
         console.error(`[WORKER] Failed to update progress for ${videoId}:`, err)
       } finally {
@@ -515,13 +570,14 @@ export async function processThumbnail(
 
   // Update progress to reflect thumbnail completion (instant phase, just mark done)
   try {
-    await prisma.video.update({
-      where: { id: videoId },
-      data: {
+    await updateVideoRecord(
+      videoId,
+      {
         processingProgress: 1,
         processingPhase: PROCESSING_PHASES.thumbnail,
       },
-    })
+      { context: 'marking thumbnail phase', ignoreMissing: true }
+    )
   } catch (err) {
     console.error(`[WORKER] Failed to update thumbnail progress for ${videoId}:`, err)
   }
@@ -593,10 +649,7 @@ export async function finalizeVideo(
   debugLog('Updating database with final video data...')
   debugLog('Update data:', updateData)
 
-  await prisma.video.update({
-    where: { id: videoId },
-    data: updateData,
-  })
+  await updateVideoRecord(videoId, updateData, { context: 'finalizing processed video' })
 
   debugLog('Database updated to READY status')
 }
@@ -612,14 +665,15 @@ export async function updateVideoStatus(
 ): Promise<void> {
   debugLog(`Updating video status to ${status}...`)
 
-  await prisma.video.update({
-    where: { id: videoId },
-    data: {
+  await updateVideoRecord(
+    videoId,
+    {
       status,
       processingProgress: progress,
       ...(phase !== undefined ? { processingPhase: phase } : {}),
     },
-  })
+    { context: `setting status to ${status}` }
+  )
 
   debugLog(`Database updated to ${status} status`)
 }
@@ -670,11 +724,12 @@ export async function handleProcessingError(
   debugLog('Updating database with error status...')
   debugLog('Error message:', errorMessage)
 
-  await prisma.video.update({
-    where: { id: videoId },
-    data: {
+  await updateVideoRecord(
+    videoId,
+    {
       status: 'ERROR',
       processingError: errorMessage,
     },
-  })
+    { context: 'marking processing error', ignoreMissing: true }
+  )
 }

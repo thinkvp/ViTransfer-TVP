@@ -485,6 +485,7 @@ The source code will be built into Docker images locally instead of pulling from
 | `ADMIN_NAME` | No | Display name for admin user | `Admin` | `Jane Doe` |
 | `HTTPS_ENABLED` | No | Enable HTTPS enforcement (HSTS) | `false` (compose default) | `true` for production |
 | `CLOUDFLARE_TUNNEL` | No | Enable Cloudflare script/connect CSP | `false` | `true` |
+| `TRUSTED_PROXIES` | No | Comma-separated proxy IPs for `X-Forwarded-For` peeling | — | `192.168.1.1` |
 | `NEXT_PUBLIC_TUS_ENDPOINT` | No | Custom TUS origin for connect-src | — | `https://uploads.example.com` |
 
 **Optional Integrations:**
@@ -565,6 +566,27 @@ Each project can override global defaults:
 ### Reverse Proxy Setup
 
 Tested with Cloudflare Tunnels. Set `CLOUDFLARE_TUNNEL=true` in `.env` for proper CSP headers.
+
+#### Trusted Proxies (`TRUSTED_PROXIES`)
+
+When running behind a reverse proxy (Nginx, Traefik, Caddy, Cloudflare, etc.), set `TRUSTED_PROXIES` to the IP(s) of your proxy so that real client IP addresses are resolved correctly from `X-Forwarded-For` headers. This is required for accurate:
+
+- Rate limiting (per real client IP)
+- IP blocklist enforcement
+- Security event logging
+
+```env
+# Single proxy
+TRUSTED_PROXIES=192.168.1.1
+
+# Multiple proxies
+TRUSTED_PROXIES=192.168.1.1,10.0.0.1
+
+# Cloudflare Tunnel (use Cloudflare published IP ranges)
+TRUSTED_PROXIES=173.245.48.0/20,...
+```
+
+If `TRUSTED_PROXIES` is not set, the app falls back to the left-most `X-Forwarded-For` entry (with a console warning) to preserve functionality. For production deployments, always configure this explicitly.
 
 ---
 

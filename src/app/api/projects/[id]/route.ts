@@ -240,7 +240,7 @@ export async function GET(
         by: ['videoId'],
         where: {
           videoId: { in: videoIds },
-          eventType: 'DOWNLOAD_COMPLETE',
+          eventType: { in: ['DOWNLOAD_COMPLETE', 'DOWNLOAD_SUCCEEDED'] },
         },
         _count: { _all: true },
       })
