@@ -5,6 +5,7 @@ import { Activity, CheckCircle2, Loader2, Pause, Play, X, XCircle } from 'lucide
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
 import { useUploadManager, type UploadJob, type ProcessingJob } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
@@ -161,14 +162,7 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
 
 function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate: (projectId: string) => void }) {
   const progressPercent = Math.min(Math.round((job.processingProgress ?? 0) * 100), 100)
-
-  // Phase label is driven by Video.processingPhase written by the worker.
-  let phaseLabel = 'Processing…'
-  switch (job.processingPhase) {
-    case 'transcode': phaseLabel = 'Processing previews…'; break
-    case 'thumbnail': phaseLabel = 'Generating thumbnail…'; break
-    case 'timeline':  phaseLabel = 'Generating timeline previews…'; break
-  }
+  const phaseLabel = getProcessingPhaseLabel(job.processingPhase)
 
   // Thread allocation badge: e.g. "(4/8 threads)"
   const threadBadge =

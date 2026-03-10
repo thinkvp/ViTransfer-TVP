@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
+import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -68,6 +69,21 @@ function asNumberBigInt(v: unknown): number {
     return Number.isFinite(n) ? n : 0
   }
   return 0
+}
+
+async function computeStorageEntrySizeBytes(storagePath: string | null | undefined): Promise<number> {
+  if (!storagePath) return 0
+
+  try {
+    return await computeDirectorySizeBytes(getFilePath(storagePath))
+  } catch {
+    return 0
+  }
+}
+
+async function sumStorageEntrySizes(paths: Array<string | null | undefined>): Promise<number> {
+  const sizes = await Promise.all(paths.map((storagePath) => computeStorageEntrySizeBytes(storagePath)))
+  return sizes.reduce((total, size) => total + size, 0)
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -138,10 +154,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const albumZipFullBytes = asNumberBigInt(albumAgg._sum.fullZipFileSize)
     const albumZipSocialBytes = asNumberBigInt(albumAgg._sum.socialZipFileSize)
+    const originalVideosBytes = videosBytes
+    const originalPhotosBytes = photosOriginalBytes + socialPhotosBytes
+    const photoZipBytes = albumZipFullBytes + albumZipSocialBytes
 
     // Fold sub-categories into the existing breakdown rows used by the UI.
-    const photosBytes = photosOriginalBytes + socialPhotosBytes + albumZipFullBytes + albumZipSocialBytes
+    const photosBytes = originalPhotosBytes + photoZipBytes
     const projectFilesBytes = projectFilesBytesRaw + communicationsBytes
+    let videoPreviewsBytes = 0
 
     const totalBytes = asNumberBigInt(project?.totalBytes)
 
@@ -153,9 +173,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     let diskOtherBytes: number | null = null
     let diskBreakdown:
       | {
+          originalVideosBytes: number
+          videoPreviewsBytes: number
           videosBytes: number
           videoAssetsBytes: number
           commentAttachmentsBytes: number
+          originalPhotosBytes: number
+          photoZipBytes: number
           photosBytes: number
           projectFilesBytes: number
         }
@@ -163,58 +187,114 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (includeDisk) {
       const projectRootRel = `projects/${projectId}`
-      const videosRel = `${projectRootRel}/videos`
-      const videoAssetsRel = `${videosRel}/assets`
+      const videoAssetsRel = `${projectRootRel}/videos/assets`
       const commentsRel = `${projectRootRel}/comments`
       const communicationRel = `${projectRootRel}/communication`
       const filesRel = `${projectRootRel}/files`
-      const albumsRel = `${projectRootRel}/albums`
 
-      const [projectRootAbs, videosAbs, videoAssetsAbs, commentsAbs, communicationAbs, filesAbs, albumsAbs] = [
+      const [projectRootAbs, videoAssetsAbs, commentsAbs, communicationAbs, filesAbs] = [
         projectRootRel,
-        videosRel,
         videoAssetsRel,
         commentsRel,
         communicationRel,
         filesRel,
-        albumsRel,
       ].map((p) => getFilePath(p))
 
       const [
+        videoEntries,
+        albumPhotoEntries,
+        albumEntries,
         rootBytes,
-        videosBytesAll,
         videoAssetsBytesDisk,
         commentsBytesDisk,
         communicationBytesDisk,
         filesBytesDisk,
-        albumsBytesDisk,
       ] = await Promise.all([
+        prisma.video.findMany({
+          where: { projectId },
+          select: {
+            originalStoragePath: true,
+            preview480Path: true,
+            preview720Path: true,
+            preview1080Path: true,
+            thumbnailPath: true,
+            timelinePreviewVttPath: true,
+            timelinePreviewSpritesPath: true,
+          },
+        }),
+        prisma.albumPhoto.findMany({
+          where: { album: { projectId } },
+          select: {
+            storagePath: true,
+            socialStoragePath: true,
+          },
+        }),
+        prisma.album.findMany({
+          where: { projectId },
+          select: { id: true },
+        }),
         computeDirectorySizeBytes(projectRootAbs),
-        computeDirectorySizeBytes(videosAbs),
         computeDirectorySizeBytes(videoAssetsAbs),
         computeDirectorySizeBytes(commentsAbs),
         computeDirectorySizeBytes(communicationAbs),
         computeDirectorySizeBytes(filesAbs),
-        computeDirectorySizeBytes(albumsAbs),
       ])
 
-      const videosNonAssetsBytesDisk = Math.max(0, videosBytesAll - videoAssetsBytesDisk)
+      const [originalVideosBytesDisk, videoPreviewsBytesDisk, originalPhotosBytesDisk, photoZipBytesDisk] = await Promise.all([
+        sumStorageEntrySizes(videoEntries.map((video) => video.originalStoragePath)),
+        sumStorageEntrySizes(
+          videoEntries.flatMap((video) => {
+            const previewPaths: string[] = []
+
+            if (video.preview480Path) previewPaths.push(video.preview480Path)
+            if (video.preview720Path) previewPaths.push(video.preview720Path)
+            if (video.preview1080Path) previewPaths.push(video.preview1080Path)
+            if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
+              previewPaths.push(video.thumbnailPath)
+            }
+            if (video.timelinePreviewSpritesPath) {
+              previewPaths.push(video.timelinePreviewSpritesPath)
+            } else if (video.timelinePreviewVttPath) {
+              previewPaths.push(video.timelinePreviewVttPath)
+            }
+
+            return previewPaths
+          })
+        ),
+        sumStorageEntrySizes(
+          albumPhotoEntries.flatMap((photo) => [photo.storagePath, photo.socialStoragePath])
+        ),
+        sumStorageEntrySizes(
+          albumEntries.flatMap((album) => [
+            getAlbumZipStoragePath({ projectId, albumId: album.id, variant: 'full' }),
+            getAlbumZipStoragePath({ projectId, albumId: album.id, variant: 'social' }),
+          ])
+        ),
+      ])
+
+      videoPreviewsBytes = Math.max(0, videoPreviewsBytesDisk)
       const projectFilesBytesDisk = Math.max(0, filesBytesDisk + communicationBytesDisk)
 
       diskTotalBytes = Math.max(0, rootBytes)
       const known =
         Math.max(0, commentsBytesDisk) +
-        Math.max(0, albumsBytesDisk) +
+        Math.max(0, originalPhotosBytesDisk) +
+        Math.max(0, photoZipBytesDisk) +
         Math.max(0, projectFilesBytesDisk) +
-        Math.max(0, videosNonAssetsBytesDisk) +
+        Math.max(0, originalVideosBytesDisk) +
+        Math.max(0, videoPreviewsBytesDisk) +
         Math.max(0, videoAssetsBytesDisk)
       diskOtherBytes = Math.max(0, diskTotalBytes - known)
 
       diskBreakdown = {
-        videosBytes: videosNonAssetsBytesDisk,
+        originalVideosBytes: Math.max(0, originalVideosBytesDisk),
+        videoPreviewsBytes: Math.max(0, videoPreviewsBytesDisk),
+        videosBytes: Math.max(0, originalVideosBytesDisk + videoPreviewsBytesDisk),
         videoAssetsBytes: Math.max(0, videoAssetsBytesDisk),
         commentAttachmentsBytes: Math.max(0, commentsBytesDisk),
-        photosBytes: Math.max(0, albumsBytesDisk),
+        originalPhotosBytes: Math.max(0, originalPhotosBytesDisk),
+        photoZipBytes: Math.max(0, photoZipBytesDisk),
+        photosBytes: Math.max(0, originalPhotosBytesDisk + photoZipBytesDisk),
         projectFilesBytes: Math.max(0, projectFilesBytesDisk),
       }
     }
@@ -246,9 +326,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       capacityBytes,
       availableBytes,
       breakdown: {
+        originalVideosBytes,
+        videoPreviewsBytes,
         videosBytes,
         videoAssetsBytes,
         commentAttachmentsBytes,
+        originalPhotosBytes,
+        photoZipBytes,
         photosBytes,
         projectFilesBytes,
       },

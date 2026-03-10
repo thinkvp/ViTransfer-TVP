@@ -13,9 +13,13 @@ type StorageSummary = {
   capacityBytes?: number | null
   availableBytes?: number | null
   breakdown: {
+    originalVideosBytes?: number
+    videoPreviewsBytes?: number
     videosBytes: number
     videoAssetsBytes: number
     commentAttachmentsBytes: number
+    originalPhotosBytes?: number
+    photoZipBytes?: number
     photosBytes: number
     projectFilesBytes: number
 
@@ -30,16 +34,20 @@ type StorageSummary = {
   // Optional on-disk breakdown that matches actual volume folder sizes.
   // When present, it should be used alongside diskTotalBytes.
   diskBreakdown?: {
+    originalVideosBytes?: number
+    videoPreviewsBytes?: number
     videosBytes: number
     videoAssetsBytes: number
     commentAttachmentsBytes: number
+    originalPhotosBytes?: number
+    photoZipBytes?: number
     photosBytes: number
     projectFilesBytes: number
   } | null
 }
 
 type Row = {
-  key: keyof StorageSummary['breakdown']
+  key: string
   label: string
   bytes: number
   pct: number
@@ -90,30 +98,65 @@ export function ProjectStorageUsage({
     const b = (data?.diskBreakdown ?? data?.breakdown) as StorageSummary['breakdown'] | null | undefined
     if (!b) return []
 
-    // Keep the UI to a stable set of rows.
-    const photosBytes =
-      Number(b.photosBytes || 0) +
-      Number((b as any).socialPhotosBytes || 0) +
-      Number((b as any).albumZipFullBytes || 0) +
-      Number((b as any).albumZipSocialBytes || 0)
+    const baseBreakdown = data?.breakdown
+    const hasDetailedSplitRows =
+      typeof (b as any).originalVideosBytes === 'number' ||
+      typeof (b as any).videoPreviewsBytes === 'number' ||
+      typeof (b as any).originalPhotosBytes === 'number' ||
+      typeof (b as any).photoZipBytes === 'number' ||
+      typeof (baseBreakdown as any)?.originalVideosBytes === 'number' ||
+      typeof (baseBreakdown as any)?.videoPreviewsBytes === 'number' ||
+      typeof (baseBreakdown as any)?.originalPhotosBytes === 'number' ||
+      typeof (baseBreakdown as any)?.photoZipBytes === 'number'
+
+    const originalVideosBytes = Number((b as any).originalVideosBytes ?? (baseBreakdown as any)?.originalVideosBytes ?? 0)
+    const videoPreviewsBytes = Number((b as any).videoPreviewsBytes ?? (baseBreakdown as any)?.videoPreviewsBytes ?? 0)
+    const originalPhotosBytes = Number((b as any).originalPhotosBytes ?? (baseBreakdown as any)?.originalPhotosBytes ?? 0)
+    const photoZipBytes = Number((b as any).photoZipBytes ?? (baseBreakdown as any)?.photoZipBytes ?? 0)
+    const hasSplitRows =
+      hasDetailedSplitRows ||
+      originalVideosBytes > 0 ||
+      videoPreviewsBytes > 0 ||
+      originalPhotosBytes > 0 ||
+      photoZipBytes > 0
 
     const projectFilesBytes = Number(b.projectFilesBytes || 0) + Number((b as any).communicationsBytes || 0)
 
-    const items: Array<{ key: Row['key']; label: string; bytes: number }> = [
-      { key: 'videosBytes', label: 'Videos', bytes: Number(b.videosBytes || 0) },
-      { key: 'videoAssetsBytes', label: 'Video Assets', bytes: Number(b.videoAssetsBytes || 0) },
-      { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
-      { key: 'photosBytes', label: 'Photos', bytes: photosBytes },
-      { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
-    ]
+    const items: Array<{ key: Row['key']; label: string; bytes: number }> = hasSplitRows
+      ? [
+          { key: 'originalVideosBytes', label: 'Original Videos', bytes: originalVideosBytes },
+          { key: 'videoPreviewsBytes', label: 'Video Previews (inc. timeline previews)', bytes: videoPreviewsBytes },
+          { key: 'videoAssetsBytes', label: 'Video Assets', bytes: Number(b.videoAssetsBytes || 0) },
+          { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
+          { key: 'originalPhotosBytes', label: 'Original Photos', bytes: originalPhotosBytes },
+          { key: 'photoZipBytes', label: 'Photo ZIP files & previews', bytes: photoZipBytes },
+          { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
+        ]
+      : [
+          {
+            key: 'videosBytes',
+            label: 'Videos',
+            bytes: Number(b.videosBytes || 0),
+          },
+          { key: 'videoAssetsBytes', label: 'Video Assets', bytes: Number(b.videoAssetsBytes || 0) },
+          { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
+          {
+            key: 'photosBytes',
+            label: 'Photos',
+            bytes:
+              Number(b.photosBytes || 0) +
+              Number((b as any).socialPhotosBytes || 0) +
+              Number((b as any).albumZipFullBytes || 0) +
+              Number((b as any).albumZipSocialBytes || 0),
+          },
+          { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
+        ]
 
-    return items
-      .map((it) => {
-        const bytes = Math.max(0, it.bytes)
-        const pct = effectiveTotal > 0 ? Math.round((bytes / effectiveTotal) * 1000) / 10 : 0
-        return { ...it, pct }
-      })
-      .sort((a, b2) => b2.bytes - a.bytes)
+    return items.map((it) => {
+      const bytes = Math.max(0, it.bytes)
+      const pct = effectiveTotal > 0 ? Math.round((bytes / effectiveTotal) * 1000) / 10 : 0
+      return { ...it, bytes, pct }
+    })
   }, [data])
 
   const totalLabel = useMemo(() => {

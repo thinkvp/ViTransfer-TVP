@@ -159,6 +159,7 @@ export async function GET(
     const videosSanitizedBase = project.videos.map((video: any) => ({
       ...video,
       originalFileSize: video.originalFileSize.toString(),
+      streamUrl480p: '',
       streamUrl720p: '',
       streamUrl1080p: '',
       downloadUrl: null,
@@ -201,7 +202,7 @@ export async function GET(
         where: { id: 'default' },
         select: {
           companyName: true,
-          defaultPreviewResolution: true,
+          defaultPreviewResolutions: true,
           companyLogoMode: true,
           companyLogoPath: true,
           companyLogoUrl: true,
@@ -240,6 +241,7 @@ export async function GET(
       fps: video.fps,
       status: video.status,
       timelinePreviewsReady: video.timelinePreviewsReady,
+      streamUrl480p: video.streamUrl480p,
       streamUrl720p: video.streamUrl720p,
       streamUrl1080p: video.streamUrl1080p,
       downloadUrl: video.downloadUrl,
@@ -259,6 +261,7 @@ export async function GET(
         fps: video.fps,
         status: video.status,
         timelinePreviewsReady: video.timelinePreviewsReady,
+        streamUrl480p: video.streamUrl480p,
         streamUrl720p: video.streamUrl720p,
         streamUrl1080p: video.streamUrl1080p,
         downloadUrl: video.downloadUrl,
@@ -299,7 +302,7 @@ export async function GET(
         useFullTimecode: (project as any).useFullTimecode ?? false,
         allowClientDeleteComments: project.allowClientDeleteComments,
         allowClientUploadFiles: project.allowClientUploadFiles,
-        previewResolution: project.previewResolution,
+        previewResolutions: project.previewResolutions,
         watermarkEnabled: project.watermarkEnabled,
       }),
 
@@ -312,7 +315,7 @@ export async function GET(
 
       settings: {
         companyName: globalSettings?.companyName || 'Studio',
-        defaultPreviewResolution: globalSettings?.defaultPreviewResolution || '720p',
+        defaultPreviewResolutions: globalSettings?.defaultPreviewResolutions || '["720p"]',
         hasLogo: globalSettings?.companyLogoMode === 'UPLOAD'
           ? Boolean(globalSettings.companyLogoPath)
           : globalSettings?.companyLogoMode === 'LINK'

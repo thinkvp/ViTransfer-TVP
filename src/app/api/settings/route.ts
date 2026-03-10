@@ -119,6 +119,7 @@ export async function PATCH(request: NextRequest) {
       emailTrackingPixelsEnabled,
       appDomain,
       mainCompanyDomain,
+      defaultPreviewResolutions,
       defaultPreviewResolution,
       defaultWatermarkEnabled,
       defaultTimelinePreviewsEnabled,
@@ -128,6 +129,8 @@ export async function PATCH(request: NextRequest) {
       defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
+      autoDeletePreviewsOnClose,
+      autoDeleteAlbumZipsOnClose,
       autoCloseApprovedProjectsEnabled,
       autoCloseApprovedProjectsAfterDays,
       adminNotificationSchedule,
@@ -422,7 +425,9 @@ export async function PATCH(request: NextRequest) {
       emailTrackingPixelsEnabled,
       appDomain,
       mainCompanyDomain,
-      defaultPreviewResolution,
+      defaultPreviewResolutions: defaultPreviewResolutions !== undefined
+        ? JSON.stringify(defaultPreviewResolutions)
+        : (defaultPreviewResolution !== undefined ? JSON.stringify([defaultPreviewResolution]) : undefined),
       defaultWatermarkEnabled,
       defaultTimelinePreviewsEnabled,
       defaultWatermarkText,
@@ -431,6 +436,8 @@ export async function PATCH(request: NextRequest) {
       defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
+      autoDeletePreviewsOnClose: typeof autoDeletePreviewsOnClose === 'boolean' ? autoDeletePreviewsOnClose : undefined,
+      autoDeleteAlbumZipsOnClose: typeof autoDeleteAlbumZipsOnClose === 'boolean' ? autoDeleteAlbumZipsOnClose : undefined,
       autoCloseApprovedProjectsEnabled,
       autoCloseApprovedProjectsAfterDays,
       adminNotificationSchedule,
@@ -482,7 +489,9 @@ export async function PATCH(request: NextRequest) {
         emailTrackingPixelsEnabled: emailTrackingPixelsEnabled ?? true,
         emailCustomFooterText,
         appDomain,
-        defaultPreviewResolution,
+        defaultPreviewResolutions: defaultPreviewResolutions !== undefined
+          ? JSON.stringify(defaultPreviewResolutions)
+          : (defaultPreviewResolution !== undefined ? JSON.stringify([defaultPreviewResolution]) : '["720p"]'),
         defaultWatermarkText,
         defaultAllowClientDeleteComments,
         defaultAllowClientUploadFiles,

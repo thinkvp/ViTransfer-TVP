@@ -17,6 +17,12 @@ export interface VideoProcessingJob {
   projectId: string
   /** When true, skip transcode/thumbnail and only generate timeline preview sprites. */
   timelineOnly?: boolean
+  /** Optional subset of preview resolutions to generate instead of the full configured set. */
+  requestedPreviewResolutions?: Array<'480p' | '720p' | '1080p'>
+  /** When false, keep the existing thumbnail instead of regenerating it. */
+  regenerateThumbnail?: boolean
+  /** When false, keep existing timeline preview assets untouched. */
+  regenerateTimelinePreviews?: boolean
 }
 
 export interface AssetProcessingJob {

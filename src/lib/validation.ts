@@ -180,7 +180,8 @@ export const createProjectSchema = z.object({
   restrictCommentsToLatestVersion: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
   isShareOnly: z.boolean().optional(),
-  previewResolution: z.enum(['720p', '1080p']).optional(),
+  previewResolution: z.enum(['480p', '720p', '1080p']).optional(),
+  previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   watermarkText: safeStringSchema(0, 100).optional()
   ,
   enableVideos: z.boolean().optional(),
@@ -209,7 +210,8 @@ export const updateProjectSchema = z.object({
   hideFeedback: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
   status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
-  previewResolution: z.enum(['720p', '1080p']).optional(),
+  previewResolution: z.enum(['480p', '720p', '1080p']).optional(),
+  previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   watermarkText: safeStringSchema(0, 100).optional(),
   enableVideos: z.boolean().optional(),
   enablePhotos: z.boolean().optional()
@@ -267,7 +269,8 @@ export const updateSettingsSchema = z.object({
   smtpFromAddress: emailSchema.optional(),
   smtpSecure: z.enum(['STARTTLS', 'TLS', 'NONE']).optional(),
   appDomain: urlSchema.optional(),
-  defaultPreviewResolution: z.enum(['720p', '1080p']).optional(),
+  defaultPreviewResolution: z.enum(['480p', '720p', '1080p']).optional(),
+  defaultPreviewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   defaultWatermarkText: safeStringSchema(0, 100).optional(),
   defaultAllowClientDeleteComments: z.boolean().optional(),
   maxUploadSizeGB: z.number().int().min(1).max(100).optional() // 1GB to 100GB

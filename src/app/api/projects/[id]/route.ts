@@ -6,6 +6,9 @@ import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { getProjectRecipients } from '@/lib/recipients'
+import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
+import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
 import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
@@ -13,6 +16,9 @@ import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess,
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { z } from 'zod'
 export const runtime = 'nodejs'
+
+const VALID_PREVIEW_RESOLUTIONS = ['480p', '720p', '1080p'] as const
+type PreviewResolution = typeof VALID_PREVIEW_RESOLUTIONS[number]
 
 function asNumberBigInt(v: unknown): number {
   if (typeof v === 'bigint') {
@@ -25,6 +31,30 @@ function asNumberBigInt(v: unknown): number {
     return Number.isFinite(n) ? n : 0
   }
   return 0
+}
+
+function parsePreviewResolutions(raw: string | null | undefined): PreviewResolution[] {
+  if (!raw) return ['720p']
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return ['720p']
+    }
+
+    const valid = parsed.filter(
+      (resolution: unknown): resolution is PreviewResolution =>
+        typeof resolution === 'string' &&
+        (VALID_PREVIEW_RESOLUTIONS as readonly string[]).includes(resolution)
+    )
+
+    return valid.length > 0 ? valid : ['720p']
+  } catch {
+    if (typeof raw === 'string' && (VALID_PREVIEW_RESOLUTIONS as readonly string[]).includes(raw)) {
+      return [raw as PreviewResolution]
+    }
+    return ['720p']
+  }
 }
 
 
@@ -45,7 +75,8 @@ const updateProjectSchema = z.object({
   allowClientUploadFiles: z.boolean().optional(),
   allowAuthenticatedProjectSwitching: z.boolean().optional(),
   maxClientUploadAllocationMB: z.number().int().min(0).max(1000000).optional(),
-  previewResolution: z.enum(['720p', '1080p', '2160p']).optional(),
+  previewResolution: z.enum(['480p', '720p', '1080p']).optional(),
+  previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   watermarkEnabled: z.boolean().optional(),
   watermarkText: z.string().max(100).nullable().optional(),
   timelinePreviewsEnabled: z.boolean().optional(),
@@ -356,7 +387,7 @@ export async function PATCH(
 
     const currentProject = await prisma.project.findUnique({
       where: { id },
-      select: { status: true, enableVideos: true, enablePhotos: true },
+      select: { status: true, enableVideos: true, enablePhotos: true, previewResolutions: true },
     })
     if (!currentProject) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -387,6 +418,12 @@ export async function PATCH(
       return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
     }
     const validatedBody = parsed.data
+    const previousPreviewResolutions = parsePreviewResolutions(currentProject.previewResolutions)
+    const nextPreviewResolutions = validatedBody.previewResolutions !== undefined
+      ? validatedBody.previewResolutions
+      : validatedBody.previewResolution !== undefined
+        ? [validatedBody.previewResolution]
+        : null
 
     // Assignment updates (optional)
     let assignedUsersToSet: Array<{ userId: string; receiveNotifications: boolean }> | null = null
@@ -621,8 +658,11 @@ export async function PATCH(
     }
 
     // Handle video processing settings
-    if (validatedBody.previewResolution !== undefined) {
-      updateData.previewResolution = validatedBody.previewResolution
+    if (validatedBody.previewResolutions !== undefined) {
+      updateData.previewResolutions = JSON.stringify(validatedBody.previewResolutions)
+    } else if (validatedBody.previewResolution !== undefined) {
+      // Legacy single-value support
+      updateData.previewResolutions = JSON.stringify([validatedBody.previewResolution])
     }
 
     if (validatedBody.timelinePreviewsEnabled !== undefined) {
@@ -820,6 +860,18 @@ export async function PATCH(
       return updated
     })
 
+    if (nextPreviewResolutions !== null) {
+      const removedPreviewResolutions = previousPreviewResolutions.filter(
+        (resolution) => !nextPreviewResolutions.includes(resolution)
+      )
+
+      if (removedPreviewResolutions.length > 0) {
+        await cancelProjectPreviewResolutionJobs(project.id, removedPreviewResolutions).catch((err) => {
+          console.error('[PROJECT UPDATE] Error cancelling obsolete preview jobs after settings change:', err)
+        })
+      }
+    }
+
     // Notify newly assigned users (in-app PROJECT_USER_ASSIGNED notification)
     if (assignedUsersToSet !== null && previousAssignedUserIds !== null) {
       const newlyAddedUserIds = assignedUsersToSet
@@ -879,6 +931,140 @@ export async function PATCH(
     }
 
     // NOTE: Project status changes no longer move storage folders.
+
+    // Cancel pending jobs when project is closed
+    if (validatedBody.status === 'CLOSED' && previousStatus !== 'CLOSED') {
+      await cancelProjectJobs(project.id).catch((err) => {
+        console.error('[PROJECT UPDATE] Error cancelling project jobs on close:', err)
+      })
+    }
+
+    // Auto-delete previews and timeline sprites when project is closed (if setting enabled)
+    if (validatedBody.status === 'CLOSED' && previousStatus !== 'CLOSED') {
+      try {
+        const globalSettings = await prisma.settings.findUnique({
+          where: { id: 'default' },
+          select: { autoDeletePreviewsOnClose: true, autoDeleteAlbumZipsOnClose: true },
+        })
+        if (globalSettings?.autoDeletePreviewsOnClose) {
+          const videos = await prisma.video.findMany({
+            where: { projectId: project.id },
+            select: {
+              id: true,
+              preview480Path: true,
+              preview720Path: true,
+              preview1080Path: true,
+              timelinePreviewSpritesPath: true,
+              timelinePreviewsReady: true,
+            },
+          })
+          for (const video of videos) {
+            const previewPaths = [video.preview480Path, video.preview720Path, video.preview1080Path].filter(Boolean) as string[]
+            const updateData: Record<string, null | boolean> = {}
+
+            if (previewPaths.length > 0) {
+              await Promise.allSettled(previewPaths.map(p => deleteFile(p)))
+              updateData.preview480Path = null
+              updateData.preview720Path = null
+              updateData.preview1080Path = null
+            }
+
+            if (video.timelinePreviewSpritesPath) {
+              await deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {})
+              updateData.timelinePreviewsReady = false
+              updateData.timelinePreviewVttPath = null
+              updateData.timelinePreviewSpritesPath = null
+            }
+
+            if (Object.keys(updateData).length > 0) {
+              await prisma.video.update({
+                where: { id: video.id },
+                data: updateData,
+              })
+            }
+          }
+        }
+        if (globalSettings?.autoDeleteAlbumZipsOnClose) {
+          const albums = await prisma.album.findMany({
+            where: { projectId: project.id },
+            select: { id: true, fullZipFileSize: true, socialZipFileSize: true },
+          })
+          for (const album of albums) {
+            const variants: AlbumZipVariant[] = ['full', 'social']
+            for (const variant of variants) {
+              const zipPath = getAlbumZipStoragePath({ projectId: project.id, albumId: album.id, variant })
+              await deleteFile(zipPath).catch(() => {})
+            }
+            if (album.fullZipFileSize > 0 || album.socialZipFileSize > 0) {
+              await prisma.album.update({
+                where: { id: album.id },
+                data: { fullZipFileSize: BigInt(0), socialZipFileSize: BigInt(0) },
+              })
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[PROJECT UPDATE] Error auto-deleting previews/zips on close:', err)
+      }
+    }
+
+    // Re-generate previews, timeline sprites, and album ZIPs when project is reopened from CLOSED
+    if (previousStatus === 'CLOSED' && validatedBody.status !== undefined && validatedBody.status !== 'CLOSED') {
+      try {
+        // Check if any videos are missing previews (indicating they were auto-deleted)
+        const videosNeedingPreviews = await prisma.video.findMany({
+          where: {
+            projectId: project.id,
+            preview720Path: null,
+            status: 'READY',
+          },
+          select: { id: true, originalStoragePath: true },
+        })
+        if (videosNeedingPreviews.length > 0) {
+          const videoQueue = getVideoQueue()
+          for (const video of videosNeedingPreviews) {
+            await prisma.video.update({
+              where: { id: video.id },
+              data: { status: 'QUEUED', processingProgress: 0, processingPhase: null },
+            })
+            await videoQueue.add('process-video', {
+              videoId: video.id,
+              originalStoragePath: video.originalStoragePath!,
+              projectId: project.id,
+            })
+          }
+          console.log(`[PROJECT UPDATE] Re-queued ${videosNeedingPreviews.length} video(s) for preview regeneration after reopen`)
+        }
+      } catch (err) {
+        console.error('[PROJECT UPDATE] Error re-queuing videos after reopen:', err)
+      }
+
+      // Re-generate album ZIPs if they were auto-deleted
+      try {
+        const albums = await prisma.album.findMany({
+          where: {
+            projectId: project.id,
+            fullZipFileSize: { equals: 0 },
+            socialZipFileSize: { equals: 0 },
+            photos: { some: {} },
+          },
+          select: { id: true },
+        })
+        if (albums.length > 0) {
+          const q = getAlbumPhotoZipQueue()
+          for (const album of albums) {
+            for (const variant of ['full', 'social'] as AlbumZipVariant[]) {
+              const jobId = getAlbumZipJobId({ albumId: album.id, variant })
+              await q.remove(jobId).catch(() => {})
+              await q.add('generate-album-zip', { albumId: album.id, variant }, { jobId })
+            }
+          }
+          console.log(`[PROJECT UPDATE] Re-queued ${albums.length} album(s) for ZIP regeneration after reopen`)
+        }
+      } catch (err) {
+        console.error('[PROJECT UPDATE] Error re-queuing album ZIPs after reopen:', err)
+      }
+    }
 
     // When an admin manually marks a project APPROVED, send the Project Approved email immediately.
     // (Client-driven approvals have their own notification path in /api/projects/[id]/approve.)

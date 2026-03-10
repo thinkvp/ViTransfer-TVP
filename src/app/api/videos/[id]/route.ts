@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { deleteFile } from '@/lib/storage'
+import { deleteDirectory, deleteFile } from '@/lib/storage'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { getSecuritySettings } from '@/lib/video-access'
@@ -499,11 +499,20 @@ export async function DELETE(
       }
 
       // Delete preview files
+      if (video.preview480Path) {
+        await deleteFile(video.preview480Path)
+      }
       if (video.preview1080Path) {
         await deleteFile(video.preview1080Path)
       }
       if (video.preview720Path) {
         await deleteFile(video.preview720Path)
+      }
+
+      if (video.timelinePreviewSpritesPath) {
+        await deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {})
+      } else if (video.timelinePreviewVttPath) {
+        await deleteFile(video.timelinePreviewVttPath).catch(() => {})
       }
 
       // Delete thumbnail

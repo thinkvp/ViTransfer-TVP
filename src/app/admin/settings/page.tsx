@@ -153,7 +153,7 @@ export default function GlobalSettingsPage() {
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
   const [appDomain, setAppDomain] = useState('')
   const [mainCompanyDomain, setMainCompanyDomain] = useState('')
-  const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('720p')
+  const [defaultPreviewResolutions, setDefaultPreviewResolutions] = useState<string[]>(['720p'])
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
   const [defaultTimelinePreviewsEnabled, setDefaultTimelinePreviewsEnabled] = useState(false)
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
@@ -162,6 +162,8 @@ export default function GlobalSettingsPage() {
   const [defaultAllowAuthenticatedProjectSwitching, setDefaultAllowAuthenticatedProjectSwitching] = useState(true)
   const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
+  const [autoDeletePreviewsOnClose, setAutoDeletePreviewsOnClose] = useState(false)
+  const [autoDeleteAlbumZipsOnClose, setAutoDeleteAlbumZipsOnClose] = useState(false)
 
   const [autoCloseApprovedProjectsEnabled, setAutoCloseApprovedProjectsEnabled] = useState(false)
   const [autoCloseApprovedProjectsAfterDays, setAutoCloseApprovedProjectsAfterDays] = useState<number | ''>(7)
@@ -308,7 +310,12 @@ export default function GlobalSettingsPage() {
         setSmtpSecure(data.smtpSecure || 'STARTTLS')
         setAppDomain(data.appDomain || '')
         setMainCompanyDomain(data.mainCompanyDomain || '')
-        setDefaultPreviewResolution(data.defaultPreviewResolution || '720p')
+        setDefaultPreviewResolutions((() => {
+          try {
+            const parsed = JSON.parse(data.defaultPreviewResolutions || '["720p"]')
+            return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
+          } catch { return ['720p'] }
+        })())
         setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
         setDefaultTimelinePreviewsEnabled(data.defaultTimelinePreviewsEnabled ?? false)
         setDefaultWatermarkText(data.defaultWatermarkText || '')
@@ -317,6 +324,8 @@ export default function GlobalSettingsPage() {
         setDefaultAllowAuthenticatedProjectSwitching(data.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(data.autoApproveProject ?? true)
+        setAutoDeletePreviewsOnClose(data.autoDeletePreviewsOnClose ?? false)
+        setAutoDeleteAlbumZipsOnClose(data.autoDeleteAlbumZipsOnClose ?? false)
         setAutoCloseApprovedProjectsEnabled(data.autoCloseApprovedProjectsEnabled ?? false)
         setAutoCloseApprovedProjectsAfterDays(data.autoCloseApprovedProjectsAfterDays ?? 7)
         setTestEmailAddress(data.smtpFromAddress || '')
@@ -583,7 +592,7 @@ export default function GlobalSettingsPage() {
         smtpSecure: smtpSecure || 'STARTTLS',
         appDomain: appDomain || null,
         mainCompanyDomain: mainCompanyDomain || null,
-        defaultPreviewResolution: defaultPreviewResolution || '720p',
+        defaultPreviewResolutions: defaultPreviewResolutions.length > 0 ? defaultPreviewResolutions : ['720p'],
         defaultWatermarkEnabled: defaultWatermarkEnabled,
         defaultTimelinePreviewsEnabled: defaultTimelinePreviewsEnabled,
         defaultWatermarkText: defaultWatermarkText || null,
@@ -594,6 +603,8 @@ export default function GlobalSettingsPage() {
           ? defaultMaxClientUploadAllocationMB
           : parseInt(String(defaultMaxClientUploadAllocationMB), 10) || 0,
         autoApproveProject: autoApproveProject,
+        autoDeletePreviewsOnClose: autoDeletePreviewsOnClose,
+        autoDeleteAlbumZipsOnClose: autoDeleteAlbumZipsOnClose,
         autoCloseApprovedProjectsEnabled: autoCloseApprovedProjectsEnabled,
         autoCloseApprovedProjectsAfterDays: typeof autoCloseApprovedProjectsAfterDays === 'number'
           ? autoCloseApprovedProjectsAfterDays
@@ -695,7 +706,12 @@ export default function GlobalSettingsPage() {
         setSmtpSecure(refreshedData.smtpSecure || 'STARTTLS')
         setAppDomain(refreshedData.appDomain || '')
         setMainCompanyDomain(refreshedData.mainCompanyDomain || '')
-        setDefaultPreviewResolution(refreshedData.defaultPreviewResolution || '720p')
+        setDefaultPreviewResolutions((() => {
+          try {
+            const parsed = JSON.parse(refreshedData.defaultPreviewResolutions || '["720p"]')
+            return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
+          } catch { return ['720p'] }
+        })())
         setDefaultWatermarkEnabled(refreshedData.defaultWatermarkEnabled ?? true)
         setDefaultTimelinePreviewsEnabled(refreshedData.defaultTimelinePreviewsEnabled ?? false)
         setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
@@ -706,6 +722,8 @@ export default function GlobalSettingsPage() {
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
         setAutoCloseApprovedProjectsEnabled(refreshedData.autoCloseApprovedProjectsEnabled ?? false)
         setAutoCloseApprovedProjectsAfterDays(refreshedData.autoCloseApprovedProjectsAfterDays ?? 7)
+        setAutoDeletePreviewsOnClose(refreshedData.autoDeletePreviewsOnClose ?? false)
+        setAutoDeleteAlbumZipsOnClose(refreshedData.autoDeleteAlbumZipsOnClose ?? false)
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
         setAdminNotificationDay(refreshedData.adminNotificationDay ?? 1)
@@ -1019,8 +1037,8 @@ export default function GlobalSettingsPage() {
           />
 
           <VideoProcessingSettingsSection
-            defaultPreviewResolution={defaultPreviewResolution}
-            setDefaultPreviewResolution={setDefaultPreviewResolution}
+            defaultPreviewResolutions={defaultPreviewResolutions}
+            setDefaultPreviewResolutions={setDefaultPreviewResolutions}
             defaultWatermarkEnabled={defaultWatermarkEnabled}
             setDefaultWatermarkEnabled={setDefaultWatermarkEnabled}
             defaultTimelinePreviewsEnabled={defaultTimelinePreviewsEnabled}
@@ -1046,6 +1064,10 @@ export default function GlobalSettingsPage() {
             setAutoCloseApprovedProjectsEnabled={setAutoCloseApprovedProjectsEnabled}
             autoCloseApprovedProjectsAfterDays={autoCloseApprovedProjectsAfterDays}
             setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
+            autoDeletePreviewsOnClose={autoDeletePreviewsOnClose}
+            setAutoDeletePreviewsOnClose={setAutoDeletePreviewsOnClose}
+            autoDeleteAlbumZipsOnClose={autoDeleteAlbumZipsOnClose}
+            setAutoDeleteAlbumZipsOnClose={setAutoDeleteAlbumZipsOnClose}
             show={showProjectBehavior}
             setShow={setShowProjectBehavior}
           />

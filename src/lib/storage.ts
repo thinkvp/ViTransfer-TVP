@@ -43,6 +43,14 @@ function validatePath(filePath: string): string {
   return fullPath
 }
 
+function validatePathForWrite(filePath: string): string {
+  const { fullPath, posixNormalized } = validatePathBase(filePath)
+  const redirected = resolveRedirectedProjectPath(posixNormalized, fullPath, { forWrite: true })
+  if (redirected) return redirected
+
+  return fullPath
+}
+
 function validatePathBase(filePath: string): { fullPath: string; posixNormalized: string } {
   // 1. Reject null bytes (common in path traversal exploits)
   if (filePath.includes('\0')) {
@@ -420,13 +428,13 @@ async function ensureProjectStorageLayoutForPath(filePath: string): Promise<void
   await ensureProjectStorageLayout(info.projectId)
 }
 
-function resolveRedirectedProjectPath(posixNormalized: string, baseFullPath: string): string | null {
+function resolveRedirectedProjectPath(
+  posixNormalized: string,
+  baseFullPath: string,
+  opts?: { forWrite?: boolean }
+): string | null {
   const info = isLegacyProjectPath(posixNormalized)
   if (!info) return null
-
-  // If the caller requested a child path and it already exists in the active folder, do not redirect.
-  const isProjectRoot = posixNormalized === `projects/${info.projectId}`
-  if (!isProjectRoot && fs.existsSync(baseFullPath)) return null
 
   // Prefer the central redirect index. Fall back to legacy per-project stub file.
   const targetPosix =
@@ -444,6 +452,20 @@ function resolveRedirectedProjectPath(posixNormalized: string, baseFullPath: str
     return null
   }
 
+  if (opts?.forWrite) {
+    return redirectedAbs
+  }
+
+  // Prefer the canonical YYYY-MM target when it already contains the requested file.
+  if (redirectedAbs !== baseFullPath && fs.existsSync(redirectedAbs)) {
+    return redirectedAbs
+  }
+
+  // For legacy projects that have not been migrated yet, keep reading the legacy-root child
+  // if that is the only copy that exists.
+  const isProjectRoot = posixNormalized === `projects/${info.projectId}`
+  if (!isProjectRoot && fs.existsSync(baseFullPath)) return null
+
   return redirectedAbs
 }
 
@@ -458,7 +480,7 @@ export async function uploadFile(
   contentType: string = 'application/octet-stream'
 ): Promise<void> {
   await ensureProjectStorageLayoutForPath(filePath)
-  const fullPath = validatePath(filePath)
+  const fullPath = validatePathForWrite(filePath)
   const dir = path.dirname(fullPath)
 
   await mkdir(dir, { recursive: true })
@@ -503,7 +525,7 @@ export async function moveUploadedFile(
   expectedSize: number,
 ): Promise<void> {
   await ensureProjectStorageLayoutForPath(destLogicalPath)
-  const destFullPath = validatePath(destLogicalPath)
+  const destFullPath = validatePathForWrite(destLogicalPath)
   const destDir = path.dirname(destFullPath)
 
   await mkdir(STORAGE_ROOT, { recursive: true })
@@ -545,9 +567,19 @@ export async function downloadFile(filePath: string): Promise<Readable> {
 }
 
 export async function deleteFile(filePath: string): Promise<void> {
-  const fullPath = validatePath(filePath)
-  if (fs.existsSync(fullPath)) {
-    await fs.promises.unlink(fullPath)
+  const base = validatePathBase(filePath)
+  const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
+  const candidates = redirected && redirected !== base.fullPath
+    ? [redirected, base.fullPath]
+    : [validatePath(filePath)]
+
+  for (const fullPath of candidates) {
+    if (!fs.existsSync(fullPath)) continue
+
+    const stats = await fs.promises.stat(fullPath)
+    if (stats.isFile()) {
+      await fs.promises.unlink(fullPath)
+    }
   }
 }
 

@@ -8,11 +8,16 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
+const VALID_RESOLUTIONS = ['480p', '720p', '1080p'] as const
+
 
 
 
 const reprocessSchema = z.object({
   videoIds: z.array(z.string().min(1)).max(50).optional(),
+  previewResolutions: z.array(z.enum(VALID_RESOLUTIONS)).min(1).optional(),
+  regenerateThumbnail: z.boolean().optional(),
+  regenerateTimelinePreviews: z.boolean().optional(),
 })
 
 export async function POST(
@@ -44,7 +49,12 @@ export async function POST(
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
     }
-    const { videoIds } = parsed.data
+    const {
+      videoIds,
+      previewResolutions,
+      regenerateThumbnail,
+      regenerateTimelinePreviews,
+    } = parsed.data
 
     // Get project with videos
     const project = await prisma.project.findUnique({
@@ -60,6 +70,13 @@ export async function POST(
 
     if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    if (project.status === 'CLOSED') {
+      return NextResponse.json(
+        { error: 'Closed projects cannot queue preview regeneration jobs.' },
+        { status: 409 }
+      )
     }
 
     // Filter videos: only READY or ERROR status
@@ -80,6 +97,7 @@ export async function POST(
 
     const videoQueue = getVideoQueue()
     const reprocessed = []
+    const targetedPreviewGeneration = Array.isArray(previewResolutions) && previewResolutions.length > 0
 
     for (const video of videosToReprocess) {
       // Preserve user-uploaded thumbnails (asset-based) so reprocessing doesn't delete them
@@ -94,11 +112,20 @@ export async function POST(
         : false
 
       // Delete old preview files (keep original safe)
+      const previewFieldsByResolution = {
+        '480p': video.preview480Path,
+        '720p': video.preview720Path,
+        '1080p': video.preview1080Path,
+      } as const
+
       const filesToDelete = [
-        video.preview720Path,
-        video.preview1080Path,
+        ...(targetedPreviewGeneration
+          ? previewResolutions.map((resolution) => previewFieldsByResolution[resolution]).filter(Boolean)
+          : [video.preview480Path, video.preview720Path, video.preview1080Path]),
         // Only delete system-generated thumbnails; keep custom assets intact
-        hasCustomThumbnail ? null : video.thumbnailPath,
+        (!targetedPreviewGeneration && !hasCustomThumbnail) || regenerateThumbnail === true
+          ? (hasCustomThumbnail ? null : video.thumbnailPath)
+          : null,
       ].filter(Boolean) as string[]
 
       await Promise.allSettled(
@@ -114,10 +141,23 @@ export async function POST(
           status: 'QUEUED',
           processingProgress: 0,
           processingPhase: null,
-          preview720Path: null,
-          preview1080Path: null,
-          // Keep custom thumbnails; regenerate only system thumbnails
-          thumbnailPath: hasCustomThumbnail ? video.thumbnailPath : null,
+          ...(targetedPreviewGeneration
+            ? {
+                ...(previewResolutions.includes('480p') ? { preview480Path: null } : {}),
+                ...(previewResolutions.includes('720p') ? { preview720Path: null } : {}),
+                ...(previewResolutions.includes('1080p') ? { preview1080Path: null } : {}),
+              }
+            : {
+                preview480Path: null,
+                preview720Path: null,
+                preview1080Path: null,
+              }),
+          ...((regenerateThumbnail === true || !targetedPreviewGeneration)
+            ? {
+                // Keep custom thumbnails; regenerate only system thumbnails
+                thumbnailPath: hasCustomThumbnail ? video.thumbnailPath : null,
+              }
+            : {}),
         },
       })
 
@@ -126,6 +166,9 @@ export async function POST(
         videoId: video.id,
         originalStoragePath: video.originalStoragePath,
         projectId: project.id,
+        ...(targetedPreviewGeneration ? { requestedPreviewResolutions: previewResolutions } : {}),
+        ...(regenerateThumbnail !== undefined ? { regenerateThumbnail } : {}),
+        ...(regenerateTimelinePreviews !== undefined ? { regenerateTimelinePreviews } : {}),
       })
 
       reprocessed.push({

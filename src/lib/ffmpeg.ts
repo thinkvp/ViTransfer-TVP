@@ -178,7 +178,15 @@ export interface TranscodeOptions {
   width: number
   height: number
   watermarkText?: string
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void | Promise<void>
+  shouldAbort?: () => boolean | Promise<boolean>
+}
+
+export class FFmpegCancellationError extends Error {
+  constructor(message: string = 'FFmpeg operation cancelled') {
+    super(message)
+    this.name = 'FFmpegCancellationError'
+  }
 }
 
 export interface TimelineSpriteOptions {
@@ -290,7 +298,8 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     width,
     height,
     watermarkText,
-    onProgress
+    onProgress,
+    shouldAbort,
   } = options
 
   if (DEBUG) {
@@ -423,6 +432,65 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let stderr = ''
+    let abortRequested = false
+    let abortCheckInFlight = false
+    let forcedKillTimer: NodeJS.Timeout | null = null
+
+    const clearAbortTimers = () => {
+      if (abortPollInterval) {
+        clearInterval(abortPollInterval)
+      }
+      if (forcedKillTimer) {
+        clearTimeout(forcedKillTimer)
+      }
+    }
+
+    const requestAbort = () => {
+      if (abortRequested) {
+        return
+      }
+
+      abortRequested = true
+
+      if (!ffmpeg.killed && ffmpeg.exitCode === null) {
+        ffmpeg.kill('SIGTERM')
+        forcedKillTimer = setTimeout(() => {
+          if (!ffmpeg.killed && ffmpeg.exitCode === null) {
+            ffmpeg.kill('SIGKILL')
+          }
+        }, 5000)
+        forcedKillTimer.unref?.()
+      }
+    }
+
+    const pollForAbort = async () => {
+      if (!shouldAbort || abortRequested || abortCheckInFlight) {
+        return
+      }
+
+      abortCheckInFlight = true
+      try {
+        const shouldCancel = await shouldAbort()
+        if (shouldCancel) {
+          requestAbort()
+        }
+      } catch (error) {
+        console.error('[FFMPEG] Failed to evaluate transcode cancellation state:', error)
+      } finally {
+        abortCheckInFlight = false
+      }
+    }
+
+    const abortPollInterval = shouldAbort
+      ? setInterval(() => {
+          void pollForAbort()
+        }, 2000)
+      : null
+
+    if (abortPollInterval) {
+      abortPollInterval.unref?.()
+      void pollForAbort()
+    }
 
     if (DEBUG) {
       console.log('[FFMPEG DEBUG] FFmpeg process spawned, PID:', ffmpeg.pid)
@@ -460,6 +528,8 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     })
 
     ffmpeg.on('close', (code) => {
+      clearAbortTimers()
+
       // Cleanup watermark temp file and directory
       if (watermarkTextFile && fs.existsSync(watermarkTextFile)) {
         try {
@@ -478,6 +548,11 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
         console.log('[FFMPEG DEBUG] Process exited with code:', code)
       }
 
+      if (abortRequested) {
+        reject(new FFmpegCancellationError('FFmpeg transcode cancelled'))
+        return
+      }
+
       if (code === 0) {
         if (DEBUG) {
           console.log('[FFMPEG DEBUG] Transcoding completed successfully')
@@ -493,6 +568,8 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     })
 
     ffmpeg.on('error', (err) => {
+      clearAbortTimers()
+
       // Cleanup watermark temp file and directory on error
       if (watermarkTextFile && fs.existsSync(watermarkTextFile)) {
         try {
@@ -507,6 +584,12 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
       if (DEBUG) {
         console.error('[FFMPEG DEBUG] Failed to spawn FFmpeg:', err)
       }
+
+      if (abortRequested) {
+        reject(new FFmpegCancellationError('FFmpeg transcode cancelled'))
+        return
+      }
+
       reject(new Error(`Failed to start FFmpeg: ${err.message}`))
     })
   })

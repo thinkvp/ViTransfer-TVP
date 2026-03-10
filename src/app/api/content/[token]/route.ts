@@ -333,9 +333,11 @@ export async function GET(
           filePath = originalPath
         }
       } else if (verifiedToken.quality === '1080p') {
-        filePath = video.preview1080Path || video.preview720Path || (canServeOriginal ? originalPath : null)
+        filePath = video.preview1080Path || video.preview720Path || (video as any).preview480Path || (canServeOriginal ? originalPath : null)
       } else if (verifiedToken.quality === '720p') {
-        filePath = video.preview720Path || video.preview1080Path || (canServeOriginal ? originalPath : null)
+        filePath = video.preview720Path || video.preview1080Path || (video as any).preview480Path || (canServeOriginal ? originalPath : null)
+      } else if (verifiedToken.quality === '480p') {
+        filePath = (video as any).preview480Path || video.preview720Path || video.preview1080Path || (canServeOriginal ? originalPath : null)
       }
     }
 

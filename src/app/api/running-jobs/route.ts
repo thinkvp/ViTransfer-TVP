@@ -95,7 +95,9 @@ export async function GET(request: NextRequest) {
       const queueStatus = queueStatusByVideoId.get(video.id)
 
       let status = video.status
-      if (video.status === 'READY' && processingPhase) {
+      if (queueStatus) {
+        status = queueStatus
+      } else if (video.status === 'READY' && processingPhase) {
         status = queueStatus ?? ((video.processingProgress ?? 0) > 0 ? 'PROCESSING' : 'QUEUED')
       }
 

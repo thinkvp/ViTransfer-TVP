@@ -7,7 +7,7 @@ import Image from 'next/image'
 type Video = any
 type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -150,6 +150,16 @@ export default function VideoPlayer({
   const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
 
   const [showApprovedDownloadOptions, setShowApprovedDownloadOptions] = useState(false)
+
+  // Quality selector state
+  const [selectedQuality, setSelectedQuality] = useState<'auto' | '480p' | '720p' | '1080p'>('auto')
+  const [showQualityMenu, setShowQualityMenu] = useState(false)
+  const [autoResolvedQuality, setAutoResolvedQuality] = useState<'480p' | '720p' | '1080p'>(defaultQuality as '720p' | '1080p')
+  const [isBuffering, setIsBuffering] = useState(false)
+  const desktopQualityControlsRef = useRef<HTMLDivElement>(null)
+  const mobileQualityControlsRef = useRef<HTMLDivElement>(null)
+  const bufferingTimeoutRef = useRef<number | null>(null)
+  const suppressAutoDowngradeUntilRef = useRef(0)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
 
@@ -538,6 +548,8 @@ export default function VideoPlayer({
     const handleFullscreenChange = () => {
       const container = playerContainerRef.current
       setIsFullscreen(Boolean(container && document.fullscreenElement === container))
+      setIsBuffering(false)
+      suppressAutoDowngradeUntilRef.current = Date.now() + 1500
     }
 
     document.addEventListener('fullscreenchange', handleFullscreenChange)
@@ -681,6 +693,155 @@ export default function VideoPlayer({
   // This keeps the mobile controls row from getting too cramped once Download is shown.
   const shouldHideSpeedControls = !isAdmin && !isGuest && isVideoApproved
 
+  // Compute available qualities from the selected video's stream URLs
+  const availableQualities = useMemo(() => {
+    if (!selectedVideo) return [] as ('480p' | '720p' | '1080p')[]
+    const q: ('480p' | '720p' | '1080p')[] = []
+    if ((selectedVideo as any).streamUrl480p) q.push('480p')
+    if ((selectedVideo as any).streamUrl720p) q.push('720p')
+    if ((selectedVideo as any).streamUrl1080p) q.push('1080p')
+    return q
+  }, [selectedVideo])
+
+  const showQualitySelector = availableQualities.length > 1
+
+  const qualityMenuOptions = useMemo(
+    () => [...availableQualities].slice().reverse(),
+    [availableQualities]
+  )
+
+  // Determine effective quality (what we actually play)
+  const effectiveQuality = useMemo(() => {
+    if (selectedQuality === 'auto') return autoResolvedQuality
+    // If the selected quality isn't available, fall back
+    if (availableQualities.includes(selectedQuality)) return selectedQuality
+    return availableQualities[availableQualities.length - 1] || '720p'
+  }, [selectedQuality, autoResolvedQuality, availableQualities])
+
+  // Quality display label for the button
+  const qualityLabel = selectedQuality === 'auto'
+    ? `Auto (${autoResolvedQuality})`
+    : selectedQuality
+
+  // Auto mode: adapt quality based on player size
+  useEffect(() => {
+    if (selectedQuality !== 'auto') return
+    const container = playerContainerRef.current
+    if (!container) return
+
+    function pickQualityForSize() {
+      const el = playerContainerRef.current
+      if (!el) return
+      const w = el.clientWidth
+      let pick: '480p' | '720p' | '1080p' = '720p'
+      if (w >= 1200) pick = '1080p'
+      else if (w >= 640) pick = '720p'
+      else pick = '480p'
+      // Only pick from available qualities
+      if (availableQualities.length > 0) {
+        if (availableQualities.includes(pick)) {
+          setAutoResolvedQuality(pick)
+        } else {
+          // Pick the closest available quality
+          const order: ('480p' | '720p' | '1080p')[] = ['480p', '720p', '1080p']
+          const pickIdx = order.indexOf(pick)
+          // Try lower, then higher
+          let found = availableQualities[0]
+          for (let i = pickIdx; i >= 0; i--) {
+            if (availableQualities.includes(order[i])) { found = order[i]; break }
+          }
+          if (!availableQualities.includes(found)) {
+            for (let i = pickIdx; i < order.length; i++) {
+              if (availableQualities.includes(order[i])) { found = order[i]; break }
+            }
+          }
+          setAutoResolvedQuality(found)
+        }
+      }
+    }
+
+    pickQualityForSize()
+
+    const observer = new ResizeObserver(() => pickQualityForSize())
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [selectedQuality, availableQualities])
+
+  // Auto mode: downgrade on buffering
+  useEffect(() => {
+    if (selectedQuality !== 'auto' || !isBuffering) return
+    if (Date.now() < suppressAutoDowngradeUntilRef.current) return
+    const order: ('480p' | '720p' | '1080p')[] = ['480p', '720p', '1080p']
+    const currentIdx = order.indexOf(autoResolvedQuality)
+    if (currentIdx > 0) {
+      // Try to downgrade to a lower available quality
+      for (let i = currentIdx - 1; i >= 0; i--) {
+        if (availableQualities.includes(order[i])) {
+          setAutoResolvedQuality(order[i])
+          break
+        }
+      }
+    }
+  }, [selectedQuality, isBuffering, autoResolvedQuality, availableQualities])
+
+  // Buffering detection
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const clearBufferingTimeout = () => {
+      if (bufferingTimeoutRef.current !== null) {
+        window.clearTimeout(bufferingTimeoutRef.current)
+        bufferingTimeoutRef.current = null
+      }
+    }
+    const clearBufferingState = () => {
+      clearBufferingTimeout()
+      setIsBuffering(false)
+    }
+    const onWaiting = () => {
+      if (video.paused || video.ended || video.seeking) return
+      if (Date.now() < suppressAutoDowngradeUntilRef.current) return
+      clearBufferingTimeout()
+      bufferingTimeoutRef.current = window.setTimeout(() => {
+        if (!video.paused && !video.ended && !video.seeking) {
+          setIsBuffering(true)
+        }
+      }, 700)
+    }
+    const onPlaying = () => clearBufferingState()
+    const onCanPlay = () => clearBufferingState()
+    const onSeeked = () => clearBufferingState()
+    const onTimeUpdate = () => clearBufferingState()
+    video.addEventListener('waiting', onWaiting)
+    video.addEventListener('playing', onPlaying)
+    video.addEventListener('canplay', onCanPlay)
+    video.addEventListener('seeked', onSeeked)
+    video.addEventListener('timeupdate', onTimeUpdate)
+    return () => {
+      clearBufferingTimeout()
+      video.removeEventListener('waiting', onWaiting)
+      video.removeEventListener('playing', onPlaying)
+      video.removeEventListener('canplay', onCanPlay)
+      video.removeEventListener('seeked', onSeeked)
+      video.removeEventListener('timeupdate', onTimeUpdate)
+    }
+  }, [videoUrl]) // re-attach when video src changes
+
+  // Close quality menu on click outside
+  useEffect(() => {
+    if (!showQualityMenu) return
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node
+      const insideDesktop = Boolean(desktopQualityControlsRef.current?.contains(target))
+      const insideMobile = Boolean(mobileQualityControlsRef.current?.contains(target))
+      if (!insideDesktop && !insideMobile) {
+        setShowQualityMenu(false)
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside)
+    return () => document.removeEventListener('pointerdown', handleClickOutside)
+  }, [showQualityMenu])
+
   // Load video URL with optimization
   useEffect(() => {
     async function loadVideoUrl() {
@@ -692,23 +853,44 @@ export default function VideoPlayer({
 
         // Use token-based URLs from the video object
         // These are generated by the share API with secure tokens
-        // Respect the default quality setting from admin
+        // Respect the effective quality (manual selection or auto-resolved)
         let url: string | undefined
 
-        if (defaultQuality === '1080p') {
-          // Prefer 1080p, fallback to 720p
-          url = (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl720p
+        if (effectiveQuality === '1080p') {
+          url = (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl480p
+        } else if (effectiveQuality === '480p') {
+          url = (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p
         } else {
-          // Prefer 720p, fallback to 1080p
-          url = (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p
+          url = (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl480p
         }
 
         if (url) {
-          // Reset player state
-          currentTimeRef.current = 0
+          // Preserve playback position when switching quality on the same video
+          const currentVideo = videoRef.current
+          const currentPos = currentVideo ? currentVideo.currentTime : 0
+          const wasPlaying = currentVideo ? !currentVideo.paused : false
 
           // Update video URL - this will trigger React to update the video element's src
-          setVideoUrl(url)
+          setVideoUrl((prev) => {
+            if (prev === url) return prev // No change needed
+            setIsBuffering(false)
+            suppressAutoDowngradeUntilRef.current = Date.now() + 1500
+            // Schedule seek to preserved position after src change
+            if (prev && currentPos > 0) {
+              requestAnimationFrame(() => {
+                const v = videoRef.current
+                if (v) {
+                  const onLoaded = () => {
+                    v.currentTime = currentPos
+                    if (wasPlaying) v.play().catch(() => {})
+                    v.removeEventListener('loadedmetadata', onLoaded)
+                  }
+                  v.addEventListener('loadedmetadata', onLoaded)
+                }
+              })
+            }
+            return url
+          })
         }
       } catch (error) {
         // Video load error - player will show error state
@@ -716,7 +898,7 @@ export default function VideoPlayer({
     }
 
     loadVideoUrl()
-  }, [selectedVideo, defaultQuality])
+  }, [selectedVideo, effectiveQuality])
 
   // Load timeline preview VTT when available
   useEffect(() => {
@@ -1409,7 +1591,7 @@ export default function VideoPlayer({
             className="flex flex-col gap-2 pt-4 lg:pt-0 lg:flex-row lg:items-center lg:gap-3"
             onPointerDownCapture={handleControlsPointerDownCapture}
           >
-            {/* Desktop/tablet: left controls */}
+            {/* Desktop/tablet: left controls — Play, Volume, Speed, Time */}
             <div className="hidden lg:flex items-center gap-3">
               <Button
                 type="button"
@@ -1420,6 +1602,87 @@ export default function VideoPlayer({
               >
                 {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
               </Button>
+
+              <div
+                className="relative flex-shrink-0"
+                data-volume-control="true"
+                onMouseEnter={openVolumeSlider}
+                onMouseLeave={scheduleCloseVolumeSlider}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleMute}
+                  aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  className="relative overflow-hidden w-14 px-0"
+                >
+                  {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-0 left-0 bg-primary/30"
+                      style={{ width: `${Math.round(volume * 100)}%` }}
+                    />
+                  )}
+                  <span className="relative z-10">
+                    {isMuted ? <VolumeX className="w-4 h-4 text-destructive" /> : <Volume2 className="w-4 h-4" />}
+                  </span>
+                </Button>
+
+                {showVolumeSlider && (
+                  <div
+                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm"
+                    onMouseEnter={openVolumeSlider}
+                    onMouseLeave={scheduleCloseVolumeSlider}
+                  >
+                    <div className="h-28 w-10 flex items-center justify-center">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round(volume * 100)}
+                      onChange={(e) => {
+                        const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                        const nextVolume = next / 100
+                        setVolume(nextVolume)
+                        if (nextVolume > 0) {
+                          setIsMuted(false)
+                        }
+                      }}
+                      className="w-28 h-4 -rotate-90 accent-primary touch-none"
+                      style={{ touchAction: 'none' }}
+                      aria-label="Volume"
+                    />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!shouldHideSpeedControls && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDecreaseSpeed}
+                    aria-label="Decrease playback speed"
+                    className={cn(playbackSpeed !== 1.0 && playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                  >
+                    <Rewind className="w-4 h-4" />
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleIncreaseSpeed}
+                    aria-label="Increase playback speed"
+                    className={cn(playbackSpeed !== 1.0 && playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                  >
+                    <FastForward className="w-4 h-4" />
+                  </Button>
+                </>
+              )}
 
               <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                 {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
@@ -1654,87 +1917,54 @@ export default function VideoPlayer({
               )}
             </div>
 
-            {/* Desktop/tablet: right controls */}
+            {/* Desktop/tablet: right controls — Quality, Comments (fullscreen), Fullscreen, Download */}
             <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
-              <div
-                className="relative flex-shrink-0"
-                data-volume-control="true"
-                onMouseEnter={openVolumeSlider}
-                onMouseLeave={scheduleCloseVolumeSlider}
-              >
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={toggleMute}
-                  aria-label={isMuted ? 'Unmute' : 'Mute'}
-                  className="relative overflow-hidden w-14 px-0"
-                >
-                  {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
-                    <span
-                      aria-hidden
-                      className="absolute inset-y-0 left-0 bg-primary/30"
-                      style={{ width: `${Math.round(volume * 100)}%` }}
-                    />
-                  )}
-                  <span className="relative z-10">
-                    {isMuted ? <VolumeX className="w-4 h-4 text-destructive" /> : <Volume2 className="w-4 h-4" />}
-                  </span>
-                </Button>
-
-                {showVolumeSlider && (
-                  <div
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm"
-                    onMouseEnter={openVolumeSlider}
-                    onMouseLeave={scheduleCloseVolumeSlider}
+              {/* Quality selector */}
+              {showQualitySelector && (
+                <div ref={desktopQualityControlsRef} className="relative flex-shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowQualityMenu((v) => !v)}
+                    aria-label="Select quality"
+                    className="text-xs px-2"
                   >
-                    <div className="h-28 w-10 flex items-center justify-center">
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={Math.round(volume * 100)}
-                      onChange={(e) => {
-                        const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
-                        const nextVolume = next / 100
-                        setVolume(nextVolume)
-                        if (nextVolume > 0) {
-                          setIsMuted(false)
-                        }
-                      }}
-                      className="w-28 h-4 -rotate-90 accent-primary touch-none"
-                      style={{ touchAction: 'none' }}
-                      aria-label="Volume"
-                    />
+                    {qualityLabel}
+                  </Button>
+
+                  {showQualityMenu && (
+                    <div
+                      className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
+                    >
+                      <button
+                        type="button"
+                        className={cn(
+                          'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                          selectedQuality === 'auto' && 'bg-accent font-medium'
+                        )}
+                        onClick={() => { setSelectedQuality('auto'); setShowQualityMenu(false) }}
+                      >
+                        Auto {selectedQuality === 'auto' && `(${autoResolvedQuality})`}
+                      </button>
+                      {qualityMenuOptions.map((q) =>
+                        availableQualities.includes(q) ? (
+                          <button
+                            key={q}
+                            type="button"
+                            className={cn(
+                              'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                              selectedQuality === q && 'bg-accent font-medium'
+                            )}
+                            onClick={() => { setSelectedQuality(q); setShowQualityMenu(false) }}
+                          >
+                            {q}
+                          </button>
+                        ) : null
+                      )}
                     </div>
-                  </div>
-                )}
-              </div>
-
-              {!shouldHideSpeedControls && (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDecreaseSpeed}
-                    aria-label="Decrease playback speed"
-                    className={cn(playbackSpeed !== 1.0 && playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                  >
-                    <Rewind className="w-4 h-4" />
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleIncreaseSpeed}
-                    aria-label="Increase playback speed"
-                    className={cn(playbackSpeed !== 1.0 && playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                  >
-                    <FastForward className="w-4 h-4" />
-                  </Button>
-                </>
+                  )}
+                </div>
               )}
 
               {isInFullscreen && canShowTimelineHover && !disableCommentsUI && !disableFullscreenCommentsUI && !isGuest && (
@@ -1846,6 +2076,54 @@ export default function VideoPlayer({
                       <FastForward className="w-4 h-4" />
                     </Button>
                   </>
+                )}
+
+                {/* Mobile quality selector (cog icon) */}
+                {showQualitySelector && (
+                  <div ref={mobileQualityControlsRef} className="relative flex-shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowQualityMenu((v) => !v)}
+                      aria-label="Select quality"
+                      className="h-8 w-8"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </Button>
+
+                    {showQualityMenu && (
+                      <div
+                        className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
+                      >
+                        <button
+                          type="button"
+                          className={cn(
+                            'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                            selectedQuality === 'auto' && 'bg-accent font-medium'
+                          )}
+                          onClick={() => { setSelectedQuality('auto'); setShowQualityMenu(false) }}
+                        >
+                          Auto {selectedQuality === 'auto' && `(${autoResolvedQuality})`}
+                        </button>
+                        {qualityMenuOptions.map((q) =>
+                          availableQualities.includes(q) ? (
+                            <button
+                              key={q}
+                              type="button"
+                              className={cn(
+                                'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                                selectedQuality === q && 'bg-accent font-medium'
+                              )}
+                              onClick={() => { setSelectedQuality(q); setShowQualityMenu(false) }}
+                            >
+                              {q}
+                            </button>
+                          ) : null
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 <Button

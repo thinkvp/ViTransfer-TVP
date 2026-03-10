@@ -213,7 +213,7 @@ model Project {
   maxClientUploadAllocationMB     Int     @default(1000) // Total allowed client comment-attachment uploads per project (0 = unlimited)
 
   // Video processing settings
-  previewResolution       String  @default("720p") // "720p", "1080p", "2160p"
+  previewResolutions      String  @default("[\"720p\"]") // JSON array of resolutions: ["480p","720p","1080p"]
   watermarkEnabled        Boolean @default(true) // Enable/disable watermarks for this project
   watermarkText           String? // Custom watermark text (null = use default format)
   timelinePreviewsEnabled Boolean @default(false) // Generate timeline preview thumbnails for this project
@@ -594,6 +594,7 @@ model Video {
   // Preview versions (watermarked)
   preview1080Path String?
   preview720Path  String?
+  preview480Path  String?
   thumbnailPath   String?
 
   // Timeline preview thumbnails (sprite sheets)
@@ -802,7 +803,7 @@ model Settings {
   maxUploadSizeGB Int @default(1) // Max upload size in GB
 
   // Default Video Processing Settings
-  defaultPreviewResolution       String? @default("720p")
+  defaultPreviewResolutions      String? @default("[\"720p\"]")
   defaultWatermarkEnabled        Boolean @default(true)
   defaultTimelinePreviewsEnabled Boolean @default(false)
   defaultWatermarkText           String?
@@ -814,7 +815,9 @@ model Settings {
   defaultMaxClientUploadAllocationMB Int     @default(1000) // Default total allowed client comment-attachment uploads per project (0 = unlimited)
 
   // Project Behavior
-  autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved
+  autoApproveProject           Boolean @default(true) // Auto-approve project when all videos approved
+  autoDeletePreviewsOnClose    Boolean @default(false) // Auto-delete video previews when a project is closed
+  autoDeleteAlbumZipsOnClose   Boolean @default(false) // Auto-delete album ZIP files when a project is closed
 
   // Auto-close approved projects
 

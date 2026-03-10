@@ -26,6 +26,25 @@ type OrphanCommentCleanupResult = {
   errors?: Array<{ storagePath: string; error: string }>
 }
 
+type OrphanProjectFileCleanupResult = {
+  ok: true
+  dryRun: boolean
+  scannedProjectDirectories: number
+  scannedFiles: number
+  orphanFiles: number
+  orphanFileBytes: number
+  sample?: {
+    orphanPaths: string[]
+    projectIds: string[]
+  }
+  deleted?: {
+    filesDeleted: number
+    filesFailed: number
+    emptyDirsPruned: number
+  }
+  errors?: Array<{ path: string; error: string }>
+}
+
 type NotificationBacklogResult = {
   ok: true
   dryRun: boolean
@@ -96,6 +115,10 @@ export function DeveloperToolsSection({
   const [cleanupResult, setCleanupResult] = useState<OrphanCommentCleanupResult | null>(null)
   const [cleanupError, setCleanupError] = useState<string | null>(null)
 
+  const [orphanProjectFilesLoading, setOrphanProjectFilesLoading] = useState(false)
+  const [orphanProjectFilesResult, setOrphanProjectFilesResult] = useState<OrphanProjectFileCleanupResult | null>(null)
+  const [orphanProjectFilesError, setOrphanProjectFilesError] = useState<string | null>(null)
+
   const [projectStorageMigrationLoading, setProjectStorageMigrationLoading] = useState(false)
   const [projectStorageMigrationResult, setProjectStorageMigrationResult] = useState<ProjectStorageYearMonthMigrationResult | null>(null)
   const [projectStorageMigrationError, setProjectStorageMigrationError] = useState<string | null>(null)
@@ -141,6 +164,13 @@ export function DeveloperToolsSection({
     return { line1, line2 }
   }, [cleanupResult])
 
+  const orphanProjectFilesSummary = useMemo(() => {
+    if (!orphanProjectFilesResult) return null
+    const line1 = `${orphanProjectFilesResult.orphanFiles} orphan files (${formatBytes(orphanProjectFilesResult.orphanFileBytes)})`
+    const line2 = `${orphanProjectFilesResult.scannedFiles} files scanned across ${orphanProjectFilesResult.scannedProjectDirectories} project folders`
+    return { line1, line2 }
+  }, [orphanProjectFilesResult])
+
   async function runOrphanCleanup(dryRun: boolean) {
     setCleanupLoading(true)
     setCleanupError(null)
@@ -152,6 +182,20 @@ export function DeveloperToolsSection({
       setCleanupError(e?.message || 'Failed to run cleanup')
     } finally {
       setCleanupLoading(false)
+    }
+  }
+
+  async function runOrphanProjectFilesCleanup(dryRun: boolean) {
+    setOrphanProjectFilesLoading(true)
+    setOrphanProjectFilesError(null)
+
+    try {
+      const res = await apiPost('/api/settings/cleanup-orphan-project-files', { dryRun })
+      setOrphanProjectFilesResult(res as OrphanProjectFileCleanupResult)
+    } catch (e: any) {
+      setOrphanProjectFilesError(e?.message || 'Failed to run orphan file cleanup')
+    } finally {
+      setOrphanProjectFilesLoading(false)
     }
   }
 
@@ -306,6 +350,98 @@ export function DeveloperToolsSection({
                   }}
                 >
                   {cleanupLoading ? 'Running…' : 'Clean up'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Orphan project files cleanup</Label>
+                <p className="text-xs text-muted-foreground">
+                  Scans project storage for files that are no longer referenced by the database
+                  (videos, previews, timeline sprites, album photos, ZIPs, comment uploads, project files, and imported emails).
+                  Run a dry run first to preview impact.
+                </p>
+
+                {orphanProjectFilesError ? (
+                  <p className="text-xs text-destructive">{orphanProjectFilesError}</p>
+                ) : null}
+
+                {orphanProjectFilesSummary ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">{orphanProjectFilesSummary.line1}</p>
+                    <p className="text-xs text-muted-foreground">{orphanProjectFilesSummary.line2}</p>
+                    {orphanProjectFilesResult?.deleted ? (
+                      <p className="text-xs text-muted-foreground">
+                        Deleted: {orphanProjectFilesResult.deleted.filesDeleted} files
+                        {orphanProjectFilesResult.deleted.filesFailed ? ` (${orphanProjectFilesResult.deleted.filesFailed} file deletes failed)` : ''}
+                        {orphanProjectFilesResult.deleted.emptyDirsPruned ? `; pruned ${orphanProjectFilesResult.deleted.emptyDirsPruned} empty directories` : ''}
+                      </p>
+                    ) : null}
+                    {orphanProjectFilesResult?.errors?.length ? (
+                      <p className="text-xs text-muted-foreground">Errors: {orphanProjectFilesResult.errors.length}</p>
+                    ) : null}
+
+                    {orphanProjectFilesResult?.sample ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show sample paths
+                        </summary>
+                        <div className="mt-2 space-y-2">
+                          <div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Orphan paths (first 20)</div>
+                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                              {orphanProjectFilesResult.sample.orphanPaths.join('\n') || 'None'}
+                            </pre>
+                          </div>
+
+                          <div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Project IDs</div>
+                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                              {orphanProjectFilesResult.sample.projectIds.join('\n') || 'None'}
+                            </pre>
+                          </div>
+
+                          {orphanProjectFilesResult?.errors?.length ? (
+                            <div>
+                              <div className="text-[11px] font-medium text-muted-foreground">Errors (first 20)</div>
+                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                {orphanProjectFilesResult.errors
+                                  .slice(0, 20)
+                                  .map((e) => `${e.path}: ${e.error}`)
+                                  .join('\n')}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={orphanProjectFilesLoading}
+                  onClick={() => void runOrphanProjectFilesCleanup(true)}
+                >
+                  {orphanProjectFilesLoading ? 'Running…' : 'Dry run'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={orphanProjectFilesLoading}
+                  onClick={() => {
+                    if (!confirm('Delete orphan project files from storage? This cannot be undone.')) return
+                    void runOrphanProjectFilesCleanup(false)
+                  }}
+                >
+                  {orphanProjectFilesLoading ? 'Running…' : 'Clean up'}
                 </Button>
               </div>
             </div>

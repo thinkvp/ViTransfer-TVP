@@ -91,6 +91,7 @@ export default function AdminSharePage() {
     const sessionId = sessionIdRef.current
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
     const isWatermarkEnabled = project?.watermarkEnabled === true
+    const isProjectClosed = project?.status === 'CLOSED'
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -100,14 +101,21 @@ export default function AdminSharePage() {
         }
 
         try {
-          const [response720p, response1080p] = await Promise.all([
+          const [response480p, response720p, response1080p] = await Promise.all([
+            apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=480p&sessionId=${sessionId}`),
             apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=720p&sessionId=${sessionId}`),
             apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=1080p&sessionId=${sessionId}`)
           ])
 
+          let streamToken480p = ''
           let streamToken720p = ''
           let streamToken1080p = ''
           let downloadToken = null
+
+          if (response480p.ok) {
+            const data480p = await response480p.json()
+            streamToken480p = data480p.token
+          }
 
           if (response720p.ok) {
             const data720p = await response720p.json()
@@ -119,14 +127,22 @@ export default function AdminSharePage() {
             streamToken1080p = data1080p.token
           }
 
-          if (video.approved) {
+          // For closed projects, stream original files when previews may have been auto-deleted
+          if (isProjectClosed || video.approved) {
             const responseOriginal = await apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=original&sessionId=${sessionId}`)
             if (responseOriginal.ok) {
               const dataOriginal = await responseOriginal.json()
               downloadToken = dataOriginal.token
 
-              streamToken720p = streamToken720p || dataOriginal.token
-              streamToken1080p = streamToken1080p || dataOriginal.token
+              // For closed projects, use original as fallback for all stream URLs
+              if (isProjectClosed) {
+                streamToken480p = streamToken480p || dataOriginal.token
+                streamToken720p = streamToken720p || dataOriginal.token
+                streamToken1080p = streamToken1080p || dataOriginal.token
+              } else {
+                streamToken720p = streamToken720p || dataOriginal.token
+                streamToken1080p = streamToken1080p || dataOriginal.token
+              }
             }
           }
 
@@ -158,6 +174,7 @@ export default function AdminSharePage() {
 
           const tokenized = {
             ...video,
+            streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,

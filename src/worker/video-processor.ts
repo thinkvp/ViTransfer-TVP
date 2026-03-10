@@ -6,17 +6,22 @@ import {
   isVideoRecordMissingError,
   downloadAndValidateVideo,
   fetchProcessingSettings,
+  filterRequestedResolutions,
   calculateOutputDimensions,
   processPreview,
   processThumbnail,
   processTimelinePreviews,
   finalizeVideo,
+  finalizeVideoWithoutPreview,
   updateVideoStatus,
   updateVideoRecord,
   cleanupTempFiles,
   handleProcessingError,
-  debugLog
+  debugLog,
+  PreviewResolutionCancelledError,
+  type Resolution,
 } from './video-processor-helpers'
+import { getPreviewProcessingPhase } from '@/lib/video-processing-phase'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
 
@@ -33,12 +38,29 @@ import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs,
  * 7. Cleanup temporary files
  */
 export async function processVideo(job: Job<VideoProcessingJob>) {
-  const { videoId, originalStoragePath, projectId, timelineOnly } = job.data
+  const {
+    videoId,
+    originalStoragePath,
+    projectId,
+    timelineOnly,
+    requestedPreviewResolutions,
+    regenerateThumbnail,
+    regenerateTimelinePreviews,
+  } = job.data
+  const previewOnly =
+    Array.isArray(requestedPreviewResolutions) &&
+    requestedPreviewResolutions.length > 0 &&
+    regenerateThumbnail === false &&
+    regenerateTimelinePreviews === false
 
   // Timeline-only mode: skip transcode/thumbnail, just generate sprites.
   // The video stays in READY status — no interruption to viewing.
   if (timelineOnly) {
     return processTimelineOnly(videoId, originalStoragePath, projectId)
+  }
+
+  if (previewOnly) {
+    return processPreviewOnly(videoId, originalStoragePath, projectId, requestedPreviewResolutions)
   }
 
   console.log(`[WORKER] Processing video ${videoId}`)
@@ -63,41 +85,79 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
   try {
     // Stage 1: Advance status from QUEUED → PROCESSING now that the worker has claimed the job
     console.log(`[WORKER] Setting video ${videoId} to PROCESSING status`)
-    await updateVideoStatus(videoId, 'PROCESSING', 0, 'transcode')
+    await updateVideoStatus(videoId, 'PROCESSING', 0, null)
 
     // Stage 2: Download and validate video
     const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
 
-    // Stage 3: Fetch processing settings
-    const settings = await fetchProcessingSettings(projectId, videoId)
+    // Stage 4+5: Process previews for each selected resolution
+    const previewResults: { resolution: string; path: string }[] = []
+    const completedResolutions = new Set<Resolution>()
 
-    // Stage 4: Calculate output dimensions
-    const dimensions = calculateOutputDimensions(videoInfo.metadata, settings.resolution)
+    while (true) {
+      const settings = await fetchProcessingSettings(projectId, videoId)
+      const pendingResolutions = filterRequestedResolutions(requestedPreviewResolutions, settings.resolutions)
+        .filter((resolution) => !completedResolutions.has(resolution))
 
-    // Stage 5: Process preview with watermark
-    const previewPath = await processPreview(
-      videoId,
-      projectId,
-      videoInfo.path,
-      dimensions,
-      settings,
-      tempFiles,
-      videoInfo.metadata.duration
-    )
+      if (pendingResolutions.length === 0) {
+        break
+      }
+
+      const resolution = pendingResolutions[0]
+      const phaseUpdated = await updateVideoRecord(
+        videoId,
+        {
+          processingProgress: 0,
+          processingPhase: getPreviewProcessingPhase(resolution),
+        },
+        { context: `starting ${resolution} preview generation`, ignoreMissing: true }
+      )
+      if (!phaseUpdated) return
+
+      const dimensions = calculateOutputDimensions(videoInfo.metadata, resolution)
+      console.log(`[WORKER] Processing ${resolution} preview for video ${videoId}`)
+
+      try {
+        const previewPath = await processPreview(
+          videoId,
+          projectId,
+          videoInfo.path,
+          dimensions,
+          { ...settings, resolution },
+          tempFiles,
+          videoInfo.metadata.duration,
+          requestedPreviewResolutions
+        )
+        if (previewPath) {
+          previewResults.push({ resolution, path: previewPath })
+          completedResolutions.add(resolution)
+        }
+      } catch (error) {
+        if (error instanceof PreviewResolutionCancelledError) {
+          continue
+        }
+        throw error
+      }
+    }
+
+    const finalSettings = await fetchProcessingSettings(projectId, videoId)
 
     // Stage 6: Generate and upload thumbnail
-    const thumbnailPath = await processThumbnail(
-      videoId,
-      projectId,
-      videoInfo.path,
-      videoInfo.metadata.duration,
-      tempFiles
-    )
+    let thumbnailPath: string | null = null
+    if (regenerateThumbnail !== false) {
+      thumbnailPath = await processThumbnail(
+        videoId,
+        projectId,
+        videoInfo.path,
+        videoInfo.metadata.duration,
+        tempFiles
+      )
+    }
 
     // Stage 6.5: Generate timeline previews (optional)
     // Uses the original video file (not the transcoded preview) for best quality.
     let timelineResult: { vttPath: string; spritesPath: string; ready: boolean } | null = null
-    if (settings.timelinePreviewsEnabled) {
+    if (regenerateTimelinePreviews !== false && finalSettings.timelinePreviewsEnabled) {
       console.log(`[WORKER] Starting timeline preview generation for video ${videoId}`)
       timelineResult = await processTimelinePreviews(
         videoId,
@@ -111,17 +171,23 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       }
     }
 
-    // Stage 7: Finalize - update database with results
-    await finalizeVideo(
-      videoId,
-      previewPath,
-      thumbnailPath,
-      videoInfo.metadata,
-      settings.resolution
-    )
+    // Stage 7: Finalize - update database with results for each resolution
+    for (const result of previewResults) {
+      await finalizeVideo(
+        videoId,
+        result.path,
+        thumbnailPath,
+        videoInfo.metadata,
+        result.resolution
+      )
+    }
+
+    if (previewResults.length === 0) {
+      await finalizeVideoWithoutPreview(videoId, thumbnailPath, videoInfo.metadata)
+    }
 
     // Persist timeline preview paths/ready flag (do not block READY if generation skipped)
-    if (settings.timelinePreviewsEnabled && timelineResult?.ready) {
+    if (regenerateTimelinePreviews !== false && finalSettings.timelinePreviewsEnabled && timelineResult?.ready) {
       const updated = await updateVideoRecord(
         videoId,
         {
@@ -132,7 +198,7 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
         { context: 'persisting timeline preview paths', ignoreMissing: true }
       )
       if (!updated) return
-    } else {
+    } else if (regenerateTimelinePreviews !== false) {
       const updated = await updateVideoRecord(
         videoId,
         {
@@ -165,6 +231,111 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     // Release active job slot so remaining jobs can scale up threads.
     decrementActiveVideoJobs()
     // Always cleanup temp files (success or failure)
+    await cleanupTempFiles(tempFiles)
+  }
+}
+
+async function processPreviewOnly(
+  videoId: string,
+  originalStoragePath: string,
+  projectId: string,
+  requestedPreviewResolutions: Array<'480p' | '720p' | '1080p'>
+) {
+  console.log(`[WORKER] Preview-only generation for video ${videoId}`)
+  const tempFiles: TempFiles = {}
+  const processingStart = Date.now()
+
+  incrementActiveVideoJobs()
+  try {
+    await updateVideoRecord(
+      videoId,
+      { status: 'PROCESSING', processingPhase: null, processingProgress: 0 },
+      { context: 'starting preview-only generation', ignoreMissing: true }
+    )
+
+    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+
+    const previewResults: { resolution: string; path: string }[] = []
+    const completedResolutions = new Set<Resolution>()
+
+    while (true) {
+      const settings = await fetchProcessingSettings(projectId, videoId)
+      const pendingResolutions = filterRequestedResolutions(requestedPreviewResolutions, settings.resolutions)
+        .filter((resolution) => !completedResolutions.has(resolution))
+
+      if (pendingResolutions.length === 0) {
+        break
+      }
+
+      const resolution = pendingResolutions[0]
+      const phaseUpdated = await updateVideoRecord(
+        videoId,
+        {
+          processingProgress: 0,
+          processingPhase: getPreviewProcessingPhase(resolution),
+        },
+        { context: `starting ${resolution} preview-only generation`, ignoreMissing: true }
+      )
+      if (!phaseUpdated) return
+
+      const dimensions = calculateOutputDimensions(videoInfo.metadata, resolution)
+      console.log(`[WORKER] Generating ${resolution} preview for video ${videoId}`)
+
+      try {
+        const previewPath = await processPreview(
+          videoId,
+          projectId,
+          videoInfo.path,
+          dimensions,
+          { ...settings, resolution },
+          tempFiles,
+          videoInfo.metadata.duration,
+          requestedPreviewResolutions
+        )
+        if (previewPath) {
+          previewResults.push({ resolution, path: previewPath })
+          completedResolutions.add(resolution)
+        }
+      } catch (error) {
+        if (error instanceof PreviewResolutionCancelledError) {
+          continue
+        }
+        throw error
+      }
+    }
+
+    for (const result of previewResults) {
+      await finalizeVideo(
+        videoId,
+        result.path,
+        null,
+        videoInfo.metadata,
+        result.resolution
+      )
+    }
+
+    if (previewResults.length === 0) {
+      await updateVideoRecord(
+        videoId,
+        { status: 'READY', processingPhase: null, processingProgress: 100 },
+        { context: 'finalizing no-op preview-only generation', ignoreMissing: true }
+      )
+    }
+
+    await recalculateAndStoreProjectTotalBytes(projectId)
+
+    const totalTime = Date.now() - processingStart
+    console.log(`[WORKER] Preview-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
+  } catch (error) {
+    await updateVideoRecord(
+      videoId,
+      { status: 'READY', processingPhase: null, processingProgress: 0 },
+      { context: 'clearing failed preview-only phase marker', ignoreMissing: true }
+    ).catch(() => undefined)
+    console.error(`[WORKER] Preview-only generation failed for ${videoId}:`, error)
+    throw error
+  } finally {
+    decrementActiveVideoJobs()
     await cleanupTempFiles(tempFiles)
   }
 }

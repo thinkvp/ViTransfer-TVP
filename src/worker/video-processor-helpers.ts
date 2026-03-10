@@ -1,32 +1,56 @@
 import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile } from '../lib/storage'
-import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite } from '../lib/ffmpeg'
+import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus } from '@prisma/client'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
+import {
+  getPreviewProcessingPhase,
+  PROCESSING_PHASES,
+  VALID_PREVIEW_RESOLUTIONS,
+  type PreviewResolution,
+} from '@/lib/video-processing-phase'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
 // Constants (no more magic numbers!)
 export const RESOLUTION_PRESETS = {
+  '480p': { horizontal: { width: 854, height: 480 }, verticalWidth: 480 },
   '720p': { horizontal: { width: 1280, height: 720 }, verticalWidth: 720 },
-  '1080p': { horizontal: { width: 1920, height: 1080 }, verticalWidth: 1080 },
-  '2160p': { horizontal: { width: 3840, height: 2160 }, verticalWidth: 2160 }
+  '1080p': { horizontal: { width: 1920, height: 1080 }, verticalWidth: 1080 }
 } as const
+
+export const VALID_RESOLUTIONS = VALID_PREVIEW_RESOLUTIONS
+export type Resolution = PreviewResolution
+
+/**
+ * Parse a previewResolutions JSON string into an array of resolution strings.
+ * Falls back to ['720p'] on invalid input.
+ */
+export function parseResolutions(raw: string | null | undefined): Resolution[] {
+  if (!raw) return ['720p']
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) return ['720p']
+    const valid = parsed.filter((r: unknown): r is Resolution =>
+      typeof r === 'string' && VALID_RESOLUTIONS.includes(r as Resolution)
+    )
+    return valid.length > 0 ? valid : ['720p']
+  } catch {
+    // Legacy single-value format
+    if (typeof raw === 'string' && VALID_RESOLUTIONS.includes(raw as Resolution)) {
+      return [raw as Resolution]
+    }
+    return ['720p']
+  }
+}
 
 export const THUMBNAIL_CONFIG = {
   percentage: 0.1,  // 10% into video
   min: 0.5,         // Minimum 0.5 seconds
   max: 10           // Maximum 10 seconds
-} as const
-
-// Phase names written to Video.processingPhase for the Running Jobs UI.
-export const PROCESSING_PHASES = {
-  transcode: 'transcode',
-  thumbnail: 'thumbnail',
-  timeline:  'timeline',
 } as const
 
 export const VALID_VIDEO_TYPES = [
@@ -49,9 +73,27 @@ export interface TempFiles {
 }
 
 export interface ProcessingSettings {
-  resolution: string
+  resolutions: Resolution[]
   watermarkText?: string
   timelinePreviewsEnabled: boolean
+}
+
+export class PreviewResolutionCancelledError extends Error {
+  constructor(public readonly resolution: Resolution) {
+    super(`Preview generation cancelled for ${resolution}`)
+    this.name = 'PreviewResolutionCancelledError'
+  }
+}
+
+export function filterRequestedResolutions(
+  requested: Array<'480p' | '720p' | '1080p'> | undefined,
+  available: Resolution[]
+): Resolution[] {
+  if (!requested || requested.length === 0) return available
+
+  const requestedSet = new Set(requested)
+  const filtered = available.filter((resolution) => requestedSet.has(resolution))
+  return filtered.length > 0 ? filtered : available
 }
 
 export interface VideoInfo {
@@ -235,7 +277,7 @@ export async function fetchProcessingSettings(
     where: { id: projectId },
     select: {
       title: true,
-      previewResolution: true,
+      previewResolutions: true,
       watermarkEnabled: true,
       watermarkText: true,
       timelinePreviewsEnabled: true,
@@ -247,9 +289,11 @@ export async function fetchProcessingSettings(
     select: { versionLabel: true },
   })
 
+  const resolutions = parseResolutions(project?.previewResolutions)
+
   debugLog('Project settings:', {
     title: project?.title,
-    resolution: project?.previewResolution,
+    resolutions,
     watermarkEnabled: project?.watermarkEnabled
   })
 
@@ -261,10 +305,29 @@ export async function fetchProcessingSettings(
   debugLog('Final watermark text:', watermarkText || '(no watermark)')
 
   return {
-    resolution: project?.previewResolution || '720p',
+    resolutions,
     watermarkText,
     timelinePreviewsEnabled: project?.timelinePreviewsEnabled ?? false,
   }
+}
+
+export async function fetchProjectPreviewResolutions(projectId: string): Promise<Resolution[]> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { previewResolutions: true },
+  })
+
+  return parseResolutions(project?.previewResolutions)
+}
+
+export async function isPreviewResolutionStillRequested(
+  projectId: string,
+  requestedPreviewResolutions: Array<'480p' | '720p' | '1080p'> | undefined,
+  resolution: Resolution
+): Promise<boolean> {
+  const availableResolutions = await fetchProjectPreviewResolutions(projectId)
+  const filteredResolutions = filterRequestedResolutions(requestedPreviewResolutions, availableResolutions)
+  return filteredResolutions.includes(resolution)
 }
 
 function formatVttTimestamp(seconds: number): string {
@@ -466,11 +529,13 @@ export async function processPreview(
   projectId: string,
   inputPath: string,
   dimensions: OutputDimensions,
-  settings: ProcessingSettings,
+  settings: ProcessingSettings & { resolution: Resolution },
   tempFiles: TempFiles,
-  duration: number
-): Promise<string> {
-  const tempPreviewPath = path.join(TEMP_DIR, `${videoId}-preview.mp4`)
+  duration: number,
+  requestedPreviewResolutions?: Array<'480p' | '720p' | '1080p'>
+): Promise<string | null> {
+  const resolution = settings.resolution
+  const tempPreviewPath = path.join(TEMP_DIR, `${videoId}-preview-${resolution}.mp4`)
   tempFiles.preview = tempPreviewPath
 
   debugLog('Starting video transcoding...')
@@ -483,49 +548,65 @@ export async function processPreview(
   let lastProgressUpdate = 0
   let progressWriteInFlight = false
 
-  await transcodeVideo({
-    inputPath,
-    outputPath: tempPreviewPath,
-    width: dimensions.width,
-    height: dimensions.height,
-    watermarkText: settings.watermarkText,
-    onProgress: async (progress) => {
-      debugLog(`Transcode progress: ${(progress * 100).toFixed(1)}%`)
-
-      const now = Date.now()
-      // Skip if another write is still in flight or if less than 3 s since last write
-      // Always allow the final progress update (progress >= 1)
-      if (progressWriteInFlight || (now - lastProgressUpdate < 3000 && progress < 1)) {
-        return
-      }
-
-      progressWriteInFlight = true
-      lastProgressUpdate = now
-      try {
-        await updateVideoRecord(
-          videoId,
-          {
-            processingProgress: progress,
-            processingPhase: PROCESSING_PHASES.transcode,
-          },
-          { context: 'updating transcode progress', ignoreMissing: true }
+  try {
+    await transcodeVideo({
+      inputPath,
+      outputPath: tempPreviewPath,
+      width: dimensions.width,
+      height: dimensions.height,
+      watermarkText: settings.watermarkText,
+      shouldAbort: async () => {
+        const stillRequested = await isPreviewResolutionStillRequested(
+          projectId,
+          requestedPreviewResolutions,
+          resolution
         )
-      } catch (err) {
-        console.error(`[WORKER] Failed to update progress for ${videoId}:`, err)
-      } finally {
-        progressWriteInFlight = false
-      }
-    },
-  })
+        return !stillRequested
+      },
+      onProgress: async (progress) => {
+        debugLog(`Transcode progress: ${(progress * 100).toFixed(1)}%`)
+
+        const now = Date.now()
+        // Skip if another write is still in flight or if less than 3 s since last write
+        // Always allow the final progress update (progress >= 1)
+        if (progressWriteInFlight || (now - lastProgressUpdate < 3000 && progress < 1)) {
+          return
+        }
+
+        progressWriteInFlight = true
+        lastProgressUpdate = now
+        try {
+          await updateVideoRecord(
+            videoId,
+            {
+              processingProgress: progress,
+              processingPhase: getPreviewProcessingPhase(resolution),
+            },
+            { context: 'updating transcode progress', ignoreMissing: true }
+          )
+        } catch (err) {
+          console.error(`[WORKER] Failed to update progress for ${videoId}:`, err)
+        } finally {
+          progressWriteInFlight = false
+        }
+      },
+    })
+  } catch (error) {
+    if (error instanceof FFmpegCancellationError) {
+      console.log(`[WORKER] Cancelled ${resolution} preview generation for video ${videoId} because project settings changed`)
+      throw new PreviewResolutionCancelledError(resolution)
+    }
+    throw error
+  }
 
   const transcodeTime = Date.now() - transcodeStart
-  console.log(`[WORKER] Generated ${settings.resolution} preview for video ${videoId} in ${(transcodeTime / 1000).toFixed(2)}s`)
+  console.log(`[WORKER] Generated ${resolution} preview for video ${videoId} in ${(transcodeTime / 1000).toFixed(2)}s`)
 
   const transcodeStats = fs.statSync(tempPreviewPath)
   debugLog('Transcoded file size:', (transcodeStats.size / 1024 / 1024).toFixed(2) + ' MB')
 
   // Move preview to storage (atomic rename on same filesystem, stream-copy fallback)
-  const previewPath = `projects/${projectId}/videos/${videoId}/preview-${settings.resolution}.mp4`
+  const previewPath = `projects/${projectId}/videos/${videoId}/preview-${resolution}.mp4`
 
   debugLog('Moving preview to logical path:', previewPath)
 
@@ -604,7 +685,7 @@ export async function processThumbnail(
 export async function finalizeVideo(
   videoId: string,
   previewPath: string,
-  thumbnailPath: string,
+  thumbnailPath: string | null,
   metadata: VideoMetadata,
   resolution: string
 ): Promise<void> {
@@ -628,8 +709,6 @@ export async function finalizeVideo(
     status: 'READY',
     processingProgress: 100,
     processingPhase: null,
-    // Keep custom thumbnails; only overwrite system-generated ones
-    thumbnailPath: hasCustomThumbnail ? existingThumbnail?.thumbnailPath : thumbnailPath,
     duration: metadata.duration,
     width: metadata.width,
     height: metadata.height,
@@ -637,13 +716,18 @@ export async function finalizeVideo(
     codec: metadata.codec,
   }
 
+  if (thumbnailPath !== null) {
+    // Keep custom thumbnails; only overwrite system-generated ones
+    updateData.thumbnailPath = hasCustomThumbnail ? existingThumbnail?.thumbnailPath : thumbnailPath
+  }
+
   // Store preview path in correct field based on resolution
-  if (resolution === '720p') {
+  if (resolution === '480p') {
+    updateData.preview480Path = previewPath
+  } else if (resolution === '720p') {
     updateData.preview720Path = previewPath
   } else if (resolution === '1080p') {
     updateData.preview1080Path = previewPath
-  } else if (resolution === '2160p') {
-    updateData.preview2160Path = previewPath
   }
 
   debugLog('Updating database with final video data...')
@@ -652,6 +736,44 @@ export async function finalizeVideo(
   await updateVideoRecord(videoId, updateData, { context: 'finalizing processed video' })
 
   debugLog('Database updated to READY status')
+}
+
+export async function finalizeVideoWithoutPreview(
+  videoId: string,
+  thumbnailPath: string | null,
+  metadata: VideoMetadata
+): Promise<void> {
+  const existingThumbnail = await prisma.video.findUnique({
+    where: { id: videoId },
+    select: { thumbnailPath: true },
+  })
+
+  const hasCustomThumbnail = existingThumbnail?.thumbnailPath
+    ? !!(await prisma.videoAsset.findFirst({
+        where: {
+          videoId,
+          storagePath: existingThumbnail.thumbnailPath,
+        },
+        select: { id: true },
+      })) || existingThumbnail.thumbnailPath.includes('/videos/assets/')
+    : false
+
+  const updateData: any = {
+    status: 'READY',
+    processingProgress: 100,
+    processingPhase: null,
+    duration: metadata.duration,
+    width: metadata.width,
+    height: metadata.height,
+    fps: metadata.fps,
+    codec: metadata.codec,
+  }
+
+  if (thumbnailPath !== null) {
+    updateData.thumbnailPath = hasCustomThumbnail ? existingThumbnail?.thumbnailPath : thumbnailPath
+  }
+
+  await updateVideoRecord(videoId, updateData, { context: 'finalizing video without preview changes' })
 }
 
 /**

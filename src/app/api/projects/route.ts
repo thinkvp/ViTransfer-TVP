@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
         authMode: true,
         hideFeedback: true,
         guestMode: true,
-        previewResolution: true,
+        previewResolutions: true,
         companyName: true,
         clientId: true,
         client: {
@@ -410,7 +410,7 @@ export async function POST(request: NextRequest) {
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
       select: {
-        defaultPreviewResolution: true,
+        defaultPreviewResolutions: true,
         defaultWatermarkEnabled: true,
         defaultWatermarkText: true,
         defaultTimelinePreviewsEnabled: true,
@@ -450,7 +450,7 @@ export async function POST(request: NextRequest) {
           status: isShareOnly ? 'SHARE_ONLY' : 'NOT_STARTED',
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,
-          previewResolution: settings?.defaultPreviewResolution || '720p',
+          previewResolutions: settings?.defaultPreviewResolutions || '[\"720p\"]',
           watermarkEnabled: settings?.defaultWatermarkEnabled ?? true,
           watermarkText: settings?.defaultWatermarkText || null,
           timelinePreviewsEnabled: settings?.defaultTimelinePreviewsEnabled ?? false,

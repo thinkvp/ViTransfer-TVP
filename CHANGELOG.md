@@ -5,6 +5,40 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.9] - 2026-03-10
+
+### Added
+- **Multi-resolution video previews (480p, 720p, 1080p)** — Projects and global settings can now select one or more preview resolutions simultaneously using checkboxes (480p, 720p, 1080p); the worker processes all selected resolutions in a single job, storing them in separate database fields (`preview480Path`, `preview720Path`, `preview1080Path`); adding a resolution from Project Settings queues preview-only regeneration jobs for all READY videos without touching the thumbnail or timeline previews; removing a resolution deletes the corresponding preview files immediately; backed by a new database migration that converts the single `previewResolution` field to a JSON-array `previewResolutions` field on both `Project` and `Settings`
+- **Video player quality selector** — when a video has more than one preview stream available, a gear-icon quality button appears in the player controls on both desktop and mobile rows; choosing a specific quality (480p / 720p / 1080p) overrides Auto mode, which selects quality based on player container width (≥1200 px → 1080p, ≥640 px → 720p, otherwise 480p) via a ResizeObserver and automatically downgrades when the video buffers for more than 700 ms; the button label shows the active resolution, e.g. `Auto (720p)`
+- **Auto-delete video previews and timeline sprites on project close** — a new "Auto-delete video previews and timeline sprites when project is closed" toggle in Admin Settings → Default Project Settings; when enabled, closing a project deletes all preview files and timeline sprite directories from storage and clears the corresponding database paths; re-opening the project automatically re-queues any READY videos with missing previews for regeneration
+- **Auto-delete album ZIP files on project close** — a companion "Auto-delete album ZIP files when project is closed" toggle; works alongside preview auto-delete; re-opening the project re-queues album ZIP generation for any album whose ZIP size was cleared to zero
+- **Pending job cancellation on project close** — closing a project (both manually and via the scheduled auto-close worker) now cancels all waiting, delayed, and prioritized BullMQ jobs for that project across the video-processing, album-photo-ZIP, and album-photo-social queues, preventing orphaned jobs from running after the project is shut down
+- **Orphan project files cleanup tool in Developer Tools** — a new "Orphan project files cleanup" section in Admin Settings → Developer Tools; a dry-run scan walks the entire project storage tree and cross-references every physical file against the full set of database-referenced paths (original videos, all preview resolutions, timeline sprites, thumbnails, video assets, album photos, album ZIPs, comment uploads, project files, and imported emails); the report shows orphan file count, total orphan bytes, sample paths and affected project IDs; a second "Delete orphans" button commits the deletion and prunes any empty directories left behind; backed by a new `POST /api/settings/cleanup-orphan-project-files` endpoint
+
+### Changed
+- **Storage breakdown now shows original vs. generated file sub-totals** — the Project Storage Usage panel now splits the "Videos" row into "Original Videos" and "Video Previews (inc. timeline previews)" and splits "Photos" into "Original Photos" and "Photo ZIP files" when the API returns the detailed per-file breakdown; the storage API now queries per-video and per-album storage paths individually to compute these sub-totals instead of relying on approximate aggregate sums
+- **Reprocess endpoint supports targeted per-resolution and partial regeneration** — `POST /api/projects/[id]/reprocess` now accepts `previewResolutions` (an array of specific resolutions to regenerate), `regenerateThumbnail: false` (skip thumbnail regeneration and keep the existing one), and `regenerateTimelinePreviews: false` (skip timeline preview regeneration); targeted resolution jobs only delete and nullify the specific preview fields requested rather than wiping all three; the endpoint now rejects requests for CLOSED projects with HTTP 409
+- **Closed projects fall back to original files when previews are absent** — the admin share page now fetches an original-quality token for CLOSED projects (not only approved videos), so all videos remain watchable via the admin share page even after previews have been auto-deleted on close; the original token is used as a fallback for all three stream-URL slots (480p / 720p / 1080p)
+- **Watermark reprocess modal only fires on content-affecting changes** — a project title change alone no longer triggers the "reprocess existing previews?" modal unless the project uses the default auto-title watermark format (watermark enabled and no custom watermark text set); changing the title with a custom watermark text or with watermarks disabled now saves immediately without showing the modal
+- **Running Jobs processing phase label extracted to shared utility** — `getProcessingPhaseLabel()` is now defined in `src/lib/video-processing-phase.ts` and shared by the worker and the Running Jobs component; the initial `processingPhase` value written when a video transitions to PROCESSING is now `null` (instead of `'transcode'`), so the phase display in the Running Jobs dropdown starts blank and is only set once the worker begins each stage
+- **Storage write-path resolution always targets the canonical date-partitioned folder** — a new `validatePathForWrite()` function is used when writing files; it bypasses the legacy-path short-circuit that applied during reads (`resolveRedirectedProjectPath` now accepts a `forWrite` flag), ensuring all new writes land in the correct `projects/YYYY-MM/<projectId>` location even when an older file still exists at the legacy `projects/<projectId>` path
+
+### Fixed
+- **Video token endpoints return 404 when a requested quality has no generated preview** — both `/api/admin/video-token` and `/api/share/[token]/video-token` now verify that the corresponding preview path field (`preview480Path`, `preview720Path`, `preview1080Path`) exists in the database before issuing a content token; requests for a quality that was never generated or that was deleted after project close now receive an explicit 404 instead of a token that silently points to a missing file, preventing broken playback
+
+### Dependencies
+- `isomorphic-dompurify` upgraded from `^2.31.0` to `^3.1.0` (uses jsdom 28, eliminating the deprecated `whatwg-encoding` transitive dependency)
+- `jsdom` override pinned to `28.1.0` (was `27.2.0`)
+- `glob` override pinned to `13.0.6` (was `^11.1.0`, which was deprecated via `archiver-utils`)
+- `eslint` pinned to `^9.39.4` to resolve `ajv < 6.14.0` audit advisory; `npm audit` now reports 0 vulnerabilities
+- `bullmq` bumped from `^5.63.0` to `^5.70.4`
+- `ioredis` bumped from `^5.8.2` to `^5.10.0`
+- `mailparser` bumped from `^3.9.1` to `^3.9.4`
+- `postcss` pinned to `^8.5.8`
+- `dompurify` bumped from `^3.3.0` to `^3.3.2`
+- `@simplewebauthn/server` bumped from `^13.2.2` to `^13.2.3`
+- `@types/node` bumped to `^22.19.15`; `@types/nodemailer` bumped to `^7.0.11`
+
 ## [1.1.8] - 2026-03-09
 
 ### Added

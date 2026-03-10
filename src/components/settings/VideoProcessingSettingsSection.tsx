@@ -4,9 +4,15 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
+const RESOLUTION_OPTIONS = [
+  { value: '480p', label: '480p (854×480 or 480×854 for vertical)' },
+  { value: '720p', label: '720p (1280×720 or 720×1280 for vertical)' },
+  { value: '1080p', label: '1080p (1920×1080 or 1080×1920 for vertical)' },
+] as const
+
 interface VideoProcessingSettingsSectionProps {
-  defaultPreviewResolution: string
-  setDefaultPreviewResolution: (value: string) => void
+  defaultPreviewResolutions: string[]
+  setDefaultPreviewResolutions: (value: string[]) => void
   defaultWatermarkEnabled: boolean
   setDefaultWatermarkEnabled: (value: boolean) => void
   defaultTimelinePreviewsEnabled: boolean
@@ -26,8 +32,8 @@ interface VideoProcessingSettingsSectionProps {
 }
 
 export function VideoProcessingSettingsSection({
-  defaultPreviewResolution,
-  setDefaultPreviewResolution,
+  defaultPreviewResolutions,
+  setDefaultPreviewResolutions,
   defaultWatermarkEnabled,
   setDefaultWatermarkEnabled,
   defaultTimelinePreviewsEnabled,
@@ -45,6 +51,16 @@ export function VideoProcessingSettingsSection({
   show,
   setShow,
 }: VideoProcessingSettingsSectionProps) {
+
+  function toggleResolution(resolution: string) {
+    if (defaultPreviewResolutions.includes(resolution)) {
+      // Don't allow removing the last resolution
+      if (defaultPreviewResolutions.length <= 1) return
+      setDefaultPreviewResolutions(defaultPreviewResolutions.filter(r => r !== resolution))
+    } else {
+      setDefaultPreviewResolutions([...defaultPreviewResolutions, resolution])
+    }
+  }
   return (
     <Card className="border-border">
       <CardHeader
@@ -70,18 +86,23 @@ export function VideoProcessingSettingsSection({
         <CardContent className="space-y-4 border-t pt-4">
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="space-y-2">
-              <Label htmlFor="resolution">Default Preview Resolution</Label>
-              <select
-                id="resolution"
-                value={defaultPreviewResolution}
-                onChange={(e) => setDefaultPreviewResolution(e.target.value)}
-                className="w-full px-3 py-2 text-sm sm:text-base bg-background text-foreground border border-border rounded-md"
-              >
-                <option value="720p">720p (1280x720 or 720x1280 for vertical)</option>
-                <option value="1080p">1080p (1920x1080 or 1080x1920 for vertical)</option>
-              </select>
+              <Label>Default Preview Resolutions</Label>
+              <div className="space-y-2">
+                {RESOLUTION_OPTIONS.map(opt => (
+                  <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={defaultPreviewResolutions.includes(opt.value)}
+                      onChange={() => toggleResolution(opt.value)}
+                      disabled={defaultPreviewResolutions.includes(opt.value) && defaultPreviewResolutions.length <= 1}
+                      className="rounded border-border accent-primary"
+                    />
+                    <span className="text-sm">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
               <p className="text-xs text-muted-foreground">
-                New projects will use this resolution by default. Can be overridden per project.
+                New projects will generate previews for these resolutions. Multiple resolutions enable a quality selector in the video player. Can be overridden per project.
               </p>
             </div>
 

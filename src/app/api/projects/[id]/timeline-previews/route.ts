@@ -63,6 +63,13 @@ export async function POST(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    if (project.status === 'CLOSED' && action === 'generate') {
+      return NextResponse.json(
+        { error: 'Closed projects cannot queue timeline preview generation jobs.' },
+        { status: 409 }
+      )
+    }
+
     if (action === 'remove') {
       // Find all videos that have timeline previews
       const videosWithPreviews = await prisma.video.findMany({

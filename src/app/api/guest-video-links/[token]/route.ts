@@ -59,8 +59,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           versionLabel: true,
           status: true,
           approved: true,
+          preview480Path: true,
+          preview720Path: true,
+          preview1080Path: true,
           thumbnailPath: true,
           timelinePreviewsReady: true,
+          timelinePreviewVttPath: true,
+          timelinePreviewSpritesPath: true,
         },
       },
     },
@@ -149,16 +154,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Build tokenized URLs (mirrors /share/* behavior but for a single video and public access).
   const wantTimeline = Boolean(link.project.timelinePreviewsEnabled) && Boolean(link.video.timelinePreviewsReady)
 
-  const [token720, token1080, thumbToken, vttToken, spriteToken] = await Promise.all([
-    generateVideoAccessToken(link.video.id, link.project.id, '720p', request, sessionId).catch(() => ''),
-    generateVideoAccessToken(link.video.id, link.project.id, '1080p', request, sessionId).catch(() => ''),
+  const [token480, token720, token1080, thumbToken, vttToken, spriteToken] = await Promise.all([
+    link.video.preview480Path
+      ? generateVideoAccessToken(link.video.id, link.project.id, '480p', request, sessionId).catch(() => '')
+      : Promise.resolve(''),
+    link.video.preview720Path
+      ? generateVideoAccessToken(link.video.id, link.project.id, '720p', request, sessionId).catch(() => '')
+      : Promise.resolve(''),
+    link.video.preview1080Path
+      ? generateVideoAccessToken(link.video.id, link.project.id, '1080p', request, sessionId).catch(() => '')
+      : Promise.resolve(''),
     link.video.thumbnailPath
       ? generateVideoAccessToken(link.video.id, link.project.id, 'thumbnail', request, sessionId).catch(() => '')
       : Promise.resolve(''),
-    wantTimeline
+    wantTimeline && Boolean(link.video.timelinePreviewVttPath)
       ? generateVideoAccessToken(link.video.id, link.project.id, 'timeline-vtt', request, sessionId).catch(() => '')
       : Promise.resolve(''),
-    wantTimeline
+    wantTimeline && Boolean(link.video.timelinePreviewSpritesPath)
       ? generateVideoAccessToken(link.video.id, link.project.id, 'timeline-sprite', request, sessionId).catch(() => '')
       : Promise.resolve(''),
   ])
@@ -180,6 +192,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       approved: link.video.approved,
       hasThumbnail: Boolean(link.video.thumbnailPath),
       timelinePreviewsReady: link.video.timelinePreviewsReady,
+      streamUrl480p: token480 ? `/api/content/${token480}` : '',
       streamUrl720p: token720 ? `/api/content/${token720}` : '',
       streamUrl1080p: token1080 ? `/api/content/${token1080}` : '',
       downloadUrl: null,

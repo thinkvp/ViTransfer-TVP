@@ -44,11 +44,35 @@ export async function GET(
       projectId: true,
       approved: true,
       thumbnailPath: true,
+      preview480Path: true,
+      preview720Path: true,
+      preview1080Path: true,
+      timelinePreviewVttPath: true,
+      timelinePreviewSpritesPath: true,
     },
   })
 
   if (!video || video.projectId !== project.id) {
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+  }
+
+  if (quality === '480p' && !(video as any).preview480Path) {
+    return NextResponse.json({ error: '480p preview unavailable' }, { status: 404 })
+  }
+  if (quality === '720p' && !video.preview720Path) {
+    return NextResponse.json({ error: '720p preview unavailable' }, { status: 404 })
+  }
+  if (quality === '1080p' && !video.preview1080Path) {
+    return NextResponse.json({ error: '1080p preview unavailable' }, { status: 404 })
+  }
+  if (quality === 'thumbnail' && !video.thumbnailPath) {
+    return NextResponse.json({ error: 'Thumbnail unavailable' }, { status: 404 })
+  }
+  if (quality === 'timeline-vtt' && !video.timelinePreviewVttPath) {
+    return NextResponse.json({ error: 'Timeline VTT unavailable' }, { status: 404 })
+  }
+  if (quality === 'timeline-sprite' && !video.timelinePreviewSpritesPath) {
+    return NextResponse.json({ error: 'Timeline sprite unavailable' }, { status: 404 })
   }
 
   if (quality === 'original' && !video.approved) {
