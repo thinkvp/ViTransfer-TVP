@@ -239,7 +239,14 @@ export async function computeProjectDiskBytes(
   const ZERO = BigInt(0)
   if (!projectId) return ZERO
 
-  const projectRootAbs = getFilePath(`projects/${projectId}`)
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { storagePath: true },
+  })
+
+  if (!project?.storagePath) return ZERO
+
+  const projectRootAbs = getFilePath(project.storagePath)
   const bytes = await computeDirectorySizeBytesBigInt(projectRootAbs)
   return bytes > ZERO ? bytes : ZERO
 }

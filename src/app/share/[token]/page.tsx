@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
+
+export const dynamic = 'force-dynamic'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
 import { GripVertical } from 'lucide-react'

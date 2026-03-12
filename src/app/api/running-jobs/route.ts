@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
 import { getRedis } from '@/lib/redis'
-import { getVideoQueue } from '@/lib/queue'
+import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 
@@ -147,7 +147,240 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({ jobs })
+    // Query active Dropbox uploads (separate from processing jobs)
+    const dropboxUploads = await prisma.video.findMany({
+      where: {
+        dropboxUploadStatus: { in: ['PENDING', 'UPLOADING'] },
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin
+            ? {}
+            : { assignedUsers: { some: { userId: authResult.id } } }),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        versionLabel: true,
+        originalFileSize: true,
+        dropboxUploadStatus: true,
+        dropboxUploadProgress: true,
+        projectId: true,
+        project: { select: { title: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const dropboxJobs = dropboxUploads.map((v) => ({
+      id: v.id,
+      projectId: v.projectId,
+      projectName: v.project.title,
+      videoName: v.name,
+      versionLabel: v.versionLabel,
+      status: v.dropboxUploadStatus as string,
+      progress: v.dropboxUploadProgress,
+      fileSizeBytes: Number(v.originalFileSize),
+    }))
+
+    // Query active Dropbox uploads for assets
+    const assetDropboxUploads = await prisma.videoAsset.findMany({
+      where: {
+        dropboxUploadStatus: { in: ['PENDING', 'UPLOADING'] },
+        video: {
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin
+              ? {}
+              : { assignedUsers: { some: { userId: authResult.id } } }),
+          },
+        },
+      },
+      select: {
+        id: true,
+        fileName: true,
+        fileSize: true,
+        dropboxUploadStatus: true,
+        dropboxUploadProgress: true,
+        video: {
+          select: {
+            name: true,
+            versionLabel: true,
+            projectId: true,
+            project: { select: { title: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const assetDropboxJobs = assetDropboxUploads.map((a) => ({
+      id: a.id,
+      projectId: a.video.projectId,
+      projectName: a.video.project.title,
+      videoName: a.fileName,
+      versionLabel: a.video.name,
+      status: a.dropboxUploadStatus as string,
+      progress: a.dropboxUploadProgress ?? 0,
+      fileSizeBytes: Number(a.fileSize ?? 0),
+    }))
+
+    // -----------------------------------------------------------------------
+    // Album ZIP generation jobs (queried from BullMQ)
+    // -----------------------------------------------------------------------
+    const albumZipJobs: Array<{
+      id: string
+      albumId: string
+      albumName: string
+      projectId: string
+      projectName: string
+      variant: 'full' | 'social'
+      status: 'PENDING' | 'ACTIVE'
+    }> = []
+
+    try {
+      const albumZipQueue = getAlbumPhotoZipQueue()
+      const [activeZipQueueJobs, waitingZipQueueJobs] = await Promise.all([
+        albumZipQueue.getJobs(['active']),
+        albumZipQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      ])
+
+      // Map albumId:variant → status
+      const albumZipJobMap = new Map<string, 'ACTIVE' | 'PENDING'>()
+      const activeAlbumIds = new Set<string>()
+
+      for (const qj of activeZipQueueJobs) {
+        const { albumId, variant } = qj.data ?? {}
+        if (albumId && variant) {
+          albumZipJobMap.set(`${albumId}:${variant}`, 'ACTIVE')
+          activeAlbumIds.add(albumId)
+        }
+      }
+      for (const qj of waitingZipQueueJobs) {
+        const { albumId, variant } = qj.data ?? {}
+        if (albumId && variant) {
+          const key = `${albumId}:${variant}`
+          if (!albumZipJobMap.has(key)) {
+            albumZipJobMap.set(key, 'PENDING')
+            activeAlbumIds.add(albumId)
+          }
+        }
+      }
+
+      if (activeAlbumIds.size > 0) {
+        const albums = await prisma.album.findMany({
+          where: {
+            id: { in: [...activeAlbumIds] },
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin
+                ? {}
+                : { assignedUsers: { some: { userId: authResult.id } } }),
+            },
+          },
+          select: {
+            id: true,
+            name: true,
+            projectId: true,
+            project: { select: { title: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        })
+
+        for (const album of albums) {
+          for (const variant of ['full', 'social'] as const) {
+            const status = albumZipJobMap.get(`${album.id}:${variant}`)
+            if (status) {
+              albumZipJobs.push({
+                id: `${album.id}:${variant}`,
+                albumId: album.id,
+                albumName: album.name,
+                projectId: album.projectId,
+                projectName: album.project.title,
+                variant,
+                status,
+              })
+            }
+          }
+        }
+      }
+    } catch {
+      // Queue may be unavailable — degrade gracefully
+    }
+
+    // -----------------------------------------------------------------------
+    // Album ZIP Dropbox upload jobs (tracked in DB)
+    // -----------------------------------------------------------------------
+    const rawAlbumZipDropboxAlbums = await prisma.album.findMany({
+      where: {
+        OR: [
+          { fullZipDropboxStatus: { in: ['PENDING', 'UPLOADING'] } },
+          { socialZipDropboxStatus: { in: ['PENDING', 'UPLOADING'] } },
+        ],
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin
+            ? {}
+            : { assignedUsers: { some: { userId: authResult.id } } }),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        projectId: true,
+        fullZipFileSize: true,
+        fullZipDropboxStatus: true,
+        fullZipDropboxProgress: true,
+        socialZipFileSize: true,
+        socialZipDropboxStatus: true,
+        socialZipDropboxProgress: true,
+        project: { select: { title: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    // Expand into one entry per active variant
+    const albumZipDropboxJobs: Array<{
+      id: string
+      albumId: string
+      albumName: string
+      projectId: string
+      projectName: string
+      variant: 'full' | 'social'
+      status: string
+      progress: number
+      fileSizeBytes: number
+    }> = []
+
+    for (const a of rawAlbumZipDropboxAlbums) {
+      if (a.fullZipDropboxStatus === 'PENDING' || a.fullZipDropboxStatus === 'UPLOADING') {
+        albumZipDropboxJobs.push({
+          id: `${a.id}:full:dropbox`,
+          albumId: a.id,
+          albumName: a.name,
+          projectId: a.projectId,
+          projectName: a.project.title,
+          variant: 'full',
+          status: a.fullZipDropboxStatus,
+          progress: a.fullZipDropboxProgress,
+          fileSizeBytes: Number(a.fullZipFileSize),
+        })
+      }
+      if (a.socialZipDropboxStatus === 'PENDING' || a.socialZipDropboxStatus === 'UPLOADING') {
+        albumZipDropboxJobs.push({
+          id: `${a.id}:social:dropbox`,
+          albumId: a.id,
+          albumName: a.name,
+          projectId: a.projectId,
+          projectName: a.project.title,
+          variant: 'social',
+          status: a.socialZipDropboxStatus,
+          progress: a.socialZipDropboxProgress,
+          fileSizeBytes: Number(a.socialZipFileSize),
+        })
+      }
+    }
+
+    return NextResponse.json({ jobs, dropboxJobs: [...dropboxJobs, ...assetDropboxJobs], albumZipJobs, albumZipDropboxJobs })
   } catch (err: any) {
     console.error('[running-jobs]', err)
     return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })

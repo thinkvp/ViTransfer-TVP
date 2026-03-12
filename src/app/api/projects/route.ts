@@ -7,7 +7,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { createProjectSchema, validateRequest } from '@/lib/validation'
 import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getSafeguardLimits } from '@/lib/settings'
-import { ensureProjectStorageLayout } from '@/lib/storage'
+import { getRawStoragePath } from '@/lib/storage'
+import { allocateUniqueStorageName, buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -330,6 +331,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const siblingProjects = await prisma.project.findMany({
+      where: { clientId: client.id },
+      select: { storagePath: true, title: true },
+    })
+    const projectFolderName = allocateUniqueStorageName(
+      title,
+      siblingProjects
+        .map((projectRow) => getStoragePathBasename(projectRow.storagePath) || projectRow.title)
+        .filter(Boolean) as string[],
+    )
+    const projectStoragePath = buildProjectStorageRoot(client.name, projectFolderName)
+
     const normalizeEmail = (email: any): string | null => {
       const v = typeof email === 'string' ? email.trim().toLowerCase() : ''
       return v && v.includes('@') ? v : null
@@ -436,6 +449,7 @@ export async function POST(request: NextRequest) {
           description,
           companyName: client.name,
           clientId: client.id,
+          storagePath: projectStoragePath,
           enableVideos: finalEnableVideos,
           enablePhotos: finalEnablePhotos,
           sharePassword: encryptedSharePassword,
@@ -529,13 +543,10 @@ export async function POST(request: NextRequest) {
       totalBytes: asNumberBigInt((project as any).totalBytes),
     })
 
-    // Initialize physical storage layout for this project.
-    // Real data lives under projects/YYYY-MM/{projectId}. Legacy paths under projects/{projectId}/...
-    // are resolved via the central redirect index file in projects/.
     try {
-      await ensureProjectStorageLayout(project.id, {
-        createdAt: (project as any).createdAt ?? null,
-      })
+      if (project.storagePath) {
+        await fs.promises.mkdir(getRawStoragePath(project.storagePath), { recursive: true })
+      }
     } catch (e) {
       console.error('[PROJECT CREATE] Failed to initialize project storage folders:', e)
     }

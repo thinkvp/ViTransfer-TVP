@@ -45,9 +45,11 @@ export default function ProjectPage() {
   const editKeyDateId = searchParams?.get('editKeyDate')
 
   const [project, setProject] = useState<any>(null)
+  const [videos, setVideos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
   const [companyName, setCompanyName] = useState('Studio')
+  const [dropboxConfigured, setDropboxConfigured] = useState(false)
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [adminUser, setAdminUser] = useState<any>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
@@ -173,7 +175,7 @@ export default function ProjectPage() {
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
     try {
-      const response = await apiFetch(`/api/projects/${id}`)
+      const response = await apiFetch(`/api/projects/${id}?includeComments=false`)
       if (!response.ok) {
         if (response.status === 404) {
           router.push('/admin/projects')
@@ -183,6 +185,7 @@ export default function ProjectPage() {
       }
       const data = await response.json()
       setProject(data)
+      setVideos(Array.isArray(data?.videos) ? data.videos : [])
       setAssignedUsers(Array.isArray((data as any)?.assignedUsers) ? ((data as any).assignedUsers as AssignableUser[]) : [])
 
       const recipients = Array.isArray((data as any)?.recipients) ? ((data as any).recipients as any[]) : []
@@ -202,6 +205,24 @@ export default function ProjectPage() {
       setLoading(false)
     }
   }, [id, router])
+
+  const fetchProjectVideoStatuses = useCallback(async () => {
+    try {
+      const response = await apiFetch(`/api/projects/${id}/video-statuses`)
+      if (!response.ok) return
+
+      const data = await response.json().catch(() => null)
+      const nextVideos = Array.isArray(data?.videos) ? data.videos : []
+      if (nextVideos.length === 0) return
+
+      setVideos((prev) => prev.map((video) => {
+        const next = nextVideos.find((row: any) => row.id === video.id)
+        return next ? { ...video, ...next } : video
+      }))
+    } catch {
+      // ignore transient polling errors
+    }
+  }, [id])
 
   // Refetch project data when the window regains focus so stale data
   // (e.g. a renamed client) is reflected immediately.
@@ -302,22 +323,22 @@ export default function ProjectPage() {
   // Auto-refresh when videos are processing to show real-time progress
   // Centralized polling to prevent duplicate network requests
   useEffect(() => {
-    if (!project?.videos) return
+    if (videos.length === 0) return
 
     // Check if any videos are currently processing or queued
-    const hasProcessingVideos = project.videos.some(
+    const hasProcessingVideos = videos.some(
       (video: any) => video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'UPLOADING'
     )
 
     if (hasProcessingVideos) {
       // Poll every 5 seconds while videos are processing (reduced from 3s to reduce load)
       const interval = setInterval(() => {
-        fetchProject()
+        fetchProjectVideoStatuses()
       }, 5000)
 
       return () => clearInterval(interval)
     }
-  }, [project?.videos, fetchProject])
+  }, [videos, fetchProjectVideoStatuses])
 
   // Fetch share URL
   useEffect(() => {
@@ -377,6 +398,7 @@ export default function ProjectPage() {
         if (response.ok) {
           const data = await response.json()
           setCompanyName(data.companyName || 'Studio')
+          setDropboxConfigured(data.dropboxConfigured === true)
         }
       } catch (error) {
         console.error('Error fetching company name:', error)
@@ -433,24 +455,6 @@ export default function ProjectPage() {
       return ''
     }
   }
-
-  const readyVideosForApproval = (project?.videos || []).filter((v: any) => v?.status === 'READY')
-  const videosByNameForApproval = (readyVideosForApproval as any[]).reduce(
-    (acc: Record<string, any[]>, video: any) => {
-    const name = String(video?.name || '')
-    if (!name) return acc
-    if (!acc[name]) acc[name] = []
-    acc[name].push(video)
-    return acc
-    },
-    {} as Record<string, any[]>
-  )
-
-  const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions) =>
-    versions.some((v) => Boolean((v as any)?.approved))
-  )
-
-  const canApproveProject = readyVideosForApproval.length > 0 && allVideosHaveApprovedVersion
 
   const setProjectStatus = async (nextStatus: string) => {
     if (!project || isUpdatingStatus) return
@@ -514,7 +518,6 @@ export default function ProjectPage() {
                   <ProjectStatusPicker
                     value={project.status}
                     disabled={isUpdatingStatus || !canChangeProjectStatuses}
-                    canApprove={canApproveProject}
                     visibleStatuses={permissions.projectVisibility.statuses}
                     className={isUpdatingStatus ? 'opacity-70' : 'px-3 py-1'}
                     onChange={(next) => setProjectStatus(next)}
@@ -735,7 +738,7 @@ export default function ProjectPage() {
 	                  </span>
 	                  Videos
 	                </h2>
-                  {project.videos.length > 0 && (
+                  {videos.length > 0 && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -750,11 +753,11 @@ export default function ProjectPage() {
                 </div>
                 <AdminVideoManager
                   projectId={project.id}
-                  videos={project.videos}
+                  videos={videos}
                   projectStatus={project.status}
-                  comments={project.comments}
                   restrictToLatestVersion={project.restrictCommentsToLatestVersion}
                   companyName={companyName}
+                  dropboxConfigured={dropboxConfigured}
                   canFullControl={canDeleteInternalFiles}
                   onVideoSelect={handleVideoSelect}
                   onRefresh={() => {
@@ -781,6 +784,7 @@ export default function ProjectPage() {
                 <AdminAlbumManager
                   projectId={project.id}
                   projectStatus={project.status}
+                  dropboxConfigured={dropboxConfigured}
                   canDelete={canDeleteInternalFiles}
                   onProjectDataChanged={bumpProjectStorageRefresh}
                 />
@@ -791,7 +795,7 @@ export default function ProjectPage() {
           <div className="space-y-6 min-w-0">
             <ProjectActions
               project={project}
-              videos={project.videos}
+              videos={videos}
               onRefresh={() => {
                 bumpProjectStorageRefresh()
                 fetchProject()

@@ -6,6 +6,8 @@ import { revokeAllUserTokens } from '@/lib/token-revocation'
 import { rateLimit } from '@/lib/rate-limit'
 import { normalizeHexDisplayColor } from '@/lib/display-color'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { logSecurityEvent } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 
@@ -396,6 +398,53 @@ export async function PATCH(
       }
     }
 
+    // Log security-sensitive changes
+    const ipAddress = getClientIpAddress(request)
+    const actorDetails = { actorId: currentUser?.id || authResult.id, actorEmail: currentUser?.email || authResult.email }
+
+    if (passwordChanged) {
+      logSecurityEvent({
+        type: 'ADMIN_PASSWORD_CHANGED',
+        severity: 'INFO',
+        ipAddress,
+        details: {
+          ...actorDetails,
+          targetUserId: user.id,
+          targetEmail: user.email,
+          selfChange: currentUser?.id === id,
+        },
+      }).catch(() => {})
+    }
+
+    if (roleChanged) {
+      logSecurityEvent({
+        type: 'ADMIN_ROLE_CHANGED',
+        severity: 'WARNING',
+        ipAddress,
+        details: {
+          ...actorDetails,
+          targetUserId: user.id,
+          targetEmail: user.email,
+          previousRoleId: targetUser.appRoleId,
+          newRoleId: user.appRoleId,
+          newRoleName: user.appRole?.name,
+        },
+      }).catch(() => {})
+    }
+
+    if (activeChanged) {
+      logSecurityEvent({
+        type: user.active ? 'ADMIN_USER_REACTIVATED' : 'ADMIN_USER_DEACTIVATED',
+        severity: user.active ? 'INFO' : 'WARNING',
+        ipAddress,
+        details: {
+          ...actorDetails,
+          targetUserId: user.id,
+          targetEmail: user.email,
+        },
+      }).catch(() => {})
+    }
+
     return NextResponse.json({
       user,
       message: securityMessage || 'User updated successfully'
@@ -467,6 +516,18 @@ export async function DELETE(
     await prisma.user.delete({
       where: { id },
     })
+
+    logSecurityEvent({
+      type: 'ADMIN_USER_DELETED',
+      severity: 'WARNING',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        actorId: currentUser.id,
+        actorEmail: currentUser.email,
+        deletedUserId: user.id,
+        deletedUserEmail: user.email,
+      },
+    }).catch(() => {})
 
     return NextResponse.json({ success: true })
   } catch (error) {

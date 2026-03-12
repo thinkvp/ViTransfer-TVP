@@ -101,6 +101,12 @@ services:
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
 
+      # Dropbox storage (optional)
+      DROPBOX_APP_KEY: ${DROPBOX_APP_KEY:-}
+      DROPBOX_APP_SECRET: ${DROPBOX_APP_SECRET:-}
+      DROPBOX_REFRESH_TOKEN: ${DROPBOX_REFRESH_TOKEN:-}
+      DROPBOX_ROOT_PATH: ${DROPBOX_ROOT_PATH:-}
+
       # Stripe Checkout (optional)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
@@ -163,6 +169,12 @@ services:
       QBO_SANDBOX: ${QBO_SANDBOX:-false}
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
+
+      # Dropbox storage (optional)
+      DROPBOX_APP_KEY: ${DROPBOX_APP_KEY:-}
+      DROPBOX_APP_SECRET: ${DROPBOX_APP_SECRET:-}
+      DROPBOX_REFRESH_TOKEN: ${DROPBOX_REFRESH_TOKEN:-}
+      DROPBOX_ROOT_PATH: ${DROPBOX_ROOT_PATH:-}
     volumes:
       - uploads:/app/uploads
     networks:

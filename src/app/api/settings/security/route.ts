@@ -5,7 +5,8 @@ import { invalidateAllSessions, clearAllRateLimits } from '@/lib/session-invalid
 import { rateLimit } from '@/lib/rate-limit'
 import { invalidateSecuritySettingsCaches, isHttpsEnabled } from '@/lib/settings'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { invalidateSecuritySettingsCache } from '@/lib/video-access'
+import { invalidateSecuritySettingsCache, logSecurityEvent } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 
@@ -296,6 +297,36 @@ export async function PATCH(request: NextRequest) {
 
     invalidateSecuritySettingsCaches()
     await invalidateSecuritySettingsCache()
+
+    // Build a summary of what changed for the audit log
+    const changes: Record<string, { from: any; to: any }> = {}
+    if (currentSettings) {
+      const fields = [
+        'hotlinkProtection', 'ipRateLimit', 'sessionRateLimit', 'shareSessionRateLimit',
+        'shareTokenTtlSeconds', 'passwordAttempts', 'sessionTimeoutValue', 'sessionTimeoutUnit',
+        'trackAnalytics', 'trackSecurityLogs', 'viewSecurityEvents',
+        'maxInternalCommentsPerProject', 'maxCommentsPerVideoVersion',
+        'maxProjectRecipients', 'maxProjectFilesPerProject',
+      ] as const
+      for (const field of fields) {
+        if ((settings as any)[field] !== (currentSettings as any)[field]) {
+          changes[field] = { from: (currentSettings as any)[field], to: (settings as any)[field] }
+        }
+      }
+    }
+
+    if (Object.keys(changes).length > 0) {
+      logSecurityEvent({
+        type: 'SECURITY_SETTING_CHANGED',
+        severity: 'WARNING',
+        ipAddress: getClientIpAddress(request),
+        details: {
+          userId: authResult.id,
+          email: authResult.email,
+          changes,
+        },
+      }).catch(() => {})
+    }
 
     // SECURITY: Invalidate sessions when security settings change
     let invalidationLog: string[] = []

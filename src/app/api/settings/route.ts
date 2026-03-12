@@ -4,6 +4,15 @@ import { requireApiUser } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { invalidateEmailSettingsCache, isSmtpConfigured } from '@/lib/email'
+import { invalidateSettingsCaches } from '@/lib/settings'
+import {
+  MAX_DOWNLOAD_CHUNK_SIZE_MB,
+  MAX_UPLOAD_CHUNK_SIZE_MB,
+  MIN_DOWNLOAD_CHUNK_SIZE_MB,
+  MIN_UPLOAD_CHUNK_SIZE_MB,
+  normalizeDownloadChunkSizeMB,
+  normalizeUploadChunkSizeMB,
+} from '@/lib/transfer-tuning'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
@@ -68,10 +77,19 @@ export async function GET(request: NextRequest) {
     // Check SMTP configuration status (reuse centralized helper)
     const smtpConfigured = await isSmtpConfigured()
 
+    // Dropbox storage status (env-var driven, read-only)
+    const dropboxConfigured = Boolean(
+      process.env.DROPBOX_APP_KEY?.trim()
+      && process.env.DROPBOX_APP_SECRET?.trim()
+      && process.env.DROPBOX_REFRESH_TOKEN?.trim()
+    )
+
     const response = NextResponse.json({
       ...decryptedSettings,
       security: securitySettings,
       smtpConfigured,
+      dropboxConfigured,
+      dropboxRootPath: process.env.DROPBOX_ROOT_PATH?.trim() || '',
     })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
@@ -130,7 +148,9 @@ export async function PATCH(request: NextRequest) {
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
       autoDeletePreviewsOnClose,
-      autoDeleteAlbumZipsOnClose,
+      excludeInternalIpsFromAnalytics,
+      uploadChunkSizeMB,
+      downloadChunkSizeMB,
       autoCloseApprovedProjectsEnabled,
       autoCloseApprovedProjectsAfterDays,
       adminNotificationSchedule,
@@ -365,6 +385,24 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
+    if (uploadChunkSizeMB !== undefined && uploadChunkSizeMB !== null) {
+      if (!Number.isInteger(uploadChunkSizeMB) || uploadChunkSizeMB < MIN_UPLOAD_CHUNK_SIZE_MB || uploadChunkSizeMB > MAX_UPLOAD_CHUNK_SIZE_MB) {
+        return NextResponse.json(
+          { error: `Invalid value for uploadChunkSizeMB. Must be an integer between ${MIN_UPLOAD_CHUNK_SIZE_MB} and ${MAX_UPLOAD_CHUNK_SIZE_MB}.` },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (downloadChunkSizeMB !== undefined && downloadChunkSizeMB !== null) {
+      if (!Number.isInteger(downloadChunkSizeMB) || downloadChunkSizeMB < MIN_DOWNLOAD_CHUNK_SIZE_MB || downloadChunkSizeMB > MAX_DOWNLOAD_CHUNK_SIZE_MB) {
+        return NextResponse.json(
+          { error: `Invalid value for downloadChunkSizeMB. Must be an integer between ${MIN_DOWNLOAD_CHUNK_SIZE_MB} and ${MAX_DOWNLOAD_CHUNK_SIZE_MB}.` },
+          { status: 400 }
+        )
+      }
+    }
+
     // Handle SMTP password update - only update if actually changed
     let passwordUpdate: string | null | undefined
     if (smtpPassword !== undefined) {
@@ -436,8 +474,10 @@ export async function PATCH(request: NextRequest) {
       defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
       autoApproveProject,
+      uploadChunkSizeMB: uploadChunkSizeMB !== undefined ? normalizeUploadChunkSizeMB(uploadChunkSizeMB) : undefined,
+      downloadChunkSizeMB: downloadChunkSizeMB !== undefined ? normalizeDownloadChunkSizeMB(downloadChunkSizeMB) : undefined,
       autoDeletePreviewsOnClose: typeof autoDeletePreviewsOnClose === 'boolean' ? autoDeletePreviewsOnClose : undefined,
-      autoDeleteAlbumZipsOnClose: typeof autoDeleteAlbumZipsOnClose === 'boolean' ? autoDeleteAlbumZipsOnClose : undefined,
+      excludeInternalIpsFromAnalytics: typeof excludeInternalIpsFromAnalytics === 'boolean' ? excludeInternalIpsFromAnalytics : undefined,
       autoCloseApprovedProjectsEnabled,
       autoCloseApprovedProjectsAfterDays,
       adminNotificationSchedule,
@@ -497,6 +537,9 @@ export async function PATCH(request: NextRequest) {
         defaultAllowClientUploadFiles,
         defaultAllowAuthenticatedProjectSwitching,
         autoApproveProject,
+        uploadChunkSizeMB: normalizeUploadChunkSizeMB(uploadChunkSizeMB),
+        downloadChunkSizeMB: normalizeDownloadChunkSizeMB(downloadChunkSizeMB),
+        excludeInternalIpsFromAnalytics: typeof excludeInternalIpsFromAnalytics === 'boolean' ? excludeInternalIpsFromAnalytics : true,
         autoCloseApprovedProjectsEnabled,
         autoCloseApprovedProjectsAfterDays,
         adminNotificationSchedule: adminNotificationSchedule || 'IMMEDIATE',
@@ -506,6 +549,7 @@ export async function PATCH(request: NextRequest) {
     })
 
     // Ensure future emails pick up updated settings immediately
+  invalidateSettingsCaches()
     invalidateEmailSettingsCache()
 
     // Decrypt sensitive fields before sending to admin

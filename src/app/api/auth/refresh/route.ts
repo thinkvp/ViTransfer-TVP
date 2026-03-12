@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 import { parseBearerToken, refreshAdminTokens, revokePresentedTokens } from '@/lib/auth'
+import { logSecurityEvent } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 
@@ -61,6 +63,13 @@ export async function POST(request: NextRequest) {
 
     if (!tokens) {
       await revokePresentedTokens({ refreshToken: presentedToken })
+      logSecurityEvent({
+        type: 'ADMIN_TOKEN_REFRESH_FAILED',
+        severity: 'WARNING',
+        ipAddress: getClientIpAddress(request),
+        details: { reason: 'Invalid or expired refresh token' },
+        wasBlocked: true,
+      }).catch(() => {})
       return NextResponse.json({ error: 'Invalid or expired refresh token' }, { status: 401 })
     }
 

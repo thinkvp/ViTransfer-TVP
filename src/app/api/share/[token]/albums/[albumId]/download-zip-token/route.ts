@@ -6,6 +6,7 @@ import { getRedis } from '@/lib/redis'
 import crypto from 'crypto'
 import { z } from 'zod'
 import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 
 export const runtime = 'nodejs'
 
@@ -47,7 +48,20 @@ export async function POST(
 
     const album = await prisma.album.findUnique({
       where: { id: albumId },
-      select: { id: true, projectId: true, name: true },
+      select: {
+        id: true,
+        projectId: true,
+        name: true,
+        storageFolderName: true,
+        project: {
+          select: {
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+          },
+        },
+      },
     })
 
     if (!album || album.projectId !== project.id) {
@@ -70,7 +84,16 @@ export async function POST(
       return NextResponse.json({ error: 'No photos available' }, { status: 404 })
     }
 
-    const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant })
+    const projectStoragePath = album.project.storagePath
+      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+    const albumFolderName = album.storageFolderName || album.name
+
+    const zipStoragePath = getAlbumZipStoragePath({
+      projectStoragePath,
+      albumFolderName,
+      albumName: album.name,
+      variant,
+    })
     const zipReady = albumZipExists(zipStoragePath)
 
     if (!zipReady) {

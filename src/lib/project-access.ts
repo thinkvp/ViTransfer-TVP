@@ -117,20 +117,20 @@ export async function verifyProjectAccess(
     }
   }
 
-  // If the project is not externally available yet, block all external/share access.
+  // Block external/share access only for closed projects.
   // (Admins can still access via the early-return above.)
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: { status: true },
     })
-    if (project?.status === 'CLOSED' || project?.status === 'NOT_STARTED') {
+    if (project?.status === 'CLOSED') {
       return {
         authorized: false,
         isAdmin: false,
         isAuthenticated: false,
         errorResponse: NextResponse.json(
-          { error: project.status === 'NOT_STARTED' ? 'Project is not yet available' : 'Project is closed' },
+          { error: 'Project is closed' },
           { status: 403 }
         ),
       }

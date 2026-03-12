@@ -4,6 +4,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,7 +44,22 @@ export async function GET(
 
   const album = await prisma.album.findUnique({
     where: { id: albumId },
-    include: {
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      notes: true,
+      createdAt: true,
+      storageFolderName: true,
+      dropboxEnabled: true,
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
       photos: {
         where: { status: 'READY' },
         orderBy: { createdAt: 'asc' },
@@ -80,8 +96,22 @@ export async function GET(
     })
   )
 
-  const fullZipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'full' })
-  const socialZipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'social' })
+  const projectStoragePath = album.project.storagePath
+    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+  const albumFolderName = album.storageFolderName || album.name
+
+  const fullZipStoragePath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'full',
+  })
+  const socialZipStoragePath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'social',
+  })
 
   const fullZipReady = photos.length === 0 ? false : albumZipExists(fullZipStoragePath)
   const socialZipReady = photos.length === 0 ? false : albumZipExists(socialZipStoragePath)
@@ -115,6 +145,7 @@ export async function GET(
       notes: album.notes,
       createdAt: album.createdAt,
       photoCount: photos.length,
+      dropboxEnabled: album.dropboxEnabled,
       zip: {
         fullReady: fullZipReady,
         socialReady: socialZipReady,

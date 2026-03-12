@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import fs from 'fs'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 
 function readFileSizeIfExists(storagePath: string): bigint {
@@ -20,12 +21,40 @@ export async function syncAlbumZipSizes(params: { albumId: string; projectId: st
   const { albumId, projectId } = params
   const album = await prisma.album.findUnique({
     where: { id: albumId },
-    select: { id: true, fullZipFileSize: true, socialZipFileSize: true },
+    select: {
+      id: true,
+      name: true,
+      storageFolderName: true,
+      fullZipFileSize: true,
+      socialZipFileSize: true,
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
   })
   if (!album) return
 
-  const fullZipStoragePath = getAlbumZipStoragePath({ projectId, albumId, variant: 'full' })
-  const socialZipStoragePath = getAlbumZipStoragePath({ projectId, albumId, variant: 'social' })
+  const projectStoragePath = album.project.storagePath
+    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+  const albumFolderName = album.storageFolderName || album.name
+
+  const fullZipStoragePath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'full',
+  })
+  const socialZipStoragePath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'social',
+  })
 
   const actualFull = readFileSizeIfExists(fullZipStoragePath)
   const actualSocial = readFileSizeIfExists(socialZipStoragePath)

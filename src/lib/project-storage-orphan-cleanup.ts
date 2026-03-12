@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import {
   getFilePath,
   getRawStoragePath,
@@ -132,7 +133,22 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true } }),
     prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
     prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
-    prisma.album.findMany({ select: { id: true, projectId: true } }),
+    prisma.album.findMany({
+      select: {
+        id: true,
+        projectId: true,
+        name: true,
+        storageFolderName: true,
+        project: {
+          select: {
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+          },
+        },
+      },
+    }),
   ])
 
   for (const video of videos) {
@@ -158,8 +174,17 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const attachment of projectEmailAttachments) addResolvedFilePath(exactFilePaths, attachment.storagePath)
 
   for (const album of albums) {
-    addResolvedFilePath(exactFilePaths, getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'full' }))
-    addResolvedFilePath(exactFilePaths, getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'social' }))
+    const projectStoragePath = album.project.storagePath
+      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+    const albumFolderName = album.storageFolderName || album.name
+    addResolvedFilePath(
+      exactFilePaths,
+      getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'full' })
+    )
+    addResolvedFilePath(
+      exactFilePaths,
+      getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'social' })
+    )
   }
 
   return { exactFilePaths, protectedDirectoryPrefixes }

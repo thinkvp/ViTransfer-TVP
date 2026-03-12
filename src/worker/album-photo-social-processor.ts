@@ -2,6 +2,7 @@ import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
 import { getFilePath } from '../lib/storage'
 import type { AlbumPhotoSocialJob } from '../lib/queue'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
 import fs from 'fs'
 import path from 'path'
@@ -133,11 +134,30 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
     try {
       const album = await prisma.album.findUnique({
         where: { id: photo.albumId },
-        select: { projectId: true },
+        select: {
+          projectId: true,
+          name: true,
+          storageFolderName: true,
+          project: {
+            select: {
+              storagePath: true,
+              title: true,
+              companyName: true,
+              client: { select: { name: true } },
+            },
+          },
+        },
       })
 
       if (album) {
-        const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: photo.albumId, variant: 'social' })
+        const projectStoragePath = album.project.storagePath
+          || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+        const zipStoragePath = getAlbumZipStoragePath({
+          projectStoragePath,
+          albumFolderName: album.storageFolderName || album.name,
+          albumName: album.name,
+          variant: 'social',
+        })
         await fs.promises.unlink(getFilePath(zipStoragePath)).catch(() => {})
 
         await syncAlbumZipSizes({ albumId: photo.albumId, projectId: album.projectId }).catch(() => {})

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Cloud, Download, Server } from 'lucide-react'
 import Image from 'next/image'
 import ThemeToggle from '@/components/ThemeToggle'
 import { apiFetch } from '@/lib/api-client'
@@ -59,6 +59,7 @@ type ShareAlbum = {
   id: string
   name: string
   notes: string | null
+  dropboxEnabled?: boolean
   zip?: {
     fullReady: boolean
     socialReady: boolean
@@ -92,6 +93,8 @@ export function ShareAlbumViewer({
 
   const zipPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [viewerPhoto, setViewerPhoto] = useState<ShareAlbumPhoto | null>(null)
+  const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [useLocalServer, setUseLocalServer] = useState(false)
 
   const headers = useMemo(() => {
     const authToken = shareToken
@@ -189,7 +192,7 @@ export function ShareAlbumViewer({
     }
   }, [album?.zip, albumId, headers, loading, photos.length, shareSlug])
 
-  const requestZip = async (variant: 'full' | 'social') => {
+  const requestZip = async (variant: 'full' | 'social', forceLocal = false) => {
     try {
       const res = await apiFetch(`/api/share/${shareSlug}/albums/${albumId}/download-zip-token`, {
         method: 'POST',
@@ -208,7 +211,11 @@ export function ShareAlbumViewer({
 
       const data = await res.json()
       if (data?.url) {
-        triggerDownload(data.url)
+        let downloadUrl: string = data.url
+        if (forceLocal && album?.dropboxEnabled) {
+          downloadUrl += (downloadUrl.includes('?') ? '&' : '?') + 'forceLocal=true'
+        }
+        triggerDownload(downloadUrl)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
@@ -277,27 +284,17 @@ export function ShareAlbumViewer({
           {album?.notes && <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{album.notes}</p>}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center sm:gap-2 sm:flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {showThemeToggle && <ThemeToggle />}
           <Button
             type="button"
-            variant="outline"
-            onClick={() => void requestZip('social')}
-            disabled={photos.length === 0 || !album?.zip?.socialReady}
-            className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Download Social Media Sized
-          </Button>
-          <Button
-            type="button"
             variant="default"
-            onClick={() => void requestZip('full')}
-            disabled={photos.length === 0 || !album?.zip?.fullReady}
-            className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
+            onClick={() => { setError(null); setShowDownloadModal(true) }}
+            disabled={photos.length === 0}
+            className="whitespace-nowrap"
           >
             <Download className="w-4 h-4 mr-2" />
-            Download Full Resolution
+            Download
           </Button>
         </div>
       </div>
@@ -447,6 +444,119 @@ export function ShareAlbumViewer({
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Album ZIP download modal */}
+      <Dialog
+        open={showDownloadModal}
+        onOpenChange={(open) => {
+          setShowDownloadModal(open)
+          if (!open) {
+            setUseLocalServer(false)
+            setError(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Download Options</DialogTitle>
+            {album?.name && <DialogDescription>{album.name}</DialogDescription>}
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {/* Dropbox / Local Server toggle — shown only when Dropbox is configured for this album */}
+            {album?.dropboxEnabled && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                <p className="text-sm font-medium">Downloading from:</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setUseLocalServer(false)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      !useLocalServer
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    <Cloud className="h-4 w-4" />
+                    Dropbox
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUseLocalServer(true)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      useLocalServer
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    <Server className="h-4 w-4" />
+                    Local Server
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {useLocalServer
+                    ? 'Downloading from our Local Server. Switch to Dropbox for generally higher speeds and more concurrent downloads.'
+                    : 'Downloading from Dropbox will generally produce higher speeds and more concurrent downloads. Change to our Local Server and restart the download if you are having issues downloading from Dropbox.'}
+                </p>
+              </div>
+            )}
+
+            {/* Download items */}
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => void requestZip('full', useLocalServer)}
+                disabled={!album?.zip?.fullReady || photos.length === 0}
+                className={`w-full p-4 border-2 border-border rounded-lg text-left transition-colors ${
+                  !album?.zip?.fullReady || photos.length === 0
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:border-primary cursor-pointer'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                    <Download className="h-5 w-5" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="font-medium">Full Resolution Photos</p>
+                    <p className="text-sm text-muted-foreground">
+                      {album?.zip?.fullReady ? 'Download the full resolution photo archive' : 'Preparing archive…'}
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void requestZip('social', useLocalServer)}
+                disabled={!album?.zip?.socialReady || photos.length === 0}
+                className={`w-full p-4 border-2 border-border rounded-lg text-left transition-colors ${
+                  !album?.zip?.socialReady || photos.length === 0
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:border-primary cursor-pointer'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                    <Download className="h-5 w-5" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="font-medium">Social Media Sized Photos</p>
+                    <p className="text-sm text-muted-foreground">
+                      {album?.zip?.socialReady ? 'Smaller photos optimized for social media sharing' : 'Preparing archive…'}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            {error && (
+              <div className="p-3 bg-destructive/10 border border-destructive rounded-md">
+                <p className="text-sm text-destructive">{error}</p>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

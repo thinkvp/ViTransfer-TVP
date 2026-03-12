@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -129,7 +130,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       albumPhotoAgg,
       albumAgg,
     ] = await Promise.all([
-      prisma.project.findUnique({ where: { id: projectId }, select: { totalBytes: true } }),
+      prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          totalBytes: true,
+          title: true,
+          storagePath: true,
+          client: { select: { name: true } },
+        },
+      }),
       prisma.video.aggregate({ where: { projectId }, _sum: { originalFileSize: true } }),
       prisma.videoAsset.aggregate({ where: { video: { projectId } }, _sum: { fileSize: true } }),
       prisma.commentFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
@@ -186,7 +195,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       | null = null
 
     if (includeDisk) {
-      const projectRootRel = `projects/${projectId}`
+      const projectRootRel = project?.storagePath || buildProjectStorageRoot(project?.client?.name || 'Client', project?.title || projectId)
       const videoAssetsRel = `${projectRootRel}/videos/assets`
       const commentsRel = `${projectRootRel}/comments`
       const communicationRel = `${projectRootRel}/communication`
@@ -231,7 +240,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         }),
         prisma.album.findMany({
           where: { projectId },
-          select: { id: true },
+          select: { id: true, name: true, storageFolderName: true },
         }),
         computeDirectorySizeBytes(projectRootAbs),
         computeDirectorySizeBytes(videoAssetsAbs),
@@ -266,8 +275,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         ),
         sumStorageEntrySizes(
           albumEntries.flatMap((album) => [
-            getAlbumZipStoragePath({ projectId, albumId: album.id, variant: 'full' }),
-            getAlbumZipStoragePath({ projectId, albumId: album.id, variant: 'social' }),
+            getAlbumZipStoragePath({
+              projectId,
+              albumId: album.id,
+              projectStoragePath: projectRootRel,
+              albumFolderName: album.storageFolderName || album.name || album.id,
+              albumName: album.name,
+              variant: 'full',
+            }),
+            getAlbumZipStoragePath({
+              projectId,
+              albumId: album.id,
+              projectStoragePath: projectRootRel,
+              albumFolderName: album.storageFolderName || album.name || album.id,
+              albumName: album.name,
+              variant: 'social',
+            }),
           ])
         ),
       ])

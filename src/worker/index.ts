@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob, DropboxUploadJob, AlbumZipDropboxUploadJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -14,6 +14,8 @@ import { processProjectFile } from './project-file-processor'
 import { processProjectEmail } from './project-email-processor'
 import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
+import { processDropboxUpload } from './dropbox-upload-processor'
+import { processAlbumZipDropboxUpload } from './album-zip-dropbox-upload-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processInternalCommentNotifications } from './internal-comment-notifications'
@@ -321,6 +323,44 @@ async function main() {
   })
 
   console.log('[WORKER] Album photo ZIP generation worker started')
+
+  // Create Dropbox background upload worker
+  const dropboxUploadWorker = new Worker<DropboxUploadJob>('dropbox-upload', processDropboxUpload, {
+    connection: getRedisForQueue(),
+    concurrency: 2,
+    lockDuration: 10 * 60 * 1000,
+    stalledInterval: 5 * 60 * 1000,
+    maxStalledCount: 2,
+  })
+
+  dropboxUploadWorker.on('completed', (job) => {
+    console.log(`[WORKER] Dropbox upload job ${job.id} completed successfully`)
+  })
+
+  dropboxUploadWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Dropbox upload job ${job?.id} failed:`, err)
+  })
+
+  console.log('[WORKER] Dropbox upload worker started')
+
+  // Create album ZIP Dropbox upload worker
+  const albumZipDropboxUploadWorker = new Worker<AlbumZipDropboxUploadJob>('album-zip-dropbox-upload', processAlbumZipDropboxUpload, {
+    connection: getRedisForQueue(),
+    concurrency: 2,
+    lockDuration: 10 * 60 * 1000,
+    stalledInterval: 5 * 60 * 1000,
+    maxStalledCount: 2,
+  })
+
+  albumZipDropboxUploadWorker.on('completed', (job) => {
+    console.log(`[WORKER] Album ZIP Dropbox upload job ${job.id} completed successfully`)
+  })
+
+  albumZipDropboxUploadWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Album ZIP Dropbox upload job ${job?.id} failed:`, err)
+  })
+
+  console.log('[WORKER] Album ZIP Dropbox upload worker started')
 
   // Create notification processing queue with repeatable job
   console.log('Setting up notification processing...')

@@ -3,6 +3,7 @@ import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
 import { videoQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import path from 'path'
 import fs from 'fs'
 import { Readable } from 'stream'
@@ -323,11 +324,13 @@ async function handleVideoUploadFinish(
 
   // Update video status to QUEUED — upload is complete and the job is waiting in the worker queue.
   // The worker will advance this to PROCESSING when it actually begins work.
+  const isDropbox = isDropboxStoragePath(video.originalStoragePath)
   await prisma.video.update({
     where: { id: videoId },
     data: {
       status: 'QUEUED',
       processingProgress: 0,
+      ...(isDropbox ? { dropboxUploadStatus: 'PENDING' } : {}),
     },
   })
 
@@ -340,6 +343,21 @@ async function handleVideoUploadFinish(
   })
 
   console.log(`[UPLOAD] Video ${videoId} queued for worker processing`)
+
+  // Enqueue background Dropbox upload (runs in parallel with video processing)
+  if (isDropbox) {
+    const localPath = stripDropboxStoragePrefix(video.originalStoragePath)
+    const { getDropboxUploadQueue } = await import('@/lib/queue')
+    const dropboxQueue = getDropboxUploadQueue()
+    await dropboxQueue.add('upload-to-dropbox', {
+      videoId: video.id,
+      localPath,
+      dropboxPath: video.originalStoragePath,
+      dropboxRelPath: video.dropboxPath,
+      fileSizeBytes: fileSize,
+    })
+    console.log(`[UPLOAD] Video ${videoId} queued for Dropbox upload`)
+  }
 
   return {}
 }
@@ -386,6 +404,22 @@ async function handleAssetUploadFinish(
     storagePath: asset.storagePath,
     expectedCategory: asset.category ?? undefined,
   })
+
+  // Enqueue background Dropbox upload for asset (runs after/concurrent with validation)
+  if (isDropboxStoragePath(asset.storagePath)) {
+    const { getDropboxUploadQueue } = await import('@/lib/queue')
+    const { stripDropboxStoragePrefix } = await import('@/lib/storage-provider-dropbox')
+    const dropboxQueue = getDropboxUploadQueue()
+    await dropboxQueue.add('upload-asset-to-dropbox', {
+      videoId: asset.videoId,
+      localPath: stripDropboxStoragePrefix(asset.storagePath),
+      dropboxPath: asset.storagePath,
+      dropboxRelPath: asset.dropboxPath,
+      fileSizeBytes: fileSize,
+      assetId: asset.id,
+    })
+    console.log(`[UPLOAD] Asset ${assetId} queued for Dropbox upload`)
+  }
 
   console.log(`[UPLOAD] Asset uploaded and queued for processing: ${assetId}`)
 
@@ -652,11 +686,46 @@ async function handleAlbumPhotoUploadFinish(
     const { syncAlbumZipSizes } = await import('@/lib/album-zip-size-sync')
     const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
 
-    const fullZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId: photo.albumId, variant: 'full' })
-    const socialZipPath = getAlbumZipStoragePath({ projectId: photo.album.projectId, albumId: photo.albumId, variant: 'social' })
+    const fullZipPath = getAlbumZipStoragePath({
+      projectId: photo.album.projectId,
+      albumId: photo.albumId,
+      albumName: photo.album.name,
+      variant: 'full',
+    })
+    const socialZipPath = getAlbumZipStoragePath({
+      projectId: photo.album.projectId,
+      albumId: photo.albumId,
+      albumName: photo.album.name,
+      variant: 'social',
+    })
 
     await deleteFile(fullZipPath).catch(() => {})
     await deleteFile(socialZipPath).catch(() => {})
+
+    // Delete old Dropbox copies and reset tracking so re-upload queues after new ZIPs are ready
+    if (photo.album.dropboxEnabled) {
+      const { isDropboxStorageConfigured, deleteDropboxFile } = await import('@/lib/storage-provider-dropbox')
+      const dbxPaths = [
+        photo.album.fullZipDropboxPath,
+        photo.album.socialZipDropboxPath,
+      ].filter(Boolean) as string[]
+      if (isDropboxStorageConfigured()) {
+        await Promise.allSettled(dbxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
+      }
+      await prisma.album.update({
+        where: { id: photo.albumId },
+        data: {
+          fullZipDropboxStatus: null,
+          fullZipDropboxProgress: 0,
+          fullZipDropboxError: null,
+          fullZipDropboxPath: null,
+          socialZipDropboxStatus: null,
+          socialZipDropboxProgress: 0,
+          socialZipDropboxError: null,
+          socialZipDropboxPath: null,
+        },
+      }).catch(() => {})
+    }
 
     await syncAlbumZipSizes({ albumId: photo.albumId, projectId: photo.album.projectId }).catch(() => {})
 
@@ -833,10 +902,22 @@ async function markProjectEmailAsError(projectEmailId: string, error: any) {
 export const config = {
   api: {
     bodyParser: false,
-    sizeLimit: '1000mb',
     responseLimit: false,
   },
   maxDuration: 3600,
+}
+
+function sanitizeForwardedHeaders(req: NextApiRequest) {
+  const rawProto = req.headers['x-forwarded-proto']
+  const protoValue = (Array.isArray(rawProto) ? rawProto[0] : rawProto)?.split(',')[0]?.trim().toLowerCase()
+  req.headers['x-forwarded-proto'] = protoValue === 'https' ? 'https' : 'http'
+
+  const rawHost = req.headers['x-forwarded-host'] || req.headers.host
+  const hostValue = (Array.isArray(rawHost) ? rawHost[0] : rawHost)?.split(',')[0]?.trim()
+  const safeHost = hostValue && /^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(hostValue) ? hostValue : 'localhost'
+
+  req.headers.host = safeHost
+  req.headers['x-forwarded-host'] = safeHost
 }
 
 function toWebRequest(req: NextApiRequest): Request {
@@ -846,22 +927,20 @@ function toWebRequest(req: NextApiRequest): Request {
 
   const rawHost = req.headers['x-forwarded-host'] || req.headers.host
   const hostValue = (Array.isArray(rawHost) ? rawHost[0] : rawHost)?.split(',')[0]?.trim()
-
-  // Accept only a conservative host[:port] shape.
   const safeHost = hostValue && /^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(hostValue) ? hostValue : 'localhost'
 
   const url = `${protocol}://${safeHost}${req.url || '/'}`
 
   const headers = new Headers()
-  Object.entries(req.headers).forEach(([key, value]) => {
-    if (value) {
-      headers.set(key, Array.isArray(value) ? value[0] : value)
-    }
-  })
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (!value) continue
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key)) continue
+    headers.set(key, Array.isArray(value) ? value[0] : value)
+  }
 
   let body: ReadableStream | undefined
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    // @ts-ignore
+    // @ts-ignore Node 18+ bridge available in runtime
     body = Readable.toWeb(req)
   }
 
@@ -869,7 +948,7 @@ function toWebRequest(req: NextApiRequest): Request {
     method: req.method || 'GET',
     headers,
     body,
-    // @ts-ignore
+    // @ts-ignore Required for streamed request bodies in Node fetch
     duplex: 'half',
   })
 }
@@ -894,19 +973,24 @@ async function fromWebResponse(webRes: Response, res: NextApiResponse): Promise<
     }
   }
 
-  res.end()
+  if (!res.writableEnded) {
+    res.end()
+  }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
+    sanitizeForwardedHeaders(req)
     const webRequest = toWebRequest(req)
     const webResponse = await tusServer.handleWeb(webRequest)
     await fromWebResponse(webResponse, res)
   } catch (error) {
     console.error('[UPLOAD] Pages Router Error:', error)
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    })
+    if (!res.headersSent && !res.writableEnded) {
+      res.status(500).json({
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
   }
 }

@@ -8,6 +8,7 @@ import { canDoAction } from '@/lib/rbac'
 import { validateAssetFile } from '@/lib/file-validation'
 import { getSafeguardLimits } from '@/lib/settings'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { buildProjectFilesStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -25,7 +26,17 @@ const createProjectFileSchema = z.object({
 })
 
 async function assertProjectAccessOr404(projectId: string, auth: any) {
-  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true, status: true } })
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      status: true,
+      storagePath: true,
+      title: true,
+      companyName: true,
+      client: { select: { name: true } },
+    },
+  })
   if (!project) return null
 
   if (!isVisibleProjectStatusForUser(auth, project.status)) return null
@@ -189,7 +200,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const timestamp = Date.now()
   const sanitizedFileName =
     fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255)
-  const storagePath = `projects/${projectId}/files/projectfile-${timestamp}-${sanitizedFileName}`
+  const storagePath = buildProjectFilesStoragePath(
+    project.storagePath || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title),
+    sanitizedFileName,
+    timestamp,
+  )
 
   const category = fileValidation.detectedCategory || 'other'
 

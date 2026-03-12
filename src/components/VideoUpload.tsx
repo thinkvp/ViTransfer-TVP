@@ -6,7 +6,7 @@ import { Checkbox } from './ui/checkbox'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Textarea } from './ui/textarea'
-import { Upload } from 'lucide-react'
+import { Upload, Cloud } from 'lucide-react'
 import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiPost } from '@/lib/api-client'
 import {
@@ -15,7 +15,7 @@ import {
   getUploadMetadata,
   clearUploadMetadata,
 } from '@/lib/tus-context'
-import { useUploadManager } from '@/components/UploadManagerProvider'
+import { useUploadManagerActions } from '@/components/UploadManagerProvider'
 
 interface VideoUploadProps {
   projectId: string
@@ -27,6 +27,8 @@ interface VideoUploadProps {
 
   allowApproval?: boolean
   showAllowApprovalField?: boolean
+
+  dropboxConfigured?: boolean
 }
 
 export default function VideoUpload({
@@ -37,15 +39,17 @@ export default function VideoUpload({
   showVideoNotesField = true,
   allowApproval: allowApprovalProp,
   showAllowApprovalField = true,
+  dropboxConfigured = false,
 }: VideoUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { addUpload } = useUploadManager()
+  const { addUpload } = useUploadManagerActions()
 
   const [file, setFile] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [versionLabel, setVersionLabel] = useState('')
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
   const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? true)
+  const [dropboxEnabled, setDropboxEnabled] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -172,6 +176,7 @@ export default function VideoUpload({
           versionLabel: trimmedVersionLabel,
           videoNotes: trimmedVideoNotes,
           allowApproval: allowApproval === true,
+          dropboxEnabled: dropboxEnabled === true,
           originalFileName: file.name,
           originalFileSize: file.size,
           name: trimmedVideoName,
@@ -195,6 +200,7 @@ export default function VideoUpload({
       setVersionLabel('')
       setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
       setAllowApproval(allowApprovalProp ?? true)
+      setDropboxEnabled(false)
 
       // Notify parent so the project page reflects the new UPLOADING record.
       onUploadComplete?.()
@@ -272,7 +278,11 @@ export default function VideoUpload({
             <div className="flex items-center gap-2 h-10">
               <Checkbox
                 checked={allowApproval}
-                onCheckedChange={(v) => setAllowApproval(Boolean(v))}
+                onCheckedChange={(v) => {
+                  const checked = Boolean(v)
+                  setAllowApproval(checked)
+                  if (!checked) setDropboxEnabled(false)
+                }}
                 disabled={submitting}
                 aria-label="Allow approval of version"
               />
@@ -283,6 +293,22 @@ export default function VideoUpload({
           </div>
         )}
       </div>
+
+      {/* Dropbox toggle - shown below version label / approval row */}
+      {showAllowApprovalField && dropboxConfigured && (
+        <div className="flex items-center gap-2 h-10">
+          <Checkbox
+            checked={dropboxEnabled}
+            onCheckedChange={(v) => setDropboxEnabled(Boolean(v))}
+            disabled={submitting || !allowApproval}
+            aria-label="Upload to Dropbox"
+          />
+          <Cloud className={`w-4 h-4 ${dropboxEnabled && allowApproval ? 'text-primary' : 'text-muted-foreground/50'}`} />
+          <span className={dropboxEnabled && allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+            {!allowApproval ? 'Dropbox requires approval enabled' : dropboxEnabled ? 'Download will be served from Dropbox' : 'Local storage only'}
+          </span>
+        </div>
+      )}
 
       {/* Version Notes */}
       {showVideoNotesField && (

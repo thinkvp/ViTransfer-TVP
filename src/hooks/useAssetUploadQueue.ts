@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import * as tus from 'tus-js-client'
 import { apiPost, apiDelete, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 import {
   ensureFreshUploadOnContextChange,
   clearFileContext,
@@ -44,6 +45,7 @@ export function useAssetUploadQueue({
   maxConcurrent = 3,
   onUploadComplete
 }: UseAssetUploadQueueOptions) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
   const [queue, setQueue] = useState<QueuedUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
   const assetIdsMap = useRef<Map<string, string>>(new Map())
@@ -163,7 +165,7 @@ export function useAssetUploadQueue({
           filetype: upload.file.type || 'application/octet-stream',
           assetId: assetId,
         },
-        chunkSize: 50 * 1024 * 1024,
+        chunkSize: uploadChunkSizeBytes,
         storeFingerprintForResuming: true,
         removeFingerprintOnSuccess: true,
 
@@ -320,7 +322,7 @@ export function useAssetUploadQueue({
       ))
       refreshAttemptsRef.current.delete(uploadId)
     }
-  }, [videoId, onUploadComplete])
+  }, [videoId, onUploadComplete, uploadChunkSizeBytes])
 
   // Auto-start queued uploads when slots are available
   useEffect(() => {

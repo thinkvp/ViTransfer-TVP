@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { getRedis } from '@/lib/redis'
+import { shouldExcludeInternalIpsFromAnalytics } from '@/lib/settings'
 
 /**
  * Best-effort check: is the given IP address likely an internal user (admin)?
@@ -18,6 +19,9 @@ import { getRedis } from '@/lib/redis'
  */
 export async function isLikelyAdminIp(ipAddress: string | null | undefined): Promise<boolean> {
   if (!ipAddress || ipAddress === 'unknown') return false
+
+  const excludeInternalIps = await shouldExcludeInternalIpsFromAnalytics().catch(() => true)
+  if (!excludeInternalIps) return false
 
   try {
     const redis = getRedis()

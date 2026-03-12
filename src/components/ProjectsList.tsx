@@ -572,19 +572,6 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                       const effectiveStatus = statusOverrides[project.id] ?? project.status
                       const isUpdatingStatus = Boolean(statusToggleLoading[project.id])
 
-                      const readyVideos = (project.videos || []).filter((v: any) => v?.status === 'READY')
-                      const videosByNameForApproval = readyVideos.reduce((acc: Record<string, any[]>, video: any) => {
-                        const name = String(video?.name || '')
-                        if (!name) return acc
-                        if (!acc[name]) acc[name] = []
-                        acc[name].push(video)
-                        return acc
-                      }, {})
-                      const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions: any[]) =>
-                        versions.some((v: any) => Boolean(v?.approved))
-                      )
-                      const canApproveProject = readyVideos.length > 0 && allVideosHaveApprovedVersion
-
                       const uniqueVideos = (() => {
                         const set = new Set<string>()
                         for (const v of project.videos || []) {
@@ -693,7 +680,6 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               <ProjectStatusPicker
                                 value={effectiveStatus}
                                 disabled={isUpdatingStatus || !canChangeProjectStatuses}
-                                canApprove={canApproveProject}
                                 stopPropagation
                                 className={isUpdatingStatus ? 'opacity-70' : undefined}
                                 visibleStatuses={visibleStatuses}

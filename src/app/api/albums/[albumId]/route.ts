@@ -2,9 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { deleteDirectory, deleteFile } from '@/lib/storage'
+import { deleteDirectory, deleteFile, moveDirectory } from '@/lib/storage'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import {
+  allocateUniqueStorageName,
+  buildAlbumDropboxRoot,
+  buildAlbumStorageRoot,
+  buildProjectStorageRoot,
+  getStoragePathBasename,
+  replaceStoredStoragePathPrefix,
+} from '@/lib/project-storage-paths'
+import { moveDropboxPath } from '@/lib/storage-provider-dropbox'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -43,7 +52,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const album = await prisma.album.findUnique({
     where: { id: albumId },
-    select: { id: true, projectId: true },
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      storageFolderName: true,
+      dropboxEnabled: true,
+      fullZipDropboxPath: true,
+      socialZipDropboxPath: true,
+      project: { select: { title: true, companyName: true, storagePath: true, client: { select: { name: true } } } },
+    },
   })
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
 
@@ -64,28 +82,110 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const data: any = {}
+  let albumRenamePlan: null | {
+    oldAlbumStorageRoot: string
+    newAlbumStorageRoot: string
+  } = null
+
   if (typeof parsed.data.name === 'string') {
     const trimmed = parsed.data.name.trim()
     if (!trimmed) {
       return NextResponse.json({ error: 'Album name cannot be empty' }, { status: 400 })
     }
     data.name = trimmed
+
+    if (trimmed !== album.name) {
+      const siblingAlbums = await prisma.album.findMany({
+        where: { projectId: album.projectId, NOT: { id: albumId } },
+        select: { storageFolderName: true, name: true },
+      })
+      const newAlbumFolderName = allocateUniqueStorageName(
+        trimmed,
+        siblingAlbums.map((row) => row.storageFolderName || row.name).filter(Boolean) as string[],
+      )
+      const projectStoragePath = album.project.storagePath
+        || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+      const oldAlbumStorageRoot = buildAlbumStorageRoot(
+        projectStoragePath,
+        album.storageFolderName || album.name,
+      )
+      const newAlbumStorageRoot = buildAlbumStorageRoot(projectStoragePath, newAlbumFolderName)
+      data.storageFolderName = newAlbumFolderName
+
+      if (oldAlbumStorageRoot !== newAlbumStorageRoot) {
+        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot }
+      }
+    }
+  }
+
+  if (albumRenamePlan) {
+    await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
   }
 
   // Return a JSON-safe subset (some Album fields are BigInt and would break JSON serialization)
-  const updated = await prisma.album.update({
-    where: { id: albumId },
-    data,
-    select: {
-      id: true,
-      projectId: true,
-      name: true,
-      notes: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    const updatedAlbum = await tx.album.update({
+      where: { id: albumId },
+      data,
+      select: {
+        id: true,
+        projectId: true,
+        name: true,
+        notes: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+
+    if (albumRenamePlan) {
+      const photos = await tx.albumPhoto.findMany({
+        where: { albumId },
+        select: { id: true, storagePath: true, socialStoragePath: true },
+      })
+      for (const photo of photos) {
+        await tx.albumPhoto.update({
+          where: { id: photo.id },
+          data: {
+            storagePath: replaceStoredStoragePathPrefix(
+              photo.storagePath,
+              albumRenamePlan.oldAlbumStorageRoot,
+              albumRenamePlan.newAlbumStorageRoot,
+            )!,
+            socialStoragePath: replaceStoredStoragePathPrefix(
+              photo.socialStoragePath,
+              albumRenamePlan.oldAlbumStorageRoot,
+              albumRenamePlan.newAlbumStorageRoot,
+            ),
+          },
+        })
+      }
+    }
+
+    return updatedAlbum
   })
+
+  // Rename Dropbox folder when album name changes
+  if (data.name && data.name !== album.name && album.dropboxEnabled) {
+    const clientName = album.project.client?.name || album.project.companyName || 'Client'
+    const projectFolderName = getStoragePathBasename(album.project.storagePath) || album.project.title
+    const oldAlbumFolder = buildAlbumDropboxRoot(clientName, projectFolderName, album.name)
+    const newAlbumFolder = buildAlbumDropboxRoot(clientName, projectFolderName, data.name)
+    if (oldAlbumFolder !== newAlbumFolder) {
+      void moveDropboxPath(oldAlbumFolder, newAlbumFolder).catch(() => {})
+      // Update stored album ZIP dropbox paths
+      const pathData: Record<string, string> = {}
+      if (album.fullZipDropboxPath?.startsWith(oldAlbumFolder + '/')) {
+        pathData.fullZipDropboxPath = newAlbumFolder + album.fullZipDropboxPath.slice(oldAlbumFolder.length)
+      }
+      if (album.socialZipDropboxPath?.startsWith(oldAlbumFolder + '/')) {
+        pathData.socialZipDropboxPath = newAlbumFolder + album.socialZipDropboxPath.slice(oldAlbumFolder.length)
+      }
+      if (Object.keys(pathData).length > 0) {
+        await prisma.album.update({ where: { id: albumId }, data: pathData })
+      }
+    }
+  }
 
   return NextResponse.json({ album: updated })
 }
@@ -114,6 +214,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const album = await prisma.album.findUnique({
       where: { id: albumId },
       include: {
+        project: {
+          select: {
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+          },
+        },
         photos: {
           select: { id: true, fileSize: true, socialFileSize: true, storagePath: true, socialStoragePath: true },
         },
@@ -170,7 +278,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     // Best-effort: delete album directory (if empty or still present)
     try {
-      await deleteDirectory(`projects/${album.projectId}/albums/${album.id}`)
+      const projectStoragePath = album.project.storagePath
+        || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+      await deleteDirectory(
+        buildAlbumStorageRoot(
+          projectStoragePath,
+          album.storageFolderName || album.name || album.id,
+        )
+      )
     } catch {
       // ignore
     }

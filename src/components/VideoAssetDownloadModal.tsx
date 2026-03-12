@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { X, Download, FileIcon, Loader2, CheckCircle, FileVideo, Image, Music, FileText, FileArchive } from 'lucide-react'
+import { X, Download, FileIcon, Loader2, CheckCircle, FileVideo, Image, Music, FileText, FileArchive, Cloud, Server } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { getAccessToken } from '@/lib/token-store'
@@ -15,6 +15,8 @@ interface VideoAsset {
   fileType: string
   category: string | null
   createdAt: string
+  dropboxEnabled?: boolean
+  dropboxUploadStatus?: string | null
 }
 
 interface VideoAssetDownloadModalProps {
@@ -25,6 +27,8 @@ interface VideoAssetDownloadModalProps {
   isOpen: boolean
   shareToken?: string | null
   isAdmin?: boolean
+  dropboxEnabled?: boolean
+  videoDropboxUploadStatus?: string | null
 }
 
 export function VideoAssetDownloadModal({
@@ -35,12 +39,15 @@ export function VideoAssetDownloadModal({
   isOpen,
   shareToken = null,
   isAdmin = false,
+  dropboxEnabled = false,
+  videoDropboxUploadStatus = null,
 }: VideoAssetDownloadModalProps) {
   const [assets, setAssets] = useState<VideoAsset[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [downloadedVideo, setDownloadedVideo] = useState(false)
   const [downloadedAssets, setDownloadedAssets] = useState<Record<string, boolean>>({})
+  const [useLocalServer, setUseLocalServer] = useState(false)
 
   const downloadStateKey = useMemo(() => {
     return `download-modal:${videoId}:${versionLabel}`
@@ -143,7 +150,11 @@ export function VideoAssetDownloadModal({
         throw new Error(data.error || 'Failed to generate download link')
       }
 
-      const { url: downloadUrl } = await response.json()
+      let { url: downloadUrl } = await response.json()
+      if (useLocalServer && dropboxEnabled) {
+        const sep = downloadUrl.includes('?') ? '&' : '?'
+        downloadUrl = `${downloadUrl}${sep}forceLocal=true`
+      }
       triggerDownload(downloadUrl)
       persistDownloadState(downloadedVideo, {
         ...downloadedAssets,
@@ -169,7 +180,11 @@ export function VideoAssetDownloadModal({
         throw new Error(data.error || 'Failed to generate download link')
       }
 
-      const { url: downloadUrl } = await response.json()
+      let { url: downloadUrl } = await response.json()
+      if (useLocalServer && dropboxEnabled) {
+        const sep = downloadUrl.includes('?') ? '&' : '?'
+        downloadUrl = `${downloadUrl}${sep}forceLocal=true`
+      }
       triggerDownload(downloadUrl)
       persistDownloadState(true, downloadedAssets)
     } catch (err) {
@@ -240,27 +255,84 @@ export function VideoAssetDownloadModal({
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Download source toggle */}
+          {dropboxEnabled && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+              <p className="text-sm font-medium">Downloading from:</p>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setUseLocalServer(false)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    !useLocalServer
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <Cloud className="h-4 w-4" />
+                  Dropbox
+                </button>
+                <button
+                  onClick={() => setUseLocalServer(true)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    useLocalServer
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <Server className="h-4 w-4" />
+                  Local Server
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {useLocalServer
+                  ? 'Downloading from our Local Server. Switch to Dropbox for generally higher speeds and more concurrent downloads.'
+                  : 'Downloading from Dropbox will generally produce higher speeds and more concurrent downloads. Change to our Local Server and restart the download if you are having issues downloading from Dropbox.'}
+              </p>
+            </div>
+          )}
+
           {/* Quick actions */}
           <div className="space-y-3">
-            <button
-              onClick={downloadVideoOnly}
-              className="w-full p-4 border-2 border-border rounded-lg hover:border-primary transition-colors text-left"
-            >
-              <div className="flex items-center gap-3">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                  <Download className="h-5 w-5" />
-                </span>
-                <div className="flex-1">
-                  <p className="font-medium">Download Video</p>
-                  <p className="text-sm text-muted-foreground">
-                    Download the approved video file
-                  </p>
-                </div>
-                {downloadedVideo && (
-                  <CheckCircle className="h-5 w-5 text-green-600" aria-hidden="true" />
-                )}
-              </div>
-            </button>
+            {(() => {
+              const videoUploadPending =
+                dropboxEnabled &&
+                !useLocalServer &&
+                (videoDropboxUploadStatus === 'PENDING' || videoDropboxUploadStatus === 'UPLOADING')
+              return (
+                <button
+                  onClick={videoUploadPending ? undefined : downloadVideoOnly}
+                  disabled={videoUploadPending}
+                  className={`w-full p-4 border-2 border-border rounded-lg transition-colors text-left ${
+                    videoUploadPending
+                      ? 'opacity-50 cursor-not-allowed'
+                      : 'hover:border-primary cursor-pointer'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-flex h-9 w-9 items-center justify-center rounded-md ${
+                      videoUploadPending ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'
+                    }`}>
+                      {videoUploadPending ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Download className="h-5 w-5" />
+                      )}
+                    </span>
+                    <div className="flex-1">
+                      <p className="font-medium">Download Video</p>
+                      <p className="text-sm text-muted-foreground">
+                        {videoUploadPending
+                          ? 'The video is still uploading to Dropbox. Switch to Local Server or wait for the upload to complete.'
+                          : 'Download the approved video file'}
+                      </p>
+                    </div>
+                    {downloadedVideo && (
+                      <CheckCircle className="h-5 w-5 text-green-600" aria-hidden="true" />
+                    )}
+                  </div>
+                </button>
+              )
+            })()}
           </div>
 
           {/* Assets section */}
@@ -284,30 +356,52 @@ export function VideoAssetDownloadModal({
                 {assets.map((asset) => {
                   const AssetIcon = getAssetIcon(asset)
                   const isDownloaded = Boolean(downloadedAssets[asset.id])
+                  const assetUploadPending =
+                    dropboxEnabled &&
+                    !useLocalServer &&
+                    asset.dropboxEnabled &&
+                    (asset.dropboxUploadStatus === 'PENDING' || asset.dropboxUploadStatus === 'UPLOADING')
                   return (
                   <div
                     key={asset.id}
                     role="button"
-                    tabIndex={0}
-                    onClick={() => downloadSingleAsset(asset.id)}
-                    onKeyDown={(event) => {
+                    tabIndex={assetUploadPending ? -1 : 0}
+                    onClick={assetUploadPending ? undefined : () => downloadSingleAsset(asset.id)}
+                    onKeyDown={assetUploadPending ? undefined : (event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault()
                         downloadSingleAsset(asset.id)
                       }
                     }}
-                    className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors cursor-pointer"
-                    aria-label={`Download ${asset.fileName}`}
+                    className={`flex items-center gap-3 p-3 border border-border rounded-lg transition-colors ${
+                      assetUploadPending
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'hover:bg-accent/50 cursor-pointer'
+                    }`}
+                    aria-label={assetUploadPending ? `${asset.fileName} is still uploading to Dropbox` : `Download ${asset.fileName}`}
+                    aria-disabled={assetUploadPending}
                   >
-                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                      <AssetIcon className="h-5 w-5" />
+                    <span className={`inline-flex h-9 w-9 items-center justify-center rounded-md ${
+                      assetUploadPending ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'
+                    }`}>
+                      {assetUploadPending ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <AssetIcon className="h-5 w-5" />
+                      )}
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{asset.fileName}</p>
                       <div className="flex gap-3 text-xs text-muted-foreground">
-                        <span>{formatFileSizeBigInt(asset.fileSize)}</span>
-                        <span>•</span>
-                        <span>{getCategoryLabel(asset.category)}</span>
+                        {assetUploadPending ? (
+                          <span>Uploading to Dropbox…</span>
+                        ) : (
+                          <>
+                            <span>{formatFileSizeBigInt(asset.fileSize)}</span>
+                            <span>•</span>
+                            <span>{getCategoryLabel(asset.category)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                     {isDownloaded && (

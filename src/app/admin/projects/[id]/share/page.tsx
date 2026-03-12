@@ -101,10 +101,19 @@ export default function AdminSharePage() {
         }
 
         try {
-          const [response480p, response720p, response1080p] = await Promise.all([
-            apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=480p&sessionId=${sessionId}`),
-            apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=720p&sessionId=${sessionId}`),
-            apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=1080p&sessionId=${sessionId}`)
+          const [response480p, response720p, response1080p, responseOriginal] = await Promise.all([
+            (video.preview480Path || video.preview720Path || video.preview1080Path || video.originalStoragePath)
+              ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=480p&sessionId=${sessionId}`)
+              : Promise.resolve(null),
+            (video.preview720Path || video.preview1080Path || video.preview480Path || video.originalStoragePath)
+              ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=720p&sessionId=${sessionId}`)
+              : Promise.resolve(null),
+            (video.preview1080Path || video.preview720Path || video.preview480Path || video.originalStoragePath)
+              ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=1080p&sessionId=${sessionId}`)
+              : Promise.resolve(null),
+            video.originalStoragePath
+              ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=original&sessionId=${sessionId}`)
+              : Promise.resolve(null),
           ])
 
           let streamToken480p = ''
@@ -112,38 +121,27 @@ export default function AdminSharePage() {
           let streamToken1080p = ''
           let downloadToken = null
 
-          if (response480p.ok) {
+          if (response480p?.ok) {
             const data480p = await response480p.json()
             streamToken480p = data480p.token
           }
 
-          if (response720p.ok) {
+          if (response720p?.ok) {
             const data720p = await response720p.json()
             streamToken720p = data720p.token
           }
 
-          if (response1080p.ok) {
+          if (response1080p?.ok) {
             const data1080p = await response1080p.json()
             streamToken1080p = data1080p.token
           }
 
-          // For closed projects, stream original files when previews may have been auto-deleted
-          if (isProjectClosed || video.approved) {
-            const responseOriginal = await apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=original&sessionId=${sessionId}`)
-            if (responseOriginal.ok) {
-              const dataOriginal = await responseOriginal.json()
-              downloadToken = dataOriginal.token
-
-              // For closed projects, use original as fallback for all stream URLs
-              if (isProjectClosed) {
-                streamToken480p = streamToken480p || dataOriginal.token
-                streamToken720p = streamToken720p || dataOriginal.token
-                streamToken1080p = streamToken1080p || dataOriginal.token
-              } else {
-                streamToken720p = streamToken720p || dataOriginal.token
-                streamToken1080p = streamToken1080p || dataOriginal.token
-              }
-            }
+          if (responseOriginal?.ok) {
+            const dataOriginal = await responseOriginal.json()
+            downloadToken = dataOriginal.token
+            streamToken480p = streamToken480p || dataOriginal.token
+            streamToken720p = streamToken720p || dataOriginal.token
+            streamToken1080p = streamToken1080p || dataOriginal.token
           }
 
           let thumbnailUrl = null

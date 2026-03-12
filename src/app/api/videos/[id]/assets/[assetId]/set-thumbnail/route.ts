@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 export const runtime = 'nodejs'
 
 
@@ -47,7 +48,18 @@ export async function POST(
     // Verify video exists
     const video = await prisma.video.findUnique({
       where: { id: videoId },
-      include: { project: { select: { status: true, assignedUsers: { select: { userId: true } } } } },
+      include: {
+        project: {
+          select: {
+            status: true,
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+            assignedUsers: { select: { userId: true } },
+          },
+        },
+      },
     })
 
     if (!video) {
@@ -65,8 +77,13 @@ export async function POST(
 
     // If action is 'remove', revert to system-generated thumbnail
     if (action === 'remove') {
-      // System-generated thumbnail path: projects/{projectId}/videos/{videoId}/thumbnail.jpg
-      const systemThumbnailPath = `projects/${video.projectId}/videos/${videoId}/thumbnail.jpg`
+      const projectStoragePath = video.project.storagePath
+        || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
+      const systemThumbnailPath = buildVideoThumbnailStoragePath(
+        projectStoragePath,
+        video.storageFolderName || video.name || videoId,
+        video.versionLabel || `v${video.version}`,
+      )
 
       await prisma.video.update({
         where: { id: videoId },

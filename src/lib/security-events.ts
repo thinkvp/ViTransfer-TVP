@@ -40,6 +40,28 @@ export type SecurityEventType =
   | 'UNAUTHORIZED_OTP_REQUEST'
   | 'GUEST_ACCESS'
 
+  // Admin Session Events
+  | 'ADMIN_SESSION_LOGOUT'
+  | 'ADMIN_TOKEN_REFRESH_FAILED'
+
+  // Admin Account Management Events
+  | 'ADMIN_USER_CREATED'
+  | 'ADMIN_USER_DELETED'
+  | 'ADMIN_USER_DEACTIVATED'
+  | 'ADMIN_USER_REACTIVATED'
+  | 'ADMIN_ROLE_CHANGED'
+  | 'ADMIN_PASSWORD_CHANGED'
+
+  // Security Configuration Events
+  | 'SECURITY_SETTING_CHANGED'
+  | 'BLOCKLIST_IP_ADDED'
+  | 'BLOCKLIST_IP_REMOVED'
+  | 'BLOCKLIST_DOMAIN_ADDED'
+  | 'BLOCKLIST_DOMAIN_REMOVED'
+
+  // Authorization Events
+  | 'PERMISSION_DENIED'
+
   // Video Access Events
   | 'HOTLINK_DETECTED'
   | 'HOTLINK_BLOCKED'
@@ -256,6 +278,98 @@ export const SECURITY_EVENT_METADATA: Record<SecurityEventType, SecurityEventMet
   RATE_LIMIT_HIT: {
     label: 'Rate Limit Exceeded',
     description: 'Request rate limit exceeded - too many requests in a short time period.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+
+  // Admin Session Events
+  ADMIN_SESSION_LOGOUT: {
+    label: 'Admin Session Logout',
+    description: 'Administrator session ended via explicit logout.',
+    category: 'Admin Auth',
+    severity: 'INFO',
+  },
+  ADMIN_TOKEN_REFRESH_FAILED: {
+    label: 'Admin Token Refresh Failed',
+    description: 'Failed attempt to refresh an admin session token - token may be invalid, expired, or stolen.',
+    category: 'Admin Auth',
+    severity: 'WARNING',
+  },
+
+  // Admin Account Management Events
+  ADMIN_USER_CREATED: {
+    label: 'Admin User Created',
+    description: 'A new administrator account was created.',
+    category: 'Security',
+    severity: 'INFO',
+  },
+  ADMIN_USER_DELETED: {
+    label: 'Admin User Deleted',
+    description: 'An administrator account was permanently deleted.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+  ADMIN_USER_DEACTIVATED: {
+    label: 'Admin User Deactivated',
+    description: 'An administrator account was disabled - all active sessions were revoked.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+  ADMIN_USER_REACTIVATED: {
+    label: 'Admin User Reactivated',
+    description: 'A previously disabled administrator account was re-enabled.',
+    category: 'Security',
+    severity: 'INFO',
+  },
+  ADMIN_ROLE_CHANGED: {
+    label: 'Admin Role Changed',
+    description: 'An administrator\'s role and permissions were changed.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+  ADMIN_PASSWORD_CHANGED: {
+    label: 'Admin Password Changed',
+    description: 'An administrator\'s password was changed - all sessions were invalidated.',
+    category: 'Admin Auth',
+    severity: 'INFO',
+  },
+
+  // Security Configuration Events
+  SECURITY_SETTING_CHANGED: {
+    label: 'Security Setting Changed',
+    description: 'One or more security settings were modified by an administrator.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+  BLOCKLIST_IP_ADDED: {
+    label: 'IP Address Blocked',
+    description: 'An IP address was added to the security blocklist.',
+    category: 'Security',
+    severity: 'INFO',
+  },
+  BLOCKLIST_IP_REMOVED: {
+    label: 'IP Address Unblocked',
+    description: 'An IP address was removed from the security blocklist.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+  BLOCKLIST_DOMAIN_ADDED: {
+    label: 'Domain Blocked',
+    description: 'A domain was added to the hotlink protection blocklist.',
+    category: 'Security',
+    severity: 'INFO',
+  },
+  BLOCKLIST_DOMAIN_REMOVED: {
+    label: 'Domain Unblocked',
+    description: 'A domain was removed from the hotlink protection blocklist.',
+    category: 'Security',
+    severity: 'WARNING',
+  },
+
+  // Authorization Events
+  PERMISSION_DENIED: {
+    label: 'Permission Denied',
+    description: 'An authenticated user attempted to access a resource or action they do not have permission for.',
     category: 'Security',
     severity: 'WARNING',
   },

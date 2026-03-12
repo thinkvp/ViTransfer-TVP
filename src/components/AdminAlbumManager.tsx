@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Cloud, Loader2 } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { AlbumPhotoUploadQueue } from '@/components/AlbumPhotoUploadQueue'
@@ -45,18 +45,28 @@ type AlbumZipStatus = {
     socialPending: number
     socialError: number
   }
+  dropbox?: {
+    enabled: boolean
+    fullStatus: string | null
+    socialStatus: string | null
+    fullProgress: number
+    socialProgress: number
+    fullError: string | null
+    socialError: string | null
+  }
 }
 
 interface AdminAlbumManagerProps {
   projectId: string
   projectStatus: string
+  dropboxConfigured?: boolean
   canDelete?: boolean
   onProjectDataChanged?: () => void
 }
 
 type PhotoSortMode = 'alphabetical' | 'upload-date'
 
-export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true, onProjectDataChanged }: AdminAlbumManagerProps) {
+export default function AdminAlbumManager({ projectId, projectStatus, dropboxConfigured = false, canDelete = true, onProjectDataChanged }: AdminAlbumManagerProps) {
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +91,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   const refreshAlbumsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  const [togglingDropboxAlbumId, setTogglingDropboxAlbumId] = useState<string | null>(null)
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => {
@@ -254,7 +266,11 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         !data.zip.fullReady ||
         !data.zip.socialReady ||
         data.counts.uploading > 0 ||
-        data.counts.socialPending > 0
+        data.counts.socialPending > 0 ||
+        (data.dropbox?.enabled && (
+          data.dropbox.fullStatus === 'PENDING' || data.dropbox.fullStatus === 'UPLOADING' ||
+          data.dropbox.socialStatus === 'PENDING' || data.dropbox.socialStatus === 'UPLOADING'
+        ))
 
       const prevTimer = zipPollTimersRef.current.get(albumId)
       if (prevTimer) clearTimeout(prevTimer)
@@ -285,6 +301,24 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       alert(e?.message || 'Failed to regenerate ZIPs')
     }
   }, [fetchZipStatus, onProjectDataChanged])
+
+  const handleToggleDropbox = useCallback(async (albumId: string, currentlyEnabled: boolean) => {
+    if (togglingDropboxAlbumId) return
+
+    if (currentlyEnabled) {
+      if (!confirm('Remove album ZIPs from Dropbox? The local copies will be kept.')) return
+    }
+
+    setTogglingDropboxAlbumId(albumId)
+    try {
+      await apiPost(`/api/albums/${albumId}/zip-dropbox`, { enabled: !currentlyEnabled })
+      void fetchZipStatus(albumId)
+    } catch (e: any) {
+      alert(e?.message || 'Failed to toggle Dropbox')
+    } finally {
+      setTogglingDropboxAlbumId(null)
+    }
+  }, [togglingDropboxAlbumId, fetchZipStatus])
 
   const handleDeleteAlbum = async (albumId: string, albumName: string) => {
     if (!canDelete) return
@@ -553,9 +587,54 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                       </div>
                     </div>
 
-                    <Button type="button" variant="outline" size="sm" onClick={() => void regenerateZips(album.id)}>
-                      Regenerate ZIPs
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {dropboxConfigured && (
+                        (() => {
+                          const dbx = zipStatusByAlbumId[album.id]?.dropbox
+                          const isUploading = dbx?.fullStatus === 'PENDING' || dbx?.fullStatus === 'UPLOADING' ||
+                            dbx?.socialStatus === 'PENDING' || dbx?.socialStatus === 'UPLOADING'
+                          const isProcessing = album.status === 'PROCESSING' || album.status === 'UPLOADING'
+                          const spinning = isUploading || (dbx?.enabled && isProcessing)
+
+                          return (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                'h-8 w-8',
+                                dbx?.enabled
+                                  ? 'text-primary hover:text-primary/80 hover:bg-primary/5'
+                                  : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
+                              )}
+                              disabled={togglingDropboxAlbumId === album.id}
+                              onClick={() => handleToggleDropbox(album.id, dbx?.enabled || false)}
+                              title={
+                                dbx?.enabled
+                                  ? isUploading
+                                    ? 'Uploading ZIPs to Dropbox…'
+                                    : 'Remove ZIPs from Dropbox'
+                                  : 'Upload ZIPs to Dropbox'
+                              }
+                            >
+                              {togglingDropboxAlbumId === album.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : spinning ? (
+                                <span className="relative inline-flex h-4 w-4">
+                                  <span className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                                  <Cloud className="w-4 h-4 text-primary" />
+                                </span>
+                              ) : (
+                                <Cloud className="w-4 h-4" />
+                              )}
+                            </Button>
+                          )
+                        })()
+                      )}
+                      <Button type="button" variant="outline" size="sm" onClick={() => void regenerateZips(album.id)}>
+                        Regenerate ZIPs
+                      </Button>
+                    </div>
                   </div>
                 </div>
 

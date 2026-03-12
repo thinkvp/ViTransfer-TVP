@@ -2,10 +2,11 @@ import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
 import { downloadFile, getFilePath } from '../lib/storage'
 import type { AlbumPhotoZipJob } from '../lib/queue'
-import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
+import { getAlbumZipJobId, getAlbumZipStoragePath, getAlbumZipDropboxPath } from '../lib/album-photo-zip'
 import fs from 'fs'
 import path from 'path'
 import archiver from 'archiver'
+import { buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 
 const ZIP_RETRY_DELAY_MS = 30_000
@@ -67,8 +68,17 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       id: true,
       projectId: true,
       name: true,
+      storageFolderName: true,
       fullZipFileSize: true,
       socialZipFileSize: true,
+      project: {
+        select: {
+          title: true,
+          storagePath: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
     },
   })
 
@@ -79,6 +89,13 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
 
   const albumRowId = album.id
   const projectId = album.projectId
+  const albumName = album.name
+  const projectTitle = album.project.title
+  const projectStoragePath = album.project.storagePath
+    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', projectTitle)
+  const albumFolderName = album.storageFolderName || albumName
+
+  const zipArgs = { projectStoragePath, albumFolderName, albumName }
 
   // Keep album-level status in sync with background work.
   await prisma.album.update({ where: { id: albumRowId }, data: { status: 'PROCESSING' } }).catch(() => {})
@@ -97,8 +114,12 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       })
       if (pendingSocialCount > 0) return
 
-      const zipFullPath = getFilePath(getAlbumZipStoragePath({ projectId, albumId: albumRowId, variant: 'full' }))
-      const zipSocialPath = getFilePath(getAlbumZipStoragePath({ projectId, albumId: albumRowId, variant: 'social' }))
+      const zipFullPath = getFilePath(
+        getAlbumZipStoragePath({ ...zipArgs, variant: 'full' })
+      )
+      const zipSocialPath = getFilePath(
+        getAlbumZipStoragePath({ ...zipArgs, variant: 'social' })
+      )
 
       const fullExists = fs.existsSync(zipFullPath)
       const socialExists = fs.existsSync(zipSocialPath)
@@ -165,7 +186,10 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
 
   if (photos.length === 0) {
     // Nothing to zip; ensure any old zip is removed.
-    const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant })
+    const zipStoragePath = getAlbumZipStoragePath({
+      ...zipArgs,
+      variant,
+    })
     await fs.promises.unlink(getFilePath(zipStoragePath)).catch(() => {})
 
     const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
@@ -187,7 +211,10 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     return
   }
 
-  const zipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant })
+  const zipStoragePath = getAlbumZipStoragePath({
+    ...zipArgs,
+    variant,
+  })
 
   if (variant === 'social') {
     // Separate photos still being processed (wait for them) from permanently failed ones (skip them).
@@ -256,4 +283,53 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
   console.log(`[WORKER] Generated ${variant} album ZIP: ${albumId}`)
 
   await maybeMarkAlbumReady()
+
+  // If Dropbox is enabled for this album, queue upload of the new ZIP
+  try {
+    const freshAlbum = await prisma.album.findUnique({
+      where: { id: albumRowId },
+      select: { dropboxEnabled: true },
+    })
+    if (freshAlbum?.dropboxEnabled) {
+      const { getAlbumZipDropboxUploadQueue } = await import('../lib/queue')
+      const q = getAlbumZipDropboxUploadQueue()
+      const dropboxJobId = `album-zip-dropbox-${variant}-${albumRowId}`
+      const localPath = getAlbumZipStoragePath({ ...zipArgs, variant })
+      const dropboxPath = getAlbumZipDropboxPath({
+        clientName: album.project.client?.name || album.project.companyName || 'Client',
+        projectFolderName: getStoragePathBasename(album.project.storagePath) || projectTitle,
+        albumFolderName,
+        albumName,
+        variant,
+      })
+
+      let fileSizeBytes = 0
+      try {
+        fileSizeBytes = fs.statSync(getFilePath(localPath)).size
+      } catch {
+        fileSizeBytes = 0
+      }
+
+      await q.remove(dropboxJobId).catch(() => {})
+      await q.add(
+        'upload-album-zip-to-dropbox',
+        { albumId: albumRowId, variant, localPath, dropboxPath, fileSizeBytes },
+        { jobId: dropboxJobId }
+      )
+
+      const statusField = variant === 'full' ? 'fullZipDropboxStatus' : 'socialZipDropboxStatus'
+      const pathField = variant === 'full' ? 'fullZipDropboxPath' : 'socialZipDropboxPath'
+      await prisma.album.update({
+        where: { id: albumRowId },
+        data: {
+          [statusField]: 'PENDING',
+          [pathField]: dropboxPath,
+        },
+      })
+
+      console.log(`[WORKER] Queued Dropbox upload for album ${albumRowId} ${variant} ZIP`)
+    }
+  } catch (err) {
+    console.error(`[WORKER] Failed to queue Dropbox upload for album ${albumRowId} ${variant}:`, err)
+  }
 }

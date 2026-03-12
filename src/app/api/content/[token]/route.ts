@@ -4,18 +4,67 @@ import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync, ReadStream } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
+import {
+  buildVideoAssetStoragePath,
+  buildVideoOriginalStoragePath,
+  buildVideoPreviewStoragePath,
+  buildVideoThumbnailStoragePath,
+  buildVideoTimelineStorageRoot,
+} from '@/lib/project-storage-paths'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
 import { recordClientActivity } from '@/lib/client-activity'
 import { registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
+import { getTransferTuningSettings } from '@/lib/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const STREAM_HIGH_WATER_MARK = 1 * 1024 * 1024 // 1MB stream buffer
-const STREAM_CHUNK_SIZE = 4 * 1024 * 1024 // 4MB chunks for smooth scrubbing/streaming
-const DOWNLOAD_CHUNK_SIZE = 16 * 1024 * 1024 // 16MB chunks – keeps transfer time per chunk under ~25s at 5 Mbps
+type WithOptionalDropboxPath = {
+  dropboxPath?: string | null
+}
+
+function buildCanonicalFallbackPath(params: {
+  video: any
+  quality: string
+  asset?: { fileName: string } | null
+  spriteFile?: string | null
+}): string | null {
+  const { video, quality, asset, spriteFile } = params
+  const projectStoragePath = video?.project?.storagePath
+  const videoFolderName = video?.storageFolderName || video?.name
+  const versionLabel = video?.versionLabel
+
+  if (!projectStoragePath || !videoFolderName || !versionLabel) return null
+
+  if (asset?.fileName) {
+    return buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, asset.fileName)
+  }
+
+  switch (quality) {
+    case 'thumbnail':
+      return buildVideoThumbnailStoragePath(projectStoragePath, videoFolderName, versionLabel)
+    case 'timeline-vtt':
+      return `${buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, versionLabel)}/index.vtt`
+    case 'timeline-sprite':
+      return spriteFile
+        ? `${buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, versionLabel)}/${spriteFile}`
+        : null
+    case '480p':
+    case '720p':
+    case '1080p':
+      return buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, versionLabel, quality)
+    case 'original':
+    case 'download':
+      return video?.originalFileName
+        ? buildVideoOriginalStoragePath(projectStoragePath, videoFolderName, versionLabel, video.originalFileName)
+        : null
+    default:
+      return null
+  }
+}
 
 function isValidMimeType(value: unknown): value is string {
   if (typeof value !== 'string') return false
@@ -265,7 +314,7 @@ export async function GET(
 
     const video = await prisma.video.findUnique({
       where: { id: verifiedToken.videoId },
-      include: { project: true }
+      include: { project: true },
     })
 
     if (!video || video.projectId !== verifiedToken.projectId) {
@@ -276,6 +325,8 @@ export async function GET(
     let filePath: string | null = null
     let filename: string | null = null
     let contentType = 'video/mp4'
+    let activeDropboxPath: string | null = null
+    let selectedAsset: { fileName: string } | null = null
     const canServeOriginal = Boolean(originalPath && (isAdminRequest || video.approved))
 
     // Handle asset download
@@ -297,9 +348,11 @@ export async function GET(
 
       filePath = asset.storagePath
       filename = asset.fileName
+      selectedAsset = { fileName: asset.fileName }
       contentType = isValidMimeType(asset.fileType)
         ? asset.fileType
         : 'application/octet-stream'
+      activeDropboxPath = (asset as WithOptionalDropboxPath).dropboxPath ?? null
     } else {
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
@@ -331,6 +384,7 @@ export async function GET(
       } else if (verifiedToken.quality === 'original' || verifiedToken.quality === 'download') {
         if (canServeOriginal) {
           filePath = originalPath
+          activeDropboxPath = (video as WithOptionalDropboxPath).dropboxPath ?? null
         }
       } else if (verifiedToken.quality === '1080p') {
         filePath = video.preview1080Path || video.preview720Path || (video as any).preview480Path || (canServeOriginal ? originalPath : null)
@@ -344,14 +398,6 @@ export async function GET(
     if (!filePath) {
       return NextResponse.json({ error: 'Access denied' }, { status: 404 })
     }
-    
-    const fullPath = getFilePath(filePath)
-    
-    if (!existsSync(fullPath)) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-    }
-
-    const stat = statSync(fullPath)
 
     const isThumbnail = verifiedToken.quality === 'thumbnail'
     const isTimelineAsset = verifiedToken.quality === 'timeline-vtt' || verifiedToken.quality === 'timeline-sprite'
@@ -362,7 +408,11 @@ export async function GET(
         : (!isThumbnail && !isTimelineAsset ? 'STREAMING_VIDEO' : null)
 
       if (activityType) {
-        await recordClientActivity({
+        // Fire-and-forget: activity tracking is analytics-only and must not
+        // delay the response. Awaiting Redis ops here was adding latency before
+        // the first response byte, which caused HAProxy to RST_STREAM on slow
+        // Redis round-trips (observed after HAProxy 3.x upgrade).
+        void recordClientActivity({
           sessionId,
           projectId: video.projectId,
           projectTitle: video.project.title,
@@ -375,7 +425,7 @@ export async function GET(
           ipAddress: getClientIpAddress(request) || null,
           throttleKey: `${sessionId}:${video.id}:${assetId || verifiedToken.quality}:${activityType}`,
           throttleSeconds: 15,
-        })
+        }).catch(() => undefined)
       }
     }
 
@@ -383,7 +433,69 @@ export async function GET(
       return NextResponse.json({ error: 'Thumbnails cannot be downloaded directly' }, { status: 403 })
     }
 
+    const forceLocal = searchParams.get('forceLocal') === 'true'
+    const resolvedTarget = await resolveStorageDownloadTarget(filePath, {
+      preferDropbox: isDownload && !forceLocal,
+      dropboxPath: activeDropboxPath,
+    })
+    let effectiveResolvedTarget = resolvedTarget
+    if (effectiveResolvedTarget.kind === 'local-file' && !existsSync(effectiveResolvedTarget.absolutePath)) {
+      const fallbackPath = buildCanonicalFallbackPath({
+        video,
+        quality: verifiedToken.quality,
+        asset: selectedAsset,
+        spriteFile: searchParams.get('file'),
+      })
+
+      if (fallbackPath && fallbackPath !== filePath) {
+        const fallbackTarget = await resolveStorageDownloadTarget(fallbackPath, {
+          preferDropbox: isDownload && !forceLocal,
+          dropboxPath: activeDropboxPath,
+        })
+        if (fallbackTarget.kind === 'local-file' ? existsSync(fallbackTarget.absolutePath) : true) {
+          effectiveResolvedTarget = fallbackTarget
+          filePath = fallbackPath
+        }
+      }
+    }
+    if (effectiveResolvedTarget.kind === 'redirect') {
+      // Record analytics event for Dropbox downloads (we can't track transfer progress)
+      if (isDownload && !isAdminRequest && !isProbe) {
+        const settings = await getSecuritySettings()
+        if (settings.trackAnalytics) {
+          await prisma.videoAnalytics.create({
+            data: {
+              videoId: video.id,
+              projectId: video.projectId,
+              eventType: 'DOWNLOAD_SUCCEEDED',
+              assetId: assetId || undefined,
+              ipAddress: getClientIpAddress(request) || undefined,
+              sessionId,
+              details: { source: 'Dropbox' },
+            },
+          }).catch(() => undefined)
+        }
+      }
+
+      return NextResponse.redirect(effectiveResolvedTarget.url, {
+        status: 307,
+        headers: {
+          'Cache-Control': 'private, no-store, must-revalidate',
+          Pragma: 'no-cache',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+      })
+    }
+
+    const fullPath = effectiveResolvedTarget.absolutePath
+    if (!existsSync(fullPath)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+    }
+
+    const stat = statSync(fullPath)
+
     const range = request.headers.get('range')
+    const { downloadChunkSizeBytes } = await getTransferTuningSettings()
 
     const cacheControl = isProbe
       ? 'private, no-store, must-revalidate'
@@ -406,7 +518,10 @@ export async function GET(
       const shouldTrackDownload = Boolean(downloadId && !isAdminRequest && !isProbe)
 
       if (shouldTrackDownload) {
-        await registerTrackedDownload({
+        // Fire-and-forget: registering the download in Redis must not delay
+        // the response start. The tracking record is seeded with the file size
+        // and current timestamp; progress is updated during streaming.
+        void registerTrackedDownload({
           downloadId: downloadId!,
           projectId: verifiedToken.projectId,
           videoId: verifiedToken.videoId,
@@ -449,7 +564,7 @@ export async function GET(
 
       // If no Range header, stream entire file with 200 so downloads aren't truncated
       if (!range) {
-        const fileStream = createReadStream(fullPath, { highWaterMark: STREAM_HIGH_WATER_MARK })
+        const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
         const readableStream = createWebReadableStream(fileStream, createDownloadTrackingHooks(0))
 
         return new NextResponse(readableStream, {
@@ -470,11 +585,11 @@ export async function GET(
       const rawRange = range || 'bytes=0-'
       const parts = rawRange.replace(/bytes=/, '').split('-')
       const start = parseInt(parts[0], 10)
-      const requestedEnd = parts[1] ? parseInt(parts[1], 10) : start + DOWNLOAD_CHUNK_SIZE - 1
-      const end = Math.min(requestedEnd, start + DOWNLOAD_CHUNK_SIZE - 1, stat.size - 1)
+      const requestedEnd = parts[1] ? parseInt(parts[1], 10) : start + downloadChunkSizeBytes - 1
+      const end = Math.min(requestedEnd, start + downloadChunkSizeBytes - 1, stat.size - 1)
       const chunksize = (end - start) + 1
 
-      const fileStream = createReadStream(fullPath, { start, end, highWaterMark: STREAM_HIGH_WATER_MARK })
+      const fileStream = createReadStream(fullPath, { start, end, highWaterMark: downloadChunkSizeBytes })
       const readableStream = createWebReadableStream(fileStream, createDownloadTrackingHooks(start))
 
       return new NextResponse(readableStream, {
@@ -496,16 +611,16 @@ export async function GET(
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-')
       const start = parseInt(parts[0], 10)
-      const requestedEnd = parts[1] ? parseInt(parts[1], 10) : start + STREAM_CHUNK_SIZE - 1
+      const requestedEnd = parts[1] ? parseInt(parts[1], 10) : start + downloadChunkSizeBytes - 1
       const cappedEnd = isProbe
         ? requestedEnd
-        : Math.min(requestedEnd, start + STREAM_CHUNK_SIZE - 1)
+        : Math.min(requestedEnd, start + downloadChunkSizeBytes - 1)
       // Cap normal streaming chunk size so scrubbing doesn't request the entire remainder of the file.
       // Probe requests are allowed to read the full requested range for connection testing.
       const end = Math.min(cappedEnd, stat.size - 1)
       const chunksize = (end - start) + 1
 
-      const fileStream = createReadStream(fullPath, { start, end, highWaterMark: STREAM_HIGH_WATER_MARK })
+      const fileStream = createReadStream(fullPath, { start, end, highWaterMark: downloadChunkSizeBytes })
       const readableStream = createWebReadableStream(fileStream)
 
       // For non-asset streams, determine Content-Type based on quality
@@ -529,7 +644,7 @@ export async function GET(
       })
     }
 
-    const fileStream = createReadStream(fullPath, { highWaterMark: STREAM_HIGH_WATER_MARK })
+    const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
     const readableStream = createWebReadableStream(fileStream)
 
     // For non-asset streams, determine Content-Type based on quality
@@ -550,6 +665,12 @@ export async function GET(
       },
     })
   } catch (error) {
+    if (error instanceof DropboxPreferredDownloadError) {
+      return NextResponse.json(
+        { error: 'Dropbox download is unavailable right now. Retry later or use Force Local if you want to bypass Dropbox.' },
+        { status: 502 }
+      )
+    }
     // Stream errors are technical issues, not security events
     console.error('[STREAM] Video streaming error:', error)
 

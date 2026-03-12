@@ -1,4 +1,11 @@
 import { prisma } from './db'
+import {
+  BYTES_PER_MB,
+  DEFAULT_DOWNLOAD_CHUNK_SIZE_MB,
+  DEFAULT_UPLOAD_CHUNK_SIZE_MB,
+  normalizeDownloadChunkSizeMB,
+  normalizeUploadChunkSizeMB,
+} from './transfer-tuning'
 
 // Simple in-memory cache for frequently read settings to avoid repeated DB hits
 const SETTINGS_CACHE_TTL_MS = 60_000
@@ -12,6 +19,14 @@ const cachedRateLimits: CachedValue<{
 const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0 }
 const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
 const cachedAutoApproveProject: CachedValue<boolean> = { value: true, expiresAt: 0 }
+const cachedExcludeInternalIpsFromAnalytics: CachedValue<boolean> = { value: true, expiresAt: 0 }
+const cachedTransferTuning: CachedValue<{ uploadChunkSizeMB: number; downloadChunkSizeMB: number }> = {
+  value: {
+    uploadChunkSizeMB: DEFAULT_UPLOAD_CHUNK_SIZE_MB,
+    downloadChunkSizeMB: DEFAULT_DOWNLOAD_CHUNK_SIZE_MB,
+  },
+  expiresAt: 0,
+}
 type SafeguardLimits = {
   maxInternalCommentsPerProject: number
   maxCommentsPerVideoVersion: number
@@ -32,6 +47,13 @@ export function invalidateSecuritySettingsCaches() {
   cachedRateLimits.expiresAt = 0
   cachedSessionTimeout.expiresAt = 0
   cachedSafeguardLimits.expiresAt = 0
+}
+
+export function invalidateSettingsCaches() {
+  cachedSmtpConfigured.expiresAt = 0
+  cachedAutoApproveProject.expiresAt = 0
+  cachedExcludeInternalIpsFromAnalytics.expiresAt = 0
+  cachedTransferTuning.expiresAt = 0
 }
 
 /**
@@ -132,6 +154,78 @@ export async function getAutoApproveProject(): Promise<boolean> {
   } catch (error) {
     console.error('Error fetching auto-approve setting:', error)
     return cachedAutoApproveProject.value
+  }
+}
+
+export async function shouldExcludeInternalIpsFromAnalytics(): Promise<boolean> {
+  const now = Date.now()
+  if (cachedExcludeInternalIpsFromAnalytics.expiresAt > now) {
+    return cachedExcludeInternalIpsFromAnalytics.value
+  }
+
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { excludeInternalIpsFromAnalytics: true },
+    })
+
+    const value = settings?.excludeInternalIpsFromAnalytics ?? true
+    cachedExcludeInternalIpsFromAnalytics.value = value
+    cachedExcludeInternalIpsFromAnalytics.expiresAt = now + SETTINGS_CACHE_TTL_MS
+    return value
+  } catch (error) {
+    console.error('Error fetching internal IP analytics exclusion setting:', error)
+    return cachedExcludeInternalIpsFromAnalytics.value
+  }
+}
+
+export async function getTransferTuningSettings(): Promise<{
+  uploadChunkSizeMB: number
+  uploadChunkSizeBytes: number
+  downloadChunkSizeMB: number
+  downloadChunkSizeBytes: number
+}> {
+  const now = Date.now()
+  if (cachedTransferTuning.expiresAt > now) {
+    const { uploadChunkSizeMB, downloadChunkSizeMB } = cachedTransferTuning.value
+    return {
+      uploadChunkSizeMB,
+      uploadChunkSizeBytes: uploadChunkSizeMB * BYTES_PER_MB,
+      downloadChunkSizeMB,
+      downloadChunkSizeBytes: downloadChunkSizeMB * BYTES_PER_MB,
+    }
+  }
+
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: {
+        uploadChunkSizeMB: true,
+        downloadChunkSizeMB: true,
+      },
+    })
+
+    const uploadChunkSizeMB = normalizeUploadChunkSizeMB(settings?.uploadChunkSizeMB)
+    const downloadChunkSizeMB = normalizeDownloadChunkSizeMB(settings?.downloadChunkSizeMB)
+
+    cachedTransferTuning.value = { uploadChunkSizeMB, downloadChunkSizeMB }
+    cachedTransferTuning.expiresAt = now + SETTINGS_CACHE_TTL_MS
+
+    return {
+      uploadChunkSizeMB,
+      uploadChunkSizeBytes: uploadChunkSizeMB * BYTES_PER_MB,
+      downloadChunkSizeMB,
+      downloadChunkSizeBytes: downloadChunkSizeMB * BYTES_PER_MB,
+    }
+  } catch (error) {
+    console.error('Error fetching transfer tuning settings:', error)
+    const { uploadChunkSizeMB, downloadChunkSizeMB } = cachedTransferTuning.value
+    return {
+      uploadChunkSizeMB,
+      uploadChunkSizeBytes: uploadChunkSizeMB * BYTES_PER_MB,
+      downloadChunkSizeMB,
+      downloadChunkSizeBytes: downloadChunkSizeMB * BYTES_PER_MB,
+    }
   }
 }
 

@@ -5,6 +5,8 @@ import { hashPassword, validatePassword } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { normalizeHexDisplayColor } from '@/lib/display-color'
+import { logSecurityEvent } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 
@@ -223,6 +225,19 @@ export async function POST(request: NextRequest) {
         updatedAt: true,
       },
     })
+
+    logSecurityEvent({
+      type: 'ADMIN_USER_CREATED',
+      severity: 'INFO',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        createdById: authResult.id,
+        createdByEmail: authResult.email,
+        newUserId: user.id,
+        newUserEmail: user.email,
+        newUserRole: user.appRole?.name,
+      },
+    }).catch(() => {})
 
     const response = NextResponse.json({ user }, { status: 201 })
     response.headers.set('Cache-Control', 'no-store')

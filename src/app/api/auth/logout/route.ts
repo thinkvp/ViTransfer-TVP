@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit } from '@/lib/rate-limit'
-import { parseBearerToken, revokePresentedTokens } from '@/lib/auth'
+import { getCurrentUserFromRequest, parseBearerToken, revokePresentedTokens } from '@/lib/auth'
+import { logSecurityEvent } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 
@@ -24,10 +26,21 @@ export async function POST(request: NextRequest) {
     }, 'logout')
     if (rateLimitResult) return rateLimitResult
 
+    const user = await getCurrentUserFromRequest(request)
     const accessToken = parseBearerToken(request)
     const refreshToken = await extractRefreshToken(request)
 
     await revokePresentedTokens({ accessToken, refreshToken })
+
+    logSecurityEvent({
+      type: 'ADMIN_SESSION_LOGOUT',
+      severity: 'INFO',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        userId: user?.id,
+        email: user?.email,
+      },
+    }).catch(() => {})
 
     return NextResponse.json({ success: true })
   } catch (error) {

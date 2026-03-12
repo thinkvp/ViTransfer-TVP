@@ -1,9 +1,17 @@
 import { useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { apiPost } from '@/lib/api-client'
+import {
+  MAX_DOWNLOAD_CHUNK_SIZE_MB,
+  MAX_UPLOAD_CHUNK_SIZE_MB,
+  MIN_DOWNLOAD_CHUNK_SIZE_MB,
+  MIN_UPLOAD_CHUNK_SIZE_MB,
+} from '@/lib/transfer-tuning'
 
 type OrphanCommentCleanupResult = {
   ok: true
@@ -65,25 +73,57 @@ type BullmqPurgeResult = {
   queues: Record<string, { completed: number; failed: number }>
 }
 
-type ProjectStorageYearMonthMigrationResult = {
+type ProjectStorageMigrationResult = {
   ok: true
   dryRun: boolean
   projectsChecked: number
-  alreadyInYearMonthFolder: number
-  movedFromLegacyRoot: number
-  movedFromClosedFolder: number
-  stubsCreatedOrUpdated: number
-  closedFoldersPruned?: number
+  projectsMigrated: number
+  projectsAlreadyCanonical: number
+  projectsWithoutClient: number
+  projectsWithoutExistingRoot: number
+  projectRootsMoved: number
+  videoFoldersNormalized: number
+  assetFilesNormalized: number
+  albumFoldersNormalized: number
+  recordsUpdated: number
+  legacyFolderCleanup?: {
+    removed: string[]
+    skippedNonEmpty: boolean
+  }
   sample?: {
-    movedProjectIds: string[]
-    missingProjectIds: string[]
-    movedProjects?: Array<{ id: string; title: string }>
-    missingProjects?: Array<{ id: string; title: string }>
+    migratedProjects: Array<{ id: string; title: string; targetPath: string }>
+    skippedProjects: Array<{ id: string; title: string; reason: string }>
   }
   errors?: Array<{ projectId?: string; path?: string; error: string }>
 }
 
+type ClosedProjectPreviewCleanupResult = {
+  ok: true
+  dryRun: boolean
+  closedProjects: number
+  projectsWithPreviews: number
+  videosWithPreviews: number
+  previewFiles: number
+  timelineDirs: number
+  deleted?: {
+    previewFiles: number
+    previewFilesFailed: number
+    timelineDirs: number
+    timelineDirsFailed: number
+  }
+  errors?: Array<{ projectId: string; path: string; error: string }>
+  sample?: {
+    projects: Array<{ id: string; title: string; videos: number }>
+  }
+}
+
 interface DeveloperToolsSectionProps {
+  excludeInternalIpsFromAnalytics: boolean
+  setExcludeInternalIpsFromAnalytics: (value: boolean) => void
+  uploadChunkSizeMB: number | ''
+  setUploadChunkSizeMB: (value: number | '') => void
+  downloadChunkSizeMB: number | ''
+  setDownloadChunkSizeMB: (value: number | '') => void
   onRecalculateProjectDataTotals?: () => void
   recalculateProjectDataTotalsLoading?: boolean
   recalculateProjectDataTotalsResult?: string | null
@@ -105,6 +145,12 @@ function formatBytes(bytes: number) {
 }
 
 export function DeveloperToolsSection({
+  excludeInternalIpsFromAnalytics,
+  setExcludeInternalIpsFromAnalytics,
+  uploadChunkSizeMB,
+  setUploadChunkSizeMB,
+  downloadChunkSizeMB,
+  setDownloadChunkSizeMB,
   onRecalculateProjectDataTotals,
   recalculateProjectDataTotalsLoading,
   recalculateProjectDataTotalsResult,
@@ -120,7 +166,7 @@ export function DeveloperToolsSection({
   const [orphanProjectFilesError, setOrphanProjectFilesError] = useState<string | null>(null)
 
   const [projectStorageMigrationLoading, setProjectStorageMigrationLoading] = useState(false)
-  const [projectStorageMigrationResult, setProjectStorageMigrationResult] = useState<ProjectStorageYearMonthMigrationResult | null>(null)
+  const [projectStorageMigrationResult, setProjectStorageMigrationResult] = useState<ProjectStorageMigrationResult | null>(null)
   const [projectStorageMigrationError, setProjectStorageMigrationError] = useState<string | null>(null)
 
   const [backlogLoading, setBacklogLoading] = useState(false)
@@ -130,6 +176,10 @@ export function DeveloperToolsSection({
   const [bullmqPurgeLoading, setBullmqPurgeLoading] = useState(false)
   const [bullmqPurgeResult, setBullmqPurgeResult] = useState<BullmqPurgeResult | null>(null)
   const [bullmqPurgeError, setBullmqPurgeError] = useState<string | null>(null)
+
+  const [closedPreviewsLoading, setClosedPreviewsLoading] = useState(false)
+  const [closedPreviewsResult, setClosedPreviewsResult] = useState<ClosedProjectPreviewCleanupResult | null>(null)
+  const [closedPreviewsError, setClosedPreviewsError] = useState<string | null>(null)
 
   async function runBullmqPurge(dryRun: boolean) {
     setBullmqPurgeLoading(true)
@@ -141,6 +191,19 @@ export function DeveloperToolsSection({
       setBullmqPurgeError(e?.message || 'Failed to run BullMQ purge')
     } finally {
       setBullmqPurgeLoading(false)
+    }
+  }
+
+  async function runClosedPreviewsCleanup(dryRun: boolean) {
+    setClosedPreviewsLoading(true)
+    setClosedPreviewsError(null)
+    try {
+      const res = await apiPost('/api/settings/delete-closed-project-previews', { dryRun })
+      setClosedPreviewsResult(res as ClosedProjectPreviewCleanupResult)
+    } catch (e: any) {
+      setClosedPreviewsError(e?.message || 'Failed to run closed project preview cleanup')
+    } finally {
+      setClosedPreviewsLoading(false)
     }
   }
 
@@ -205,7 +268,7 @@ export function DeveloperToolsSection({
 
     try {
       const res = await apiPost('/api/settings/migrate-project-storage-yearmonth', { dryRun })
-      setProjectStorageMigrationResult(res as ProjectStorageYearMonthMigrationResult)
+      setProjectStorageMigrationResult(res as ProjectStorageMigrationResult)
     } catch (e: any) {
       setProjectStorageMigrationError(e?.message || 'Failed to run migration')
     } finally {
@@ -233,6 +296,71 @@ export function DeveloperToolsSection({
 
       {show && (
         <CardContent className="space-y-4 border-t pt-4">
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5 flex-1 min-w-0">
+                <Label htmlFor="excludeInternalIpsFromAnalytics">Exclude internal/admin IPs from analytics</Label>
+                <p className="text-xs text-muted-foreground">
+                  Leave this on for normal use. Turn it off temporarily when you need to test project, quote, or invoice analytics from an internal/admin network.
+                </p>
+              </div>
+              <Switch
+                id="excludeInternalIpsFromAnalytics"
+                checked={excludeInternalIpsFromAnalytics}
+                onCheckedChange={setExcludeInternalIpsFromAnalytics}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="space-y-0.5">
+              <Label>Transfer tuning</Label>
+              <p className="text-xs text-muted-foreground">
+                Controls the TUS upload PATCH size and the server-side file read/download chunk size. Changes apply after saving settings.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="uploadChunkSizeMB">Upload chunk size (MB)</Label>
+                <Input
+                  id="uploadChunkSizeMB"
+                  type="number"
+                  min={MIN_UPLOAD_CHUNK_SIZE_MB}
+                  max={MAX_UPLOAD_CHUNK_SIZE_MB}
+                  step={1}
+                  value={uploadChunkSizeMB}
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    setUploadChunkSizeMB(nextValue === '' ? '' : Number(nextValue))
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Allowed range: {MIN_UPLOAD_CHUNK_SIZE_MB}-{MAX_UPLOAD_CHUNK_SIZE_MB} MB.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="downloadChunkSizeMB">Download chunk size (MB)</Label>
+                <Input
+                  id="downloadChunkSizeMB"
+                  type="number"
+                  min={MIN_DOWNLOAD_CHUNK_SIZE_MB}
+                  max={MAX_DOWNLOAD_CHUNK_SIZE_MB}
+                  step={1}
+                  value={downloadChunkSizeMB}
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    setDownloadChunkSizeMB(nextValue === '' ? '' : Number(nextValue))
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Allowed range: {MIN_DOWNLOAD_CHUNK_SIZE_MB}-{MAX_DOWNLOAD_CHUNK_SIZE_MB} MB.
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-0.5 min-w-0">
@@ -450,13 +578,12 @@ export function DeveloperToolsSection({
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-0.5 min-w-0">
-                <Label>Project storage migration (YYYY-MM)</Label>
+                <Label>Project storage normalization</Label>
                 <p className="text-xs text-muted-foreground">
-                  Moves existing projects into <span className="font-mono">projects/YYYY-MM/&lt;projectId&gt;</span> based on their
-                  created date, and ensures a redirect stub exists at <span className="font-mono">projects/&lt;projectId&gt;</span> so legacy
-                  storage paths still work. If a project already has a YYYY-MM folder but newer files were written into the legacy root,
-                  the migration merges that misplaced content back into the correct folder.
-                  Run a dry-run first to preview changes.
+                  Normalizes existing local storage into the canonical client/project layout under
+                  <span className="font-mono"> clients/&lt;client&gt;/projects/&lt;project&gt; </span>
+                  and rehomes video and album folders to use their names instead of legacy IDs or date-based roots.
+                  Run a dry-run first to preview changes before applying them.
                 </p>
 
                 {projectStorageMigrationError ? (
@@ -469,17 +596,29 @@ export function DeveloperToolsSection({
                       Projects checked: {projectStorageMigrationResult.projectsChecked}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Already in YYYY-MM: {projectStorageMigrationResult.alreadyInYearMonthFolder}
+                      Migrated: {projectStorageMigrationResult.projectsMigrated}; already canonical: {projectStorageMigrationResult.projectsAlreadyCanonical}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Moved: {projectStorageMigrationResult.movedFromLegacyRoot} from legacy root; {projectStorageMigrationResult.movedFromClosedFolder} from closed folder
+                      Skipped without client: {projectStorageMigrationResult.projectsWithoutClient}; missing on disk: {projectStorageMigrationResult.projectsWithoutExistingRoot}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Redirect stubs created/updated: {projectStorageMigrationResult.stubsCreatedOrUpdated}
-                      {projectStorageMigrationResult.closedFoldersPruned !== undefined ? `; closed folders pruned: ${projectStorageMigrationResult.closedFoldersPruned}` : ''}
+                      Project roots moved: {projectStorageMigrationResult.projectRootsMoved}; video folders normalized: {projectStorageMigrationResult.videoFoldersNormalized}; album folders normalized: {projectStorageMigrationResult.albumFoldersNormalized}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Asset files normalized: {projectStorageMigrationResult.assetFilesNormalized}; records updated: {projectStorageMigrationResult.recordsUpdated}
                     </p>
                     {projectStorageMigrationResult.errors?.length ? (
                       <p className="text-xs text-muted-foreground">Errors: {projectStorageMigrationResult.errors.length}</p>
+                    ) : null}
+                    {projectStorageMigrationResult.legacyFolderCleanup ? (
+                      <p className="text-xs text-muted-foreground">
+                        Legacy projects/ cleanup: {projectStorageMigrationResult.legacyFolderCleanup.removed.length
+                          ? `removed ${projectStorageMigrationResult.legacyFolderCleanup.removed.join(', ')}`
+                          : 'nothing to remove'}
+                        {projectStorageMigrationResult.legacyFolderCleanup.skippedNonEmpty
+                          ? ' (some folders still contain data files)'
+                          : ''}
+                      </p>
                     ) : null}
 
                     {projectStorageMigrationResult.sample ? (
@@ -489,21 +628,19 @@ export function DeveloperToolsSection({
                         </summary>
                         <div className="mt-2 space-y-2">
                           <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Moved projects (first 10)</div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Migrated projects (first 10)</div>
                             <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {(projectStorageMigrationResult.sample.movedProjects?.length
-                                ? projectStorageMigrationResult.sample.movedProjects.map((p) => `${p.id}\t${p.title}`)
-                                : projectStorageMigrationResult.sample.movedProjectIds
-                              ).join('\n')}
+                              {projectStorageMigrationResult.sample.migratedProjects
+                                .map((p) => `${p.id}\t${p.title}\t${p.targetPath}`)
+                                .join('\n') || 'None'}
                             </pre>
                           </div>
                           <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Missing projects (first 10)</div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Skipped projects (first 10)</div>
                             <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {(projectStorageMigrationResult.sample.missingProjects?.length
-                                ? projectStorageMigrationResult.sample.missingProjects.map((p) => `${p.id}\t${p.title}`)
-                                : projectStorageMigrationResult.sample.missingProjectIds
-                              ).join('\n')}
+                              {projectStorageMigrationResult.sample.skippedProjects
+                                .map((p) => `${p.id}\t${p.title}\t${p.reason}`)
+                                .join('\n') || 'None'}
                             </pre>
                           </div>
 
@@ -540,11 +677,107 @@ export function DeveloperToolsSection({
                   variant="secondary"
                   disabled={projectStorageMigrationLoading}
                   onClick={() => {
-                    if (!confirm('Move project folders into projects/YYYY-MM/<projectId>? This cannot be undone.')) return
+                    if (!confirm('Normalize project storage into clients/<client>/projects/<project>? This cannot be undone.')) return
                     void runProjectStorageYearMonthMigration(false)
                   }}
                 >
                   {projectStorageMigrationLoading ? 'Running…' : 'Migrate'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Delete previews for closed projects</Label>
+                <p className="text-xs text-muted-foreground">
+                  Finds all CLOSED projects that still have preview files (480p, 720p, 1080p) or timeline sprite
+                  directories on disk, and deletes them to reclaim storage.
+                  Database fields are cleared so previews will regenerate if the project is re-opened.
+                  Run a dry-run first to preview impact.
+                </p>
+
+                {closedPreviewsError ? (
+                  <p className="text-xs text-destructive">{closedPreviewsError}</p>
+                ) : null}
+
+                {closedPreviewsResult ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Closed projects: {closedPreviewsResult.closedProjects} total, {closedPreviewsResult.projectsWithPreviews} with previews
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Videos with previews: {closedPreviewsResult.videosWithPreviews}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Preview files: {closedPreviewsResult.previewFiles}; timeline sprite dirs: {closedPreviewsResult.timelineDirs}
+                    </p>
+                    {closedPreviewsResult.deleted ? (
+                      <p className="text-xs text-muted-foreground">
+                        Deleted: {closedPreviewsResult.deleted.previewFiles} preview files
+                        {closedPreviewsResult.deleted.previewFilesFailed ? ` (${closedPreviewsResult.deleted.previewFilesFailed} failed)` : ''}
+                        , {closedPreviewsResult.deleted.timelineDirs} timeline dirs
+                        {closedPreviewsResult.deleted.timelineDirsFailed ? ` (${closedPreviewsResult.deleted.timelineDirsFailed} failed)` : ''}
+                      </p>
+                    ) : null}
+                    {closedPreviewsResult.errors?.length ? (
+                      <p className="text-xs text-muted-foreground">Errors: {closedPreviewsResult.errors.length}</p>
+                    ) : null}
+
+                    {closedPreviewsResult.sample?.projects?.length ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show affected projects
+                        </summary>
+                        <div className="mt-2 space-y-2">
+                          <div>
+                            <div className="text-[11px] font-medium text-muted-foreground">Affected projects (first 10)</div>
+                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                              {closedPreviewsResult.sample.projects
+                                .map(p => `${p.id}\t${p.title} (${p.videos} video${p.videos !== 1 ? 's' : ''})`)
+                                .join('\n')}
+                            </pre>
+                          </div>
+
+                          {closedPreviewsResult.errors?.length ? (
+                            <div>
+                              <div className="text-[11px] font-medium text-muted-foreground">Errors (first 20)</div>
+                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                {closedPreviewsResult.errors
+                                  .slice(0, 20)
+                                  .map(e => `${e.projectId}: ${e.path}: ${e.error}`)
+                                  .join('\n')}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={closedPreviewsLoading}
+                  onClick={() => void runClosedPreviewsCleanup(true)}
+                >
+                  {closedPreviewsLoading ? 'Running\u2026' : 'Dry run'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={closedPreviewsLoading}
+                  onClick={() => {
+                    if (!confirm('Delete all preview files and timeline sprites for CLOSED projects? This cannot be undone.')) return
+                    void runClosedPreviewsCleanup(false)
+                  }}
+                >
+                  {closedPreviewsLoading ? 'Running\u2026' : 'Delete previews'}
                 </Button>
               </div>
             </div>

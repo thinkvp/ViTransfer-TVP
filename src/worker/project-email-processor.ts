@@ -5,6 +5,7 @@ import { sanitizeFilename } from '../lib/file-validation'
 import { simpleParser, type SimpleParserOptions } from 'mailparser'
 import type { ProjectEmailProcessingJob } from '../lib/queue'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { buildProjectEmailAttachmentStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -33,7 +34,7 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
   // Load record and ensure it belongs to the expected project
   const email = await prisma.projectEmail.findUnique({
     where: { id: projectEmailId },
-    include: { attachments: true },
+    include: { attachments: true, project: { select: { storagePath: true, title: true, companyName: true, client: { select: { name: true } } } } },
   })
 
   if (!email || email.projectId !== projectId || email.rawStoragePath !== rawStoragePath) {
@@ -130,7 +131,9 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
       const referencedByCid = cid ? (htmlForInlineCheck.includes(`cid:${cid}`) || htmlForInlineCheck.includes(`cid:<${cid}>`)) : false
       const isInline = att.contentDisposition === 'inline' || referencedByCid
 
-      const storagePath = `projects/${projectId}/communication/emails/${projectEmailId}/att-${now}-${i + 1}-${safeName}`
+      const projectStoragePath = email.project.storagePath
+        || buildProjectStorageRoot(email.project.client?.name || email.project.companyName || 'Client', email.project.title)
+      const storagePath = buildProjectEmailAttachmentStoragePath(projectStoragePath, projectEmailId, safeName, now, i + 1)
 
       // When streamAttachments=true, att.content is a stream.
       await uploadFile(storagePath, att.content, size, contentType)

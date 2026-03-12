@@ -13,8 +13,6 @@ interface ProjectBehaviorSectionProps {
   setAutoCloseApprovedProjectsAfterDays: (value: number | '') => void
   autoDeletePreviewsOnClose: boolean
   setAutoDeletePreviewsOnClose: (value: boolean) => void
-  autoDeleteAlbumZipsOnClose: boolean
-  setAutoDeleteAlbumZipsOnClose: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -28,8 +26,6 @@ export function ProjectBehaviorSection({
   setAutoCloseApprovedProjectsAfterDays,
   autoDeletePreviewsOnClose,
   setAutoDeletePreviewsOnClose,
-  autoDeleteAlbumZipsOnClose,
-  setAutoDeleteAlbumZipsOnClose,
   show,
   setShow,
 }: ProjectBehaviorSectionProps) {
@@ -130,20 +126,6 @@ export function ProjectBehaviorSection({
                 id="autoDeletePreviewsOnClose"
                 checked={autoDeletePreviewsOnClose}
                 onCheckedChange={setAutoDeletePreviewsOnClose}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5 flex-1">
-                <Label htmlFor="autoDeleteAlbumZipsOnClose">Auto-delete album ZIP files when project is closed</Label>
-                <p className="text-xs text-muted-foreground">
-                  When enabled, all generated photo album ZIP files will be deleted when a project is closed to save disk space. They will be automatically regenerated if the project is reopened.
-                </p>
-              </div>
-              <Switch
-                id="autoDeleteAlbumZipsOnClose"
-                checked={autoDeleteAlbumZipsOnClose}
-                onCheckedChange={setAutoDeleteAlbumZipsOnClose}
               />
             </div>
           </div>

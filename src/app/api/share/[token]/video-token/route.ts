@@ -6,6 +6,42 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+function canIssueShareVideoToken(
+  video: {
+    approved: boolean
+    originalStoragePath: string | null
+    thumbnailPath: string | null
+    preview480Path: string | null
+    preview720Path: string | null
+    preview1080Path: string | null
+    timelinePreviewVttPath: string | null
+    timelinePreviewSpritesPath: string | null
+  },
+  quality: string,
+): boolean {
+  const canUseOriginal = Boolean(video.originalStoragePath && video.approved)
+
+  switch (quality) {
+    case '480p':
+      return Boolean(video.preview480Path || video.preview720Path || video.preview1080Path || canUseOriginal)
+    case '720p':
+      return Boolean(video.preview720Path || video.preview1080Path || video.preview480Path || canUseOriginal)
+    case '1080p':
+      return Boolean(video.preview1080Path || video.preview720Path || video.preview480Path || canUseOriginal)
+    case 'thumbnail':
+      return Boolean(video.thumbnailPath)
+    case 'timeline-vtt':
+      return Boolean(video.timelinePreviewVttPath)
+    case 'timeline-sprite':
+      return Boolean(video.timelinePreviewSpritesPath)
+    case 'original':
+    case 'download':
+      return canUseOriginal
+    default:
+      return false
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -43,6 +79,7 @@ export async function GET(
       id: true,
       projectId: true,
       approved: true,
+      originalStoragePath: true,
       thumbnailPath: true,
       preview480Path: true,
       preview720Path: true,
@@ -56,27 +93,8 @@ export async function GET(
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }
 
-  if (quality === '480p' && !(video as any).preview480Path) {
-    return NextResponse.json({ error: '480p preview unavailable' }, { status: 404 })
-  }
-  if (quality === '720p' && !video.preview720Path) {
-    return NextResponse.json({ error: '720p preview unavailable' }, { status: 404 })
-  }
-  if (quality === '1080p' && !video.preview1080Path) {
-    return NextResponse.json({ error: '1080p preview unavailable' }, { status: 404 })
-  }
-  if (quality === 'thumbnail' && !video.thumbnailPath) {
-    return NextResponse.json({ error: 'Thumbnail unavailable' }, { status: 404 })
-  }
-  if (quality === 'timeline-vtt' && !video.timelinePreviewVttPath) {
-    return NextResponse.json({ error: 'Timeline VTT unavailable' }, { status: 404 })
-  }
-  if (quality === 'timeline-sprite' && !video.timelinePreviewSpritesPath) {
-    return NextResponse.json({ error: 'Timeline sprite unavailable' }, { status: 404 })
-  }
-
-  if (quality === 'original' && !video.approved) {
-    return NextResponse.json({ error: 'Original quality unavailable' }, { status: 403 })
+  if (!canIssueShareVideoToken(video, quality)) {
+    return NextResponse.json({ error: `${quality} unavailable` }, { status: quality === 'original' ? 403 : 404 })
   }
 
   const sessionId = shareContext.sessionId || `share:${project.id}:${token}`

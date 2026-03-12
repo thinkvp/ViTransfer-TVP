@@ -64,22 +64,32 @@ export function ProjectStorageUsage({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [hasLoadedDiskDetails, setHasLoadedDiskDetails] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    async function load() {
+    async function loadSummary() {
       setLoading(true)
       setError(null)
       try {
-        // Ask the server for on-disk sizes when available.
-        // The server may omit these fields (older versions or unsupported environments).
-        const res = await apiFetch(`/api/projects/${projectId}/storage?includeDisk=1`)
+        const res = await apiFetch(`/api/projects/${projectId}/storage`)
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
           throw new Error(body?.error || 'Failed to load storage usage')
         }
         const json = (await res.json()) as StorageSummary
-        if (!cancelled) setData(json)
+        if (!cancelled) {
+          setData((prev) => ({
+            ...(prev || {}),
+            ...json,
+            diskTotalBytes: prev?.diskTotalBytes ?? null,
+            diskOtherBytes: prev?.diskOtherBytes ?? null,
+            capacityBytes: prev?.capacityBytes ?? json.capacityBytes,
+            availableBytes: prev?.availableBytes ?? json.availableBytes,
+            diskBreakdown: prev?.diskBreakdown ?? null,
+          }))
+          setHasLoadedDiskDetails(false)
+        }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Failed to load storage usage')
       } finally {
@@ -87,11 +97,42 @@ export function ProjectStorageUsage({
       }
     }
 
-    void load()
+    void loadSummary()
     return () => {
       cancelled = true
     }
   }, [projectId, refreshTrigger])
+
+  useEffect(() => {
+    if (!expanded || hasLoadedDiskDetails) return
+
+    let cancelled = false
+    async function loadDiskDetails() {
+      setLoading(true)
+      setError(null)
+      try {
+        const res = await apiFetch(`/api/projects/${projectId}/storage?includeDisk=1`)
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body?.error || 'Failed to load storage usage')
+        }
+        const json = (await res.json()) as StorageSummary
+        if (!cancelled) {
+          setData((prev) => (prev ? { ...prev, ...json } : json))
+          setHasLoadedDiskDetails(true)
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Failed to load storage usage')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void loadDiskDetails()
+    return () => {
+      cancelled = true
+    }
+  }, [expanded, hasLoadedDiskDetails, projectId])
 
   const rows: Row[] = useMemo(() => {
     const effectiveTotal = Math.max(0, Number((data?.diskTotalBytes ?? data?.totalBytes) || 0))

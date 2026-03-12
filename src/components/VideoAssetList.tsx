@@ -13,7 +13,8 @@ import {
   ImagePlay,
   Trash2,
   Loader2,
-  Copy
+  Copy,
+  Cloud,
 } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
@@ -28,6 +29,8 @@ interface VideoAsset {
   fileType: string
   category: string | null
   createdAt: string
+  dropboxEnabled?: boolean
+  dropboxUploadStatus?: string | null
 }
 
 interface VideoAssetListProps {
@@ -36,6 +39,7 @@ interface VideoAssetListProps {
   versionLabel: string
   projectId: string
   canManage?: boolean
+  dropboxConfigured?: boolean
   onAssetDeleted?: () => void
   refreshTrigger?: number // Used to trigger refetch from parent
 }
@@ -46,6 +50,7 @@ export function VideoAssetList({
   versionLabel,
   projectId,
   canManage = true,
+  dropboxConfigured = false,
   onAssetDeleted,
   refreshTrigger,
 }: VideoAssetListProps) {
@@ -81,6 +86,28 @@ export function VideoAssetList({
   useEffect(() => {
     fetchAssets()
   }, [fetchAssets, refreshTrigger])
+
+  // Poll while any asset has a Dropbox upload in progress
+  useEffect(() => {
+    const hasActiveUpload = assets.some(
+      a => a.dropboxUploadStatus === 'PENDING' || a.dropboxUploadStatus === 'UPLOADING'
+    )
+    if (!hasActiveUpload) return
+
+    const interval = setInterval(() => {
+      apiFetch(`/api/videos/${videoId}/assets`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.assets) {
+            setAssets(data.assets)
+            setCurrentThumbnailPath(data.currentThumbnailPath || null)
+          }
+        })
+        .catch(() => {})
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [assets, videoId])
 
   const handleDelete = async (assetId: string, fileName: string) => {
     if (!canManage) return
@@ -245,8 +272,6 @@ export function VideoAssetList({
 
   const isCurrentThumbnail = (asset: VideoAsset) => {
     if (!currentThumbnailPath) return false
-    // Check if this asset's storage path matches the video's thumbnailPath
-    // The thumbnailPath might be a relative path, so we need to check if it contains the asset info
     return currentThumbnailPath.includes(asset.id) || currentThumbnailPath.includes(asset.fileName)
   }
 
@@ -312,6 +337,26 @@ export function VideoAssetList({
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
+                {/* Dropbox cloud status icon */}
+                {dropboxConfigured && asset.dropboxEnabled && (
+                  <span
+                    className="inline-flex items-center justify-center w-8 h-8"
+                    title={
+                      asset.dropboxUploadStatus === 'PENDING' || asset.dropboxUploadStatus === 'UPLOADING'
+                        ? 'Uploading to Dropbox…'
+                        : 'Stored in Dropbox'
+                    }
+                  >
+                    {asset.dropboxUploadStatus === 'PENDING' || asset.dropboxUploadStatus === 'UPLOADING' ? (
+                      <span className="relative inline-flex h-4 w-4">
+                        <span className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                        <Cloud className="w-4 h-4 text-primary" />
+                      </span>
+                    ) : (
+                      <Cloud className="w-4 h-4 text-primary" />
+                    )}
+                  </span>
+                )}
                 {canManage && canSetAsThumbnail(asset) && (
                   <Button
                     type="button"

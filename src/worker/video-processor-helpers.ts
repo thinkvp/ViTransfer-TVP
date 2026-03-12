@@ -1,7 +1,14 @@
 import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile } from '../lib/storage'
+import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus } from '@prisma/client'
+import {
+  buildProjectStorageRoot,
+  buildVideoPreviewStoragePath,
+  buildVideoThumbnailStoragePath,
+  buildVideoTimelineStorageRoot,
+} from '@/lib/project-storage-paths'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -25,9 +32,35 @@ export const RESOLUTION_PRESETS = {
 export const VALID_RESOLUTIONS = VALID_PREVIEW_RESOLUTIONS
 export type Resolution = PreviewResolution
 
+async function getCanonicalVideoStorageContext(videoId: string): Promise<{ projectStoragePath: string; videoFolderName: string; versionLabel: string }> {
+  const video = await prisma.video.findUnique({
+    where: { id: videoId },
+    select: {
+      name: true,
+      version: true,
+      versionLabel: true,
+      storageFolderName: true,
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
+  })
+
+  const project = video?.project
+  return {
+    projectStoragePath: project?.storagePath
+      || buildProjectStorageRoot(project?.client?.name || project?.companyName || 'Client', project?.title || 'Untitled'),
+    videoFolderName: video?.storageFolderName || video?.name || videoId,
+    versionLabel: video?.versionLabel || `v${video?.version ?? 1}`,
+  }
+}
+
 /**
- * Parse a previewResolutions JSON string into an array of resolution strings.
- * Falls back to ['720p'] on invalid input.
  */
 export function parseResolutions(raw: string | null | undefined): Resolution[] {
   if (!raw) return ['720p']
@@ -117,7 +150,6 @@ export function debugLog(message: string, data?: any) {
     console.log(`[WORKER DEBUG] ${message}`)
   }
 }
-
 export class VideoRecordMissingError extends Error {
   constructor(videoId: string, context?: string) {
     super(`Video ${videoId} was removed during processing${context ? ` (${context})` : ''}`)
@@ -202,8 +234,16 @@ export async function downloadAndValidateVideo(
 ): Promise<VideoInfo> {
   debugLog('Starting validation...')
 
-  // Resolve the absolute path to the original file in storage root (no copy)
-  const inputPath = getFilePath(storagePath)
+  const resolvedInput = await materializeStoragePathToLocalFile({
+    rawPath: storagePath,
+    tempDir: TEMP_DIR,
+    suggestedName: `${videoId}-source.bin`,
+  })
+  const inputPath = resolvedInput.localPath
+
+  if (resolvedInput.isTemporary) {
+    tempFiles.input = inputPath
+  }
 
   debugLog('Reading original directly from:', inputPath)
 
@@ -455,7 +495,8 @@ export async function processTimelinePreviews(
   await fs.promises.writeFile(tempVttPath, vttLines.join('\n'), 'utf-8')
 
   // Move VTT + sprites to storage (atomic rename on same filesystem)
-  const spritesPath = `projects/${projectId}/videos/${videoId}/timeline-previews`
+  const storageContext = await getCanonicalVideoStorageContext(videoId)
+  const spritesPath = buildVideoTimelineStorageRoot(storageContext.projectStoragePath, storageContext.videoFolderName, storageContext.versionLabel)
   const vttPath = `${spritesPath}/index.vtt`
 
   await moveTempFileToLogicalStorage(tempVttPath, vttPath)
@@ -606,7 +647,13 @@ export async function processPreview(
   debugLog('Transcoded file size:', (transcodeStats.size / 1024 / 1024).toFixed(2) + ' MB')
 
   // Move preview to storage (atomic rename on same filesystem, stream-copy fallback)
-  const previewPath = `projects/${projectId}/videos/${videoId}/preview-${resolution}.mp4`
+  const storageContext = await getCanonicalVideoStorageContext(videoId)
+  const previewPath = buildVideoPreviewStoragePath(
+    storageContext.projectStoragePath,
+    storageContext.videoFolderName,
+    storageContext.versionLabel,
+    resolution,
+  )
 
   debugLog('Moving preview to logical path:', previewPath)
 
@@ -664,7 +711,12 @@ export async function processThumbnail(
   }
 
   // Move thumbnail to storage (atomic rename on same filesystem, stream-copy fallback)
-  const thumbnailPath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
+  const storageContext = await getCanonicalVideoStorageContext(videoId)
+  const thumbnailPath = buildVideoThumbnailStoragePath(
+    storageContext.projectStoragePath,
+    storageContext.videoFolderName,
+    storageContext.versionLabel,
+  )
 
   debugLog('Moving thumbnail to logical path:', thumbnailPath)
 

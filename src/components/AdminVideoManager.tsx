@@ -24,6 +24,7 @@ interface AdminVideoManagerProps {
   comments?: any[]
   restrictToLatestVersion?: boolean
   companyName?: string
+  dropboxConfigured?: boolean
   canFullControl?: boolean
   onVideoSelect?: (videoName: string, videos: any[]) => void
   onRefresh?: () => void
@@ -39,6 +40,7 @@ export default function AdminVideoManager({
   comments = [],
   restrictToLatestVersion = false,
   companyName = 'Studio',
+  dropboxConfigured = false,
   canFullControl = true,
   onVideoSelect,
   onRefresh,
@@ -292,6 +294,7 @@ export default function AdminVideoManager({
                           videoName={groupName}
                           allowApproval={canFullControl ? undefined : false}
                           showAllowApprovalField={canFullControl}
+                          dropboxConfigured={dropboxConfigured}
                           onUploadComplete={() => {
                             setShowNewVersionForGroup(null)
                             handleUploadComplete()
@@ -311,6 +314,7 @@ export default function AdminVideoManager({
                     canDelete={canFullControl}
                     canApprove={canFullControl}
                     canManageAllowApproval={canFullControl}
+                    dropboxConfigured={dropboxConfigured}
                   />
                 </div>
               </CardContent>
@@ -321,7 +325,7 @@ export default function AdminVideoManager({
 
       {/* Add new video button */}
       {projectStatus !== 'APPROVED' && (
-        <div>
+        <div className="space-y-2">
           <Button
             variant="outline"
             size="lg"
@@ -338,6 +342,7 @@ export default function AdminVideoManager({
             projectId={projectId}
             canFullControl={canFullControl}
             onUploadComplete={handleUploadComplete}
+            dropboxConfigured={dropboxConfigured}
           />
         </div>
       )}

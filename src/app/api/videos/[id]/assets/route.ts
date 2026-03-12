@@ -6,6 +6,8 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { isDropboxStorageConfigured, toDropboxStoragePath } from '@/lib/storage-provider-dropbox'
+import { buildProjectStorageRoot, buildVideoAssetDropboxPath, buildVideoAssetStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -48,7 +50,7 @@ export async function GET(
       where: { id: videoId },
       include: {
         project: {
-          include: { assignedUsers: { select: { userId: true } } },
+          include: { client: { select: { name: true } }, assignedUsers: { select: { userId: true } } },
         },
       },
     })
@@ -155,7 +157,7 @@ export async function POST(
       where: { id: videoId },
       include: {
         project: {
-          include: { assignedUsers: { select: { userId: true } } },
+          include: { client: { select: { name: true } }, assignedUsers: { select: { userId: true } } },
         },
       },
     })
@@ -209,7 +211,26 @@ export async function POST(
     // Create storage path (use sanitized filename from validation)
     const timestamp = Date.now()
     const sanitizedFileName = assetValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255)
-    const storagePath = `projects/${video.projectId}/videos/assets/${videoId}/asset-${timestamp}-${sanitizedFileName}`
+    const projectStoragePath = video.project.storagePath
+      || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
+    const videoFolderName = video.storageFolderName || video.name
+    const versionLabel = video.versionLabel || `v${video.version}`
+    const localPath = buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, sanitizedFileName)
+
+    // Auto-enable Dropbox for new assets when the video already has Dropbox enabled
+    const autoDropbox = video.dropboxEnabled === true && isDropboxStorageConfigured()
+    const storagePath = autoDropbox ? toDropboxStoragePath(localPath) : localPath
+
+    // Build human-friendly Dropbox path for assets: {Project}/{Video}/Assets/{filename}
+    const assetDropboxPath = autoDropbox
+      ? buildVideoAssetDropboxPath(
+          video.project.client?.name || video.project.companyName || 'Client',
+          getStoragePathBasename(projectStoragePath) || video.project.title,
+          videoFolderName,
+          versionLabel,
+          sanitizedFileName,
+        )
+      : null
 
     // Use detected category if not provided
     const finalCategory = normalizedCategory || assetValidation.detectedCategory || 'other'
@@ -225,6 +246,12 @@ export async function POST(
         storagePath,
         category: finalCategory,
         uploadedByName: currentUser.name || currentUser.email,
+        ...(autoDropbox ? {
+          dropboxEnabled: true,
+          dropboxPath: assetDropboxPath,
+          dropboxUploadStatus: 'PENDING',
+          dropboxUploadProgress: 0,
+        } : {}),
       },
     })
 

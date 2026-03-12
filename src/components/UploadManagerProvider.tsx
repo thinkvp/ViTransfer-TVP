@@ -1,9 +1,10 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as tus from 'tus-js-client'
 import { getAccessToken } from '@/lib/token-store'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 import {
   clearFileContext,
   clearTUSFingerprint,
@@ -47,6 +48,52 @@ export type ProcessingJob = {
   threadBudget: number | null
 }
 
+/** Background Dropbox upload job (polled from server). */
+export type DropboxUploadJob = {
+  id: string
+  projectId: string
+  projectName: string
+  videoName: string
+  versionLabel: string | null
+  status: string // PENDING | UPLOADING
+  progress: number
+  fileSizeBytes: number
+}
+
+/** Album ZIP generation job (polled from BullMQ via server). */
+export type AlbumZipJob = {
+  id: string
+  albumId: string
+  albumName: string
+  projectId: string
+  projectName: string
+  variant: 'full' | 'social'
+  status: 'PENDING' | 'ACTIVE'
+}
+
+/** Album ZIP Dropbox upload job (polled from server DB). */
+export type AlbumZipDropboxJob = {
+  id: string
+  albumId: string
+  albumName: string
+  projectId: string
+  projectName: string
+  variant: 'full' | 'social'
+  status: string // PENDING | UPLOADING
+  progress: number
+  fileSizeBytes: number
+}
+
+/** A server-side job that has recently completed (kept for 30 min). */
+export type CompletedServerJob = {
+  id: string
+  type: 'processing' | 'dropbox' | 'albumZip' | 'albumZipDropbox'
+  label: string
+  sublabel: string
+  projectId: string
+  completedAt: number
+}
+
 export type StartUploadConfig = {
   file: File
   projectId: string
@@ -61,7 +108,15 @@ export type UploadManagerContextType = {
   uploads: UploadJob[]
   /** Server-side queued/processing jobs, including READY timeline-only work (polled). */
   processingJobs: ProcessingJob[]
-  /** Badge count: queued + uploading + paused + processing. */
+  /** Background Dropbox upload jobs (polled). */
+  dropboxJobs: DropboxUploadJob[]
+  /** Album ZIP generation jobs (polled from queue). */
+  albumZipJobs: AlbumZipJob[]
+  /** Album ZIP Dropbox upload jobs (polled). */
+  albumZipDropboxJobs: AlbumZipDropboxJob[]
+  /** Recently completed server-side jobs (kept for 30 min). */
+  completedServerJobs: CompletedServerJob[]
+  /** Badge count: queued + uploading + paused + processing + dropbox + album zips. */
   totalActiveCount: number
   /** Enqueue a new upload. Returns the job ID. */
   addUpload: (config: StartUploadConfig) => string
@@ -73,9 +128,16 @@ export type UploadManagerContextType = {
   resumeUpload: (id: string) => void
   /** Remove a finished (success / error) job from the list. */
   dismissUpload: (id: string) => void
+  /** Remove a completed server-side job from the list. */
+  dismissCompletedJob: (id: string) => void
   /** Notify the provider when the Running Jobs dropdown opens/closes (adjusts poll rate). */
   setDropdownOpen: (open: boolean) => void
 }
+
+type UploadManagerActionsContextType = Pick<
+  UploadManagerContextType,
+  'addUpload' | 'cancelUpload' | 'pauseUpload' | 'resumeUpload' | 'dismissUpload' | 'dismissCompletedJob' | 'setDropdownOpen'
+>
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -96,10 +158,17 @@ type InternalJob = UploadJob & {
 // ---------------------------------------------------------------------------
 
 const UploadManagerContext = createContext<UploadManagerContextType | null>(null)
+const UploadManagerActionsContext = createContext<UploadManagerActionsContextType | null>(null)
 
 export function useUploadManager() {
   const ctx = useContext(UploadManagerContext)
   if (!ctx) throw new Error('useUploadManager must be used within UploadManagerProvider')
+  return ctx
+}
+
+export function useUploadManagerActions() {
+  const ctx = useContext(UploadManagerActionsContext)
+  if (!ctx) throw new Error('useUploadManagerActions must be used within UploadManagerProvider')
   return ctx
 }
 
@@ -115,14 +184,35 @@ export function useUploadManagerOptional(): UploadManagerContextType | null {
 // Provider
 // ---------------------------------------------------------------------------
 
+const MAX_CONCURRENT_UPLOADS = 1
+
 export function UploadManagerProvider({ children }: { children: React.ReactNode }) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
+
   // Internal mutable list — avoids stale-closure issues in TUS callbacks.
   const jobsRef = useRef<InternalJob[]>([])
-  const activeIdRef = useRef<string | null>(null)
+  const activeIdsRef = useRef<Set<string>>(new Set())
 
   // React state for consumers.
   const [uploads, setUploads] = useState<UploadJob[]>([])
   const [processingJobs, setProcessingJobs] = useState<ProcessingJob[]>([])
+  const [dropboxJobs, setDropboxJobs] = useState<DropboxUploadJob[]>([])
+  const [albumZipJobs, setAlbumZipJobs] = useState<AlbumZipJob[]>([])
+  const [albumZipDropboxJobs, setAlbumZipDropboxJobs] = useState<AlbumZipDropboxJob[]>([])
+  const [completedServerJobs, setCompletedServerJobs] = useState<CompletedServerJob[]>([])
+
+  // Track previously-seen job IDs so we can detect completions.
+  const prevProcessingIdsRef = useRef<Set<string>>(new Set())
+  const prevDropboxIdsRef = useRef<Set<string>>(new Set())
+  const prevAlbumZipIdsRef = useRef<Set<string>>(new Set())
+  const prevAlbumZipDropboxIdsRef = useRef<Set<string>>(new Set())
+  // Map id → job metadata for building completion entries.
+  const prevProcessingMapRef = useRef<Map<string, ProcessingJob>>(new Map())
+  const prevDropboxMapRef = useRef<Map<string, DropboxUploadJob>>(new Map())
+  const prevAlbumZipMapRef = useRef<Map<string, AlbumZipJob>>(new Map())
+  const prevAlbumZipDropboxMapRef = useRef<Map<string, AlbumZipDropboxJob>>(new Map())
+  // Track IDs that the user has manually dismissed (so re-polls don't re-add them).
+  const dismissedServerJobIdsRef = useRef<Set<string>>(new Set())
 
   // ------ helpers ------
 
@@ -158,7 +248,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const removeJob = useCallback(
     (id: string) => {
       jobsRef.current = jobsRef.current.filter((j) => j.id !== id)
-      if (activeIdRef.current === id) activeIdRef.current = null
+      activeIdsRef.current.delete(id)
       syncState()
     },
     [syncState],
@@ -169,11 +259,11 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const processNextRef = useRef<() => void>(() => {})
 
   const processNext = useCallback(() => {
-    if (activeIdRef.current) return
+    if (activeIdsRef.current.size >= MAX_CONCURRENT_UPLOADS) return
     const next = jobsRef.current.find((j) => j.status === 'queued')
     if (!next) return
 
-    activeIdRef.current = next.id
+    activeIdsRef.current.add(next.id)
     patchJob(next.id, { status: 'uploading' })
 
     const startTime = Date.now()
@@ -183,7 +273,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     const upload = new tus.Upload(next.file, {
       endpoint: `${window.location.origin}/api/uploads`,
       retryDelays: [0, 1000, 3000, 5000, 10000],
-      chunkSize: 50 * 1024 * 1024,
+      chunkSize: uploadChunkSizeBytes,
       storeFingerprintForResuming: true,
       removeFingerprintOnSuccess: true,
       metadata: {
@@ -220,7 +310,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       },
       onSuccess: () => {
         if (next.cancelled) {
-          activeIdRef.current = null
+          activeIdsRef.current.delete(next.id)
           processNextRef.current()
           return
         }
@@ -228,7 +318,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         clearUploadMetadata(next.file)
         clearTUSFingerprint(next.file)
         patchJob(next.id, { status: 'success', progress: 100, speed: 0 })
-        activeIdRef.current = null
+        activeIdsRef.current.delete(next.id)
 
         // Notify listeners (project pages, etc.)
         next.onComplete?.()
@@ -238,15 +328,15 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           )
         } catch {}
 
-        // Auto-remove successful jobs after 10 minutes.
+        // Auto-remove successful jobs after 30 minutes.
         const jobId = next.id
-        setTimeout(() => removeJob(jobId), 600_000)
+        setTimeout(() => removeJob(jobId), 1_800_000)
 
         processNextRef.current()
       },
       onError: async (error) => {
         if (next.cancelled) {
-          activeIdRef.current = null
+          activeIdsRef.current.delete(next.id)
           processNextRef.current()
           return
         }
@@ -274,7 +364,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         }
 
         patchJob(next.id, { status: 'error', error: errorMessage, speed: 0 })
-        activeIdRef.current = null
+        activeIdsRef.current.delete(next.id)
         processNextRef.current()
       },
     })
@@ -289,7 +379,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       .catch(() => upload.start())
 
     next.tusUpload = upload
-  }, [patchJob, removeJob])
+  }, [patchJob, removeJob, uploadChunkSizeBytes])
 
   // Keep ref in sync so callbacks can call processNext without stale closure.
   useEffect(() => {
@@ -325,7 +415,129 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         const res = await apiFetch('/api/running-jobs')
         if (res.ok && active) {
           const data = await res.json()
-          if (Array.isArray(data.jobs)) setProcessingJobs(data.jobs)
+          const now = Date.now()
+          const newCompleted: CompletedServerJob[] = []
+
+          // --- Processing jobs ---
+          if (Array.isArray(data.jobs)) {
+            const incoming = data.jobs as ProcessingJob[]
+            const incomingIds = new Set(incoming.map((j: ProcessingJob) => j.id))
+
+            // Detect jobs that disappeared (completed)
+            for (const prevId of prevProcessingIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+                const prev = prevProcessingMapRef.current.get(prevId)
+                if (prev) {
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'processing',
+                    label: prev.videoName,
+                    sublabel: prev.projectName,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            prevProcessingIdsRef.current = incomingIds
+            prevProcessingMapRef.current = new Map(incoming.map((j: ProcessingJob) => [j.id, j]))
+            setProcessingJobs(incoming)
+          }
+
+          // --- Dropbox upload jobs ---
+          if (Array.isArray(data.dropboxJobs)) {
+            const incoming = data.dropboxJobs as DropboxUploadJob[]
+            const incomingIds = new Set(incoming.map((j: DropboxUploadJob) => j.id))
+
+            for (const prevId of prevDropboxIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+                const prev = prevDropboxMapRef.current.get(prevId)
+                if (prev) {
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'dropbox',
+                    label: prev.videoName,
+                    sublabel: prev.projectName,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            prevDropboxIdsRef.current = incomingIds
+            prevDropboxMapRef.current = new Map(incoming.map((j: DropboxUploadJob) => [j.id, j]))
+            setDropboxJobs(incoming)
+          }
+
+          // --- Album ZIP jobs ---
+          if (Array.isArray(data.albumZipJobs)) {
+            const incoming = data.albumZipJobs as AlbumZipJob[]
+            const incomingIds = new Set(incoming.map((j: AlbumZipJob) => j.id))
+
+            for (const prevId of prevAlbumZipIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+                const prev = prevAlbumZipMapRef.current.get(prevId)
+                if (prev) {
+                  const variantLabel = prev.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'albumZip',
+                    label: prev.albumName,
+                    sublabel: `${prev.projectName} · ${variantLabel}`,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            prevAlbumZipIdsRef.current = incomingIds
+            prevAlbumZipMapRef.current = new Map(incoming.map((j: AlbumZipJob) => [j.id, j]))
+            setAlbumZipJobs(incoming)
+          }
+
+          // --- Album ZIP Dropbox upload jobs ---
+          if (Array.isArray(data.albumZipDropboxJobs)) {
+            const incoming = data.albumZipDropboxJobs as AlbumZipDropboxJob[]
+            const incomingIds = new Set(incoming.map((j: AlbumZipDropboxJob) => j.id))
+
+            for (const prevId of prevAlbumZipDropboxIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+                const prev = prevAlbumZipDropboxMapRef.current.get(prevId)
+                if (prev) {
+                  const variantLabel = prev.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'albumZipDropbox',
+                    label: prev.albumName,
+                    sublabel: `${prev.projectName} · ${variantLabel}`,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            prevAlbumZipDropboxIdsRef.current = incomingIds
+            prevAlbumZipDropboxMapRef.current = new Map(incoming.map((j: AlbumZipDropboxJob) => [j.id, j]))
+            setAlbumZipDropboxJobs(incoming)
+          }
+
+          // Merge new completions and purge stale (>30 min)
+          if (newCompleted.length > 0) {
+            setCompletedServerJobs((prev) => {
+              const merged = [...prev, ...newCompleted]
+              return merged.filter((j) => now - j.completedAt < 1_800_000)
+            })
+          } else {
+            // Purge stale entries even when no new completions
+            setCompletedServerJobs((prev) => {
+              const filtered = prev.filter((j) => now - j.completedAt < 1_800_000)
+              return filtered.length !== prev.length ? filtered : prev
+            })
+          }
         }
       } catch {
         // ignore transient errors
@@ -452,8 +664,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         } catch {}
       }
       patchJob(id, { status: 'paused', speed: 0 })
-      activeIdRef.current = null
-      // Don't processNext — paused job blocks the slot intentionally.
+      activeIdsRef.current.delete(id)
+      processNextRef.current()
     },
     [patchJob],
   )
@@ -478,27 +690,69 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     [removeJob],
   )
 
+  const dismissCompletedJob = useCallback(
+    (id: string) => {
+      dismissedServerJobIdsRef.current.add(id)
+      setCompletedServerJobs((prev) => prev.filter((j) => j.id !== id))
+    },
+    [],
+  )
+
   // ------ derived ------
 
   const totalActiveCount =
     uploads.filter((u) => u.status === 'queued' || u.status === 'uploading' || u.status === 'paused').length +
-    processingJobs.length
+    processingJobs.length +
+    dropboxJobs.length +
+    albumZipJobs.length +
+    albumZipDropboxJobs.length
+
+  const actionsValue = useMemo<UploadManagerActionsContextType>(() => ({
+    addUpload,
+    cancelUpload,
+    pauseUpload,
+    resumeUpload,
+    dismissUpload,
+    dismissCompletedJob,
+    setDropdownOpen,
+  }), [addUpload, cancelUpload, dismissCompletedJob, dismissUpload, pauseUpload, resumeUpload])
+
+  const contextValue = useMemo<UploadManagerContextType>(() => ({
+    uploads,
+    processingJobs,
+    dropboxJobs,
+    albumZipJobs,
+    albumZipDropboxJobs,
+    completedServerJobs,
+    totalActiveCount,
+    addUpload,
+    cancelUpload,
+    pauseUpload,
+    resumeUpload,
+    dismissUpload,
+    dismissCompletedJob,
+    setDropdownOpen,
+  }), [
+    uploads,
+    processingJobs,
+    dropboxJobs,
+    albumZipJobs,
+    albumZipDropboxJobs,
+    completedServerJobs,
+    totalActiveCount,
+    addUpload,
+    cancelUpload,
+    pauseUpload,
+    resumeUpload,
+    dismissUpload,
+    dismissCompletedJob,
+  ])
 
   return (
-    <UploadManagerContext.Provider
-      value={{
-        uploads,
-        processingJobs,
-        totalActiveCount,
-        addUpload,
-        cancelUpload,
-        pauseUpload,
-        resumeUpload,
-        dismissUpload,
-        setDropdownOpen,
-      }}
-    >
-      {children}
-    </UploadManagerContext.Provider>
+    <UploadManagerActionsContext.Provider value={actionsValue}>
+      <UploadManagerContext.Provider value={contextValue}>
+        {children}
+      </UploadManagerContext.Provider>
+    </UploadManagerActionsContext.Provider>
   )
 }

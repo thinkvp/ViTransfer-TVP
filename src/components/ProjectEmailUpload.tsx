@@ -7,6 +7,7 @@ import * as tus from 'tus-js-client'
 import { apiDelete, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { formatFileSize } from '@/lib/utils'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 
 interface ProjectEmailUploadProps {
   projectId: string
@@ -63,6 +64,7 @@ export function ProjectEmailUpload({
   description = '',
   layout = 'stacked',
 }: ProjectEmailUploadProps) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<QueuedProjectEmailUpload[]>([])
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
@@ -194,7 +196,7 @@ export function ProjectEmailUpload({
             filetype: upload.file.type || 'message/rfc822',
             projectEmailId,
           },
-          chunkSize: 50 * 1024 * 1024,
+          chunkSize: uploadChunkSizeBytes,
           storeFingerprintForResuming: true,
           removeFingerprintOnSuccess: true,
 
@@ -293,7 +295,7 @@ export function ProjectEmailUpload({
         updateUpload(id, { status: 'error', error: e?.message || 'Upload failed', tusUpload: null })
       }
     },
-    [onUploadComplete, projectId]
+    [onUploadComplete, projectId, uploadChunkSizeBytes]
   )
 
   const pauseUpload = (id: string) => {

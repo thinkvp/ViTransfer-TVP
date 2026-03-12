@@ -10,6 +10,7 @@ import { apiDelete, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { formatFileSize } from '@/lib/utils'
 import { validateAssetExtension } from '@/lib/asset-validation'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 
 interface ProjectFileUploadProps {
   projectId: string
@@ -42,6 +43,7 @@ export function ProjectFileUpload({
   description,
   layout = 'stacked',
 }: ProjectFileUploadProps) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
   const hasDescription = String(description || '').trim().length > 0
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<QueuedProjectFileUpload[]>([])
@@ -174,7 +176,7 @@ export function ProjectFileUpload({
             filetype: upload.file.type || 'application/octet-stream',
             projectFileId,
           },
-          chunkSize: 50 * 1024 * 1024,
+          chunkSize: uploadChunkSizeBytes,
           storeFingerprintForResuming: true,
           removeFingerprintOnSuccess: true,
 
@@ -272,7 +274,7 @@ export function ProjectFileUpload({
         refreshAttemptsRef.current.delete(id)
       }
     },
-    [onUploadComplete, projectId]
+    [onUploadComplete, projectId, uploadChunkSizeBytes]
   )
 
   useEffect(() => {

@@ -3,6 +3,13 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { moveDirectory } from '@/lib/storage'
+import { moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import {
+  buildClientStorageRoot,
+  replaceStoredStoragePathPrefix,
+  replaceStoragePathPrefix,
+} from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -139,6 +146,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const { name, address, phone, website, notes } = parsed.data
     const active = parsed.data.active
+    const trimmedName = typeof name === 'string' ? name.trim() : ''
+    const oldClientStorageRoot = buildClientStorageRoot(existing.name)
+    const newClientStorageRoot = trimmedName ? buildClientStorageRoot(trimmedName) : oldClientStorageRoot
+    const clientRenamePlanned = Boolean(trimmedName) && trimmedName !== String(existing.name || '').trim()
+
+    let movedClientStorage = false
+    if (clientRenamePlanned) {
+      await moveDirectory(oldClientStorageRoot, newClientStorageRoot)
+      movedClientStorage = true
+    }
 
     const recipientsInput = parsed.data.recipients
       ? parsed.data.recipients.map((r) => ({
@@ -152,30 +169,179 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }))
       : undefined
 
-    const client = await prisma.$transaction(async (tx) => {
-      const updated = await tx.client.update({
-        where: { id },
-        data: {
-          ...(typeof name === 'string' ? { name } : {}),
-          ...(address !== undefined ? { address: address ?? null } : {}),
-          ...(phone !== undefined ? { phone: phone ?? null } : {}),
-          ...(website !== undefined ? { website: website ?? null } : {}),
-          ...(notes !== undefined ? { notes: notes ?? null } : {}),
-          ...(typeof active === 'boolean' ? { active } : {}),
-        },
-        select: { id: true, name: true },
-      })
-
-      // Keep project display names in sync for linked projects.
-      // Many parts of the app currently use Project.companyName as the client-facing name.
-      if (typeof name === 'string' && name.trim() && name.trim() !== String(existing.name || '').trim()) {
-        await tx.project.updateMany({
-          where: { clientId: id },
-          data: { companyName: updated.name },
+    let client
+    try {
+      client = await prisma.$transaction(async (tx) => {
+        const updated = await tx.client.update({
+          where: { id },
+          data: {
+            ...(typeof name === 'string' ? { name } : {}),
+            ...(address !== undefined ? { address: address ?? null } : {}),
+            ...(phone !== undefined ? { phone: phone ?? null } : {}),
+            ...(website !== undefined ? { website: website ?? null } : {}),
+            ...(notes !== undefined ? { notes: notes ?? null } : {}),
+            ...(typeof active === 'boolean' ? { active } : {}),
+          },
+          select: { id: true, name: true },
         })
-      }
 
-      if (recipientsInput) {
+        // Keep project display names in sync for linked projects.
+        // Many parts of the app currently use Project.companyName as the client-facing name.
+        if (clientRenamePlanned) {
+          const projects = await tx.project.findMany({
+            where: { clientId: id },
+            select: { id: true, storagePath: true },
+          })
+
+          for (const project of projects) {
+            await tx.project.update({
+              where: { id: project.id },
+              data: {
+                companyName: updated.name,
+                storagePath: replaceStoragePathPrefix(project.storagePath, oldClientStorageRoot, newClientStorageRoot),
+              },
+            })
+          }
+
+          const clientFiles = await tx.clientFile.findMany({
+            where: { clientId: id },
+            select: { id: true, storagePath: true },
+          })
+          for (const file of clientFiles) {
+            await tx.clientFile.update({
+              where: { id: file.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(file.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+              },
+            })
+          }
+
+          const videos = await tx.video.findMany({
+            where: { project: { clientId: id } },
+            select: {
+              id: true,
+              originalStoragePath: true,
+              preview480Path: true,
+              preview720Path: true,
+              preview1080Path: true,
+              thumbnailPath: true,
+              timelinePreviewVttPath: true,
+              timelinePreviewSpritesPath: true,
+              dropboxPath: true,
+            },
+          })
+          for (const video of videos) {
+            await tx.video.update({
+              where: { id: video.id },
+              data: {
+                originalStoragePath: replaceStoredStoragePathPrefix(video.originalStoragePath, oldClientStorageRoot, newClientStorageRoot)!,
+                preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldClientStorageRoot, newClientStorageRoot),
+                preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldClientStorageRoot, newClientStorageRoot),
+                preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldClientStorageRoot, newClientStorageRoot),
+                thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldClientStorageRoot, newClientStorageRoot),
+                timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldClientStorageRoot, newClientStorageRoot),
+                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldClientStorageRoot, newClientStorageRoot),
+                dropboxPath: replaceStoragePathPrefix(video.dropboxPath, oldClientStorageRoot, newClientStorageRoot),
+              },
+            })
+          }
+
+          const assets = await tx.videoAsset.findMany({
+            where: { video: { project: { clientId: id } } },
+            select: { id: true, storagePath: true, dropboxPath: true },
+          })
+          for (const asset of assets) {
+            await tx.videoAsset.update({
+              where: { id: asset.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+                dropboxPath: replaceStoragePathPrefix(asset.dropboxPath, oldClientStorageRoot, newClientStorageRoot),
+              },
+            })
+          }
+
+          const albumPhotos = await tx.albumPhoto.findMany({
+            where: { album: { project: { clientId: id } } },
+            select: { id: true, storagePath: true, socialStoragePath: true },
+          })
+          for (const photo of albumPhotos) {
+            await tx.albumPhoto.update({
+              where: { id: photo.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(photo.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+                socialStoragePath: replaceStoredStoragePathPrefix(photo.socialStoragePath, oldClientStorageRoot, newClientStorageRoot),
+              },
+            })
+          }
+
+          const albums = await tx.album.findMany({
+            where: { project: { clientId: id } },
+            select: { id: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
+          })
+          for (const album of albums) {
+            await tx.album.update({
+              where: { id: album.id },
+              data: {
+                fullZipDropboxPath: replaceStoragePathPrefix(album.fullZipDropboxPath, oldClientStorageRoot, newClientStorageRoot),
+                socialZipDropboxPath: replaceStoragePathPrefix(album.socialZipDropboxPath, oldClientStorageRoot, newClientStorageRoot),
+              },
+            })
+          }
+
+          const projectFiles = await tx.projectFile.findMany({
+            where: { project: { clientId: id } },
+            select: { id: true, storagePath: true },
+          })
+          for (const file of projectFiles) {
+            await tx.projectFile.update({
+              where: { id: file.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(file.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+              },
+            })
+          }
+
+          const projectEmails = await tx.projectEmail.findMany({
+            where: { project: { clientId: id } },
+            select: { id: true, rawStoragePath: true },
+          })
+          for (const email of projectEmails) {
+            await tx.projectEmail.update({
+              where: { id: email.id },
+              data: {
+                rawStoragePath: replaceStoredStoragePathPrefix(email.rawStoragePath, oldClientStorageRoot, newClientStorageRoot)!,
+              },
+            })
+          }
+
+          const attachments = await tx.projectEmailAttachment.findMany({
+            where: { projectEmail: { project: { clientId: id } } },
+            select: { id: true, storagePath: true },
+          })
+          for (const attachment of attachments) {
+            await tx.projectEmailAttachment.update({
+              where: { id: attachment.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(attachment.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+              },
+            })
+          }
+
+          const commentFiles = await tx.commentFile.findMany({
+            where: { project: { clientId: id } },
+            select: { id: true, storagePath: true },
+          })
+          for (const commentFile of commentFiles) {
+            await tx.commentFile.update({
+              where: { id: commentFile.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(commentFile.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+              },
+            })
+          }
+        }
+
+        if (recipientsInput) {
         const normalized = recipientsInput.filter((r) => r.email || r.name)
 
         // Ensure at most one primary; default first
@@ -301,8 +467,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
-      return updated
-    })
+        return updated
+      })
+    } catch (error) {
+      if (movedClientStorage) {
+        await moveDirectory(newClientStorageRoot, oldClientStorageRoot).catch(() => {})
+      }
+      throw error
+    }
+
+    if (clientRenamePlanned) {
+      void moveDropboxPath(oldClientStorageRoot, newClientStorageRoot).catch(() => {})
+    }
 
     return NextResponse.json({ client })
   } catch (error: any) {

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { albumZipExists, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
@@ -30,7 +31,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const album = await prisma.album.findUnique({
     where: { id: albumId },
-    select: { id: true, projectId: true, status: true },
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      storageFolderName: true,
+      status: true,
+      dropboxEnabled: true,
+      fullZipDropboxStatus: true,
+      socialZipDropboxStatus: true,
+      fullZipDropboxProgress: true,
+      socialZipDropboxProgress: true,
+      fullZipDropboxError: true,
+      socialZipDropboxError: true,
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
   })
 
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
@@ -64,8 +86,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     where: { albumId, status: 'READY', socialStatus: 'ERROR' },
   })
 
-  const fullZipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'full' })
-  const socialZipStoragePath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'social' })
+  const projectStoragePath = album.project.storagePath
+    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+  const albumFolderName = album.storageFolderName || album.name
+
+  const fullZipStoragePath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'full',
+  })
+  const socialZipStoragePath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'social',
+  })
 
   const fullReady = albumZipExists(fullZipStoragePath)
   const socialReady = albumZipExists(socialZipStoragePath)
@@ -99,6 +135,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       socialReady: socialReadyCount,
       socialPending: socialPendingCount,
       socialError: socialErrorCount,
+    },
+    dropbox: {
+      enabled: album.dropboxEnabled,
+      fullStatus: album.fullZipDropboxStatus,
+      socialStatus: album.socialZipDropboxStatus,
+      fullProgress: album.fullZipDropboxProgress,
+      socialProgress: album.socialZipDropboxProgress,
+      fullError: album.fullZipDropboxError,
+      socialError: album.socialZipDropboxError,
     },
   })
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X } from 'lucide-react'
+import { Upload, X, Cloud } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -17,7 +17,7 @@ import {
   ensureFreshUploadOnContextChange,
   getUploadMetadata,
 } from '@/lib/tus-context'
-import { useUploadManager } from '@/components/UploadManagerProvider'
+import { useUploadManagerActions } from '@/components/UploadManagerProvider'
 
 type UploadStatus = 'pending' | 'queued' | 'error'
 
@@ -28,6 +28,7 @@ type QueuedVideo = {
   versionLabel: string
   videoNotes: string
   allowApproval: boolean
+  dropboxEnabled: boolean
   status: UploadStatus
   error: string | null
 }
@@ -82,30 +83,57 @@ export default function MultiVideoUploadModal({
   projectId,
   canFullControl,
   onUploadComplete,
+  dropboxConfigured = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
   canFullControl: boolean
   onUploadComplete?: () => void
+  dropboxConfigured?: boolean
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { addUpload } = useUploadManager()
+  const { addUpload } = useUploadManagerActions()
 
   const [isDragging, setIsDragging] = useState(false)
   const [globalError, setGlobalError] = useState<string | null>(null)
   const [items, setItems] = useState<QueuedVideo[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [isClosingAfterQueue, setIsClosingAfterQueue] = useState(false)
+  const [closeCountdown, setCloseCountdown] = useState<number | null>(null)
 
-  const canUpload = items.length > 0 && items.some((i) => i.status === 'pending') && !submitting
+  const queuedCount = items.filter((i) => i.status === 'queued').length
+  const canUpload = items.length > 0 && items.some((i) => i.status === 'pending') && !submitting && !isClosingAfterQueue
 
   useEffect(() => {
     if (!open) {
       setIsDragging(false)
       setGlobalError(null)
       setItems([])
+      setIsClosingAfterQueue(false)
+      setCloseCountdown(null)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open || !isClosingAfterQueue || closeCountdown === null) return
+
+    if (closeCountdown <= 0) {
+      onOpenChange(false)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setCloseCountdown((prev) => (prev === null ? prev : prev - 1))
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [closeCountdown, isClosingAfterQueue, onOpenChange, open])
+
+  function getClosingLabel(countdown: number | null) {
+    if (countdown === null || countdown <= 0) return 'Closing...'
+    return `Closing in ${countdown}...`
+  }
 
   function addFiles(files: FileList | File[]) {
     const accepted = Array.from(files).filter((f) => f.type?.startsWith('video/'))
@@ -132,6 +160,7 @@ export default function MultiVideoUploadModal({
           versionLabel: '',
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
+          dropboxEnabled: false,
           status: 'pending',
           error: null,
         })
@@ -206,6 +235,7 @@ export default function MultiVideoUploadModal({
 
     // ---- create video records + enqueue uploads ----
     let enqueued = 0
+    let hadUploadErrors = false
     for (const item of pending) {
       const trimmedVideoName = item.videoName.trim()
       const trimmedVersionLabel = item.versionLabel.trim()
@@ -253,6 +283,7 @@ export default function MultiVideoUploadModal({
             versionLabel: trimmedVersionLabel,
             videoNotes: trimmedVideoNotes,
             allowApproval: item.allowApproval === true,
+            dropboxEnabled: item.dropboxEnabled === true,
             originalFileName: item.file.name,
             originalFileSize: item.file.size,
             name: trimmedVideoName,
@@ -274,6 +305,7 @@ export default function MultiVideoUploadModal({
       } catch (err: any) {
         const message = typeof err?.message === 'string' && err.message.trim() ? err.message : 'Failed to start upload'
         updateItem(item.id, { status: 'error', error: message })
+        hadUploadErrors = true
       }
     }
 
@@ -281,15 +313,16 @@ export default function MultiVideoUploadModal({
 
     // Close modal if all items were successfully enqueued.
     // Uploads continue in background via UploadManager.
-    if (enqueued > 0 && items.every((i) => i.status === 'queued' || i.status === 'error')) {
+    if (enqueued > 0 && enqueued === pending.length && !hadUploadErrors && !items.some((item) => item.status === 'error')) {
       // Notify parent so the project page can reflect new UPLOADING records.
       onUploadComplete?.()
-      onOpenChange(false)
+      setIsClosingAfterQueue(true)
+      setCloseCountdown(4)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => !submitting && !isClosingAfterQueue && onOpenChange(next)}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Add Video/s</DialogTitle>
@@ -303,48 +336,54 @@ export default function MultiVideoUploadModal({
           )}
 
           <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
             className={cn(
-              'rounded-lg border-2 border-dashed p-4 transition-all',
-              isDragging ? 'border-primary bg-primary/5' : 'border-border'
+              'space-y-4 overflow-hidden transition-all duration-300 ease-out',
+              isClosingAfterQueue ? 'max-h-0 opacity-0 -translate-y-2 pointer-events-none' : 'max-h-[4000px] opacity-100 translate-y-0'
             )}
           >
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <div className="font-medium">Drag & drop videos here</div>
-                <div className="text-sm text-muted-foreground">Or choose files using the button.</div>
-              </div>
-              <div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) addFiles(e.target.files)
-                    e.currentTarget.value = ''
-                  }}
-                  disabled={submitting}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={submitting}
-                  className="w-full"
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  Choose video files
-                </Button>
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={cn(
+                'rounded-lg border-2 border-dashed p-4 transition-all',
+                isDragging ? 'border-primary bg-primary/5' : 'border-border'
+              )}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <div className="font-medium">Drag & drop videos here</div>
+                  <div className="text-sm text-muted-foreground">Or choose files using the button.</div>
+                </div>
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) addFiles(e.target.files)
+                      e.currentTarget.value = ''
+                    }}
+                    disabled={submitting}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={submitting}
+                    className="w-full"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Choose video files
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
 
-          {items.length > 0 && (
-            <div className="space-y-4">
+            {items.length > 0 && (
+              <div className="space-y-4">
               {items.map((item) => (
                 <div key={item.id} className={cn('rounded-lg border border-border bg-card p-4', item.status === 'queued' && 'opacity-60')}>
                   <div className="flex items-start justify-between gap-3">
@@ -405,19 +444,45 @@ export default function MultiVideoUploadModal({
                     </div>
 
                     {canFullControl && (
-                      <div className="space-y-2 sm:col-span-2">
-                        <div className="text-sm font-medium">Allow approval of version</div>
-                        <div className="flex items-center gap-2 h-10">
-                          <Checkbox
-                            checked={item.allowApproval}
-                            onCheckedChange={(v) => updateItem(item.id, { allowApproval: Boolean(v) })}
-                            disabled={item.status !== 'pending'}
-                            aria-label="Allow approval of version"
-                          />
-                          <span className={item.allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
-                            {item.allowApproval ? 'Clients can approve version' : 'Client approval disabled'}
-                          </span>
+                      <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Allow approval of version</div>
+                          <div className="flex items-center gap-2 h-10">
+                            <Checkbox
+                              checked={item.allowApproval}
+                              onCheckedChange={(v) => {
+                                const checked = Boolean(v)
+                                const patch: Partial<QueuedVideo> = { allowApproval: checked }
+                                // If disabling approval, also disable Dropbox
+                                if (!checked) patch.dropboxEnabled = false
+                                updateItem(item.id, patch)
+                              }}
+                              disabled={item.status !== 'pending'}
+                              aria-label="Allow approval of version"
+                            />
+                            <span className={item.allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                              {item.allowApproval ? 'Clients can approve version' : 'Client approval disabled'}
+                            </span>
+                          </div>
                         </div>
+
+                        {dropboxConfigured && (
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Upload to Dropbox</div>
+                            <div className="flex items-center gap-2 h-10">
+                              <Checkbox
+                                checked={item.dropboxEnabled}
+                                onCheckedChange={(v) => updateItem(item.id, { dropboxEnabled: Boolean(v) })}
+                                disabled={item.status !== 'pending' || !item.allowApproval}
+                                aria-label="Upload to Dropbox"
+                              />
+                              <Cloud className={`w-4 h-4 ${item.dropboxEnabled && item.allowApproval ? 'text-primary' : 'text-muted-foreground/50'}`} />
+                              <span className={item.dropboxEnabled && item.allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                                {!item.allowApproval ? 'Requires approval enabled' : item.dropboxEnabled ? 'Download will be served from Dropbox' : 'Local storage only'}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -428,7 +493,7 @@ export default function MultiVideoUploadModal({
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                           </span>
-                          Queued — uploading in background
+                          Queued - uploading in background
                         </p>
                       </div>
                     )}
@@ -441,16 +506,34 @@ export default function MultiVideoUploadModal({
                   </div>
                 </div>
               ))}
+              </div>
+            )}
+          </div>
+
+          <div
+            className={cn(
+              'overflow-hidden transition-all duration-300 ease-out',
+              isClosingAfterQueue ? 'max-h-24 opacity-100 translate-y-0' : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none'
+            )}
+          >
+            <div className="rounded-lg border border-border bg-card px-4 py-3">
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                </span>
+                {queuedCount > 1 ? `${queuedCount} videos queued - uploading in background` : 'Queued - uploading in background'}
+              </p>
             </div>
-          )}
+          </div>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting || isClosingAfterQueue}>
             Cancel
           </Button>
           <Button type="button" onClick={handleUploadAll} disabled={!canUpload}>
-            {submitting ? 'Starting…' : 'Upload Video/s'}
+            {submitting ? 'Starting…' : isClosingAfterQueue ? getClosingLabel(closeCountdown) : 'Upload Video/s'}
           </Button>
         </DialogFooter>
       </DialogContent>

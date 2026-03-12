@@ -1,7 +1,6 @@
 import { prisma } from '../lib/db'
 import { deleteFile, deleteDirectory } from '../lib/storage'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '../lib/session-invalidation'
-import { getAlbumZipStoragePath, AlbumZipVariant } from '../lib/album-photo-zip'
 import { cancelProjectJobs } from '../lib/cancel-project-jobs'
 
 export async function processAutoCloseApprovedProjects(): Promise<{ closedCount: number }> {
@@ -11,7 +10,6 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
       autoCloseApprovedProjectsEnabled: true,
       autoCloseApprovedProjectsAfterDays: true,
       autoDeletePreviewsOnClose: true,
-      autoDeleteAlbumZipsOnClose: true,
     },
   })
 
@@ -119,36 +117,6 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
         console.log(`[AUTO-CLOSE] Deleted previews and timeline sprites for project ${projectId}`)
       } catch (err) {
         console.error(`[AUTO-CLOSE] Error deleting previews for project ${projectId}:`, err)
-      }
-    }
-  }
-
-  // Auto-delete album ZIPs if the setting is enabled
-  if (settings?.autoDeleteAlbumZipsOnClose) {
-    for (const projectId of ids) {
-      try {
-        const albums = await prisma.album.findMany({
-          where: { projectId },
-          select: { id: true, fullZipFileSize: true, socialZipFileSize: true },
-        })
-
-        for (const album of albums) {
-          const variants: AlbumZipVariant[] = ['full', 'social']
-          for (const variant of variants) {
-            const zipPath = getAlbumZipStoragePath({ projectId, albumId: album.id, variant })
-            await deleteFile(zipPath).catch(() => {})
-          }
-
-          if (album.fullZipFileSize > 0 || album.socialZipFileSize > 0) {
-            await prisma.album.update({
-              where: { id: album.id },
-              data: { fullZipFileSize: BigInt(0), socialZipFileSize: BigInt(0) },
-            })
-          }
-        }
-        console.log(`[AUTO-CLOSE] Deleted album ZIPs for project ${projectId}`)
-      } catch (err) {
-        console.error(`[AUTO-CLOSE] Error deleting album ZIPs for project ${projectId}:`, err)
       }
     }
   }

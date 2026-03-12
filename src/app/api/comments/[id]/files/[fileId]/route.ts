@@ -3,6 +3,7 @@ import { extname } from 'path'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
@@ -156,7 +157,8 @@ export async function GET(
     const safeFilename = sanitizeFilenameForHeader(commentFile.fileName)
 
     // Stream file to avoid loading into memory
-    const fileStream = createReadStream(fullPath)
+    const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+    const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
 
     let closed = false
     const readableStream = new ReadableStream({

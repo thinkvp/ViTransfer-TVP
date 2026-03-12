@@ -4,6 +4,7 @@ import { getCurrentUserFromRequest, requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
+import { buildClientFilesStoragePath } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   )
   if (rateLimitResult) return rateLimitResult
 
-  const client = await prisma.client.findFirst({ where: { id: clientId, deletedAt: null }, select: { id: true } })
+  const client = await prisma.client.findFirst({ where: { id: clientId, deletedAt: null }, select: { id: true, name: true } })
   if (!client) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
 
   const files = await prisma.clientFile.findMany({
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   )
   if (rateLimitResult) return rateLimitResult
 
-  const client = await prisma.client.findFirst({ where: { id: clientId, deletedAt: null }, select: { id: true } })
+  const client = await prisma.client.findFirst({ where: { id: clientId, deletedAt: null }, select: { id: true, name: true } })
   if (!client) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
 
   const currentUser = await getCurrentUserFromRequest(request)
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const timestamp = Date.now()
   const sanitizedFileName =
     fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255)
-  const storagePath = `clients/${clientId}/files/clientfile-${timestamp}-${sanitizedFileName}`
+  const storagePath = buildClientFilesStoragePath(client.name, sanitizedFileName, timestamp)
 
   const category = fileValidation.detectedCategory || 'other'
 

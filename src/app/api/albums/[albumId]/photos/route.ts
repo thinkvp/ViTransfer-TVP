@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateAlbumPhotoFile } from '@/lib/photo-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { buildAlbumPhotoStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -38,7 +39,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { albumId } = await params
 
-  const album = await prisma.album.findUnique({ where: { id: albumId }, select: { id: true, projectId: true } })
+  const album = await prisma.album.findUnique({
+    where: { id: albumId },
+    select: { id: true, projectId: true, name: true, storageFolderName: true, project: { select: { storagePath: true } } },
+  })
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
 
   // Reflect immediate work in progress (uploading).
@@ -111,7 +115,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   )
   if (rateLimitResult) return rateLimitResult
 
-  const album = await prisma.album.findUnique({ where: { id: albumId }, select: { id: true, projectId: true } })
+  const album = await prisma.album.findUnique({
+    where: { id: albumId },
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      storageFolderName: true,
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
+  })
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
 
   if (auth.appRoleIsSystemAdmin !== true) {
@@ -148,12 +168,33 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const timestamp = Date.now()
   const safeName = validation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255)
-  const storagePath = `projects/${album.projectId}/albums/${album.id}/photos/photo-${timestamp}-${safeName}`
+
+  // Allocate a collision-free filename within the album
+  const existingPhotos = await prisma.albumPhoto.findMany({
+    where: { albumId: album.id },
+    select: { fileName: true },
+  })
+  const usedNames = new Set(existingPhotos.map((p) => p.fileName.toLowerCase()))
+  let uniqueName = safeName
+  if (usedNames.has(uniqueName.toLowerCase())) {
+    const dotIdx = safeName.lastIndexOf('.')
+    const base = dotIdx > 0 ? safeName.slice(0, dotIdx) : safeName
+    const ext = dotIdx > 0 ? safeName.slice(dotIdx) : ''
+    let counter = 2
+    while (usedNames.has(`${base} (${counter})${ext}`.toLowerCase())) {
+      counter++
+    }
+    uniqueName = `${base} (${counter})${ext}`
+  }
+
+  const projectStoragePath = album.project.storagePath
+    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+  const storagePath = buildAlbumPhotoStoragePath(projectStoragePath, album.storageFolderName || album.name, uniqueName)
 
   const photo = await prisma.albumPhoto.create({
     data: {
       albumId: album.id,
-      fileName: safeName,
+      fileName: uniqueName,
       fileSize: BigInt(fileSize),
       fileType: 'application/octet-stream',
       storagePath,

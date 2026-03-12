@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import * as tus from 'tus-js-client'
 import { apiFetch, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 import {
   ensureFreshUploadOnContextChange,
   clearFileContext,
@@ -42,6 +43,7 @@ export function useAlbumPhotoUploadQueue({
   maxConcurrent = 3,
   onUploadComplete,
 }: UseAlbumPhotoUploadQueueOptions) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
   const [queue, setQueue] = useState<QueuedAlbumPhotoUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
   const photoIdsMap = useRef<Map<string, string>>(new Map())
@@ -161,7 +163,7 @@ export function useAlbumPhotoUploadQueue({
             filetype: upload.file.type || 'application/octet-stream',
             photoId,
           },
-          chunkSize: 50 * 1024 * 1024,
+          chunkSize: uploadChunkSizeBytes,
           storeFingerprintForResuming: true,
           removeFingerprintOnSuccess: true,
 
@@ -259,7 +261,7 @@ export function useAlbumPhotoUploadQueue({
         refreshAttemptsRef.current.delete(uploadId)
       }
     },
-    [albumId, onUploadComplete]
+    [albumId, onUploadComplete, uploadChunkSizeBytes]
   )
 
   useEffect(() => {

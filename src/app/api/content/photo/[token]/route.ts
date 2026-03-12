@@ -8,6 +8,7 @@ import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getAuthContext } from '@/lib/auth'
 import { getSecuritySettings } from '@/lib/video-access'
 import { verifyAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { getTransferTuningSettings } from '@/lib/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -93,7 +94,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!existsSync(fullPath)) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
 
   const stat = statSync(fullPath)
-  const fileStream = createReadStream(fullPath)
+  const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+  const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
   const readableStream = createWebReadableStream(fileStream)
 
   const filename = sanitizeFilenameForHeader(photo.fileName || 'photo.jpg')

@@ -4,8 +4,10 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
+import { isDropboxStorageConfigured, deleteDropboxFile } from '@/lib/storage-provider-dropbox'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,7 +34,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const album = await prisma.album.findUnique({
     where: { id: albumId },
-    select: { id: true, projectId: true },
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      storageFolderName: true,
+      dropboxEnabled: true,
+      fullZipDropboxPath: true,
+      socialZipDropboxPath: true,
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
   })
 
   if (!album) return NextResponse.json({ error: 'Album not found' }, { status: 404 })
@@ -59,11 +77,46 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
-  const fullZipPath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'full' })
-  const socialZipPath = getAlbumZipStoragePath({ projectId: album.projectId, albumId: album.id, variant: 'social' })
+  const projectStoragePath = album.project.storagePath
+    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+  const albumFolderName = album.storageFolderName || album.name
+
+  const fullZipPath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'full',
+  })
+  const socialZipPath = getAlbumZipStoragePath({
+    projectStoragePath,
+    albumFolderName,
+    albumName: album.name,
+    variant: 'social',
+  })
 
   await deleteFile(fullZipPath).catch(() => {})
   await deleteFile(socialZipPath).catch(() => {})
+
+  // Delete Dropbox copies if they exist and reset tracking so re-upload queues after new ZIPs are ready.
+  if (album.dropboxEnabled) {
+    const dropboxPaths = [album.fullZipDropboxPath, album.socialZipDropboxPath].filter(Boolean) as string[]
+    if (isDropboxStorageConfigured()) {
+      await Promise.allSettled(dropboxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
+    }
+    await prisma.album.update({
+      where: { id: album.id },
+      data: {
+        fullZipDropboxStatus: null,
+        fullZipDropboxProgress: 0,
+        fullZipDropboxError: null,
+        fullZipDropboxPath: null,
+        socialZipDropboxStatus: null,
+        socialZipDropboxProgress: 0,
+        socialZipDropboxError: null,
+        socialZipDropboxPath: null,
+      },
+    }).catch(() => {})
+  }
 
   // Keep DB totals consistent with storage after invalidation.
   await syncAlbumZipSizes({ albumId: album.id, projectId: album.projectId }).catch(() => {})

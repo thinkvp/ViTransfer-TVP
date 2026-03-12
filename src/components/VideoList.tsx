@@ -9,7 +9,7 @@ import { Checkbox } from './ui/checkbox'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download, Cloud, Loader2 } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -22,6 +22,7 @@ interface VideoListProps {
   canDelete?: boolean
   canApprove?: boolean
   canManageAllowApproval?: boolean
+  dropboxConfigured?: boolean
 }
 
 export default function VideoList({
@@ -31,6 +32,7 @@ export default function VideoList({
   canDelete,
   canApprove,
   canManageAllowApproval,
+  dropboxConfigured = false,
 }: VideoListProps) {
   const effectiveCanDelete = canDelete ?? isAdmin
   const effectiveCanApprove = canApprove ?? isAdmin
@@ -50,6 +52,7 @@ export default function VideoList({
   const [notesEditValue, setNotesEditValue] = useState('')
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
   const [savingAllowApprovalId, setSavingAllowApprovalId] = useState<string | null>(null)
+  const [togglingDropboxId, setTogglingDropboxId] = useState<string | null>(null)
   const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
   const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
@@ -93,6 +96,24 @@ export default function VideoList({
 
   const ensureExpanded = (videoId: string) => {
     setExpandedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]))
+  }
+
+  const handleToggleDropbox = async (videoId: string, currentlyEnabled: boolean) => {
+    if (togglingDropboxId) return
+
+    if (currentlyEnabled) {
+      if (!confirm('Remove this video from Dropbox? The local copy will be kept.')) return
+    }
+
+    setTogglingDropboxId(videoId)
+    try {
+      await apiPatch(`/api/videos/${videoId}`, { dropboxEnabled: !currentlyEnabled })
+      onRefresh?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to toggle Dropbox')
+    } finally {
+      setTogglingDropboxId(null)
+    }
   }
 
   const handleDelete = async (videoId: string) => {
@@ -428,6 +449,39 @@ export default function VideoList({
                     <Upload className="w-4 h-4" />
                   </Button>
                 )}
+                {isAdmin && dropboxConfigured && video.status === 'READY' && (video as any).allowApproval && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleToggleDropbox(video.id, (video as any).dropboxEnabled || false)}
+                    disabled={togglingDropboxId === video.id}
+                    className={(video as any).dropboxUploadStatus === 'ERROR'
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive-visible'
+                      : (video as any).dropboxEnabled
+                      ? 'text-primary hover:text-primary/80 hover:bg-primary/5'
+                      : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
+                    }
+                    title={(video as any).dropboxUploadStatus === 'ERROR'
+                      ? 'Dropbox upload failed'
+                      : (video as any).dropboxEnabled
+                      ? 'Remove from Dropbox'
+                      : 'Upload to Dropbox'
+                    }
+                  >
+                    {togglingDropboxId === video.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (video as any).dropboxUploadStatus === 'ERROR' ? (
+                      <XCircle className="w-4 h-4" />
+                    ) : (video as any).dropboxEnabled && ((video as any).dropboxUploadStatus === 'UPLOADING' || (video as any).dropboxUploadStatus === 'PENDING') ? (
+                      <span className="relative inline-flex h-4 w-4">
+                        <span className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                        <Cloud className="w-4 h-4 text-primary" />
+                      </span>
+                    ) : (
+                      <Cloud className="w-4 h-4" />
+                    )}
+                  </Button>
+                )}
                 {isAdmin && effectiveCanDelete && (
                   <Button
                     variant="ghost"
@@ -682,6 +736,7 @@ export default function VideoList({
                 versionLabel={video.versionLabel}
                 projectId={video.projectId}
                 canManage={effectiveCanManageAllowApproval}
+                dropboxConfigured={dropboxConfigured}
                 onAssetDeleted={() => {
                   setAssetRefreshTrigger(prev => prev + 1)
                   onRefresh?.()

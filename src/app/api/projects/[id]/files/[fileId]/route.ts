@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getTransferTuningSettings } from '@/lib/settings'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import fs from 'fs'
@@ -88,7 +89,8 @@ export async function GET(
   const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
   const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
 
-  const fileStream = createReadStream(fullPath)
+  const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+  const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
   let closed = false
   const readableStream = new ReadableStream({
     start(controller) {

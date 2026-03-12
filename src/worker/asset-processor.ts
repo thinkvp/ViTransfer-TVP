@@ -1,8 +1,10 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { getFilePath } from '../lib/storage'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
+import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
@@ -39,11 +41,16 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
   })()
 
   try {
-    // Read magic bytes directly from storage — no temp copy needed
-    const filePath = getFilePath(storagePath)
+    // Resolve file path — handles both local and Dropbox-backed assets
+    const resolved = await materializeStoragePathToLocalFile({
+      rawPath: storagePath,
+      tempDir: path.join(os.tmpdir(), 'vitransfer-asset-tmp'),
+      suggestedName: `${assetId}-asset.bin`,
+    })
+    const filePath = resolved.localPath
 
     if (DEBUG) {
-      console.log('[WORKER DEBUG] Reading asset directly from:', filePath)
+      console.log('[WORKER DEBUG] Reading asset from:', filePath, resolved.isTemporary ? '(temp)' : '(local)')
     }
 
     // Verify file exists and has content
@@ -156,6 +163,11 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
     })
 
     if (projectId) await recalculateAndStoreProjectTotalBytes(projectId)
+
+    // Clean up temp file if materialized from Dropbox
+    if (resolved.isTemporary) {
+      fs.promises.unlink(filePath).catch(() => {})
+    }
 
     console.log(`[WORKER] Asset ${assetId} processed successfully`)
 

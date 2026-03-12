@@ -116,7 +116,7 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 ## Features
 
 ### Core Video Review
-- **Video Upload & Processing** — Automatic FFmpeg transcoding to 720p, 1080p, or 4K with resumable uploads via TUS protocol
+- **Video Upload & Processing** — Automatic FFmpeg transcoding with resumable uploads via TUS protocol
 - **Smart Watermarking** — Customizable watermarks with center and corner placements, configurable per project or globally
 - **Timestamped Comments** — Timestamped feedback with threaded replies that track video versions (up to 10,000 characters), with full timecode support (HH:MM:SS:FF including drop-frame)
 - **Comment Attachments** — Multi-file uploads (up to 5 files per comment) supporting images, PSD/AI, and common video formats
@@ -181,6 +181,16 @@ Built-in customer relationship management and invoicing capabilities:
 - **Calendar Integration** — Quote expiry and invoice due dates automatically appear on the calendar view
 - **Project Linking** — Link invoices directly to projects for seamless workflow from quote to delivery
 
+### Dropbox Cloud Offloading
+Optional Dropbox integration to offload large file delivery from your server:
+- **Video Originals** — Upload approved video originals to Dropbox; share page downloads are served via temporary Dropbox links, eliminating multi-GB streams through your application server
+- **Photo Album ZIPs** — Upload full-resolution and social-crop ZIP files to Dropbox for direct client download, with automatic lifecycle management when photos are added or removed from an album
+- **Video Assets** — Per-asset Dropbox uploads available from the asset list
+- **Download Source Toggle** — The download modal lets clients choose between Dropbox (generally faster, more concurrent downloads) and Local Server, giving them a manual fallback if Dropbox is unavailable
+- **Running Jobs Visibility** — All Dropbox upload activity appears in the Running Jobs panel for real-time progress tracking
+- **Background Processing** — Uploads run as BullMQ background jobs with automatic retry (3 attempts, exponential backoff)
+- **Human-Readable Paths** — Files are stored in Dropbox under `clients/{Client Name}/projects/{Project Title}/...`, matching the same client-based folder structure used for local storage so files are easy to find in your Dropbox
+
 ### Export Feedback and Import in NLE
 - **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
 
@@ -191,6 +201,14 @@ Authenticated recipients can move between active projects for the same client wi
 - **Global and Per-Project Controls** — Admins can enable or disable switching platform-wide by default and override it per project
 - **Status-Aware Restrictions** — Automatically blocks switching into `NOT_STARTED` and `CLOSED` projects and excludes guest sessions
 - **Server-Side Enforcement** — Both source and destination projects are validated before a switch is allowed
+
+### Multi-Resolution Previews & Adaptive Playback
+Flexible preview quality generation and intelligent in-player quality selection:
+- **Multiple Preview Resolutions** — Transcode to any combination of 480p, 720p, and 1080p per project; select one or more at the project or global level (default: 720p)
+- **Adaptive Quality Selector** — In-player gear icon on desktop and mobile lets clients choose their preferred quality or stay on **Auto** mode
+- **Auto Mode** — Selects resolution based on the player container width (≥1200 px → 1080p, ≥640 px → 720p, otherwise 480p) via ResizeObserver; button label shows the active resolution, e.g. `Auto (720p)`
+- **Buffering-Triggered Downgrade** — Auto mode automatically steps down to the next lower available resolution when the video buffers for more than 700 ms, then resumes normal selection on the next load
+- **Quality Preserved on Switch** — Changing quality mid-playback preserves the current playback position and resumes if the video was playing
 
 ### Guest Video Links
 Per-video shareable links for targeted distribution:
@@ -492,6 +510,10 @@ The source code will be built into Docker images locally instead of pulling from
 
 | Variable | Description |
 |----------|-------------|
+| `DROPBOX_APP_KEY` | Dropbox app key — enables Dropbox-backed storage for video originals, assets, and album ZIPs |
+| `DROPBOX_APP_SECRET` | Dropbox app secret (paired with `DROPBOX_APP_KEY`) |
+| `DROPBOX_REFRESH_TOKEN` | Dropbox offline refresh token — used server-side to obtain temporary download/upload tokens |
+| `DROPBOX_ROOT_PATH` | Optional namespace prefix within Dropbox (e.g. `/ViTransfer-TVP`); defaults to Dropbox root |
 | `QBO_CLIENT_ID` | QuickBooks Online OAuth client ID |
 | `QBO_CLIENT_SECRET` | QuickBooks Online OAuth client secret |
 | `QBO_REALM_ID` | QuickBooks company ID (realmId) |
@@ -524,7 +546,7 @@ Configure these in the admin panel under Settings:
 - Email Tracking Pixels — Enable/disable open tracking globally
 
 **Video Processing Defaults:**
-- Preview Resolution — 720p (default) or 1080p
+- Preview Resolutions — Select any combination of 480p, 720p, and 1080p to generate per project (default: 720p); higher resolutions use more storage and processing time
 - Watermark Enabled — Apply watermark to preview videos (default: true)
 - Watermark Text — Custom watermark text for previews
 

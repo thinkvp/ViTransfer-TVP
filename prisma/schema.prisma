@@ -173,6 +173,7 @@ model Project {
   companyName     String? // Optional company/brand name (display priority: companyName → primary recipient → 'Client')
   clientId        String?
   client          Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  storagePath     String?
   sharePassword   String?
   authMode        String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
   guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
@@ -406,7 +407,8 @@ model Album {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  name  String
+  name              String
+  storageFolderName String?
   notes String? @db.VarChar(500)
 
   status AlbumStatus @default(READY)
@@ -415,6 +417,18 @@ model Album {
   // These represent storage usage of generated download zips.
   fullZipFileSize   BigInt @default(0)
   socialZipFileSize BigInt @default(0)
+
+  // Dropbox upload tracking for generated ZIP files.
+  // null = not queued; PENDING = queued; UPLOADING = in progress; COMPLETE = done; ERROR = failed.
+  dropboxEnabled           Boolean @default(false)
+  fullZipDropboxStatus     String?
+  fullZipDropboxProgress   Int     @default(0)
+  fullZipDropboxError      String?
+  fullZipDropboxPath       String?
+  socialZipDropboxStatus   String?
+  socialZipDropboxProgress Int     @default(0)
+  socialZipDropboxError    String?
+  socialZipDropboxPath     String?
 
   photos AlbumPhoto[]
   analytics AlbumAnalytics[]
@@ -566,6 +580,7 @@ model Video {
   id           String @id @default(cuid())
   projectId    String
   name         String // Name to distinguish different videos in a project (required)
+  storageFolderName String?
   version      Int // 1, 2, 3 (for revisions)
   versionLabel String // "v1", "v2", "v3" or custom
 
@@ -607,6 +622,15 @@ model Video {
   approvedAt DateTime?
   allowApproval Boolean @default(false)
 
+  // Dropbox storage
+  dropboxEnabled Boolean @default(false)
+  dropboxPath    String? // Human-friendly Dropbox path relative to root (e.g. "Project Name/Video Name/v1 - file.mp4")
+
+  // Dropbox background upload tracking
+  dropboxUploadStatus   String? // PENDING, UPLOADING, COMPLETE, ERROR
+  dropboxUploadProgress Float   @default(0)
+  dropboxUploadError    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -634,6 +658,13 @@ model VideoAsset {
   fileType    String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
   storagePath String // Path in storage system
   category    String? // Optional category: "image", "audio", "project", "other"
+
+  // Dropbox storage
+  dropboxEnabled        Boolean @default(false)
+  dropboxPath           String? // Human-friendly Dropbox path relative to root
+  dropboxUploadStatus   String? // PENDING, UPLOADING, COMPLETE, ERROR
+  dropboxUploadProgress Float   @default(0)
+  dropboxUploadError    String?
 
   // Upload metadata
   expiresAt      DateTime?
@@ -801,6 +832,8 @@ model Settings {
 
   // Upload Settings
   maxUploadSizeGB Int @default(1) // Max upload size in GB
+  uploadChunkSizeMB Int @default(200) // TUS PATCH chunk size in MB
+  downloadChunkSizeMB Int @default(16) // Read/download chunk size in MB
 
   // Default Video Processing Settings
   defaultPreviewResolutions      String? @default("[\"720p\"]")
@@ -817,7 +850,7 @@ model Settings {
   // Project Behavior
   autoApproveProject           Boolean @default(true) // Auto-approve project when all videos approved
   autoDeletePreviewsOnClose    Boolean @default(false) // Auto-delete video previews when a project is closed
-  autoDeleteAlbumZipsOnClose   Boolean @default(false) // Auto-delete album ZIP files when a project is closed
+  excludeInternalIpsFromAnalytics Boolean @default(true) // Exclude likely internal/admin IPs from public analytics tracking
 
   // Auto-close approved projects
 

@@ -115,21 +115,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   // Filter only ready videos
   const readyVideos = videos.filter(v => v.status === 'READY')
 
-  // Check if all unique videos have at least one approved version
-  const videosByNameForApproval = readyVideos.reduce((acc, video) => {
-    if (!acc[video.name]) {
-      acc[video.name] = []
-    }
-    acc[video.name].push(video)
-    return acc
-  }, {} as Record<string, Video[]>)
-
-  const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions: Video[]) =>
-    versions.some(v => v.approved)
-  )
-
-  const canApproveProject = readyVideos.length > 0 && allVideosHaveApprovedVersion
-
   const permissions = normalizeRolePermissions(user?.permissions)
   const canSendNotifications = canDoAction(permissions, 'sendNotificationsToRecipients')
   const canViewAnalytics = canDoAction(permissions, 'viewAnalytics')
@@ -588,12 +573,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 size="default"
                 className="w-full"
                 onClick={handleToggleApproval}
-                disabled={isTogglingApproval || (project.status !== 'APPROVED' && !canApproveProject)}
-                title={
-                  project.status !== 'APPROVED' && !canApproveProject
-                    ? 'Approve one version of each video first'
-                    : ''
-                }
+                disabled={isTogglingApproval}
               >
                 {project.status === 'APPROVED' ? (
                   <>
@@ -607,11 +587,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                   </>
                 )}
               </Button>
-              {project.status !== 'APPROVED' && !canApproveProject && (
-                <p className="text-xs text-muted-foreground mt-1 px-1">
-                  Approve one version of each video to enable project approval
-                </p>
-              )}
             </div>
           )}
 

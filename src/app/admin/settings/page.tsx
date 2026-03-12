@@ -14,7 +14,16 @@ import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsS
 import { CpuConfigurationSection } from '@/components/settings/CpuConfigurationSection'
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
 import { AdminBrowserPushSection } from '@/components/settings/AdminBrowserPushSection'
+import { DropboxStorageSection } from '@/components/settings/DropboxStorageSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
+import {
+  DEFAULT_DOWNLOAD_CHUNK_SIZE_MB,
+  DEFAULT_UPLOAD_CHUNK_SIZE_MB,
+  MAX_DOWNLOAD_CHUNK_SIZE_MB,
+  MAX_UPLOAD_CHUNK_SIZE_MB,
+  MIN_DOWNLOAD_CHUNK_SIZE_MB,
+  MIN_UPLOAD_CHUNK_SIZE_MB,
+} from '@/lib/transfer-tuning'
 
 interface Settings {
   id: string
@@ -51,6 +60,9 @@ interface Settings {
   adminNotificationSchedule: string | null
   adminNotificationTime: string | null
   adminNotificationDay: number | null
+  excludeInternalIpsFromAnalytics?: boolean | null
+  uploadChunkSizeMB?: number | null
+  downloadChunkSizeMB?: number | null
 }
 
 interface SecuritySettings {
@@ -163,7 +175,9 @@ export default function GlobalSettingsPage() {
   const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [autoApproveProject, setAutoApproveProject] = useState(true)
   const [autoDeletePreviewsOnClose, setAutoDeletePreviewsOnClose] = useState(false)
-  const [autoDeleteAlbumZipsOnClose, setAutoDeleteAlbumZipsOnClose] = useState(false)
+  const [excludeInternalIpsFromAnalytics, setExcludeInternalIpsFromAnalytics] = useState(true)
+  const [uploadChunkSizeMB, setUploadChunkSizeMB] = useState<number | ''>(DEFAULT_UPLOAD_CHUNK_SIZE_MB)
+  const [downloadChunkSizeMB, setDownloadChunkSizeMB] = useState<number | ''>(DEFAULT_DOWNLOAD_CHUNK_SIZE_MB)
 
   const [autoCloseApprovedProjectsEnabled, setAutoCloseApprovedProjectsEnabled] = useState(false)
   const [autoCloseApprovedProjectsAfterDays, setAutoCloseApprovedProjectsAfterDays] = useState<number | ''>(7)
@@ -247,6 +261,9 @@ export default function GlobalSettingsPage() {
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
   const [showBrowserPush, setShowBrowserPush] = useState(false)
+  const [showDropboxStorage, setShowDropboxStorage] = useState(false)
+  const [dropboxConfigured, setDropboxConfigured] = useState(false)
+  const [dropboxRootPath, setDropboxRootPath] = useState('')
 
   // CPU Configuration state
   const [showCpuConfig, setShowCpuConfig] = useState(false)
@@ -325,7 +342,9 @@ export default function GlobalSettingsPage() {
         setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(data.autoApproveProject ?? true)
         setAutoDeletePreviewsOnClose(data.autoDeletePreviewsOnClose ?? false)
-        setAutoDeleteAlbumZipsOnClose(data.autoDeleteAlbumZipsOnClose ?? false)
+        setExcludeInternalIpsFromAnalytics(data.excludeInternalIpsFromAnalytics ?? true)
+        setUploadChunkSizeMB(data.uploadChunkSizeMB ?? DEFAULT_UPLOAD_CHUNK_SIZE_MB)
+        setDownloadChunkSizeMB(data.downloadChunkSizeMB ?? DEFAULT_DOWNLOAD_CHUNK_SIZE_MB)
         setAutoCloseApprovedProjectsEnabled(data.autoCloseApprovedProjectsEnabled ?? false)
         setAutoCloseApprovedProjectsAfterDays(data.autoCloseApprovedProjectsAfterDays ?? 7)
         setTestEmailAddress(data.smtpFromAddress || '')
@@ -416,6 +435,12 @@ export default function GlobalSettingsPage() {
               ? cpuData.overrides.dynamicThreadAllocation
               : cpuData.current?.dynamicThreadAllocation ?? true
           )
+        }
+
+        // Dropbox status is included in the main settings response
+        if (data.dropboxConfigured !== undefined) {
+          setDropboxConfigured(data.dropboxConfigured)
+          setDropboxRootPath(data.dropboxRootPath || '')
         }
       } catch (err) {
         setError('Failed to load settings')
@@ -560,6 +585,21 @@ export default function GlobalSettingsPage() {
         throw new Error('Concurrent jobs must be between 1 and 20.')
       }
 
+      const parsedUploadChunkSizeMB = typeof uploadChunkSizeMB === 'number'
+        ? uploadChunkSizeMB
+        : parseInt(String(uploadChunkSizeMB), 10)
+      const parsedDownloadChunkSizeMB = typeof downloadChunkSizeMB === 'number'
+        ? downloadChunkSizeMB
+        : parseInt(String(downloadChunkSizeMB), 10)
+
+      if (!Number.isInteger(parsedUploadChunkSizeMB) || parsedUploadChunkSizeMB < MIN_UPLOAD_CHUNK_SIZE_MB || parsedUploadChunkSizeMB > MAX_UPLOAD_CHUNK_SIZE_MB) {
+        throw new Error(`Upload chunk size must be between ${MIN_UPLOAD_CHUNK_SIZE_MB} and ${MAX_UPLOAD_CHUNK_SIZE_MB} MB.`)
+      }
+
+      if (!Number.isInteger(parsedDownloadChunkSizeMB) || parsedDownloadChunkSizeMB < MIN_DOWNLOAD_CHUNK_SIZE_MB || parsedDownloadChunkSizeMB > MAX_DOWNLOAD_CHUNK_SIZE_MB) {
+        throw new Error(`Download chunk size must be between ${MIN_DOWNLOAD_CHUNK_SIZE_MB} and ${MAX_DOWNLOAD_CHUNK_SIZE_MB} MB.`)
+      }
+
       const estimatedCpuThreads = parsedCpuThreadsPerJob * parsedCpuConcurrency
       if (cpuDetectedThreads > 0 && estimatedCpuThreads > cpuDetectedThreads) {
         throw new Error(
@@ -604,7 +644,9 @@ export default function GlobalSettingsPage() {
           : parseInt(String(defaultMaxClientUploadAllocationMB), 10) || 0,
         autoApproveProject: autoApproveProject,
         autoDeletePreviewsOnClose: autoDeletePreviewsOnClose,
-        autoDeleteAlbumZipsOnClose: autoDeleteAlbumZipsOnClose,
+        excludeInternalIpsFromAnalytics,
+        uploadChunkSizeMB: parsedUploadChunkSizeMB,
+        downloadChunkSizeMB: parsedDownloadChunkSizeMB,
         autoCloseApprovedProjectsEnabled: autoCloseApprovedProjectsEnabled,
         autoCloseApprovedProjectsAfterDays: typeof autoCloseApprovedProjectsAfterDays === 'number'
           ? autoCloseApprovedProjectsAfterDays
@@ -720,10 +762,12 @@ export default function GlobalSettingsPage() {
         setDefaultAllowAuthenticatedProjectSwitching(refreshedData.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(refreshedData.defaultMaxClientUploadAllocationMB ?? 1000)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
+        setExcludeInternalIpsFromAnalytics(refreshedData.excludeInternalIpsFromAnalytics ?? true)
+        setUploadChunkSizeMB(refreshedData.uploadChunkSizeMB ?? DEFAULT_UPLOAD_CHUNK_SIZE_MB)
+        setDownloadChunkSizeMB(refreshedData.downloadChunkSizeMB ?? DEFAULT_DOWNLOAD_CHUNK_SIZE_MB)
         setAutoCloseApprovedProjectsEnabled(refreshedData.autoCloseApprovedProjectsEnabled ?? false)
         setAutoCloseApprovedProjectsAfterDays(refreshedData.autoCloseApprovedProjectsAfterDays ?? 7)
         setAutoDeletePreviewsOnClose(refreshedData.autoDeletePreviewsOnClose ?? false)
-        setAutoDeleteAlbumZipsOnClose(refreshedData.autoDeleteAlbumZipsOnClose ?? false)
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
         setAdminNotificationDay(refreshedData.adminNotificationDay ?? 1)
@@ -1036,6 +1080,13 @@ export default function GlobalSettingsPage() {
             defaultVideoWorkerConcurrency={cpuDefaultVideoWorkerConcurrency}
           />
 
+          <DropboxStorageSection
+            show={showDropboxStorage}
+            setShow={setShowDropboxStorage}
+            dropboxConfigured={dropboxConfigured}
+            dropboxRootPath={dropboxRootPath}
+          />
+
           <VideoProcessingSettingsSection
             defaultPreviewResolutions={defaultPreviewResolutions}
             setDefaultPreviewResolutions={setDefaultPreviewResolutions}
@@ -1066,13 +1117,17 @@ export default function GlobalSettingsPage() {
             setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
             autoDeletePreviewsOnClose={autoDeletePreviewsOnClose}
             setAutoDeletePreviewsOnClose={setAutoDeletePreviewsOnClose}
-            autoDeleteAlbumZipsOnClose={autoDeleteAlbumZipsOnClose}
-            setAutoDeleteAlbumZipsOnClose={setAutoDeleteAlbumZipsOnClose}
             show={showProjectBehavior}
             setShow={setShowProjectBehavior}
           />
 
           <DeveloperToolsSection
+            excludeInternalIpsFromAnalytics={excludeInternalIpsFromAnalytics}
+            setExcludeInternalIpsFromAnalytics={setExcludeInternalIpsFromAnalytics}
+            uploadChunkSizeMB={uploadChunkSizeMB}
+            setUploadChunkSizeMB={setUploadChunkSizeMB}
+            downloadChunkSizeMB={downloadChunkSizeMB}
+            setDownloadChunkSizeMB={setDownloadChunkSizeMB}
             onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
             recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
             recalculateProjectDataTotalsResult={recalcProjectDataResult}

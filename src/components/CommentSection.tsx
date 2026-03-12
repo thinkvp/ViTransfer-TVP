@@ -1589,6 +1589,8 @@ export function CommentSectionView({
             onClose={() => setShowDownloadOptions(false)}
             shareToken={shareToken}
             isAdmin={isAdminView}
+            dropboxEnabled={(headerVideo as any)?.dropboxEnabled === true}
+            videoDropboxUploadStatus={(headerVideo as any)?.dropboxUploadStatus ?? null}
           />
         ) : null}
 

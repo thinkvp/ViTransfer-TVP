@@ -9,6 +9,8 @@ import { getRedis } from './redis'
 import { isShareSessionRevoked } from './session-invalidation'
 import { adminAllPermissions, normalizeRolePermissions, type RolePermissions } from './rbac'
 import { requireActionAccess, requireAnyActionAccess, requireMenuAccess } from './rbac-api'
+import { logSecurityEvent } from './video-access'
+import { getClientIpAddress } from './utils'
 
 export interface AuthUser {
   id: string
@@ -443,6 +445,17 @@ export async function requireApiSystemAdmin(request: NextRequest): Promise<AuthU
   const user = await requireApiAdmin(request)
   if (user instanceof Response) return user
   if (user.appRoleIsSystemAdmin !== true) {
+    logSecurityEvent({
+      type: 'PERMISSION_DENIED',
+      severity: 'WARNING',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        userId: user.id,
+        email: user.email,
+        role: user.appRoleName || user.role,
+        resource: 'systemAdmin',
+      },
+    }).catch(() => {})
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   return user

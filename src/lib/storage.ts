@@ -3,6 +3,7 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
+import { deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -524,6 +525,44 @@ export async function moveUploadedFile(
   destLogicalPath: string,
   expectedSize: number,
 ): Promise<void> {
+  if (isDropboxStoragePath(destLogicalPath)) {
+    // For Dropbox-destined files, store locally first (fast same-filesystem rename).
+    // The Dropbox upload is handled asynchronously by the dropbox-upload worker queue.
+    const localPath = stripDropboxStoragePrefix(destLogicalPath)
+    console.log(`[STORAGE] Dropbox path detected — storing locally at: ${localPath}`)
+
+    await ensureProjectStorageLayoutForPath(localPath)
+    const destFullPath = validatePathForWrite(localPath)
+    const destDir = path.dirname(destFullPath)
+
+    await mkdir(STORAGE_ROOT, { recursive: true })
+    await mkdir(destDir, { recursive: true })
+
+    try {
+      await fs.promises.rename(srcAbsPath, destFullPath)
+    } catch (err: any) {
+      if (err?.code === 'EXDEV') {
+        const readStream = fs.createReadStream(srcAbsPath)
+        const writeStream = fs.createWriteStream(destFullPath)
+        await pipeline(readStream, writeStream)
+        await fs.promises.unlink(srcAbsPath).catch(() => {})
+      } else {
+        throw err
+      }
+    }
+
+    const stats = await fs.promises.stat(destFullPath)
+    if (stats.size !== expectedSize) {
+      await fs.promises.unlink(destFullPath).catch(() => {})
+      throw new Error(
+        `File size mismatch after move: expected ${expectedSize} bytes, got ${stats.size} bytes.`
+      )
+    }
+
+    await fs.promises.unlink(`${srcAbsPath}.json`).catch(() => {})
+    return
+  }
+
   await ensureProjectStorageLayoutForPath(destLogicalPath)
   const destFullPath = validatePathForWrite(destLogicalPath)
   const destDir = path.dirname(destFullPath)
@@ -562,11 +601,20 @@ export async function moveUploadedFile(
 }
 
 export async function downloadFile(filePath: string): Promise<Readable> {
-  const fullPath = validatePath(filePath)
+  // For Dropbox-stored files, resolve to the local copy (local-first model keeps files on disk)
+  const resolvedPath = isDropboxStoragePath(filePath)
+    ? stripDropboxStoragePrefix(filePath)
+    : filePath
+  const fullPath = validatePath(resolvedPath)
   return fs.createReadStream(fullPath)
 }
 
 export async function deleteFile(filePath: string): Promise<void> {
+  if (isDropboxStoragePath(filePath)) {
+    await deleteDropboxFile(filePath)
+    return
+  }
+
   const base = validatePathBase(filePath)
   const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
   const candidates = redirected && redirected !== base.fullPath
@@ -596,6 +644,70 @@ export async function deleteDirectory(dirPath: string): Promise<void> {
   const legacyInfo = isLegacyProjectPath(base.posixNormalized)
   if (legacyInfo && redirected && base.fullPath !== fullPath && fs.existsSync(base.fullPath)) {
     await fs.promises.rm(base.fullPath, { recursive: true, force: true })
+  }
+}
+
+async function moveDirectoryContents(fromFullPath: string, toFullPath: string): Promise<void> {
+  await fs.promises.mkdir(toFullPath, { recursive: true })
+
+  const entries = await fs.promises.readdir(fromFullPath, { withFileTypes: true })
+  for (const entry of entries) {
+    const sourceChild = path.join(fromFullPath, entry.name)
+    const targetChild = path.join(toFullPath, entry.name)
+
+    if (fs.existsSync(targetChild)) {
+      const targetStats = await fs.promises.lstat(targetChild)
+      if (entry.isDirectory() && targetStats.isDirectory()) {
+        await moveDirectoryContents(sourceChild, targetChild)
+        continue
+      }
+
+      throw new Error(`Destination already exists: ${targetChild}`)
+    }
+
+    await fs.promises.rename(sourceChild, targetChild)
+  }
+
+  await fs.promises.rm(fromFullPath, { recursive: true, force: true })
+}
+
+export async function moveDirectory(
+  fromDirPath: string,
+  toDirPath: string,
+  options?: { merge?: boolean },
+): Promise<void> {
+  const fromFullPath = getRawStoragePath(fromDirPath)
+  const toFullPath = getRawStoragePath(toDirPath)
+
+  if (fromFullPath === toFullPath) {
+    return
+  }
+
+  if (!fs.existsSync(fromFullPath)) {
+    return
+  }
+
+  if (fs.existsSync(toFullPath)) {
+    if (options?.merge) {
+      await moveDirectoryContents(fromFullPath, toFullPath)
+      return
+    }
+
+    throw new Error(`Destination already exists: ${toDirPath}`)
+  }
+
+  await fs.promises.mkdir(path.dirname(toFullPath), { recursive: true })
+
+  try {
+    await fs.promises.rename(fromFullPath, toFullPath)
+  } catch (error: any) {
+    if (error?.code === 'EXDEV') {
+      await fs.promises.cp(fromFullPath, toFullPath, { recursive: true })
+      await fs.promises.rm(fromFullPath, { recursive: true, force: true })
+      return
+    }
+
+    throw error
   }
 }
 

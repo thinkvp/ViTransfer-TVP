@@ -5,6 +5,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateUploadedFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { isDropboxStorageConfigured, toDropboxStoragePath } from '@/lib/storage-provider-dropbox'
+import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoOriginalDropboxPath, buildVideoOriginalStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
 export const runtime = 'nodejs'
 
 
@@ -37,7 +39,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval } = body
+    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval, dropboxEnabled } = body
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -72,10 +74,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const sanitizedOriginalFileName = fileValidation.sanitizedFilename || 'upload.mp4'
+
     // Get the project and existing videos with the same name
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
+        client: { select: { name: true } },
         assignedUsers: { select: { userId: true } },
         videos: {
           where: { name: videoName },
@@ -116,18 +121,63 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const dropboxConfigured = isDropboxStorageConfigured()
+    // dropboxEnabled is an explicit per-video toggle; only allowed when Dropbox is configured
+    const effectiveDropboxEnabled = Boolean(dropboxEnabled) && dropboxConfigured
+    const existingVersionFolder = await prisma.video.findFirst({
+      where: { projectId, name: videoName },
+      select: { storageFolderName: true, name: true },
+      orderBy: { version: 'asc' },
+    })
+    const siblingVideoFolderRows = existingVersionFolder
+      ? []
+      : await prisma.video.findMany({
+          where: { projectId },
+          select: { storageFolderName: true, name: true },
+        })
+    const videoFolderName = existingVersionFolder
+      ? (existingVersionFolder.storageFolderName || existingVersionFolder.name)
+      : allocateUniqueStorageName(
+          videoName,
+          siblingVideoFolderRows
+            .map((row) => row.storageFolderName || row.name)
+            .filter(Boolean) as string[],
+        )
+    const effectiveVersionLabel = versionLabel || `v${nextVersion}`
+    const projectStoragePath = project.storagePath
+      || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title)
+    const localRelPath = buildVideoOriginalStoragePath(projectStoragePath, videoFolderName, effectiveVersionLabel, sanitizedOriginalFileName)
+    const originalStoragePath = effectiveDropboxEnabled
+      ? toDropboxStoragePath(localRelPath)
+      : localRelPath
+
+    const dropboxPath = effectiveDropboxEnabled
+      ? buildVideoOriginalDropboxPath(
+          project.client?.name || project.companyName || 'Client',
+          getStoragePathBasename(projectStoragePath) || project.title,
+          videoFolderName,
+          effectiveVersionLabel,
+          sanitizedOriginalFileName,
+        )
+      : null
+
+    console.log(`[VIDEO] Storage path decision: dropboxEnabled=${effectiveDropboxEnabled}, dropboxConfigured=${dropboxConfigured}, backend=${effectiveDropboxEnabled ? 'dropbox' : 'local'}`)
+
     // Create video record
     const video = await prisma.video.create({
       data: {
         projectId,
         name: videoName,
+        storageFolderName: videoFolderName,
         version: nextVersion,
-        versionLabel: versionLabel || `v${nextVersion}`,
+        versionLabel: effectiveVersionLabel,
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
         allowApproval: allowApproval ?? true,
-        originalFileName,
+        dropboxEnabled: effectiveDropboxEnabled,
+        dropboxPath,
+        originalFileName: sanitizedOriginalFileName,
         originalFileSize: BigInt(originalFileSize),
-        originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,
+        originalStoragePath,
         status: 'UPLOADING',
         duration: 0,
         width: 0,
@@ -140,6 +190,7 @@ export async function POST(request: NextRequest) {
     // Return videoId - TUS will handle upload directly
     const response = NextResponse.json({
       videoId: video.id,
+      storageBackend: effectiveDropboxEnabled ? 'dropbox' : 'local',
     })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')

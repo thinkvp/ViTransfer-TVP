@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
+import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -51,6 +53,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     select: {
       id: true,
       status: true,
+      storagePath: true,
       assignedUsers: { select: { userId: true } },
     },
   })
@@ -130,12 +133,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const name = parsed.data.name.trim()
   const notesRaw = typeof parsed.data.notes === 'string' ? parsed.data.notes.trim() : null
   const notes = notesRaw ? notesRaw : null
+  const siblingAlbums = await prisma.album.findMany({
+    where: { projectId },
+    select: { storageFolderName: true, name: true },
+  })
+  const storageFolderName = allocateUniqueStorageName(
+    name,
+    siblingAlbums.map((row) => row.storageFolderName || row.name).filter(Boolean) as string[],
+  )
 
   const album = await prisma.album.create({
     data: {
       projectId,
       name,
+      storageFolderName,
       notes,
+      ...(isDropboxStorageConfigured() ? { dropboxEnabled: true } : {}),
     },
   })
 

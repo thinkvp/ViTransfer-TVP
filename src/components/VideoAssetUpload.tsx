@@ -10,6 +10,7 @@ import { formatFileSize } from '@/lib/utils'
 import { apiPost, apiDelete } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { ALLOWED_ASSET_EXTENSIONS, ALL_ALLOWED_EXTENSIONS, validateAssetExtension, detectAssetCategory } from '@/lib/asset-validation'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 
 interface VideoAssetUploadProps {
   videoId: string
@@ -28,6 +29,7 @@ const CATEGORY_OPTIONS = [
 ]
 
 export function VideoAssetUpload({ videoId, onUploadComplete }: VideoAssetUploadProps) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<tus.Upload | null>(null)
   const assetIdRef = useRef<string | null>(null)
@@ -100,7 +102,7 @@ export function VideoAssetUpload({ videoId, onUploadComplete }: VideoAssetUpload
           filetype: file.type || 'application/octet-stream',
           assetId: assetId,
         },
-        chunkSize: 50 * 1024 * 1024,
+        chunkSize: uploadChunkSizeBytes,
         storeFingerprintForResuming: true,
         removeFingerprintOnSuccess: true,
 

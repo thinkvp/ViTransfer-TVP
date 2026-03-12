@@ -9,6 +9,7 @@ import { apiDelete, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { formatFileSize } from '@/lib/utils'
 import { validateAssetExtension } from '@/lib/asset-validation'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
 
 interface UserFileUploadProps {
   userId: string
@@ -31,6 +32,7 @@ type QueuedUserFileUpload = {
 }
 
 export function UserFileUpload({ userId, onUploadComplete, maxConcurrent = 3 }: UserFileUploadProps) {
+  const { uploadChunkSizeBytes } = useTransferTuning()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<QueuedUserFileUpload[]>([])
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
@@ -157,7 +159,7 @@ export function UserFileUpload({ userId, onUploadComplete, maxConcurrent = 3 }: 
           filetype: upload.file.type || 'application/octet-stream',
           userFileId,
         },
-        chunkSize: 50 * 1024 * 1024,
+        chunkSize: uploadChunkSizeBytes,
         storeFingerprintForResuming: true,
         removeFingerprintOnSuccess: true,
         onProgress: (bytesUploaded, bytesTotal) => {
@@ -244,7 +246,7 @@ export function UserFileUpload({ userId, onUploadComplete, maxConcurrent = 3 }: 
       updateUpload(id, { status: 'error', error: e?.message || 'Upload failed', tusUpload: null })
       refreshAttemptsRef.current.delete(id)
     }
-  }, [onUploadComplete, userId])
+  }, [onUploadComplete, uploadChunkSizeBytes, userId])
 
   useEffect(() => {
     const uploading = queue.filter((upload) => upload.status === 'uploading').length

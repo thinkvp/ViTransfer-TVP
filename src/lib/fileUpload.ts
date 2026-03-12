@@ -2,6 +2,8 @@
  * File upload configuration and utilities for comment attachments
  */
 
+import { buildCommentFileStoragePath } from '@/lib/project-storage-paths'
+
 // Maximum number of files per comment
 export const MAX_FILES_PER_COMMENT = 5;
 
@@ -177,16 +179,11 @@ export function getAllowedFileTypesDescription(): string {
  * @param fileName - Original file name
  * @returns Safe storage path
  */
-export function generateCommentFilePath(projectId: string, commentId: string, fileName: string): string {
+export function generateCommentFilePath(projectStoragePath: string, commentId: string, fileName: string): string {
   // Sanitize filename and ensure it doesn't contain path traversal attempts
   const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
 
   // Generate unique filename to avoid collisions
   const timestamp = Date.now();
-  const extension = sanitized.split(".").pop();
-  const nameWithoutExt = sanitized.slice(0, sanitized.length - (extension ? extension.length + 1 : 0));
-
-  const finalFileName = `${nameWithoutExt}_${timestamp}.${extension || "bin"}`;
-
-  return `projects/${projectId}/comments/${commentId}/${finalFileName}`;
+  return buildCommentFileStoragePath(projectStoragePath, commentId, sanitized, timestamp);
 }

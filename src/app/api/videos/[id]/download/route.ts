@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { sanitizeFilenameForHeader } from '@/lib/storage'
+import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { getTransferTuningSettings } from '@/lib/settings'
 import fs from 'fs'
 import { createReadStream } from 'fs'
-import { Readable } from 'stream'
 export const runtime = 'nodejs'
 
 
@@ -63,8 +64,26 @@ export async function GET(
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
+    // Use the original filename from the database, guard against missing values
+    const originalFilename = video.originalFileName || 'video.mp4'
+    const safeFilename = sanitizeFilenameForHeader(originalFilename)
+
+    // Resolve storage target — prefer Dropbox redirect for downloads
+    const resolvedTarget = await resolveStorageDownloadTarget(filePath, { preferDropbox: true, dropboxPath: video.dropboxPath })
+
+    if (resolvedTarget.kind === 'redirect') {
+      return NextResponse.redirect(resolvedTarget.url, {
+        status: 307,
+        headers: {
+          'Cache-Control': 'private, no-store, must-revalidate',
+          Pragma: 'no-cache',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+      })
+    }
+
     // Get the full file path
-    const fullPath = getFilePath(filePath)
+    const fullPath = resolvedTarget.absolutePath
 
     // Check if file exists and get stats
     const stat = await fs.promises.stat(fullPath)
@@ -72,13 +91,10 @@ export async function GET(
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
-    // Use the original filename from the database, guard against missing values
-    const originalFilename = video.originalFileName || 'video.mp4'
-    const safeFilename = sanitizeFilenameForHeader(originalFilename)
-
     // Stream file with proper backpressure so large downloads don't buffer
     // the entire file in memory when the client is on a slow connection.
-    const fileStream = createReadStream(fullPath)
+    const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+    const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
     fileStream.pause()
 
     let ended = false
@@ -150,6 +166,12 @@ export async function GET(
       },
     })
   } catch (error) {
+    if (error instanceof DropboxPreferredDownloadError) {
+      return NextResponse.json(
+        { error: 'Dropbox download is unavailable right now. Retry later or switch to local if you intentionally want to bypass Dropbox.' },
+        { status: 502 }
+      )
+    }
     console.error('Download error:', error)
     return NextResponse.json(
       { error: 'Failed to download file' },

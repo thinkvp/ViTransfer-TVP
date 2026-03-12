@@ -6,6 +6,9 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { buildProjectStorageRoot, buildVideoAssetDropboxPath, buildVideoThumbnailStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
+import { getTransferTuningSettings } from '@/lib/settings'
+import { isDropboxStorageConfigured, toDropboxStoragePath, deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { createReadStream } from 'fs'
 import fs from 'fs'
 export const runtime = 'nodejs'
@@ -113,7 +116,8 @@ export async function GET(
       : 'application/octet-stream'
 
     // Stream file with proper Node.js to Web API stream conversion
-    const fileStream = createReadStream(fullPath)
+    const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+    const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
 
     // Convert Node.js stream to Web API ReadableStream
     let closed = false
@@ -191,7 +195,16 @@ export async function DELETE(
       include: {
         video: {
           include: {
-            project: { select: { status: true, assignedUsers: { select: { userId: true } } } },
+            project: {
+              select: {
+                status: true,
+                title: true,
+                storagePath: true,
+                companyName: true,
+                client: { select: { name: true } },
+                assignedUsers: { select: { userId: true } },
+              },
+            },
           },
         },
       },
@@ -227,8 +240,13 @@ export async function DELETE(
 
     // If this asset was the current thumbnail, revert to system-generated thumbnail
     if (isCurrentThumbnail) {
-      // System-generated thumbnail path: projects/{projectId}/videos/{videoId}/thumbnail.jpg
-      const systemThumbnailPath = `projects/${asset.video.projectId}/videos/${videoId}/thumbnail.jpg`
+      const projectStoragePath = asset.video.project.storagePath
+        || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
+      const systemThumbnailPath = buildVideoThumbnailStoragePath(
+        projectStoragePath,
+        asset.video.storageFolderName || asset.video.name || videoId,
+        asset.video.versionLabel || `v${asset.video.version}`,
+      )
 
       await prisma.video.update({
         where: { id: videoId },
@@ -253,5 +271,142 @@ export async function DELETE(
       { error: 'Failed to delete asset' },
       { status: 500 }
     )
+  }
+}
+
+// PATCH /api/videos/[id]/assets/[assetId] - Toggle Dropbox for asset
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; assetId: string }> }
+) {
+  const { id: videoId, assetId } = await params
+
+  const authResult = await requireApiUser(request)
+  if (authResult instanceof Response) return authResult
+
+  const forbiddenMenu = requireMenuAccess(authResult, 'projects')
+  if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAction = requireActionAccess(authResult, 'projectsFullControl')
+  if (forbiddenAction) return forbiddenAction
+
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
+    message: 'Too many update requests. Please slow down.',
+  }, 'video-asset-update')
+  if (rateLimitResult) return rateLimitResult
+
+  try {
+    const body = await request.json()
+    const { dropboxEnabled } = body
+
+    if (typeof dropboxEnabled !== 'boolean') {
+      return NextResponse.json({ error: 'dropboxEnabled must be a boolean' }, { status: 400 })
+    }
+
+    if (dropboxEnabled && !isDropboxStorageConfigured()) {
+      return NextResponse.json({ error: 'Dropbox is not configured' }, { status: 400 })
+    }
+
+    const asset = await prisma.videoAsset.findUnique({
+      where: { id: assetId },
+      include: {
+        video: {
+          include: {
+            project: {
+              select: {
+                status: true,
+                title: true,
+                storagePath: true,
+                companyName: true,
+                assignedUsers: { select: { userId: true } },
+                client: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    })
+
+    if (!asset || asset.videoId !== videoId) {
+      return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
+    }
+
+    if (authResult.appRoleIsSystemAdmin !== true) {
+      const assigned = asset.video.project.assignedUsers?.some((u) => u.userId === authResult.id)
+      if (!assigned) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      if (!isVisibleProjectStatusForUser(authResult, asset.video.project.status)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
+    const updateData: any = { dropboxEnabled }
+    const assetDropboxRelPath = buildVideoAssetDropboxPath(
+      asset.video.project.client?.name || asset.video.project.companyName || 'Client',
+      getStoragePathBasename(asset.video.project.storagePath) || asset.video.project.title,
+      asset.video.storageFolderName || asset.video.name || videoId,
+      asset.video.versionLabel,
+      asset.fileName,
+    )
+
+    if (dropboxEnabled) {
+      const currentPath = asset.storagePath
+      if (!isDropboxStoragePath(currentPath)) {
+        const dropboxPath = toDropboxStoragePath(currentPath)
+        updateData.storagePath = dropboxPath
+        updateData.dropboxPath = assetDropboxRelPath
+        updateData.dropboxUploadStatus = 'PENDING'
+        updateData.dropboxUploadProgress = 0
+        updateData.dropboxUploadError = null
+      } else if (asset.dropboxUploadStatus === 'ERROR') {
+        updateData.dropboxPath = assetDropboxRelPath
+        updateData.dropboxUploadStatus = 'PENDING'
+        updateData.dropboxUploadProgress = 0
+        updateData.dropboxUploadError = null
+      } else if (asset.dropboxPath !== assetDropboxRelPath) {
+        updateData.dropboxPath = assetDropboxRelPath
+      }
+    } else {
+      const currentPath = asset.storagePath
+      if (isDropboxStoragePath(currentPath)) {
+        updateData.storagePath = stripDropboxStoragePrefix(currentPath)
+        deleteDropboxFile(currentPath, asset.dropboxPath).catch((err) => {
+          console.error(`[DROPBOX] Failed to delete asset ${assetId} from Dropbox:`, err)
+        })
+      }
+      updateData.dropboxPath = null
+      updateData.dropboxUploadStatus = null
+      updateData.dropboxUploadProgress = 0
+      updateData.dropboxUploadError = null
+    }
+
+    await prisma.videoAsset.update({
+      where: { id: assetId },
+      data: updateData,
+    })
+
+    // Enqueue upload to Dropbox if enabling
+    if (dropboxEnabled && updateData.dropboxUploadStatus === 'PENDING') {
+      const localPath = stripDropboxStoragePrefix(updateData.storagePath || asset.storagePath)
+      const dropboxPath = updateData.storagePath || asset.storagePath
+      const { getDropboxUploadQueue } = await import('@/lib/queue')
+      const dropboxQueue = getDropboxUploadQueue()
+      await dropboxQueue.add('upload-asset-to-dropbox', {
+        videoId,
+        localPath,
+        dropboxPath,
+        dropboxRelPath: updateData.dropboxPath || asset.dropboxPath || null,
+        fileSizeBytes: Number(asset.fileSize),
+        assetId,
+      })
+      console.log(`[ASSET] Asset ${assetId} queued for Dropbox upload (toggled on)`)
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Error updating asset:', error)
+    return NextResponse.json({ error: 'Failed to update asset' }, { status: 500 })
   }
 }

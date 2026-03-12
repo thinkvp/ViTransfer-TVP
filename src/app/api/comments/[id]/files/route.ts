@@ -7,6 +7,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +37,7 @@ export async function POST(
     }
 
     // Verify project exists and get upload settings
-    const project = await prisma.project.findUnique({
+    const projectSettings = await prisma.project.findUnique({
       where: { id: comment.projectId },
       select: { 
         id: true,
@@ -46,12 +48,12 @@ export async function POST(
       },
     })
 
-    if (!project) {
+    if (!projectSettings) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
     // Authenticate with share token
-    const authResult = await verifyProjectAccess(request, comment.projectId, project.sharePassword, project.authMode)
+    const authResult = await verifyProjectAccess(request, comment.projectId, projectSettings.sharePassword, projectSettings.authMode)
     if (!authResult.authorized) {
       return authResult.errorResponse!
     }
@@ -69,7 +71,7 @@ export async function POST(
     }
 
     // Check if file uploads are allowed for this project (only applies to clients)
-    if (isClient && !project.allowClientUploadFiles) {
+    if (isClient && !projectSettings.allowClientUploadFiles) {
       return NextResponse.json(
         { error: 'File uploads are not allowed for this project' },
         { status: 403 }
@@ -112,8 +114,8 @@ export async function POST(
     }
 
     // Enforce per-project total allocation for client uploads (0 = unlimited)
-    if (isClient && (project.maxClientUploadAllocationMB ?? 0) > 0) {
-      const limitBytes = BigInt(project.maxClientUploadAllocationMB) * BigInt(1024 * 1024)
+    if (isClient && (projectSettings.maxClientUploadAllocationMB ?? 0) > 0) {
+      const limitBytes = BigInt(projectSettings.maxClientUploadAllocationMB) * BigInt(1024 * 1024)
       const used = await prisma.commentFile.aggregate({
         where: { projectId: comment.projectId },
         _sum: { fileSize: true },
@@ -143,8 +145,20 @@ export async function POST(
       )
     }
 
+    const projectStorage = await prisma.project.findUnique({
+      where: { id: comment.projectId },
+      select: {
+        storagePath: true,
+        title: true,
+        companyName: true,
+        client: { select: { name: true } },
+      },
+    })
+
     // Generate storage path
-    const storagePath = generateCommentFilePath(comment.projectId, commentId, fileName)
+    const projectStoragePath = projectStorage?.storagePath
+      || buildProjectStorageRoot(projectStorage?.client?.name || projectStorage?.companyName || 'Client', projectStorage?.title || 'Untitled')
+    const storagePath = generateCommentFilePath(projectStoragePath, commentId, fileName)
     const fullPath = join(STORAGE_ROOT, storagePath)
     const directory = fullPath.substring(0, fullPath.lastIndexOf('/'))
 

@@ -14,7 +14,6 @@ import {
 interface ProjectStatusPickerProps {
   value: string
   onChange: (nextStatus: ProjectStatus) => Promise<void> | void
-  canApprove?: boolean
   disabled?: boolean
   visibleStatuses?: Array<ProjectStatus | string>
   className?: string
@@ -24,7 +23,6 @@ interface ProjectStatusPickerProps {
 export default function ProjectStatusPicker({
   value,
   onChange,
-  canApprove,
   disabled,
   visibleStatuses,
   className,
@@ -33,8 +31,6 @@ export default function ProjectStatusPicker({
   const [open, setOpen] = useState(false)
 
   const normalizedValue = useMemo(() => String(value || ''), [value])
-
-  const approvedDisabled = normalizedValue !== 'APPROVED' && canApprove !== true
 
   const visibleOptions = useMemo(() => {
     if (!Array.isArray(visibleStatuses) || visibleStatuses.length === 0) {
@@ -104,14 +100,9 @@ export default function ProjectStatusPicker({
 
           <div className="space-y-2">
             {visibleOptions.map((opt) => {
-              const isApproved = opt.value === 'APPROVED'
               const isShareOnly = opt.value === 'SHARE_ONLY'
               const isClosed = opt.value === 'CLOSED'
               const isSelected = normalizedValue === opt.value
-
-              const isDisabled =
-                disabled ||
-                (isApproved ? approvedDisabled : false)
 
               return (
                 <div key={opt.value}>
@@ -130,21 +121,10 @@ export default function ProjectStatusPicker({
                       e.stopPropagation()
                       void setStatus(opt.value)
                     }}
-                    disabled={isDisabled}
-                    title={
-                      isApproved && approvedDisabled
-                        ? 'Approve one version of each video first'
-                        : undefined
-                    }
+                    disabled={disabled}
                   >
                     {opt.label}
                   </Button>
-
-                  {isApproved && (
-                    <p className="text-xs text-muted-foreground mt-1 px-1">
-                      Approve one version of each video to enable project approval
-                    </p>
-                  )}
 
                   {isShareOnly && (
                     <p className="text-xs text-muted-foreground mt-1 px-1">

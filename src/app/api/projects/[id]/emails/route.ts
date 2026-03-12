@@ -6,6 +6,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { getSafeguardLimits } from '@/lib/settings'
 import { validateEmlFilename } from '@/lib/eml-validation'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { buildProjectEmailRawStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -48,7 +49,17 @@ const createSchema = z.object({
 })
 
 async function assertProjectAccessOr404(projectId: string, auth: any) {
-  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true, status: true } })
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      status: true,
+      storagePath: true,
+      title: true,
+      companyName: true,
+      client: { select: { name: true } },
+    },
+  })
   if (!project) return null
 
   if (!isVisibleProjectStatusForUser(auth, project.status)) return null
@@ -209,7 +220,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const timestamp = Date.now()
   const sanitizedFileName = nameValidation.sanitizedFilename!
-  const storagePath = `projects/${projectId}/communication/raw/email-${timestamp}-${sanitizedFileName}`
+  const storagePath = buildProjectEmailRawStoragePath(
+    project.storagePath || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title),
+    sanitizedFileName,
+    timestamp,
+  )
 
   const record = await prisma.projectEmail.create({
     data: {

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
-import { invalidateBlocklistCache } from '@/lib/video-access'
+import { invalidateBlocklistCache, logSecurityEvent } from '@/lib/video-access'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getClientIpAddress } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
@@ -107,6 +108,18 @@ export async function POST(request: NextRequest) {
     // Invalidate cache
     await invalidateBlocklistCache()
 
+    logSecurityEvent({
+      type: 'BLOCKLIST_IP_ADDED',
+      severity: 'INFO',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        userId: authResult.id,
+        email: authResult.email,
+        blockedIpAddress: ipAddress,
+        reason: reason || null,
+      },
+    }).catch(() => {})
+
     const response = NextResponse.json({
       success: true,
       blockedIP,
@@ -158,6 +171,17 @@ export async function DELETE(request: NextRequest) {
 
     // Invalidate cache
     await invalidateBlocklistCache()
+
+    logSecurityEvent({
+      type: 'BLOCKLIST_IP_REMOVED',
+      severity: 'WARNING',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        userId: authResult.id,
+        email: authResult.email,
+        unblockedEntryId: id,
+      },
+    }).catch(() => {})
 
     const response = NextResponse.json({
       success: true,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { deleteFile, deleteDirectory } from '@/lib/storage'
+import { deleteFile, deleteDirectory, moveDirectory } from '@/lib/storage'
 import { requireApiAuth } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
@@ -8,6 +8,15 @@ import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib
 import { getProjectRecipients } from '@/lib/recipients'
 import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
+import { sanitizeDropboxName, moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import {
+  allocateUniqueStorageName,
+  buildProjectDropboxRoot,
+  buildProjectStorageRoot,
+  getStoragePathBasename,
+  replaceStoredStoragePathPrefix,
+  replaceStoragePathPrefix,
+} from '@/lib/project-storage-paths'
 import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
 import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
@@ -125,6 +134,7 @@ export async function GET(
 
   try {
     const { id } = await params
+    const includeComments = new URL(request.url).searchParams.get('includeComments') !== 'false'
 
     const project = await prisma.project.findUnique({
       where: { id },
@@ -159,33 +169,37 @@ export async function GET(
         videos: {
           orderBy: { version: 'desc' },
         },
-        comments: {
-          where: { parentId: null },
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                username: true,
-                email: true,
-              }
-            },
-            replies: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    username: true,
-                    email: true,
-                  }
-                }
+        ...(includeComments
+          ? {
+              comments: {
+                where: { parentId: null },
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      username: true,
+                      email: true,
+                    }
+                  },
+                  replies: {
+                    include: {
+                      user: {
+                        select: {
+                          id: true,
+                          name: true,
+                          username: true,
+                          email: true,
+                        }
+                      }
+                    },
+                    orderBy: { createdAt: 'asc' },
+                  },
+                },
+                orderBy: { createdAt: 'desc' },
               },
-              orderBy: { createdAt: 'asc' },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-        },
+            }
+          : {}),
         recipients: {
           orderBy: [
             { isPrimary: 'desc' },
@@ -233,13 +247,15 @@ export async function GET(
 
     // Sanitize/normalize comments to ensure timecodes are consistent
     // Be defensive: malformed legacy comments should not break the entire project view.
-    const sanitizedComments = project.comments.map((comment: any) => {
-      try {
-        return sanitizeComment(comment, true, true, fallbackName)
-      } catch {
-        return comment
-      }
-    })
+    const sanitizedComments = includeComments
+      ? (project.comments || []).map((comment: any) => {
+          try {
+            return sanitizeComment(comment, true, true, fallbackName)
+          } catch {
+            return comment
+          }
+        })
+      : []
 
     // Decrypt password for admin users (needed for settings form)
     // Be defensive: if ENCRYPTION_KEY changed, older records may not decrypt.
@@ -387,7 +403,17 @@ export async function PATCH(
 
     const currentProject = await prisma.project.findUnique({
       where: { id },
-      select: { status: true, enableVideos: true, enablePhotos: true, previewResolutions: true },
+      select: {
+        status: true,
+        title: true,
+        enableVideos: true,
+        enablePhotos: true,
+        previewResolutions: true,
+        clientId: true,
+        companyName: true,
+        storagePath: true,
+        client: { select: { name: true } },
+      },
     })
     if (!currentProject) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -520,6 +546,10 @@ export async function PATCH(
       previousStatus = currentProject.status
     }
 
+    const currentClientName = currentProject.client?.name || currentProject.companyName || 'Client'
+    let targetClientId = currentProject.clientId
+    let targetClientName = currentClientName
+
     // Build update data object
     const updateData: any = {}
 
@@ -608,6 +638,8 @@ export async function PATCH(
 
       updateData.clientId = client.id
       updateData.companyName = client.name
+      targetClientId = client.id
+      targetClientName = client.name
     }
 
     // Handle status update (for approval)
@@ -829,6 +861,52 @@ export async function PATCH(
       updateData.clientNotificationDay = validatedBody.clientNotificationDay
     }
 
+    const currentProjectStoragePath = currentProject.storagePath
+      || buildProjectStorageRoot(currentClientName, currentProject.title)
+    const currentProjectFolderName = getStoragePathBasename(currentProjectStoragePath) || currentProject.title
+    const nextProjectTitle = validatedBody.title !== undefined ? validatedBody.title : currentProject.title
+
+    let projectStorageRename:
+      | {
+          oldProjectStoragePath: string
+          newProjectStoragePath: string
+          oldProjectDropboxRoot: string
+          newProjectDropboxRoot: string
+        }
+      | null = null
+
+    if (
+      validatedBody.title !== undefined
+      || validatedBody.clientId !== undefined
+      || !currentProject.storagePath
+    ) {
+      const siblingProjects = await prisma.project.findMany({
+        where: {
+          clientId: targetClientId,
+          NOT: { id },
+        },
+        select: { storagePath: true, title: true },
+      })
+      const nextProjectFolderName = allocateUniqueStorageName(
+        nextProjectTitle,
+        siblingProjects
+          .map((projectRow) => getStoragePathBasename(projectRow.storagePath) || projectRow.title)
+          .filter(Boolean) as string[],
+      )
+      const nextProjectStoragePath = buildProjectStorageRoot(targetClientName, nextProjectFolderName)
+
+      updateData.storagePath = nextProjectStoragePath
+
+      if (nextProjectStoragePath !== currentProjectStoragePath) {
+        projectStorageRename = {
+          oldProjectStoragePath: currentProjectStoragePath,
+          newProjectStoragePath: nextProjectStoragePath,
+          oldProjectDropboxRoot: buildProjectDropboxRoot(currentClientName, currentProjectFolderName),
+          newProjectDropboxRoot: buildProjectDropboxRoot(targetClientName, nextProjectFolderName),
+        }
+      }
+    }
+
     // Snapshot existing assignments so we can detect newly added users after the transaction
     const previousAssignedUserIds = assignedUsersToSet !== null
       ? new Set(
@@ -836,29 +914,241 @@ export async function PATCH(
         )
       : null
 
+    let movedProjectStorage = false
+    if (projectStorageRename && currentProject.storagePath) {
+      await moveDirectory(projectStorageRename.oldProjectStoragePath, projectStorageRename.newProjectStoragePath)
+      movedProjectStorage = true
+    }
+
     // Update the project in database FIRST (before invalidating sessions)
-    const project = await prisma.$transaction(async (tx) => {
-      const updated = await tx.project.update({
-        where: { id },
-        data: updateData,
-      })
+    let project
+    try {
+      project = await prisma.$transaction(async (tx) => {
+        const updated = await tx.project.update({
+          where: { id },
+          data: updateData,
+        })
 
-      if (assignedUsersToSet !== null) {
-        await tx.projectUser.deleteMany({ where: { projectId: id } })
-        if (assignedUsersToSet.length > 0) {
-          await tx.projectUser.createMany({
-            data: assignedUsersToSet.map((a) => ({
-              projectId: id,
-              userId: a.userId,
-              receiveNotifications: a.receiveNotifications !== false,
-            })),
-            skipDuplicates: true,
+        if (projectStorageRename) {
+          const videos = await tx.video.findMany({
+            where: { projectId: id },
+            select: {
+              id: true,
+              originalStoragePath: true,
+              preview480Path: true,
+              preview720Path: true,
+              preview1080Path: true,
+              thumbnailPath: true,
+              timelinePreviewVttPath: true,
+              timelinePreviewSpritesPath: true,
+              dropboxPath: true,
+            },
           })
-        }
-      }
+          for (const video of videos) {
+            await tx.video.update({
+              where: { id: video.id },
+              data: {
+                originalStoragePath: replaceStoredStoragePathPrefix(
+                  video.originalStoragePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+                preview480Path: replaceStoredStoragePathPrefix(
+                  video.preview480Path,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+                preview720Path: replaceStoredStoragePathPrefix(
+                  video.preview720Path,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+                preview1080Path: replaceStoredStoragePathPrefix(
+                  video.preview1080Path,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+                thumbnailPath: replaceStoredStoragePathPrefix(
+                  video.thumbnailPath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+                timelinePreviewVttPath: replaceStoredStoragePathPrefix(
+                  video.timelinePreviewVttPath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(
+                  video.timelinePreviewSpritesPath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+                dropboxPath: replaceStoragePathPrefix(
+                  video.dropboxPath,
+                  projectStorageRename.oldProjectDropboxRoot,
+                  projectStorageRename.newProjectDropboxRoot,
+                ),
+              },
+            })
+          }
 
-      return updated
-    })
+          const assets = await tx.videoAsset.findMany({
+            where: { video: { projectId: id } },
+            select: { id: true, storagePath: true, dropboxPath: true },
+          })
+          for (const asset of assets) {
+            await tx.videoAsset.update({
+              where: { id: asset.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(
+                  asset.storagePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+                dropboxPath: replaceStoragePathPrefix(
+                  asset.dropboxPath,
+                  projectStorageRename.oldProjectDropboxRoot,
+                  projectStorageRename.newProjectDropboxRoot,
+                ),
+              },
+            })
+          }
+
+          const albumPhotos = await tx.albumPhoto.findMany({
+            where: { album: { projectId: id } },
+            select: { id: true, storagePath: true, socialStoragePath: true },
+          })
+          for (const photo of albumPhotos) {
+            await tx.albumPhoto.update({
+              where: { id: photo.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(
+                  photo.storagePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+                socialStoragePath: replaceStoredStoragePathPrefix(
+                  photo.socialStoragePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
+              },
+            })
+          }
+
+          const projectFiles = await tx.projectFile.findMany({
+            where: { projectId: id },
+            select: { id: true, storagePath: true },
+          })
+          for (const file of projectFiles) {
+            await tx.projectFile.update({
+              where: { id: file.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(
+                  file.storagePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+              },
+            })
+          }
+
+          const projectEmails = await tx.projectEmail.findMany({
+            where: { projectId: id },
+            select: { id: true, rawStoragePath: true },
+          })
+          for (const email of projectEmails) {
+            await tx.projectEmail.update({
+              where: { id: email.id },
+              data: {
+                rawStoragePath: replaceStoredStoragePathPrefix(
+                  email.rawStoragePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+              },
+            })
+          }
+
+          const attachments = await tx.projectEmailAttachment.findMany({
+            where: { projectEmail: { projectId: id } },
+            select: { id: true, storagePath: true },
+          })
+          for (const attachment of attachments) {
+            await tx.projectEmailAttachment.update({
+              where: { id: attachment.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(
+                  attachment.storagePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+              },
+            })
+          }
+
+          const commentFiles = await tx.commentFile.findMany({
+            where: { projectId: id },
+            select: { id: true, storagePath: true },
+          })
+          for (const commentFile of commentFiles) {
+            await tx.commentFile.update({
+              where: { id: commentFile.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(
+                  commentFile.storagePath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                )!,
+              },
+            })
+          }
+
+          const albums = await tx.album.findMany({
+            where: { projectId: id },
+            select: { id: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
+          })
+          for (const album of albums) {
+            await tx.album.update({
+              where: { id: album.id },
+              data: {
+                fullZipDropboxPath: replaceStoragePathPrefix(
+                  album.fullZipDropboxPath,
+                  projectStorageRename.oldProjectDropboxRoot,
+                  projectStorageRename.newProjectDropboxRoot,
+                ),
+                socialZipDropboxPath: replaceStoragePathPrefix(
+                  album.socialZipDropboxPath,
+                  projectStorageRename.oldProjectDropboxRoot,
+                  projectStorageRename.newProjectDropboxRoot,
+                ),
+              },
+            })
+          }
+        }
+
+        if (assignedUsersToSet !== null) {
+          await tx.projectUser.deleteMany({ where: { projectId: id } })
+          if (assignedUsersToSet.length > 0) {
+            await tx.projectUser.createMany({
+              data: assignedUsersToSet.map((a) => ({
+                projectId: id,
+                userId: a.userId,
+                receiveNotifications: a.receiveNotifications !== false,
+              })),
+              skipDuplicates: true,
+            })
+          }
+        }
+
+        return updated
+      })
+    } catch (error) {
+      if (movedProjectStorage) {
+        await moveDirectory(projectStorageRename!.newProjectStoragePath, projectStorageRename!.oldProjectStoragePath).catch(() => {})
+      }
+      throw error
+    }
 
     if (nextPreviewResolutions !== null) {
       const removedPreviewResolutions = previousPreviewResolutions.filter(
@@ -917,6 +1207,16 @@ export async function PATCH(
       }
     }
 
+    if (
+      projectStorageRename
+      && projectStorageRename.oldProjectDropboxRoot !== projectStorageRename.newProjectDropboxRoot
+    ) {
+      void moveDropboxPath(
+        projectStorageRename.oldProjectDropboxRoot,
+        projectStorageRename.newProjectDropboxRoot,
+      ).catch(() => {})
+    }
+
     // Record status change in analytics activity feed
     if (validatedBody.status !== undefined && previousStatus && previousStatus !== validatedBody.status) {
       await prisma.projectStatusChange.create({
@@ -944,7 +1244,7 @@ export async function PATCH(
       try {
         const globalSettings = await prisma.settings.findUnique({
           where: { id: 'default' },
-          select: { autoDeletePreviewsOnClose: true, autoDeleteAlbumZipsOnClose: true },
+          select: { autoDeletePreviewsOnClose: true },
         })
         if (globalSettings?.autoDeletePreviewsOnClose) {
           const videos = await prisma.video.findMany({
@@ -980,25 +1280,6 @@ export async function PATCH(
               await prisma.video.update({
                 where: { id: video.id },
                 data: updateData,
-              })
-            }
-          }
-        }
-        if (globalSettings?.autoDeleteAlbumZipsOnClose) {
-          const albums = await prisma.album.findMany({
-            where: { projectId: project.id },
-            select: { id: true, fullZipFileSize: true, socialZipFileSize: true },
-          })
-          for (const album of albums) {
-            const variants: AlbumZipVariant[] = ['full', 'social']
-            for (const variant of variants) {
-              const zipPath = getAlbumZipStoragePath({ projectId: project.id, albumId: album.id, variant })
-              await deleteFile(zipPath).catch(() => {})
-            }
-            if (album.fullZipFileSize > 0 || album.socialZipFileSize > 0) {
-              await prisma.album.update({
-                where: { id: album.id },
-                data: { fullZipFileSize: BigInt(0), socialZipFileSize: BigInt(0) },
               })
             }
           }
@@ -1196,11 +1477,14 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    // Get project with all videos
+    // Get project with all videos and their assets
     const project = await prisma.project.findUnique({
       where: { id },
       include: {
-        videos: true,
+        client: { select: { name: true } },
+        videos: {
+          include: { assets: true },
+        },
       },
     })
 
@@ -1215,12 +1499,24 @@ export async function DELETE(
     // Delete all video files from storage
     for (const video of project.videos) {
       try {
+        // Delete asset files (including Dropbox copies)
+        for (const asset of video.assets) {
+          try {
+            await deleteFile(asset.storagePath)
+          } catch {
+            // Ignore per-asset errors
+          }
+        }
+
         // Delete original file
         if (video.originalStoragePath) {
           await deleteFile(video.originalStoragePath)
         }
 
         // Delete preview files
+        if (video.preview480Path) {
+          await deleteFile(video.preview480Path)
+        }
         if (video.preview1080Path) {
           await deleteFile(video.preview1080Path)
         }
@@ -1240,7 +1536,9 @@ export async function DELETE(
 
     // Delete the entire project directory after all files are removed
     try {
-      await deleteDirectory(`projects/${id}`)
+      await deleteDirectory(
+        project.storagePath || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title)
+      )
     } catch (error) {
       console.error(`Failed to delete project directory for ${id}:`, error)
       // Continue even if directory deletion fails
