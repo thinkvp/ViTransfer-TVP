@@ -6,6 +6,7 @@ import { sendPushNotification } from '@/lib/push-notifications'
 import { getClientIpAddress } from '@/lib/utils'
 import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
+import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -122,6 +123,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Guest-video links share a sessionId across viewers, so dedupe must not be session-based.
   // Skip tracking entirely when the visitor is likely an admin.
   if (!likelyAdmin) {
+    await touchProjectLastAccessForRequest({
+      projectId: link.project.id,
+      request,
+      sessionId,
+    }).catch(() => {})
+
     const redis = getRedis()
     const dedupeKey = `analytics:guest_video_view:${link.project.id}:${link.video.id}:${ipAddress || 'unknown'}`
     const alreadyTracked = await redis.get(dedupeKey).catch(() => null)

@@ -5,6 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-03-13
+
+### Added
+- **Last Access column on projects dashboard** — the projects table now has a "Last Access" column showing when a client or guest last accessed the share page; the timestamp is written via a raw SQL update so `updatedAt` (Last Activity) is not bumped; falls back to the most recent `SharePageAccess` ACCESS event so projects with visits before this feature was added still show a meaningful value
+
+### Changed
+- **Dropbox section description updated to accurately reflect scope** — the Dropbox configuration card in Admin Settings now states that video originals, assets, and album ZIPs can all be offloaded to Dropbox, replacing the previous description that only mentioned approvable video originals
+
+### Fixed
+- **Admin IPs excluded from Last Access tracking** — visiting a share page from an admin IP no longer advances the Last Access timestamp when "Exclude internal/admin IPs from analytics" is enabled
+- **Enabling Dropbox on a video now also queues existing assets for upload** — toggling Dropbox on a video version now marks all attached assets as `dropboxEnabled` and queues them for Dropbox upload in the same operation; previously only the video original was uploaded and assets were left behind
+- **Running Jobs panel now shows recently completed Dropbox uploads** — Dropbox upload completions from the past 30 minutes (for both video originals and assets) are included in the running-jobs API response and surfaced in the Running Jobs panel
+- **Asset panel refreshes immediately after Dropbox toggle** — toggling Dropbox on a video version now triggers an asset list refresh so asset Dropbox statuses update without a manual page reload
+
 ## [1.2.0] - 2026-03-12
 
 ### Added

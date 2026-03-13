@@ -191,6 +191,7 @@ model Project {
   status          ProjectStatus @default(NOT_STARTED)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  lastAccessedAt  DateTime?
   approvedAt      DateTime?
   approvedVideoId String? // ID of the video that was approved (null if not approved)
 

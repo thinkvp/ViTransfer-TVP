@@ -224,6 +224,76 @@ export async function GET(request: NextRequest) {
       fileSizeBytes: Number(a.fileSize ?? 0),
     }))
 
+    const recentDropboxCompletionCutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+    const [completedDropboxVideos, completedDropboxAssets] = await Promise.all([
+      prisma.video.findMany({
+        where: {
+          dropboxUploadStatus: 'COMPLETE',
+          updatedAt: { gte: recentDropboxCompletionCutoff },
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin
+              ? {}
+              : { assignedUsers: { some: { userId: authResult.id } } }),
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          projectId: true,
+          updatedAt: true,
+          project: { select: { title: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      prisma.videoAsset.findMany({
+        where: {
+          dropboxUploadStatus: 'COMPLETE',
+          updatedAt: { gte: recentDropboxCompletionCutoff },
+          video: {
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin
+                ? {}
+                : { assignedUsers: { some: { userId: authResult.id } } }),
+            },
+          },
+        },
+        select: {
+          id: true,
+          fileName: true,
+          updatedAt: true,
+          video: {
+            select: {
+              projectId: true,
+              project: { select: { title: true } },
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ])
+
+    const completedDropboxJobs = [
+      ...completedDropboxVideos.map((video) => ({
+        id: video.id,
+        type: 'dropbox' as const,
+        label: video.name,
+        sublabel: video.project.title,
+        projectId: video.projectId,
+        completedAt: video.updatedAt.getTime(),
+      })),
+      ...completedDropboxAssets.map((asset) => ({
+        id: asset.id,
+        type: 'dropbox' as const,
+        label: asset.fileName,
+        sublabel: asset.video.project.title,
+        projectId: asset.video.projectId,
+        completedAt: asset.updatedAt.getTime(),
+      })),
+    ]
+
     // -----------------------------------------------------------------------
     // Album ZIP generation jobs (queried from BullMQ)
     // -----------------------------------------------------------------------
@@ -380,7 +450,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ jobs, dropboxJobs: [...dropboxJobs, ...assetDropboxJobs], albumZipJobs, albumZipDropboxJobs })
+    return NextResponse.json({
+      jobs,
+      dropboxJobs: [...dropboxJobs, ...assetDropboxJobs],
+      completedDropboxJobs,
+      albumZipJobs,
+      albumZipDropboxJobs,
+    })
   } catch (err: any) {
     console.error('[running-jobs]', err)
     return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })

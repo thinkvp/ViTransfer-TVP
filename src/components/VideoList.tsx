@@ -108,6 +108,7 @@ export default function VideoList({
     setTogglingDropboxId(videoId)
     try {
       await apiPatch(`/api/videos/${videoId}`, { dropboxEnabled: !currentlyEnabled })
+      setAssetRefreshTrigger(prev => prev + 1)
       onRefresh?.()
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to toggle Dropbox')

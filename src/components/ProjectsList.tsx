@@ -76,7 +76,7 @@ function getProjectDataBytes(project: Project): number | null {
 interface ProjectsListProps {
   projects: Project[]
   onFilteredProjectsChange?: (projects: Project[]) => void
-  analyticsMap?: Record<string, { lastActivityAt?: string | null }>
+  analyticsMap?: Record<string, { lastActivityAt?: string | null; lastAccessedAt?: string | null }>
 }
 
 export default function ProjectsList({ projects, onFilteredProjectsChange, analyticsMap }: ProjectsListProps) {
@@ -327,7 +327,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
       if (tableSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
       if (tableSortKey === 'data') return dir * ((getProjectDataBytes(a) || 0) - (getProjectDataBytes(b) || 0))
       if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      if (tableSortKey === 'updatedAt') return dir * (new Date(analyticsMap?.[a.id]?.lastActivityAt ?? a.updatedAt).getTime() - new Date(analyticsMap?.[b.id]?.lastActivityAt ?? b.updatedAt).getTime())
+      if (tableSortKey === 'updatedAt') return dir * (new Date(analyticsMap?.[a.id]?.lastAccessedAt ?? 0).getTime() - new Date(analyticsMap?.[b.id]?.lastAccessedAt ?? 0).getTime())
       return 0
     })
 
@@ -373,7 +373,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
       { key: 'photos', label: 'Photos', className: 'w-[95px] text-right hidden md:table-cell', mobile: false, toggleKey: 'photos' as const },
       { key: 'data', label: 'Data', className: 'w-[110px] text-right hidden md:table-cell', mobile: false, toggleKey: 'data' as const },
       { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'createdAt' as const },
-      { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'updatedAt' as const },
+      { key: 'updatedAt', label: 'Last Access', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'updatedAt' as const },
     ] as const
 
     const visibleCols = cols.filter((c: any) => !c.toggleKey || visible.has(c.toggleKey))
@@ -422,7 +422,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                     { key: 'photos', label: 'Photos' },
                     { key: 'data', label: 'Data' },
                     { key: 'createdAt', label: 'Date Created' },
-                    { key: 'updatedAt', label: 'Last Activity' },
+                    { key: 'updatedAt', label: 'Last Access' },
                   ] as const
                 ).map((col) => {
                   const checked = visibleColumns.has(col.key)
@@ -736,7 +736,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
                             )}
                             {visibleColumns.has('updatedAt') && (
-                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(analyticsMap?.[project.id]?.lastActivityAt ?? project.updatedAt)}</td>
+                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}</td>
                             )}
                           </tr>
 
@@ -767,7 +767,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                                       <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
                                     </div>
                                     <div className="text-right">
-                                      <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(analyticsMap?.[project.id]?.lastActivityAt ?? project.updatedAt)}
+                                      <span className="text-muted-foreground">Last Access:</span> {analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}
                                     </div>
                                   </div>
                                 </div>
