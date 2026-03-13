@@ -480,16 +480,23 @@ async function normalizeProjectStorage(opts: {
         : currentAssetPath
       const legacyAssetPath = path.posix.join(legacyVideoIdRoot, 'assets', asset.fileName)
       const legacyNamedAssetPath = path.posix.join(legacyNamedRoot, 'assets', asset.fileName)
+      // Shared videos/assets/ folder: created by an older broken migration run that
+      // dumped all assets into one directory at the root of the videos folder.
+      const sharedVideosAssetsPath = path.posix.join(sharedVideosRoot, 'assets', asset.fileName)
+      const sharedVideosAssetsCleanPath = path.posix.join(sharedVideosRoot, 'assets', desiredAssetFileName)
       const desiredVersionLegacyAssetPath = path.posix.join(desiredVersionRoot, 'assets', asset.fileName)
       const cleanNameLegacyAssetPath = path.posix.join(desiredVersionRoot, 'assets', desiredAssetFileName)
       const legacyPrefixedAssetPath = findLegacyPrefixedFileInDir(path.posix.join(desiredVersionRoot, 'assets'), desiredAssetFileName)
         || findLegacyPrefixedFileInDir(path.posix.join(legacyVideoIdRoot, 'assets'), desiredAssetFileName)
         || findLegacyPrefixedFileInDir(path.posix.join(legacyNamedRoot, 'assets'), desiredAssetFileName)
+        || findLegacyPrefixedFileInDir(path.posix.join(sharedVideosRoot, 'assets'), desiredAssetFileName)
       const resolvedCurrentAssetPath = pickExistingRel(uniquePaths([
         rebasedCurrentAssetPath,
         currentAssetPath,
         legacyAssetPath,
         legacyNamedAssetPath,
+        sharedVideosAssetsPath,
+        sharedVideosAssetsCleanPath,
         desiredVersionLegacyAssetPath,
         cleanNameLegacyAssetPath,
         legacyPrefixedAssetPath,
@@ -700,8 +707,11 @@ async function normalizeProjectStorage(opts: {
         photo.fileName ? `${legacyNamedRoot}/${photo.fileName}` : null,
         desiredStoragePath,
       ])) || (replaceStoragePathPrefix(rebasedPhotoPath, oldAlbumRoot, newAlbumRoot) || photo.storagePath)
-      if (currentStoragePath !== desiredStoragePath && !dryRun) {
-        await moveFileRel(currentStoragePath, desiredStoragePath, false)
+      if (currentStoragePath !== desiredStoragePath) {
+        albumFoldersNormalized += 1
+        if (!dryRun) {
+          await moveFileRel(currentStoragePath, desiredStoragePath, false)
+        }
       }
 
       const desiredSocialStoragePath = photo.socialStoragePath ? `${desiredStoragePath}-social.jpg` : null
@@ -728,9 +738,11 @@ async function normalizeProjectStorage(opts: {
         desiredSocialStoragePath
         && currentSocialStoragePath
         && currentSocialStoragePath !== desiredSocialStoragePath
-        && !dryRun
       ) {
-        await moveFileRel(currentSocialStoragePath, desiredSocialStoragePath, false)
+        albumFoldersNormalized += 1
+        if (!dryRun) {
+          await moveFileRel(currentSocialStoragePath, desiredSocialStoragePath, false)
+        }
       }
 
       if (
