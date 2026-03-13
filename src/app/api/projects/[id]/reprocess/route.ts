@@ -18,6 +18,7 @@ const reprocessSchema = z.object({
   previewResolutions: z.array(z.enum(VALID_RESOLUTIONS)).min(1).optional(),
   regenerateThumbnail: z.boolean().optional(),
   regenerateTimelinePreviews: z.boolean().optional(),
+  thumbnailOnly: z.boolean().optional(),
 })
 
 export async function POST(
@@ -54,6 +55,7 @@ export async function POST(
       previewResolutions,
       regenerateThumbnail,
       regenerateTimelinePreviews,
+      thumbnailOnly,
     } = parsed.data
 
     // Get project with videos
@@ -98,6 +100,7 @@ export async function POST(
     const videoQueue = getVideoQueue()
     const reprocessed = []
     const targetedPreviewGeneration = Array.isArray(previewResolutions) && previewResolutions.length > 0
+    const thumbnailOnlyMode = thumbnailOnly === true
 
     for (const video of videosToReprocess) {
       // Preserve user-uploaded thumbnails (asset-based) so reprocessing doesn't delete them
@@ -119,11 +122,13 @@ export async function POST(
       } as const
 
       const filesToDelete = [
-        ...(targetedPreviewGeneration
+        ...(thumbnailOnlyMode
+          ? []
+          : targetedPreviewGeneration
           ? previewResolutions.map((resolution) => previewFieldsByResolution[resolution]).filter(Boolean)
           : [video.preview480Path, video.preview720Path, video.preview1080Path]),
         // Only delete system-generated thumbnails; keep custom assets intact
-        (!targetedPreviewGeneration && !hasCustomThumbnail) || regenerateThumbnail === true
+        ((thumbnailOnlyMode || !targetedPreviewGeneration) && !hasCustomThumbnail) || regenerateThumbnail === true
           ? (hasCustomThumbnail ? null : video.thumbnailPath)
           : null,
       ].filter(Boolean) as string[]
@@ -141,7 +146,9 @@ export async function POST(
           status: 'QUEUED',
           processingProgress: 0,
           processingPhase: null,
-          ...(targetedPreviewGeneration
+          ...(thumbnailOnlyMode
+            ? {}
+            : targetedPreviewGeneration
             ? {
                 ...(previewResolutions.includes('480p') ? { preview480Path: null } : {}),
                 ...(previewResolutions.includes('720p') ? { preview720Path: null } : {}),
@@ -166,6 +173,7 @@ export async function POST(
         videoId: video.id,
         originalStoragePath: video.originalStoragePath,
         projectId: project.id,
+        ...(thumbnailOnlyMode ? { thumbnailOnly: true } : {}),
         ...(targetedPreviewGeneration ? { requestedPreviewResolutions: previewResolutions } : {}),
         ...(regenerateThumbnail !== undefined ? { regenerateThumbnail } : {}),
         ...(regenerateTimelinePreviews !== undefined ? { regenerateTimelinePreviews } : {}),

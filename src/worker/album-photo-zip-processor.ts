@@ -38,7 +38,21 @@ async function writeZipFile(params: {
 
   for (const entry of entries) {
     try {
+      const entryPath = getFilePath(entry.storagePath)
+      const stats = await fs.promises.stat(entryPath).catch(() => null)
+      if (!stats?.isFile()) {
+        if (DEBUG) {
+          console.warn('[WORKER DEBUG] Skipping missing ZIP entry:', entry)
+        }
+        continue
+      }
+
       const stream = await downloadFile(entry.storagePath)
+      stream.on('error', (error) => {
+        if (DEBUG) {
+          console.warn('[WORKER DEBUG] ZIP entry stream failed:', entry, error)
+        }
+      })
       archive.append(stream, { name: entry.name })
     } catch (e) {
       if (DEBUG) {

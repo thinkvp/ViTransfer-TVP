@@ -3,20 +3,29 @@ import * as path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
+import { sanitizeFilename } from '@/lib/file-validation'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getRawStoragePath, moveDirectory, STORAGE_ROOT } from '@/lib/storage'
 import {
+  isDropboxStoragePath,
+  stripDropboxStoragePrefix,
+  toDropboxStoragePath,
+} from '@/lib/storage-provider-dropbox'
+import {
   allocateUniqueStorageName,
   buildAlbumStorageRoot,
   buildProjectStorageRoot,
+  buildVideoAssetDropboxPath,
   buildVideoAssetStoragePath,
+  buildVideoOriginalDropboxPath,
   buildVideoOriginalStoragePath,
   buildVideoPreviewStoragePath,
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
   buildVideoVersionRoot,
   replaceStoragePathPrefix,
+  replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 
 export const runtime = 'nodejs'
@@ -70,7 +79,7 @@ function toYearMonthUTC(dateLike: Date) {
  * building canonical paths.
  */
 function sanitizeRelPathForFs(relPath: string): string {
-  return relPath.replace(/:/g, '_')
+  return stripDropboxStoragePrefix(relPath).replace(/:/g, '_')
 }
 
 function existsRel(relPath: string | null | undefined): boolean {
@@ -97,6 +106,14 @@ function rebaseProjectPath(currentPath: string | null | undefined, oldRoot: stri
   return currentPath
 }
 
+function rebaseStoredProjectPath(currentPath: string | null | undefined, oldRoot: string | null, newRoot: string): string | null {
+  if (!currentPath) return null
+  if (oldRoot) {
+    return replaceStoredStoragePathPrefix(currentPath, oldRoot, newRoot)
+  }
+  return currentPath
+}
+
 function uniquePaths(paths: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -114,7 +131,41 @@ function escapeRegExp(value: string): string {
 }
 
 function stripLegacyUploadPrefix(fileName: string): string {
-  return fileName.replace(/^(?:original|asset|photo)-\d+-/, '')
+  return fileName.replace(/^(?:original|asset|photo|photos)-\d+-/, '')
+}
+
+function allocateUniqueFileName(baseName: string, existingNames: Iterable<string>): string {
+  const sanitizedBaseName = sanitizeFilename(stripLegacyUploadPrefix(baseName))
+  const parsed = path.posix.parse(sanitizedBaseName)
+  const stem = parsed.name || 'upload'
+  const ext = parsed.ext || ''
+  const used = new Set(Array.from(existingNames, (value) => value.trim().toLowerCase()).filter(Boolean))
+
+  let candidate = `${stem}${ext}`
+  if (!used.has(candidate.toLowerCase())) {
+    return candidate
+  }
+
+  let suffix = 2
+  while (used.has(`${stem} (${suffix})${ext}`.toLowerCase())) {
+    suffix += 1
+  }
+
+  candidate = `${stem} (${suffix})${ext}`
+  return candidate
+}
+
+function deriveVideoVersionRootCandidate(storagePath: string | null | undefined): string | null {
+  if (!storagePath) return null
+
+  const directParent = path.posix.dirname(storagePath)
+  const directParentBase = path.posix.basename(stripDropboxStoragePrefix(directParent).replace(/\\/g, '/').replace(/\/+$/, ''))
+
+  if (directParentBase === 'assets' || directParentBase === 'timeline-previews') {
+    return path.posix.dirname(directParent)
+  }
+
+  return directParent
 }
 
 function findLegacyPrefixedFileInDir(dirRel: string, suffix: string): string | null {
@@ -124,7 +175,7 @@ function findLegacyPrefixedFileInDir(dirRel: string, suffix: string): string | n
     const dirAbs = getRawStoragePath(sanitizeRelPathForFs(dirRel))
     if (!fs.existsSync(dirAbs)) return null
 
-    const matcher = new RegExp(`^(?:original|asset|photo)-\\d+-${escapeRegExp(suffix)}$`, 'i')
+    const matcher = new RegExp(`^(?:original|asset|photo|photos)-\\d+-${escapeRegExp(suffix)}$`, 'i')
     const match = fs.readdirSync(dirAbs, { withFileTypes: true })
       .find((entry) => entry.isFile() && matcher.test(entry.name))
 
@@ -138,10 +189,13 @@ async function moveFileRel(fromRel: string, toRel: string, dryRun: boolean): Pro
   if (!fromRel || !toRel || fromRel === toRel) return false
 
   const sanitizedFrom = sanitizeRelPathForFs(fromRel)
+  const sanitizedTo = sanitizeRelPathForFs(toRel)
+  if (sanitizedFrom === sanitizedTo) return false
+
   const fromAbs = getRawStoragePath(sanitizedFrom)
   if (!fs.existsSync(fromAbs)) return false
 
-  const toAbs = getRawStoragePath(toRel)
+  const toAbs = getRawStoragePath(sanitizedTo)
   if (fs.existsSync(toAbs)) return false
 
   if (dryRun) return true
@@ -172,6 +226,61 @@ async function moveDirectorySanitized(
 ): Promise<void> {
   const sanitizedFrom = sanitizeRelPathForFs(fromRel)
   return moveDirectory(sanitizedFrom, toRel, options)
+}
+
+async function removeEmptyDirectoryRel(relPath: string, dryRun: boolean): Promise<boolean> {
+  if (!relPath) return false
+
+  const sanitizedRel = sanitizeRelPathForFs(relPath)
+  let dirAbs: string
+  try {
+    dirAbs = getRawStoragePath(sanitizedRel)
+  } catch {
+    return false
+  }
+
+  try {
+    const stats = await fs.promises.stat(dirAbs)
+    if (!stats.isDirectory()) return false
+  } catch {
+    return false
+  }
+
+  const entries = await fs.promises.readdir(dirAbs)
+  if (entries.length > 0) return false
+
+  if (!dryRun) {
+    await fs.promises.rm(dirAbs, { recursive: true, force: true })
+  }
+
+  return true
+}
+
+async function pruneEmptyChildrenRel(parentRel: string, dryRun: boolean): Promise<void> {
+  if (!parentRel) return
+
+  const sanitizedParent = sanitizeRelPathForFs(parentRel)
+  let parentAbs: string
+  try {
+    parentAbs = getRawStoragePath(sanitizedParent)
+  } catch {
+    return
+  }
+
+  let entries: fs.Dirent[]
+  try {
+    entries = await fs.promises.readdir(parentAbs, { withFileTypes: true })
+  } catch {
+    return
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+
+    const childRel = path.posix.join(parentRel, entry.name)
+    await pruneEmptyChildrenRel(childRel, dryRun)
+    await removeEmptyDirectoryRel(childRel, dryRun)
+  }
 }
 
 async function normalizeProjectStorage(opts: {
@@ -218,12 +327,19 @@ async function normalizeProjectStorage(opts: {
           timelinePreviewVttPath: true,
           timelinePreviewSpritesPath: true,
           storageFolderName: true,
+          dropboxEnabled: true,
+          dropboxPath: true,
+          dropboxUploadStatus: true,
           assets: {
             select: {
               id: true,
               fileName: true,
               storagePath: true,
+              dropboxEnabled: true,
+              dropboxPath: true,
+              dropboxUploadStatus: true,
             },
+            orderBy: { createdAt: 'asc' },
           },
         },
         orderBy: [{ createdAt: 'asc' }, { version: 'asc' }],
@@ -276,6 +392,8 @@ async function normalizeProjectStorage(opts: {
 
   const workingProjectRoot = targetProjectStoragePath
   const oldProjectRootForRebase = existingProjectRoot
+  const projectClientName = project.client?.name || project.companyName || 'Client'
+  const projectFolderName = path.posix.basename(targetProjectStoragePath)
 
   const usedVideoFolders: string[] = []
   const videoGroupFolderByName = new Map<string, string>()
@@ -295,7 +413,7 @@ async function normalizeProjectStorage(opts: {
   }
 
   const videoUpdates = new Map<string, Record<string, string | null>>()
-  const assetUpdates = new Map<string, string>()
+  const assetUpdates = new Map<string, { fileName: string; storagePath: string; dropboxPath: string | null }>()
   const albumUpdates = new Map<string, string>()
   const photoUpdates = new Map<string, { fileName: string; storagePath: string; socialStoragePath: string | null }>()
   const projectFileUpdates = new Map<string, string>()
@@ -305,104 +423,152 @@ async function normalizeProjectStorage(opts: {
 
   for (const video of fullProject.videos) {
     try {
+    let normalizedVideoFoldersForVideo = 0
+    let normalizedAssetFilesForVideo = 0
+    const pendingAssetUpdates: Array<[string, { fileName: string; storagePath: string; dropboxPath: string | null }]> = []
+    const assetPathAliases = new Map<string, string>()
+    const usedAssetFileNames: string[] = []
+    const videoUsesDropbox = isDropboxStoragePath(video.originalStoragePath)
     const desiredVideoFolder = videoGroupFolderByName.get(video.name) || video.name
     const desiredVersionRoot = buildVideoVersionRoot(workingProjectRoot, desiredVideoFolder, video.versionLabel)
-    const currentOriginalPath = rebaseProjectPath(video.originalStoragePath, oldProjectRootForRebase, workingProjectRoot) || video.originalStoragePath
-    const current480FromDb = rebaseProjectPath(video.preview480Path, oldProjectRootForRebase, workingProjectRoot)
-    const current720FromDb = rebaseProjectPath(video.preview720Path, oldProjectRootForRebase, workingProjectRoot)
-    const current1080FromDb = rebaseProjectPath(video.preview1080Path, oldProjectRootForRebase, workingProjectRoot)
-    const currentThumbnailFromDb = rebaseProjectPath(video.thumbnailPath, oldProjectRootForRebase, workingProjectRoot)
-    const currentTimelineSpritesFromDb = rebaseProjectPath(video.timelinePreviewSpritesPath, oldProjectRootForRebase, workingProjectRoot)
-    const currentTimelineVttFromDb = rebaseProjectPath(video.timelinePreviewVttPath, oldProjectRootForRebase, workingProjectRoot)
+    const currentOriginalPath = rebaseStoredProjectPath(video.originalStoragePath, oldProjectRootForRebase, workingProjectRoot) || video.originalStoragePath
+    const current480FromDb = rebaseStoredProjectPath(video.preview480Path, oldProjectRootForRebase, workingProjectRoot)
+    const current720FromDb = rebaseStoredProjectPath(video.preview720Path, oldProjectRootForRebase, workingProjectRoot)
+    const current1080FromDb = rebaseStoredProjectPath(video.preview1080Path, oldProjectRootForRebase, workingProjectRoot)
+    const currentThumbnailFromDb = rebaseStoredProjectPath(video.thumbnailPath, oldProjectRootForRebase, workingProjectRoot)
+    const currentTimelineSpritesFromDb = rebaseStoredProjectPath(video.timelinePreviewSpritesPath, oldProjectRootForRebase, workingProjectRoot)
+    const currentTimelineVttFromDb = rebaseStoredProjectPath(video.timelinePreviewVttPath, oldProjectRootForRebase, workingProjectRoot)
     const originalBaseName = path.posix.basename(currentOriginalPath || video.originalFileName || '')
     const legacyVideoIdRoot = path.posix.join(workingProjectRoot, 'videos', video.id)
     const legacyNamedRoot = path.posix.join(workingProjectRoot, 'videos', video.storageFolderName || video.name)
     const sharedVideosRoot = path.posix.join(workingProjectRoot, 'videos')
     const desiredVersionAlreadyNested = desiredVersionRoot.startsWith(`${legacyNamedRoot}/`) && existsRel(desiredVersionRoot)
     const currentVersionRoot = pickExistingRel(uniquePaths([
-      current480FromDb ? path.posix.dirname(current480FromDb) : null,
-      current720FromDb ? path.posix.dirname(current720FromDb) : null,
-      current1080FromDb ? path.posix.dirname(current1080FromDb) : null,
-      currentThumbnailFromDb ? path.posix.dirname(currentThumbnailFromDb) : null,
-      currentTimelineSpritesFromDb ? path.posix.dirname(currentTimelineSpritesFromDb) : null,
-      currentTimelineVttFromDb ? path.posix.dirname(currentTimelineVttFromDb) : null,
+      deriveVideoVersionRootCandidate(current480FromDb),
+      deriveVideoVersionRootCandidate(current720FromDb),
+      deriveVideoVersionRootCandidate(current1080FromDb),
+      deriveVideoVersionRootCandidate(currentThumbnailFromDb),
+      deriveVideoVersionRootCandidate(currentTimelineSpritesFromDb),
+      deriveVideoVersionRootCandidate(currentTimelineVttFromDb),
       legacyVideoIdRoot,
       desiredVersionAlreadyNested ? null : legacyNamedRoot,
       desiredVersionRoot,
     ]))
 
     if (currentVersionRoot && currentVersionRoot !== desiredVersionRoot) {
-      videoFoldersNormalized += 1
+      normalizedVideoFoldersForVideo += 1
       if (!dryRun) {
         await moveDirectorySanitized(currentVersionRoot, desiredVersionRoot, { merge: true })
       }
     }
 
-    const assetTargetByCurrentPath = new Map<string, string>()
     for (const asset of video.assets) {
-      const currentAssetPath = rebaseProjectPath(asset.storagePath, oldProjectRootForRebase, workingProjectRoot) || asset.storagePath
-      const desiredAssetPath = buildVideoAssetStoragePath(
+      const assetUsesDropbox = isDropboxStoragePath(asset.storagePath)
+      const desiredAssetFileName = allocateUniqueFileName(asset.fileName, usedAssetFileNames)
+      usedAssetFileNames.push(desiredAssetFileName)
+      const desiredLocalAssetPath = buildVideoAssetStoragePath(
         workingProjectRoot,
         desiredVideoFolder,
         video.versionLabel,
-        asset.fileName,
+        desiredAssetFileName,
       )
+      const desiredAssetPath = assetUsesDropbox ? toDropboxStoragePath(desiredLocalAssetPath) : desiredLocalAssetPath
+      const desiredAssetDropboxPath = asset.dropboxPath ?? null
+      const currentAssetPath = rebaseStoredProjectPath(asset.storagePath, oldProjectRootForRebase, workingProjectRoot) || asset.storagePath
+      const rebasedCurrentAssetPath = currentVersionRoot
+        ? (replaceStoredStoragePathPrefix(currentAssetPath, currentVersionRoot, desiredVersionRoot) || currentAssetPath)
+        : currentAssetPath
+      const legacyAssetPath = path.posix.join(legacyVideoIdRoot, 'assets', asset.fileName)
+      const legacyNamedAssetPath = path.posix.join(legacyNamedRoot, 'assets', asset.fileName)
+      const desiredVersionLegacyAssetPath = path.posix.join(desiredVersionRoot, 'assets', asset.fileName)
+      const cleanNameLegacyAssetPath = path.posix.join(desiredVersionRoot, 'assets', desiredAssetFileName)
+      const legacyPrefixedAssetPath = findLegacyPrefixedFileInDir(path.posix.join(desiredVersionRoot, 'assets'), desiredAssetFileName)
+        || findLegacyPrefixedFileInDir(path.posix.join(legacyVideoIdRoot, 'assets'), desiredAssetFileName)
+        || findLegacyPrefixedFileInDir(path.posix.join(legacyNamedRoot, 'assets'), desiredAssetFileName)
       const resolvedCurrentAssetPath = pickExistingRel(uniquePaths([
-        currentVersionRoot ? replaceStoragePathPrefix(currentAssetPath, currentVersionRoot, desiredVersionRoot) : currentAssetPath,
+        rebasedCurrentAssetPath,
         currentAssetPath,
-        `${legacyVideoIdRoot}/assets/${asset.fileName}`,
-        `${legacyNamedRoot}/assets/${asset.fileName}`,
+        legacyAssetPath,
+        legacyNamedAssetPath,
+        desiredVersionLegacyAssetPath,
+        cleanNameLegacyAssetPath,
+        legacyPrefixedAssetPath,
         desiredAssetPath,
+        desiredLocalAssetPath,
       ])) || currentAssetPath
       if (resolvedCurrentAssetPath !== desiredAssetPath) {
-        assetFilesNormalized += 1
+        normalizedAssetFilesForVideo += 1
         if (!dryRun) {
           await moveFileRel(resolvedCurrentAssetPath, desiredAssetPath, false)
         }
       }
-      assetTargetByCurrentPath.set(resolvedCurrentAssetPath, desiredAssetPath)
-      if (asset.storagePath !== desiredAssetPath) {
-        assetUpdates.set(asset.id, desiredAssetPath)
+
+      for (const alias of uniquePaths([
+        asset.storagePath,
+        currentAssetPath,
+        rebasedCurrentAssetPath,
+        resolvedCurrentAssetPath,
+        desiredAssetPath,
+      ])) {
+        assetPathAliases.set(alias, desiredAssetPath)
+      }
+
+      if (
+        asset.fileName !== desiredAssetFileName
+        || asset.storagePath !== desiredAssetPath
+        || asset.dropboxPath !== desiredAssetDropboxPath
+      ) {
+        pendingAssetUpdates.push([
+          asset.id,
+          {
+            fileName: desiredAssetFileName,
+            storagePath: desiredAssetPath,
+            dropboxPath: desiredAssetDropboxPath,
+          },
+        ])
       }
     }
 
-    const desiredOriginalPath = buildVideoOriginalStoragePath(
+    const desiredOriginalLocalPath = buildVideoOriginalStoragePath(
       workingProjectRoot,
       desiredVideoFolder,
       video.versionLabel,
       video.originalFileName,
     )
+    const desiredOriginalPath = videoUsesDropbox ? toDropboxStoragePath(desiredOriginalLocalPath) : desiredOriginalLocalPath
+    const desiredVideoDropboxPath = video.dropboxPath ?? null
     const cleanOriginalFileName = stripLegacyUploadPrefix(video.originalFileName)
     const legacyPrefixedOriginalPath = findLegacyPrefixedFileInDir(sharedVideosRoot, cleanOriginalFileName)
       || findLegacyPrefixedFileInDir(legacyVideoIdRoot, cleanOriginalFileName)
       || findLegacyPrefixedFileInDir(legacyNamedRoot, cleanOriginalFileName)
     const currentOriginalAfterRootMove = pickExistingRel(uniquePaths([
-      currentVersionRoot ? replaceStoragePathPrefix(currentOriginalPath, currentVersionRoot, desiredVersionRoot) : currentOriginalPath,
+      currentVersionRoot ? replaceStoredStoragePathPrefix(currentOriginalPath, currentVersionRoot, desiredVersionRoot) : currentOriginalPath,
       currentOriginalPath,
       originalBaseName ? `${sharedVideosRoot}/${originalBaseName}` : null,
       originalBaseName ? `${legacyVideoIdRoot}/${originalBaseName}` : null,
       originalBaseName ? `${legacyNamedRoot}/${originalBaseName}` : null,
       legacyPrefixedOriginalPath,
       desiredOriginalPath,
+      desiredOriginalLocalPath,
     ])) || currentOriginalPath
     if (currentOriginalAfterRootMove !== desiredOriginalPath && !dryRun) {
       await moveFileRel(currentOriginalAfterRootMove, desiredOriginalPath, false)
     }
 
     const current480 = pickExistingRel(uniquePaths([
-      currentVersionRoot && current480FromDb ? replaceStoragePathPrefix(current480FromDb, currentVersionRoot, desiredVersionRoot) : current480FromDb,
+      currentVersionRoot && current480FromDb ? replaceStoredStoragePathPrefix(current480FromDb, currentVersionRoot, desiredVersionRoot) : current480FromDb,
       current480FromDb,
       `${legacyVideoIdRoot}/preview-480p.mp4`,
       `${legacyNamedRoot}/preview-480p.mp4`,
     ]))
     const current720 = pickExistingRel(uniquePaths([
-      currentVersionRoot && current720FromDb ? replaceStoragePathPrefix(current720FromDb, currentVersionRoot, desiredVersionRoot) : current720FromDb,
+      currentVersionRoot && current720FromDb ? replaceStoredStoragePathPrefix(current720FromDb, currentVersionRoot, desiredVersionRoot) : current720FromDb,
       current720FromDb,
       `${legacyVideoIdRoot}/preview-720p.mp4`,
       `${legacyNamedRoot}/preview-720p.mp4`,
     ]))
     const current1080 = pickExistingRel(uniquePaths([
-      currentVersionRoot && current1080FromDb ? replaceStoragePathPrefix(current1080FromDb, currentVersionRoot, desiredVersionRoot) : current1080FromDb,
+      currentVersionRoot && current1080FromDb ? replaceStoredStoragePathPrefix(current1080FromDb, currentVersionRoot, desiredVersionRoot) : current1080FromDb,
       current1080FromDb,
       `${legacyVideoIdRoot}/preview-1080p.mp4`,
       `${legacyNamedRoot}/preview-1080p.mp4`,
@@ -416,7 +582,7 @@ async function normalizeProjectStorage(opts: {
     if (current1080 && desired1080 && current1080 !== desired1080 && !dryRun) await moveFileRel(current1080, desired1080, false)
 
     const currentSpritesPath = pickExistingRel(uniquePaths([
-      currentVersionRoot && currentTimelineSpritesFromDb ? replaceStoragePathPrefix(currentTimelineSpritesFromDb, currentVersionRoot, desiredVersionRoot) : currentTimelineSpritesFromDb,
+      currentVersionRoot && currentTimelineSpritesFromDb ? replaceStoredStoragePathPrefix(currentTimelineSpritesFromDb, currentVersionRoot, desiredVersionRoot) : currentTimelineSpritesFromDb,
       currentTimelineSpritesFromDb,
       `${legacyVideoIdRoot}/timeline-previews`,
       `${legacyNamedRoot}/timeline-previews`,
@@ -429,17 +595,22 @@ async function normalizeProjectStorage(opts: {
     }
 
     const currentThumbnailPath = pickExistingRel(uniquePaths([
-      currentVersionRoot && currentThumbnailFromDb ? replaceStoragePathPrefix(currentThumbnailFromDb, currentVersionRoot, desiredVersionRoot) : currentThumbnailFromDb,
+      currentVersionRoot && currentThumbnailFromDb ? replaceStoredStoragePathPrefix(currentThumbnailFromDb, currentVersionRoot, desiredVersionRoot) : currentThumbnailFromDb,
       currentThumbnailFromDb,
       `${legacyVideoIdRoot}/thumbnail.jpg`,
       `${legacyNamedRoot}/thumbnail.jpg`,
     ]))
     let desiredThumbnailPath: string | null = currentThumbnailPath
-    if (currentThumbnailPath && assetTargetByCurrentPath.has(currentThumbnailPath)) {
-      desiredThumbnailPath = assetTargetByCurrentPath.get(currentThumbnailPath) || currentThumbnailPath
+    const customThumbnailTarget = currentThumbnailPath
+      ? (assetPathAliases.get(currentThumbnailPath)
+        || (currentThumbnailFromDb ? assetPathAliases.get(currentThumbnailFromDb) : null)
+        || (video.thumbnailPath ? assetPathAliases.get(video.thumbnailPath) : null))
+      : null
+    if (customThumbnailTarget) {
+      desiredThumbnailPath = customThumbnailTarget
     } else if (currentThumbnailPath) {
       const movedThumbnailPath = currentVersionRoot
-        ? (replaceStoragePathPrefix(currentThumbnailPath, currentVersionRoot, desiredVersionRoot) || currentThumbnailPath)
+        ? (replaceStoredStoragePathPrefix(currentThumbnailPath, currentVersionRoot, desiredVersionRoot) || currentThumbnailPath)
         : currentThumbnailPath
       const systemThumbnailPath = buildVideoThumbnailStoragePath(workingProjectRoot, desiredVideoFolder, video.versionLabel)
       desiredThumbnailPath = systemThumbnailPath
@@ -457,6 +628,7 @@ async function normalizeProjectStorage(opts: {
       thumbnailPath: desiredThumbnailPath,
       timelinePreviewSpritesPath: desiredSpritesPath,
       timelinePreviewVttPath: desiredSpritesPath ? `${desiredSpritesPath}/index.vtt` : null,
+      dropboxPath: desiredVideoDropboxPath,
     }
 
     if (
@@ -468,9 +640,15 @@ async function normalizeProjectStorage(opts: {
       || video.thumbnailPath !== nextVideoData.thumbnailPath
       || video.timelinePreviewSpritesPath !== nextVideoData.timelinePreviewSpritesPath
       || video.timelinePreviewVttPath !== nextVideoData.timelinePreviewVttPath
+      || video.dropboxPath !== nextVideoData.dropboxPath
     ) {
       videoUpdates.set(video.id, nextVideoData)
     }
+    for (const [assetId, assetData] of pendingAssetUpdates) {
+      assetUpdates.set(assetId, assetData)
+    }
+    videoFoldersNormalized += normalizedVideoFoldersForVideo
+    assetFilesNormalized += normalizedAssetFilesForVideo
     } catch (err: any) {
       opts.errors.push({ projectId: project.id, path: video.originalStoragePath || video.id, error: `Video "${video.name}": ${err?.message || err}` })
     }
@@ -509,7 +687,7 @@ async function normalizeProjectStorage(opts: {
     for (const photo of album.photos) {
       const rebasedPhotoPath = rebaseProjectPath(photo.storagePath, oldProjectRootForRebase, workingProjectRoot)
       const rebasedSocialPath = rebaseProjectPath(photo.socialStoragePath, oldProjectRootForRebase, workingProjectRoot)
-      const desiredPhotoFileName = allocateUniqueStorageName(stripLegacyUploadPrefix(photo.fileName), usedPhotoFileNames)
+      const desiredPhotoFileName = allocateUniqueFileName(photo.fileName, usedPhotoFileNames)
       usedPhotoFileNames.push(desiredPhotoFileName)
       const desiredStoragePath = path.posix.join(newAlbumRoot, desiredPhotoFileName)
       const legacyPrefixedStoragePath = findLegacyPrefixedFileInDir(newAlbumRoot, desiredPhotoFileName)
@@ -527,6 +705,10 @@ async function normalizeProjectStorage(opts: {
       }
 
       const desiredSocialStoragePath = photo.socialStoragePath ? `${desiredStoragePath}-social.jpg` : null
+      const currentPhotoLegacySocialPath = currentStoragePath
+        ? `${currentStoragePath}-social.jpg`
+        : null
+      const previousPhotoLegacySocialPath = photo.storagePath ? `${photo.storagePath}-social.jpg` : null
       const legacyPrefixedSocialStoragePath = desiredSocialStoragePath
         ? (findLegacyPrefixedFileInDir(newAlbumRoot, `${desiredPhotoFileName}-social.jpg`)
           || findLegacyPrefixedFileInDir(oldAlbumRoot, `${desiredPhotoFileName}-social.jpg`))
@@ -535,7 +717,8 @@ async function normalizeProjectStorage(opts: {
         ? pickExistingRel(uniquePaths([
             replaceStoragePathPrefix(rebasedSocialPath, oldAlbumRoot, newAlbumRoot),
             rebasedSocialPath,
-            currentStoragePath ? `${currentStoragePath}-social.jpg` : null,
+            currentPhotoLegacySocialPath,
+            previousPhotoLegacySocialPath,
             legacyPrefixedSocialStoragePath,
             desiredSocialStoragePath,
           ])) || replaceStoragePathPrefix(rebasedSocialPath, oldAlbumRoot, newAlbumRoot)
@@ -566,6 +749,10 @@ async function normalizeProjectStorage(opts: {
       opts.errors.push({ projectId: project.id, path: album.id, error: `Album "${album.name}": ${err?.message || err}` })
     }
   }
+
+  await pruneEmptyChildrenRel(path.posix.join(workingProjectRoot, 'videos'), dryRun)
+  await pruneEmptyChildrenRel(path.posix.join(workingProjectRoot, 'albums'), dryRun)
+  await removeEmptyDirectoryRel(path.posix.join(workingProjectRoot, 'videos', 'assets'), dryRun)
 
   for (const file of fullProject.files) {
     const nextPath = rebaseProjectPath(file.storagePath, oldProjectRootForRebase, workingProjectRoot) || file.storagePath
@@ -620,8 +807,8 @@ async function normalizeProjectStorage(opts: {
       for (const [videoId, data] of videoUpdates) {
         await tx.video.update({ where: { id: videoId }, data })
       }
-      for (const [assetId, storagePath] of assetUpdates) {
-        await tx.videoAsset.update({ where: { id: assetId }, data: { storagePath } })
+      for (const [assetId, data] of assetUpdates) {
+        await tx.videoAsset.update({ where: { id: assetId }, data })
       }
       for (const [albumId, storageFolderName] of albumUpdates) {
         await tx.album.update({ where: { id: albumId }, data: { storageFolderName } })

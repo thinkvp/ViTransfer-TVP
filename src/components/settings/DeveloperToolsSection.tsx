@@ -117,6 +117,17 @@ type ClosedProjectPreviewCleanupResult = {
   }
 }
 
+type MissingThumbnailRepairResult = {
+  ok: true
+  dryRun: boolean
+  videosChecked: number
+  videosEligible: number
+  queued?: number
+  skippedClosedProjects: number
+  skippedCustomThumbnails: number
+  sample?: Array<{ videoId: string; projectId: string; projectTitle: string; videoName: string; versionLabel: string; reason: string }>
+}
+
 interface DeveloperToolsSectionProps {
   excludeInternalIpsFromAnalytics: boolean
   setExcludeInternalIpsFromAnalytics: (value: boolean) => void
@@ -181,6 +192,10 @@ export function DeveloperToolsSection({
   const [closedPreviewsResult, setClosedPreviewsResult] = useState<ClosedProjectPreviewCleanupResult | null>(null)
   const [closedPreviewsError, setClosedPreviewsError] = useState<string | null>(null)
 
+  const [missingThumbnailLoading, setMissingThumbnailLoading] = useState(false)
+  const [missingThumbnailResult, setMissingThumbnailResult] = useState<MissingThumbnailRepairResult | null>(null)
+  const [missingThumbnailError, setMissingThumbnailError] = useState<string | null>(null)
+
   async function runBullmqPurge(dryRun: boolean) {
     setBullmqPurgeLoading(true)
     setBullmqPurgeError(null)
@@ -204,6 +219,19 @@ export function DeveloperToolsSection({
       setClosedPreviewsError(e?.message || 'Failed to run closed project preview cleanup')
     } finally {
       setClosedPreviewsLoading(false)
+    }
+  }
+
+  async function runMissingThumbnailRepair(dryRun: boolean) {
+    setMissingThumbnailLoading(true)
+    setMissingThumbnailError(null)
+    try {
+      const res = await apiPost('/api/settings/regenerate-missing-thumbnails', { dryRun })
+      setMissingThumbnailResult(res as MissingThumbnailRepairResult)
+    } catch (e: any) {
+      setMissingThumbnailError(e?.message || 'Failed to queue thumbnail regeneration')
+    } finally {
+      setMissingThumbnailLoading(false)
     }
   }
 
@@ -778,6 +806,75 @@ export function DeveloperToolsSection({
                   }}
                 >
                   {closedPreviewsLoading ? 'Running\u2026' : 'Delete previews'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Regenerate missing video thumbnails</Label>
+                <p className="text-xs text-muted-foreground">
+                  Finds READY and ERROR videos whose system thumbnail is missing on disk or unset, then queues
+                  thumbnail-only repair jobs. Existing previews stay untouched. Custom asset-based thumbnails are skipped.
+                  Run a dry run first to preview impact.
+                </p>
+
+                {missingThumbnailError ? (
+                  <p className="text-xs text-destructive">{missingThumbnailError}</p>
+                ) : null}
+
+                {missingThumbnailResult ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Videos checked: {missingThumbnailResult.videosChecked}; eligible: {missingThumbnailResult.videosEligible}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Skipped custom thumbnails: {missingThumbnailResult.skippedCustomThumbnails}; skipped closed-project videos: {missingThumbnailResult.skippedClosedProjects}
+                    </p>
+                    {!missingThumbnailResult.dryRun ? (
+                      <p className="text-xs text-muted-foreground">Queued: {missingThumbnailResult.queued ?? 0}</p>
+                    ) : null}
+
+                    {missingThumbnailResult.sample?.length ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show affected videos
+                        </summary>
+                        <div className="mt-2">
+                          <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                            {missingThumbnailResult.sample
+                              .map((video) => `${video.projectId}\t${video.projectTitle}\t${video.videoName}\t${video.versionLabel}\t${video.reason}`)
+                              .join('\n')}
+                          </pre>
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={missingThumbnailLoading}
+                  onClick={() => void runMissingThumbnailRepair(true)}
+                >
+                  {missingThumbnailLoading ? 'Running…' : 'Dry run'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={missingThumbnailLoading}
+                  onClick={() => {
+                    if (!confirm('Queue thumbnail-only repair jobs for all videos with missing system thumbnails?')) return
+                    void runMissingThumbnailRepair(false)
+                  }}
+                >
+                  {missingThumbnailLoading ? 'Running…' : 'Queue repairs'}
                 </Button>
               </div>
             </div>

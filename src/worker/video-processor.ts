@@ -43,6 +43,7 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     originalStoragePath,
     projectId,
     timelineOnly,
+    thumbnailOnly,
     requestedPreviewResolutions,
     regenerateThumbnail,
     regenerateTimelinePreviews,
@@ -57,6 +58,10 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
   // The video stays in READY status — no interruption to viewing.
   if (timelineOnly) {
     return processTimelineOnly(videoId, originalStoragePath, projectId)
+  }
+
+  if (thumbnailOnly) {
+    return processThumbnailOnly(videoId, originalStoragePath, projectId)
   }
 
   if (previewOnly) {
@@ -333,6 +338,51 @@ async function processPreviewOnly(
       { context: 'clearing failed preview-only phase marker', ignoreMissing: true }
     ).catch(() => undefined)
     console.error(`[WORKER] Preview-only generation failed for ${videoId}:`, error)
+    throw error
+  } finally {
+    decrementActiveVideoJobs()
+    await cleanupTempFiles(tempFiles)
+  }
+}
+
+async function processThumbnailOnly(
+  videoId: string,
+  originalStoragePath: string,
+  projectId: string,
+) {
+  console.log(`[WORKER] Thumbnail-only generation for video ${videoId}`)
+  const tempFiles: TempFiles = {}
+  const processingStart = Date.now()
+
+  incrementActiveVideoJobs()
+  try {
+    await updateVideoRecord(
+      videoId,
+      { status: 'PROCESSING', processingPhase: null, processingProgress: 0 },
+      { context: 'starting thumbnail-only generation', ignoreMissing: true }
+    )
+
+    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+    const thumbnailPath = await processThumbnail(
+      videoId,
+      projectId,
+      videoInfo.path,
+      videoInfo.metadata.duration,
+      tempFiles,
+    )
+
+    await finalizeVideoWithoutPreview(videoId, thumbnailPath, videoInfo.metadata)
+    await recalculateAndStoreProjectTotalBytes(projectId)
+
+    const totalTime = Date.now() - processingStart
+    console.log(`[WORKER] Thumbnail-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
+  } catch (error) {
+    if (isVideoRecordMissingError(error)) {
+      console.warn(`[WORKER] Video ${videoId} was deleted during thumbnail-only processing; aborting job cleanup updates.`)
+      return
+    }
+
+    await handleProcessingError(videoId, error)
     throw error
   } finally {
     decrementActiveVideoJobs()

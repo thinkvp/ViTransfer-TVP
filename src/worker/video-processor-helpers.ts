@@ -5,10 +5,12 @@ import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, gen
 import { Prisma, type VideoStatus } from '@prisma/client'
 import {
   buildProjectStorageRoot,
+  buildVideoOriginalStoragePath,
   buildVideoPreviewStoragePath,
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
 } from '@/lib/project-storage-paths'
+import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -135,6 +137,35 @@ export interface VideoInfo {
   fileSize: number
 }
 
+async function resolveExistingVideoOriginalPath(videoId: string, storagePath: string): Promise<string> {
+  const video = await prisma.video.findUnique({
+    where: { id: videoId },
+    select: {
+      id: true,
+      name: true,
+      versionLabel: true,
+      originalFileName: true,
+      originalStoragePath: true,
+      storageFolderName: true,
+      projectId: true,
+      project: {
+        select: {
+          title: true,
+          companyName: true,
+          storagePath: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
+  })
+
+  if (!video) {
+    return storagePath
+  }
+
+  return resolveVideoOriginalPath(video) || storagePath
+}
+
 export interface OutputDimensions {
   width: number
   height: number
@@ -234,8 +265,10 @@ export async function downloadAndValidateVideo(
 ): Promise<VideoInfo> {
   debugLog('Starting validation...')
 
+  const resolvedStoragePath = await resolveExistingVideoOriginalPath(videoId, storagePath)
+
   const resolvedInput = await materializeStoragePathToLocalFile({
-    rawPath: storagePath,
+    rawPath: resolvedStoragePath,
     tempDir: TEMP_DIR,
     suggestedName: `${videoId}-source.bin`,
   })

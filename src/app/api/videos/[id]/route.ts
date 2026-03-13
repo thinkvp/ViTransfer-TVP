@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { existsSync } from 'fs'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteDirectory, deleteFile, moveDirectory } from '@/lib/storage'
@@ -16,99 +15,15 @@ import {
   buildProjectStorageRoot,
   buildVideoStorageRoot,
   buildVideoDropboxRoot,
-  buildVideoOriginalStoragePath,
   buildVideoOriginalDropboxPath,
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
+import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
 export const runtime = 'nodejs'
 
-function toYearMonthUTC(dateLike: Date) {
-  const yyyy = dateLike.getUTCFullYear()
-  const mm = String(dateLike.getUTCMonth() + 1).padStart(2, '0')
-  return `${yyyy}-${mm}`
-}
-
-function uniquePaths(paths: Array<string | null | undefined>): string[] {
-  const seen = new Set<string>()
-  const result: string[] = []
-
-  for (const raw of paths) {
-    const value = String(raw || '').trim()
-    if (!value || seen.has(value)) continue
-    seen.add(value)
-    result.push(value)
-  }
-
-  return result
-}
-
-function storagePathExists(storagePath: string | null | undefined): boolean {
-  if (!storagePath) return false
-
-  try {
-    return existsSync(getFilePath(storagePath))
-  } catch {
-    return false
-  }
-}
-
-function findExistingVideoOriginalPath(video: {
-  id: string
-  name: string
-  versionLabel: string
-  originalFileName: string
-  originalStoragePath: string
-  storageFolderName: string | null
-  projectId: string
-  project: {
-    title: string
-    companyName: string | null
-    storagePath: string | null
-    createdAt: Date
-    client: { name: string } | null
-  }
-}): string | null {
-  const localCurrentPath = isDropboxStoragePath(video.originalStoragePath)
-    ? stripDropboxStoragePrefix(video.originalStoragePath)
-    : video.originalStoragePath
-  const projectStoragePath = video.project.storagePath
-    || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
-  const canonicalOriginalPath = buildVideoOriginalStoragePath(
-    projectStoragePath,
-    video.storageFolderName || video.name,
-    video.versionLabel,
-    video.originalFileName,
-  )
-  const legacyProjectRoots = [
-    video.project.storagePath,
-    `projects/${video.projectId}`,
-    `projects/${toYearMonthUTC(video.project.createdAt)}/${video.projectId}`,
-    `projects/closed/${toYearMonthUTC(video.project.createdAt)}/${video.projectId}`,
-  ]
-  const legacyVideoFolderCandidates = [video.storageFolderName || video.name, video.id]
-  const legacyCandidates = legacyProjectRoots.flatMap((projectRoot) => {
-    if (!projectRoot) return []
-
-    return [
-      ...legacyVideoFolderCandidates.map((folderName) => `${projectRoot}/videos/${folderName}/${video.originalFileName}`),
-      `${projectRoot}/videos/${video.originalFileName}`,
-    ]
-  })
-
-  const candidates = uniquePaths([
-    localCurrentPath,
-    canonicalOriginalPath,
-    ...legacyCandidates,
-  ])
-
-  for (const candidate of candidates) {
-    if (storagePathExists(candidate)) {
-      return candidate
-    }
-  }
-
-  return null
+function findExistingVideoOriginalPath(video: Parameters<typeof resolveVideoOriginalPath>[0]): string | null {
+  return resolveVideoOriginalPath(video)
 }
 
 
