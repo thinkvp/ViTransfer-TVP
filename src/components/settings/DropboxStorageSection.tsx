@@ -34,7 +34,7 @@ export function DropboxStorageSection({
             </CardTitle>
             <CardDescription>
               {dropboxConfigured
-                ? 'Approvable video originals are stored in Dropbox'
+                ? 'Video originals, assets, and album ZIPs can be offloaded to Dropbox'
                 : 'All files use local storage'}
             </CardDescription>
           </div>
@@ -56,9 +56,7 @@ export function DropboxStorageSection({
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">
-                When a video version is marked as <strong>Approvable</strong>, its original file
-                is uploaded to Dropbox instead of local storage. Transcoded previews are always
-                stored locally for fast streaming.
+                Each video version has a Dropbox toggle — available when the version is set to <strong>Approvable</strong> — that uploads its original file and any associated assets to Dropbox. Album ZIPs are automatically uploaded to Dropbox when the album has Dropbox enabled. Transcoded preview files remain on the local server for streaming.
               </p>
               {dropboxRootPath && (
                 <div className="text-sm">
@@ -68,7 +66,7 @@ export function DropboxStorageSection({
               )}
               <p className="text-xs text-muted-foreground">
                 Configured via environment variables (DROPBOX_APP_KEY, DROPBOX_APP_SECRET,
-                DROPBOX_REFRESH_TOKEN). Downloads are served transparently via temporary Dropbox links.
+                DROPBOX_REFRESH_TOKEN). Downloads are served via temporary Dropbox direct-download links.
               </p>
             </div>
           ) : (
@@ -80,8 +78,7 @@ export function DropboxStorageSection({
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">
-                All video files are stored on the local filesystem. To enable Dropbox storage
-                for approvable video originals, set <code className="bg-muted px-1 py-0.5 rounded text-xs">DROPBOX_APP_KEY</code>,{' '}
+                To enable Dropbox offloading for video originals, assets, and album ZIPs, set <code className="bg-muted px-1 py-0.5 rounded text-xs">DROPBOX_APP_KEY</code>,{' '}
                 <code className="bg-muted px-1 py-0.5 rounded text-xs">DROPBOX_APP_SECRET</code>, and{' '}
                 <code className="bg-muted px-1 py-0.5 rounded text-xs">DROPBOX_REFRESH_TOKEN</code> in
                 your environment variables and restart the application.

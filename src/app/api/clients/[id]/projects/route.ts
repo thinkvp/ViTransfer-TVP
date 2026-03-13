@@ -47,6 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         status: true,
         createdAt: true,
         updatedAt: true,
+        lastAccessedAt: true,
         videos: {
           select: {
             id: true,
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return null
     }
 
-    const [maxShareAccess, maxVideoAnalytics, maxAlbumAnalytics] = await Promise.all([
+    const [maxShareAccess, maxVideoAnalytics, maxAlbumAnalytics, maxDirectAccess] = await Promise.all([
       projectIds.length
         ? prisma.sharePageAccess.groupBy({
             by: ['projectId'],
@@ -96,6 +97,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             _max: { createdAt: true },
           })
         : Promise.resolve([] as any[]),
+      projectIds.length
+        ? prisma.sharePageAccess.groupBy({
+            by: ['projectId'],
+            where: {
+              projectId: { in: projectIds },
+              eventType: 'ACCESS',
+            },
+            _max: { createdAt: true },
+          })
+        : Promise.resolve([] as any[]),
     ])
 
     const maxShareByPid: Record<string, string | null> = {}
@@ -113,7 +124,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const pid = String(g?.projectId ?? '').trim()
       if (pid) maxAlbumByPid[pid] = toIsoOrNull(g?._max?.createdAt)
     }
-
+    const maxDirectAccessByPid: Record<string, string | null> = {}
+    for (const g of maxDirectAccess as any[]) {
+      const pid = String(g?.projectId ?? '').trim()
+      if (pid) maxDirectAccessByPid[pid] = toIsoOrNull(g?._max?.createdAt)
+    }
     const projectsWithActivity = projects.map((project) => {
       const updatedAtIso = toIsoOrNull(project.updatedAt) ?? new Date(0).toISOString()
       const lastActivityAt = [
@@ -125,7 +140,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .filter((d): d is string => typeof d === 'string' && d.length > 0)
         .sort()
         .at(-1) ?? updatedAtIso
-      return { ...project, lastActivityAt }
+
+      const lastAccessedAt = toIsoOrNull(project.lastAccessedAt) || maxDirectAccessByPid[project.id] || null
+
+      return { ...project, lastActivityAt, lastAccessedAt }
     })
 
     const response = NextResponse.json({ projects: projectsWithActivity })

@@ -471,6 +471,10 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             setDropboxJobs(incoming)
           }
 
+          if (Array.isArray(data.completedDropboxJobs) && data.completedDropboxJobs.length > 0) {
+            newCompleted.push(...(data.completedDropboxJobs as CompletedServerJob[]))
+          }
+
           // --- Album ZIP jobs ---
           if (Array.isArray(data.albumZipJobs)) {
             const incoming = data.albumZipJobs as AlbumZipJob[]
@@ -528,8 +532,23 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           // Merge new completions and purge stale (>30 min)
           if (newCompleted.length > 0) {
             setCompletedServerJobs((prev) => {
-              const merged = [...prev, ...newCompleted]
-              return merged.filter((j) => now - j.completedAt < 1_800_000)
+              const merged = new Map<string, CompletedServerJob>()
+
+              for (const job of prev) {
+                if (now - job.completedAt < 1_800_000) {
+                  merged.set(job.id, job)
+                }
+              }
+
+              for (const job of newCompleted) {
+                if (dismissedServerJobIdsRef.current.has(job.id)) continue
+                const existing = merged.get(job.id)
+                if (!existing || existing.completedAt < job.completedAt) {
+                  merged.set(job.id, job)
+                }
+              }
+
+              return Array.from(merged.values()).sort((a, b) => b.completedAt - a.completedAt)
             })
           } else {
             // Purge stale entries even when no new completions

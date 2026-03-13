@@ -5,6 +5,7 @@ import { sendPushNotification } from './push-notifications'
 import { getClientIpAddress } from './utils'
 import { isLikelyAdminIp } from './admin-ip-match'
 import { recordClientActivity } from './client-activity'
+import { touchProjectLastAccess } from './project-last-access'
 
 export async function trackSharePageAccess(params: {
   projectId: string
@@ -62,6 +63,10 @@ export async function trackSharePageAccess(params: {
       email: accessMethod === 'OTP' ? email || null : null,
       ipAddress: ipAddress || null,
     })
+
+    if (eventType === 'ACCESS') {
+      await touchProjectLastAccess(projectId)
+    }
 
     if (!settings.trackAnalytics) {
       return

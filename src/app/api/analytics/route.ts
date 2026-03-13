@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch max activity timestamps per project from the three most relevant event tables.
     // These are more accurate than project.updatedAt for "Last Activity" display.
-    const [maxShareAccess, maxVideoAnalytics, maxAlbumAnalytics] = await Promise.all([
+    const [maxShareAccess, maxVideoAnalytics, maxAlbumAnalytics, maxDirectAccess] = await Promise.all([
       projectIds.length
         ? prisma.sharePageAccess.groupBy({
             by: ['projectId'],
@@ -106,6 +106,16 @@ export async function GET(request: NextRequest) {
         ? prisma.albumAnalytics.groupBy({
             by: ['projectId'],
             where: { projectId: { in: projectIds } },
+            _max: { createdAt: true },
+          })
+        : Promise.resolve([] as any[]),
+      projectIds.length
+        ? prisma.sharePageAccess.groupBy({
+            by: ['projectId'],
+            where: {
+              projectId: { in: projectIds },
+              eventType: 'ACCESS',
+            },
             _max: { createdAt: true },
           })
         : Promise.resolve([] as any[]),
@@ -132,7 +142,11 @@ export async function GET(request: NextRequest) {
       const id = String(g?.projectId ?? '').trim()
       if (id) maxAlbumByPid[id] = toIsoOrNull(g?._max?.createdAt)
     }
-
+    const maxDirectAccessByPid: Record<string, string | null> = {}
+    for (const g of maxDirectAccess as any[]) {
+      const id = String(g?.projectId ?? '').trim()
+      if (id) maxDirectAccessByPid[id] = toIsoOrNull(g?._max?.createdAt)
+    }
     const projectsWithAnalytics = projects.map(project => {
       const totalDownloads = project.analytics.length
       const displayName = project.companyName || project.recipients[0]?.name || project.recipients[0]?.email || 'Client'
@@ -166,6 +180,8 @@ export async function GET(request: NextRequest) {
         .sort()
         .at(-1) ?? updatedAtIso
 
+      const lastAccessedAt = toIsoOrNull(project.lastAccessedAt) || maxDirectAccessByPid[project.id] || null
+
       return {
         id: project.id,
         title: project.title,
@@ -182,6 +198,7 @@ export async function GET(request: NextRequest) {
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
         lastActivityAt,
+        lastAccessedAt,
       }
     })
 

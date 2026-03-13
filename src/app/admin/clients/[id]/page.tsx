@@ -56,6 +56,7 @@ type ClientProjectRow = {
   createdAt: string | Date
   updatedAt: string | Date
   lastActivityAt?: string | null
+  lastAccessedAt?: string | null
   videos: any[]
   _count: { comments: number }
 }
@@ -293,7 +294,7 @@ export default function ClientDetailPage() {
       if (projectsSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (projectsSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
       if (projectsSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      if (projectsSortKey === 'updatedAt') return dir * (new Date(a.lastActivityAt ?? a.updatedAt).getTime() - new Date(b.lastActivityAt ?? b.updatedAt).getTime())
+      if (projectsSortKey === 'updatedAt') return dir * (new Date(a.lastAccessedAt ?? 0).getTime() - new Date(b.lastAccessedAt ?? 0).getTime())
       return 0
     })
 
@@ -659,7 +660,7 @@ export default function ClientDetailPage() {
                               { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
                               { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
                               { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false },
-                              { key: 'updatedAt', label: 'Last Activity', className: 'w-[130px] hidden md:table-cell', mobile: false },
+                              { key: 'updatedAt', label: 'Last Access', className: 'w-[130px] hidden md:table-cell', mobile: false },
                             ] as const
                           ).map((col) => (
                             <th
@@ -738,7 +739,7 @@ export default function ClientDetailPage() {
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
                                 <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
-                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.lastActivityAt ?? project.updatedAt)}</td>
+                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{project.lastAccessedAt ? formatProjectDate(project.lastAccessedAt) : '—'}</td>
                               </tr>
 
                               {projectsIsMobile && isExpanded && (
@@ -765,7 +766,7 @@ export default function ClientDetailPage() {
                                           <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
                                         </div>
                                         <div className="text-right">
-                                          <span className="text-muted-foreground">Last Activity:</span> {formatProjectDate(project.lastActivityAt ?? project.updatedAt)}
+                                          <span className="text-muted-foreground">Last Access:</span> {project.lastAccessedAt ? formatProjectDate(project.lastAccessedAt) : '—'}
                                         </div>
                                       </div>
                                     </div>

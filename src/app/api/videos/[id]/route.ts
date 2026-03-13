@@ -13,6 +13,7 @@ import { isDropboxStorageConfigured, toDropboxStoragePath, deleteDropboxFile, is
 import {
   allocateUniqueStorageName,
   buildProjectStorageRoot,
+  buildVideoAssetDropboxPath,
   buildVideoStorageRoot,
   buildVideoDropboxRoot,
   buildVideoOriginalDropboxPath,
@@ -511,6 +512,70 @@ export async function PATCH(
           updateData.dropboxUploadProgress = 0
           updateData.dropboxUploadError = null
         }
+
+        const assets = await prisma.videoAsset.findMany({
+          where: { videoId: id },
+          select: {
+            id: true,
+            fileName: true,
+            fileSize: true,
+            storagePath: true,
+            dropboxEnabled: true,
+            dropboxPath: true,
+            dropboxUploadStatus: true,
+          },
+        })
+
+        for (const asset of assets) {
+          const assetUpdateData: {
+            dropboxEnabled?: boolean
+            storagePath?: string
+            dropboxPath?: string
+            dropboxUploadStatus?: 'PENDING'
+            dropboxUploadProgress?: number
+            dropboxUploadError?: null
+          } = {}
+
+          const assetDropboxPath = buildVideoAssetDropboxPath(
+            video.project.client?.name || video.project.companyName || 'Client',
+            getStoragePathBasename(video.project.storagePath) || video.project.title,
+            video.storageFolderName || video.name,
+            video.versionLabel,
+            asset.fileName,
+          )
+
+          if (!asset.dropboxEnabled) {
+            assetUpdateData.dropboxEnabled = true
+          }
+
+          const assetDropboxStoragePath = isDropboxStoragePath(asset.storagePath)
+            ? asset.storagePath
+            : toDropboxStoragePath(asset.storagePath)
+
+          if (asset.storagePath !== assetDropboxStoragePath) {
+            assetUpdateData.storagePath = assetDropboxStoragePath
+            assetUpdateData.dropboxPath = assetDropboxPath
+            assetUpdateData.dropboxUploadStatus = 'PENDING'
+            assetUpdateData.dropboxUploadProgress = 0
+            assetUpdateData.dropboxUploadError = null
+          } else if (asset.dropboxUploadStatus === 'ERROR' || asset.dropboxUploadStatus === null) {
+            assetUpdateData.dropboxPath = assetDropboxPath
+            assetUpdateData.dropboxUploadStatus = 'PENDING'
+            assetUpdateData.dropboxUploadProgress = 0
+            assetUpdateData.dropboxUploadError = null
+          } else if (asset.dropboxPath !== assetDropboxPath) {
+            assetUpdateData.dropboxPath = assetDropboxPath
+          }
+
+          if (Object.keys(assetUpdateData).length === 0) {
+            continue
+          }
+
+          await prisma.videoAsset.update({
+            where: { id: asset.id },
+            data: assetUpdateData,
+          })
+        }
       } else {
         // Disable: remove dropbox prefix from storagePath, delete from Dropbox
         const currentPath = video.originalStoragePath
@@ -668,6 +733,35 @@ export async function PATCH(
         fileSizeBytes: Number(video.originalFileSize),
       })
       console.log(`[VIDEO] Video ${id} queued for Dropbox upload (toggled on)`)
+
+      const assetsToQueue = await prisma.videoAsset.findMany({
+        where: {
+          videoId: id,
+          dropboxEnabled: true,
+          dropboxUploadStatus: 'PENDING',
+        },
+        select: {
+          id: true,
+          fileSize: true,
+          storagePath: true,
+          dropboxPath: true,
+        },
+      })
+
+      for (const asset of assetsToQueue) {
+        await dropboxQueue.add('upload-asset-to-dropbox', {
+          videoId: id,
+          localPath: stripDropboxStoragePrefix(asset.storagePath),
+          dropboxPath: asset.storagePath,
+          dropboxRelPath: asset.dropboxPath,
+          fileSizeBytes: Number(asset.fileSize),
+          assetId: asset.id,
+        })
+      }
+
+      if (assetsToQueue.length > 0) {
+        console.log(`[VIDEO] Queued ${assetsToQueue.length} asset Dropbox upload(s) for video ${id}`)
+      }
     }
 
     // Update project status if approval changed

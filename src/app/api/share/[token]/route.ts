@@ -6,6 +6,7 @@ import { getPrimaryRecipient, getProjectRecipients } from '@/lib/recipients'
 import { verifyProjectAccess, fetchProjectWithVideos } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { trackSharePageAccess } from '@/lib/share-access-tracking'
+import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
 import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import crypto from 'crypto'
@@ -117,6 +118,14 @@ export async function GET(
     }
 
     const { isAdmin } = accessCheck
+
+    if (!isAdmin && shareContext?.accessMethod) {
+      await touchProjectLastAccessForRequest({
+        projectId: projectMeta.id,
+        request,
+        sessionId: shareContext.sessionId,
+      }).catch(() => {})
+    }
 
     // Track share page access for projects with no authentication (authMode = NONE)
     // Only track as NONE if guest mode is disabled; otherwise let guest endpoint track as GUEST
