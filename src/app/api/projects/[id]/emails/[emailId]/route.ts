@@ -1,11 +1,13 @@
+import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { deleteFile } from '@/lib/storage'
+import { deleteDirectory, deleteFile, pruneEmptyParentDirectories } from '@/lib/storage'
 import { sanitizeEmailHtml } from '@/lib/security/email-html-sanitization'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 
 export const runtime = 'nodejs'
 
@@ -30,6 +32,12 @@ function rewriteCidReferences(html: string, projectId: string, emailId: string, 
   }
 
   return rewritten
+}
+
+function toLocalStoragePath(storagePath: string): string {
+  return isDropboxStoragePath(storagePath)
+    ? stripDropboxStoragePrefix(storagePath)
+    : storagePath
 }
 
 async function assertProjectAccessOr404(projectId: string, auth: any) {
@@ -191,6 +199,18 @@ export async function DELETE(
 
   if (!email) return NextResponse.json({ error: 'Email not found' }, { status: 404 })
 
+  const rawDirectoryPath = path.posix.dirname(email.rawStoragePath)
+  const projectStoragePath = path.posix.dirname(path.posix.dirname(rawDirectoryPath))
+  const attachmentDirectoryPaths = Array.from(new Set(
+    email.attachments
+      .map((attachment) => attachment.storagePath)
+      .filter(Boolean)
+      .map((storagePath) => path.posix.dirname(storagePath))
+  ))
+  const attachmentParentDirectoryPaths = Array.from(new Set(
+    attachmentDirectoryPaths.map((directoryPath) => path.posix.dirname(directoryPath))
+  ))
+
   // Delete DB first; storage is best-effort.
   await prisma.projectEmail.delete({ where: { id: email.id } })
 
@@ -203,9 +223,31 @@ export async function DELETE(
     // ignore
   }
 
+  try {
+    await pruneEmptyParentDirectories(toLocalStoragePath(rawDirectoryPath), toLocalStoragePath(projectStoragePath))
+  } catch {
+    // ignore
+  }
+
   for (const att of email.attachments) {
     try {
       await deleteFile(att.storagePath)
+    } catch {
+      // ignore
+    }
+  }
+
+  for (const attachmentDirectoryPath of attachmentDirectoryPaths) {
+    try {
+      await deleteDirectory(toLocalStoragePath(attachmentDirectoryPath))
+    } catch {
+      // ignore
+    }
+  }
+
+  for (const attachmentParentDirectoryPath of attachmentParentDirectoryPaths) {
+    try {
+      await pruneEmptyParentDirectories(toLocalStoragePath(attachmentParentDirectoryPath), toLocalStoragePath(projectStoragePath))
     } catch {
       // ignore
     }

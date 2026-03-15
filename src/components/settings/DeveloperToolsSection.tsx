@@ -42,6 +42,25 @@ type NotificationBacklogResult = {
   recentCount?: number
   oldestCreatedAt?: string | null
   dismissed?: number
+  staleSample?: Array<{
+    id: string
+    createdAt: string
+    projectId: string | null
+    projectTitle: string | null
+    type: string
+    pendingTargets: string[]
+    attempts: {
+      clients: number
+      admins: number
+    }
+    failed: {
+      clients: boolean
+      admins: boolean
+    }
+    lastError: string | null
+    summary: string | null
+  }>
+  staleSampleTruncated?: boolean
 }
 
 type BullmqPurgeResult = {
@@ -54,61 +73,6 @@ type BullmqPurgeResult = {
   queues: Record<string, { completed: number; failed: number }>
 }
 
-type ProjectStorageMigrationResult = {
-  ok: true
-  dryRun: boolean
-  projectsChecked: number
-  projectsMigrated: number
-  projectsAlreadyCanonical: number
-  projectsWithoutClient: number
-  projectsWithoutExistingRoot: number
-  projectRootsMoved: number
-  videoFoldersNormalized: number
-  assetFilesNormalized: number
-  albumFoldersNormalized: number
-  recordsUpdated: number
-  legacyFolderCleanup?: {
-    removed: string[]
-    skippedNonEmpty: boolean
-  }
-  sample?: {
-    migratedProjects: Array<{ id: string; title: string; targetPath: string }>
-    skippedProjects: Array<{ id: string; title: string; reason: string }>
-  }
-  errors?: Array<{ projectId?: string; path?: string; error: string }>
-}
-
-type ClosedProjectPreviewCleanupResult = {
-  ok: true
-  dryRun: boolean
-  closedProjects: number
-  projectsWithPreviews: number
-  videosWithPreviews: number
-  previewFiles: number
-  timelineDirs: number
-  deleted?: {
-    previewFiles: number
-    previewFilesFailed: number
-    timelineDirs: number
-    timelineDirsFailed: number
-  }
-  errors?: Array<{ projectId: string; path: string; error: string }>
-  sample?: {
-    projects: Array<{ id: string; title: string; videos: number }>
-  }
-}
-
-type MissingThumbnailRepairResult = {
-  ok: true
-  dryRun: boolean
-  videosChecked: number
-  videosEligible: number
-  queued?: number
-  skippedClosedProjects: number
-  skippedCustomThumbnails: number
-  sample?: Array<{ videoId: string; projectId: string; projectTitle: string; videoName: string; versionLabel: string; reason: string }>
-}
-
 interface DeveloperToolsSectionProps {
   excludeInternalIpsFromAnalytics: boolean
   setExcludeInternalIpsFromAnalytics: (value: boolean) => void
@@ -116,9 +80,6 @@ interface DeveloperToolsSectionProps {
   setUploadChunkSizeMB: (value: number | '') => void
   downloadChunkSizeMB: number | ''
   setDownloadChunkSizeMB: (value: number | '') => void
-  onRecalculateProjectDataTotals?: () => void
-  recalculateProjectDataTotalsLoading?: boolean
-  recalculateProjectDataTotalsResult?: string | null
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -143,19 +104,12 @@ export function DeveloperToolsSection({
   setUploadChunkSizeMB,
   downloadChunkSizeMB,
   setDownloadChunkSizeMB,
-  onRecalculateProjectDataTotals,
-  recalculateProjectDataTotalsLoading,
-  recalculateProjectDataTotalsResult,
   show,
   setShow,
 }: DeveloperToolsSectionProps) {
   const [orphanProjectFilesLoading, setOrphanProjectFilesLoading] = useState(false)
   const [orphanProjectFilesResult, setOrphanProjectFilesResult] = useState<OrphanProjectFileCleanupResult | null>(null)
   const [orphanProjectFilesError, setOrphanProjectFilesError] = useState<string | null>(null)
-
-  const [projectStorageMigrationLoading, setProjectStorageMigrationLoading] = useState(false)
-  const [projectStorageMigrationResult, setProjectStorageMigrationResult] = useState<ProjectStorageMigrationResult | null>(null)
-  const [projectStorageMigrationError, setProjectStorageMigrationError] = useState<string | null>(null)
 
   const [backlogLoading, setBacklogLoading] = useState(false)
   const [backlogResult, setBacklogResult] = useState<NotificationBacklogResult | null>(null)
@@ -164,14 +118,6 @@ export function DeveloperToolsSection({
   const [bullmqPurgeLoading, setBullmqPurgeLoading] = useState(false)
   const [bullmqPurgeResult, setBullmqPurgeResult] = useState<BullmqPurgeResult | null>(null)
   const [bullmqPurgeError, setBullmqPurgeError] = useState<string | null>(null)
-
-  const [closedPreviewsLoading, setClosedPreviewsLoading] = useState(false)
-  const [closedPreviewsResult, setClosedPreviewsResult] = useState<ClosedProjectPreviewCleanupResult | null>(null)
-  const [closedPreviewsError, setClosedPreviewsError] = useState<string | null>(null)
-
-  const [missingThumbnailLoading, setMissingThumbnailLoading] = useState(false)
-  const [missingThumbnailResult, setMissingThumbnailResult] = useState<MissingThumbnailRepairResult | null>(null)
-  const [missingThumbnailError, setMissingThumbnailError] = useState<string | null>(null)
 
   async function runBullmqPurge(dryRun: boolean) {
     setBullmqPurgeLoading(true)
@@ -183,32 +129,6 @@ export function DeveloperToolsSection({
       setBullmqPurgeError(e?.message || 'Failed to run BullMQ purge')
     } finally {
       setBullmqPurgeLoading(false)
-    }
-  }
-
-  async function runClosedPreviewsCleanup(dryRun: boolean) {
-    setClosedPreviewsLoading(true)
-    setClosedPreviewsError(null)
-    try {
-      const res = await apiPost('/api/settings/delete-closed-project-previews', { dryRun })
-      setClosedPreviewsResult(res as ClosedProjectPreviewCleanupResult)
-    } catch (e: any) {
-      setClosedPreviewsError(e?.message || 'Failed to run closed project preview cleanup')
-    } finally {
-      setClosedPreviewsLoading(false)
-    }
-  }
-
-  async function runMissingThumbnailRepair(dryRun: boolean) {
-    setMissingThumbnailLoading(true)
-    setMissingThumbnailError(null)
-    try {
-      const res = await apiPost('/api/settings/regenerate-missing-thumbnails', { dryRun })
-      setMissingThumbnailResult(res as MissingThumbnailRepairResult)
-    } catch (e: any) {
-      setMissingThumbnailError(e?.message || 'Failed to queue thumbnail regeneration')
-    } finally {
-      setMissingThumbnailLoading(false)
     }
   }
 
@@ -246,18 +166,13 @@ export function DeveloperToolsSection({
     }
   }
 
-  async function runProjectStorageYearMonthMigration(dryRun: boolean) {
-    setProjectStorageMigrationLoading(true)
-    setProjectStorageMigrationError(null)
-
-    try {
-      const res = await apiPost('/api/settings/migrate-project-storage-yearmonth', { dryRun })
-      setProjectStorageMigrationResult(res as ProjectStorageMigrationResult)
-    } catch (e: any) {
-      setProjectStorageMigrationError(e?.message || 'Failed to run migration')
-    } finally {
-      setProjectStorageMigrationLoading(false)
-    }
+  function formatBacklogEntry(entry: NonNullable<NotificationBacklogResult['staleSample']>[number]) {
+    const createdAt = new Date(entry.createdAt).toLocaleString()
+    const projectLabel = entry.projectTitle || entry.projectId || 'No project'
+    const pendingTargets = entry.pendingTargets.length ? entry.pendingTargets.join(',') : 'none'
+    const summary = entry.summary ? ` | ${entry.summary}` : ''
+    const lastError = entry.lastError ? ` | lastError=${entry.lastError}` : ''
+    return `${createdAt} | ${entry.type} | project=${projectLabel} | pending=${pendingTargets} | attempts=c${entry.attempts.clients}/a${entry.attempts.admins}${summary}${lastError}`
   }
 
   return (
@@ -342,31 +257,6 @@ export function DeveloperToolsSection({
                   Allowed range: {MIN_DOWNLOAD_CHUNK_SIZE_MB}-{MAX_DOWNLOAD_CHUNK_SIZE_MB} MB.
                 </p>
               </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <Label>Project Data totals</Label>
-                <p className="text-xs text-muted-foreground">
-                  Recalculate totals from the database and the project folder on disk (videos, photos, ZIP artifacts, previews, etc).
-                  Use this after upgrades or if totals look incorrect.
-                </p>
-                {recalculateProjectDataTotalsResult ? (
-                  <p className="text-xs text-muted-foreground">{recalculateProjectDataTotalsResult}</p>
-                ) : null}
-              </div>
-
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-shrink-0"
-                disabled={!onRecalculateProjectDataTotals || recalculateProjectDataTotalsLoading}
-                onClick={() => onRecalculateProjectDataTotals?.()}
-              >
-                {recalculateProjectDataTotalsLoading ? 'Queuing…' : 'Recalculate now'}
-              </Button>
             </div>
           </div>
 
@@ -465,283 +355,6 @@ export function DeveloperToolsSection({
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-0.5 min-w-0">
-                <Label>Project storage normalization</Label>
-                <p className="text-xs text-muted-foreground">
-                  Normalizes existing local storage into the canonical client/project layout under
-                  <span className="font-mono"> clients/&lt;client&gt;/projects/&lt;project&gt; </span>
-                  and rehomes video and album folders to use their names instead of legacy IDs or date-based roots.
-                  Run a dry-run first to preview changes before applying them.
-                </p>
-
-                {projectStorageMigrationError ? (
-                  <p className="text-xs text-destructive">{projectStorageMigrationError}</p>
-                ) : null}
-
-                {projectStorageMigrationResult ? (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      Projects checked: {projectStorageMigrationResult.projectsChecked}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Migrated: {projectStorageMigrationResult.projectsMigrated}; already canonical: {projectStorageMigrationResult.projectsAlreadyCanonical}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Skipped without client: {projectStorageMigrationResult.projectsWithoutClient}; missing on disk: {projectStorageMigrationResult.projectsWithoutExistingRoot}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Project roots moved: {projectStorageMigrationResult.projectRootsMoved}; video folders normalized: {projectStorageMigrationResult.videoFoldersNormalized}; album folders normalized: {projectStorageMigrationResult.albumFoldersNormalized}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Asset files normalized: {projectStorageMigrationResult.assetFilesNormalized}; records updated: {projectStorageMigrationResult.recordsUpdated}
-                    </p>
-                    {projectStorageMigrationResult.errors?.length ? (
-                      <p className="text-xs text-muted-foreground">Errors: {projectStorageMigrationResult.errors.length}</p>
-                    ) : null}
-                    {projectStorageMigrationResult.legacyFolderCleanup ? (
-                      <p className="text-xs text-muted-foreground">
-                        Legacy projects/ cleanup: {projectStorageMigrationResult.legacyFolderCleanup.removed.length
-                          ? `removed ${projectStorageMigrationResult.legacyFolderCleanup.removed.join(', ')}`
-                          : 'nothing to remove'}
-                        {projectStorageMigrationResult.legacyFolderCleanup.skippedNonEmpty
-                          ? ' (some folders still contain data files)'
-                          : ''}
-                      </p>
-                    ) : null}
-
-                    {projectStorageMigrationResult.sample ? (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          Show sample projects
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Migrated projects (first 10)</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {projectStorageMigrationResult.sample.migratedProjects
-                                .map((p) => `${p.id}\t${p.title}\t${p.targetPath}`)
-                                .join('\n') || 'None'}
-                            </pre>
-                          </div>
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Skipped projects (first 10)</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {projectStorageMigrationResult.sample.skippedProjects
-                                .map((p) => `${p.id}\t${p.title}\t${p.reason}`)
-                                .join('\n') || 'None'}
-                            </pre>
-                          </div>
-
-                          {projectStorageMigrationResult.errors?.length ? (
-                            <div>
-                              <div className="text-[11px] font-medium text-muted-foreground">Errors (first 20)</div>
-                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                                {projectStorageMigrationResult.errors
-                                  .slice(0, 20)
-                                  .map((e) => `${e.projectId ? `${e.projectId}: ` : ''}${e.path ? `${e.path}: ` : ''}${e.error}`)
-                                  .join('\n')}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </div>
-                      </details>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={projectStorageMigrationLoading}
-                  onClick={() => void runProjectStorageYearMonthMigration(true)}
-                >
-                  {projectStorageMigrationLoading ? 'Running…' : 'Dry run'}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={projectStorageMigrationLoading}
-                  onClick={() => {
-                    if (!confirm('Normalize project storage into clients/<client>/projects/<project>? This cannot be undone.')) return
-                    void runProjectStorageYearMonthMigration(false)
-                  }}
-                >
-                  {projectStorageMigrationLoading ? 'Running…' : 'Migrate'}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <Label>Delete previews for closed projects</Label>
-                <p className="text-xs text-muted-foreground">
-                  Finds all CLOSED projects that still have preview files (480p, 720p, 1080p) or timeline sprite
-                  directories on disk, and deletes them to reclaim storage.
-                  Database fields are cleared so previews will regenerate if the project is re-opened.
-                  Run a dry-run first to preview impact.
-                </p>
-
-                {closedPreviewsError ? (
-                  <p className="text-xs text-destructive">{closedPreviewsError}</p>
-                ) : null}
-
-                {closedPreviewsResult ? (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      Closed projects: {closedPreviewsResult.closedProjects} total, {closedPreviewsResult.projectsWithPreviews} with previews
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Videos with previews: {closedPreviewsResult.videosWithPreviews}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Preview files: {closedPreviewsResult.previewFiles}; timeline sprite dirs: {closedPreviewsResult.timelineDirs}
-                    </p>
-                    {closedPreviewsResult.deleted ? (
-                      <p className="text-xs text-muted-foreground">
-                        Deleted: {closedPreviewsResult.deleted.previewFiles} preview files
-                        {closedPreviewsResult.deleted.previewFilesFailed ? ` (${closedPreviewsResult.deleted.previewFilesFailed} failed)` : ''}
-                        , {closedPreviewsResult.deleted.timelineDirs} timeline dirs
-                        {closedPreviewsResult.deleted.timelineDirsFailed ? ` (${closedPreviewsResult.deleted.timelineDirsFailed} failed)` : ''}
-                      </p>
-                    ) : null}
-                    {closedPreviewsResult.errors?.length ? (
-                      <p className="text-xs text-muted-foreground">Errors: {closedPreviewsResult.errors.length}</p>
-                    ) : null}
-
-                    {closedPreviewsResult.sample?.projects?.length ? (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          Show affected projects
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Affected projects (first 10)</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {closedPreviewsResult.sample.projects
-                                .map(p => `${p.id}\t${p.title} (${p.videos} video${p.videos !== 1 ? 's' : ''})`)
-                                .join('\n')}
-                            </pre>
-                          </div>
-
-                          {closedPreviewsResult.errors?.length ? (
-                            <div>
-                              <div className="text-[11px] font-medium text-muted-foreground">Errors (first 20)</div>
-                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                                {closedPreviewsResult.errors
-                                  .slice(0, 20)
-                                  .map(e => `${e.projectId}: ${e.path}: ${e.error}`)
-                                  .join('\n')}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </div>
-                      </details>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={closedPreviewsLoading}
-                  onClick={() => void runClosedPreviewsCleanup(true)}
-                >
-                  {closedPreviewsLoading ? 'Running\u2026' : 'Dry run'}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={closedPreviewsLoading}
-                  onClick={() => {
-                    if (!confirm('Delete all preview files and timeline sprites for CLOSED projects? This cannot be undone.')) return
-                    void runClosedPreviewsCleanup(false)
-                  }}
-                >
-                  {closedPreviewsLoading ? 'Running\u2026' : 'Delete previews'}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <Label>Regenerate missing video thumbnails</Label>
-                <p className="text-xs text-muted-foreground">
-                  Finds READY and ERROR videos whose system thumbnail is missing on disk or unset, then queues
-                  thumbnail-only repair jobs. Existing previews stay untouched. Custom asset-based thumbnails are skipped.
-                  Run a dry run first to preview impact.
-                </p>
-
-                {missingThumbnailError ? (
-                  <p className="text-xs text-destructive">{missingThumbnailError}</p>
-                ) : null}
-
-                {missingThumbnailResult ? (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      Videos checked: {missingThumbnailResult.videosChecked}; eligible: {missingThumbnailResult.videosEligible}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Skipped custom thumbnails: {missingThumbnailResult.skippedCustomThumbnails}; skipped closed-project videos: {missingThumbnailResult.skippedClosedProjects}
-                    </p>
-                    {!missingThumbnailResult.dryRun ? (
-                      <p className="text-xs text-muted-foreground">Queued: {missingThumbnailResult.queued ?? 0}</p>
-                    ) : null}
-
-                    {missingThumbnailResult.sample?.length ? (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          Show affected videos
-                        </summary>
-                        <div className="mt-2">
-                          <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                            {missingThumbnailResult.sample
-                              .map((video) => `${video.projectId}\t${video.projectTitle}\t${video.videoName}\t${video.versionLabel}\t${video.reason}`)
-                              .join('\n')}
-                          </pre>
-                        </div>
-                      </details>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={missingThumbnailLoading}
-                  onClick={() => void runMissingThumbnailRepair(true)}
-                >
-                  {missingThumbnailLoading ? 'Running…' : 'Dry run'}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={missingThumbnailLoading}
-                  onClick={() => {
-                    if (!confirm('Queue thumbnail-only repair jobs for all videos with missing system thumbnails?')) return
-                    void runMissingThumbnailRepair(false)
-                  }}
-                >
-                  {missingThumbnailLoading ? 'Running…' : 'Queue repairs'}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
                 <Label>Notification queue backlog</Label>
                 <p className="text-xs text-muted-foreground">
                   Finds unsent notification queue entries older than 7 days and marks them as already sent,
@@ -770,6 +383,19 @@ export function DeveloperToolsSection({
                         <p className="text-xs text-muted-foreground">Recent entries kept: {backlogResult.recentCount}</p>
                       </>
                     )}
+
+                    {backlogResult.staleSample?.length ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show stale notifications{backlogResult.staleSampleTruncated ? ' (first 50)' : ''}
+                        </summary>
+                        <div className="mt-2">
+                          <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                            {backlogResult.staleSample.map((entry) => formatBacklogEntry(entry)).join('\n')}
+                          </pre>
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

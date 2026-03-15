@@ -208,8 +208,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const albumZipFullBytes = asNumberBigInt(albumAgg._sum.fullZipFileSize)
     const albumZipSocialBytes = asNumberBigInt(albumAgg._sum.socialZipFileSize)
     const originalVideosBytes = videosBytes
-    const originalPhotosBytes = photosOriginalBytes + socialPhotosBytes
-    const photoZipBytes = albumZipFullBytes + albumZipSocialBytes
+    const originalPhotosBytes = photosOriginalBytes
+    const photoZipBytes = socialPhotosBytes + albumZipFullBytes + albumZipSocialBytes
 
     // Fold sub-categories into the existing breakdown rows used by the UI.
     const photosBytes = originalPhotosBytes + photoZipBytes
@@ -337,29 +337,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           })
         ),
         sumStorageEntrySizes(videoAssetEntries.map((a) => a.storagePath)),
-        sumStorageEntrySizes(
-          albumPhotoEntries.flatMap((photo) => [photo.storagePath, photo.socialStoragePath])
-        ),
-        sumStorageEntrySizes(
-          albumEntries.flatMap((album) => [
-            getAlbumZipStoragePath({
-              projectId,
-              albumId: album.id,
-              projectStoragePath: projectRootRel,
-              albumFolderName: album.storageFolderName || album.name || album.id,
-              albumName: album.name,
-              variant: 'full',
-            }),
-            getAlbumZipStoragePath({
-              projectId,
-              albumId: album.id,
-              projectStoragePath: projectRootRel,
-              albumFolderName: album.storageFolderName || album.name || album.id,
-              albumName: album.name,
-              variant: 'social',
-            }),
-          ])
-        ),
+        sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.storagePath)),
+        Promise.all([
+          sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.socialStoragePath)),
+          sumStorageEntrySizes(
+            albumEntries.flatMap((album) => [
+              getAlbumZipStoragePath({
+                projectId,
+                albumId: album.id,
+                projectStoragePath: projectRootRel,
+                albumFolderName: album.storageFolderName || album.name || album.id,
+                albumName: album.name,
+                variant: 'full',
+              }),
+              getAlbumZipStoragePath({
+                projectId,
+                albumId: album.id,
+                projectStoragePath: projectRootRel,
+                albumFolderName: album.storageFolderName || album.name || album.id,
+                albumName: album.name,
+                variant: 'social',
+              }),
+            ])
+          ),
+        ]).then(([socialPhotoBytesDisk, albumZipBytesDisk]) => socialPhotoBytesDisk + albumZipBytesDisk),
       ])
 
       videoPreviewsBytes = Math.max(0, videoPreviewsBytesDisk)

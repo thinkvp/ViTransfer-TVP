@@ -35,6 +35,44 @@ function summarizeNotificationData(data: unknown): string | null {
   return fields.length ? fields.join(' | ') : null
 }
 
+function serializeBacklogEntry(entry: {
+  id: string
+  createdAt: Date
+  projectId: string | null
+  type: string
+  clientAttempts: number
+  adminAttempts: number
+  clientFailed: boolean
+  adminFailed: boolean
+  lastError: string | null
+  data: unknown
+  sentToClients: boolean
+  sentToAdmins: boolean
+  project: { title: string } | null
+}) {
+  return {
+    id: entry.id,
+    createdAt: entry.createdAt.toISOString(),
+    projectId: entry.projectId,
+    projectTitle: entry.project?.title || null,
+    type: entry.type,
+    pendingTargets: [
+      !entry.sentToClients && !entry.clientFailed ? 'clients' : null,
+      !entry.sentToAdmins && !entry.adminFailed ? 'admins' : null,
+    ].filter((value): value is string => Boolean(value)),
+    attempts: {
+      clients: entry.clientAttempts,
+      admins: entry.adminAttempts,
+    },
+    failed: {
+      clients: entry.clientFailed,
+      admins: entry.adminFailed,
+    },
+    lastError: entry.lastError || null,
+    summary: summarizeNotificationData(entry.data),
+  }
+}
+
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
@@ -85,27 +123,8 @@ export async function POST(request: NextRequest) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const stale = pending.filter(r => r.createdAt < sevenDaysAgo)
     const recent = pending.filter(r => r.createdAt >= sevenDaysAgo)
-    const sample = pending.slice(0, 20).map((entry) => ({
-      id: entry.id,
-      createdAt: entry.createdAt,
-      projectId: entry.projectId,
-      projectTitle: entry.project?.title || null,
-      type: entry.type,
-      pendingTargets: [
-        !entry.sentToClients && !entry.clientFailed ? 'clients' : null,
-        !entry.sentToAdmins && !entry.adminFailed ? 'admins' : null,
-      ].filter((value): value is string => Boolean(value)),
-      attempts: {
-        clients: entry.clientAttempts,
-        admins: entry.adminAttempts,
-      },
-      failed: {
-        clients: entry.clientFailed,
-        admins: entry.adminFailed,
-      },
-      lastError: entry.lastError || null,
-      summary: summarizeNotificationData(entry.data),
-    }))
+    const staleSample = stale.slice(0, 50).map(serializeBacklogEntry)
+    const staleSampleTruncated = stale.length > staleSample.length
 
     if (dryRun) {
       return NextResponse.json({
@@ -115,7 +134,8 @@ export async function POST(request: NextRequest) {
         staleCount: stale.length,
         recentCount: recent.length,
         oldestCreatedAt: pending[0]?.createdAt ?? null,
-        sample,
+        staleSample,
+        staleSampleTruncated,
       })
     }
 
@@ -139,7 +159,8 @@ export async function POST(request: NextRequest) {
       dismissed: result.count,
       recentCount: recent.length,
       oldestCreatedAt: pending[0]?.createdAt ?? null,
-      sample,
+      staleSample,
+      staleSampleTruncated,
     })
   } catch (err: any) {
     console.error('[purge-notification-backlog]', err)

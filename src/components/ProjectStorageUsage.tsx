@@ -168,7 +168,7 @@ export function ProjectStorageUsage({
     const items: Array<{ key: Row['key']; label: string; bytes: number }> = hasSplitRows
       ? [
           { key: 'originalVideosBytes', label: 'Original Videos', bytes: originalVideosBytes },
-          { key: 'videoPreviewsBytes', label: 'Video Previews (inc. timeline previews)', bytes: videoPreviewsBytes },
+          { key: 'videoPreviewsBytes', label: 'Video Previews', bytes: videoPreviewsBytes },
           { key: 'videoAssetsBytes', label: 'Video Assets', bytes: Number(b.videoAssetsBytes || 0) },
           { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
           { key: 'originalPhotosBytes', label: 'Original Photos', bytes: originalPhotosBytes },

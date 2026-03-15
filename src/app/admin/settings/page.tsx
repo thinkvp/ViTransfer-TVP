@@ -15,6 +15,7 @@ import { CpuConfigurationSection } from '@/components/settings/CpuConfigurationS
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
 import { AdminBrowserPushSection } from '@/components/settings/AdminBrowserPushSection'
 import { DropboxStorageSection } from '@/components/settings/DropboxStorageSection'
+import { StorageOverviewSection } from '@/components/settings/StorageOverviewSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 import {
   DEFAULT_DOWNLOAD_CHUNK_SIZE_MB,
@@ -262,6 +263,7 @@ export default function GlobalSettingsPage() {
   const [showPushNotifications, setShowPushNotifications] = useState(false)
   const [showBrowserPush, setShowBrowserPush] = useState(false)
   const [showDropboxStorage, setShowDropboxStorage] = useState(false)
+  const [showStorageOverview, setShowStorageOverview] = useState(false)
   const [dropboxConfigured, setDropboxConfigured] = useState(false)
   const [dropboxRootPath, setDropboxRootPath] = useState('')
 
@@ -1080,6 +1082,16 @@ export default function GlobalSettingsPage() {
             defaultVideoWorkerConcurrency={cpuDefaultVideoWorkerConcurrency}
           />
 
+          <StorageOverviewSection
+            show={showStorageOverview}
+            setShow={setShowStorageOverview}
+            autoDeletePreviewsOnClose={autoDeletePreviewsOnClose}
+            setAutoDeletePreviewsOnClose={setAutoDeletePreviewsOnClose}
+            onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
+            recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
+            recalculateProjectDataTotalsResult={recalcProjectDataResult}
+          />
+
           <DropboxStorageSection
             show={showDropboxStorage}
             setShow={setShowDropboxStorage}
@@ -1115,8 +1127,6 @@ export default function GlobalSettingsPage() {
             setAutoCloseApprovedProjectsEnabled={setAutoCloseApprovedProjectsEnabled}
             autoCloseApprovedProjectsAfterDays={autoCloseApprovedProjectsAfterDays}
             setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
-            autoDeletePreviewsOnClose={autoDeletePreviewsOnClose}
-            setAutoDeletePreviewsOnClose={setAutoDeletePreviewsOnClose}
             show={showProjectBehavior}
             setShow={setShowProjectBehavior}
           />
@@ -1128,9 +1138,6 @@ export default function GlobalSettingsPage() {
             setUploadChunkSizeMB={setUploadChunkSizeMB}
             downloadChunkSizeMB={downloadChunkSizeMB}
             setDownloadChunkSizeMB={setDownloadChunkSizeMB}
-            onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
-            recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
-            recalculateProjectDataTotalsResult={recalcProjectDataResult}
             show={showDeveloperTools}
             setShow={setShowDeveloperTools}
           />

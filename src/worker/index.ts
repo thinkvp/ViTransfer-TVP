@@ -673,7 +673,7 @@ async function main() {
           const result = await runDropboxStorageConsistencyScanAndSyncNotification()
           console.log(`[CONSISTENCY] Dropbox scan completed (checked=${result.checkedCount}, issues=${result.inconsistencyCount})`)
         } catch (e) {
-          console.error('[CONSISTENCY] Dropbox storage consistency scan failed:', e instanceof Error ? e.message : e)
+          console.error('[CONSISTENCY] Dropbox storage consistency scan failed:', e)
         }
         return
       }
@@ -783,30 +783,22 @@ async function main() {
     }
   )
 
+  const getNotificationWorkerJobLabel = (name?: string) => {
+    if (name === 'project-key-date-reminders') return 'Project Key Date reminders check'
+    if (name === 'user-key-date-reminders') return 'User Key Date reminders check'
+    if (name === 'auto-start-projects-on-shooting-key-date') return 'Auto-start on SHOOTING key date check'
+    if (name === 'process-notifications' || name === 'process-notifications-retry') return 'Notification check'
+    return name || 'Job'
+  }
+
   notificationWorker.on('completed', (job) => {
-    const name = job.name
-    const label =
-      name === 'project-key-date-reminders' ||
-      name === 'user-key-date-reminders' ||
-      name === 'auto-start-projects-on-shooting-key-date'
-        ? 'Key Date check'
-        : name === 'process-notifications' || name === 'process-notifications-retry'
-        ? 'Notification check'
-        : name || 'Job'
+    const label = getNotificationWorkerJobLabel(job.name)
 
     console.log(`${label} ${job.id} completed`)
   })
 
   notificationWorker.on('failed', (job, err) => {
-    const name = job?.name
-    const label =
-      name === 'project-key-date-reminders' ||
-      name === 'user-key-date-reminders' ||
-      name === 'auto-start-projects-on-shooting-key-date'
-        ? 'Key Date check'
-        : name === 'process-notifications' || name === 'process-notifications-retry'
-        ? 'Notification check'
-        : name || 'Job'
+    const label = getNotificationWorkerJobLabel(job?.name)
 
     console.error(`${label} ${job?.id} failed:`, err)
   })

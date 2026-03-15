@@ -11,8 +11,6 @@ interface ProjectBehaviorSectionProps {
   setAutoCloseApprovedProjectsEnabled: (value: boolean) => void
   autoCloseApprovedProjectsAfterDays: number | ''
   setAutoCloseApprovedProjectsAfterDays: (value: number | '') => void
-  autoDeletePreviewsOnClose: boolean
-  setAutoDeletePreviewsOnClose: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
 }
@@ -24,8 +22,6 @@ export function ProjectBehaviorSection({
   setAutoCloseApprovedProjectsEnabled,
   autoCloseApprovedProjectsAfterDays,
   setAutoCloseApprovedProjectsAfterDays,
-  autoDeletePreviewsOnClose,
-  setAutoDeletePreviewsOnClose,
   show,
   setShow,
 }: ProjectBehaviorSectionProps) {
@@ -115,19 +111,6 @@ export function ProjectBehaviorSection({
               />
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5 flex-1">
-                <Label htmlFor="autoDeletePreviewsOnClose">Auto-delete video previews and timeline sprites when project is closed</Label>
-                <p className="text-xs text-muted-foreground">
-                  When enabled, all generated preview files and timeline sprite previews will be deleted when a project is closed to save disk space. They will be automatically regenerated if the project is reopened.
-                </p>
-              </div>
-              <Switch
-                id="autoDeletePreviewsOnClose"
-                checked={autoDeletePreviewsOnClose}
-                onCheckedChange={setAutoDeletePreviewsOnClose}
-              />
-            </div>
           </div>
         </CardContent>
       )}

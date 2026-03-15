@@ -23,6 +23,10 @@ type NodeRequestInit = RequestInit & {
 export type DropboxUploadProgressCallback = (uploadedBytes: number, totalBytes: number) => void
 
 let tokenCache: DropboxTokenCache = null
+let tokenRefreshPromise: Promise<string> | null = null
+
+const DROPBOX_FETCH_RETRY_COUNT = 2
+const DROPBOX_FETCH_RETRY_DELAY_MS = 1000
 
 /**
  * Sanitize a name for use as a Dropbox folder or file name segment.
@@ -146,57 +150,111 @@ function normalizeDropboxRelPath(rawPath: string): string {
   return rawPath.trim().replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function formatDropboxFetchError(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = (error as Error & { cause?: unknown }).cause
+    const causeMessage = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : null
+    return causeMessage ? `${error.message} (cause: ${causeMessage})` : error.message
+  }
+
+  return String(error)
+}
+
+function isRetryableDropboxFetchError(error: unknown): boolean {
+  const message = formatDropboxFetchError(error)
+  return /fetch failed|network|econnreset|enotfound|eai_again|etimedout|socket/i.test(message)
+}
+
+async function fetchDropboxWithRetry(url: string, init: RequestInit, label: string): Promise<Response> {
+  let attempt = 0
+  let lastError: unknown = null
+
+  while (attempt <= DROPBOX_FETCH_RETRY_COUNT) {
+    try {
+      return await fetch(url, init)
+    } catch (error) {
+      lastError = error
+      if (attempt >= DROPBOX_FETCH_RETRY_COUNT || !isRetryableDropboxFetchError(error)) {
+        throw new Error(`Dropbox request ${label} failed: ${formatDropboxFetchError(error)}`)
+      }
+
+      console.warn(`[DROPBOX] ${label} failed on attempt ${attempt + 1}; retrying in ${DROPBOX_FETCH_RETRY_DELAY_MS}ms: ${formatDropboxFetchError(error)}`)
+      await sleep(DROPBOX_FETCH_RETRY_DELAY_MS)
+      attempt += 1
+    }
+  }
+
+  throw new Error(`Dropbox request ${label} failed: ${formatDropboxFetchError(lastError)}`)
+}
+
 async function fetchDropboxAccessToken(): Promise<string> {
   const now = Date.now()
   if (tokenCache && tokenCache.expiresAt > now + 60_000) {
     return tokenCache.accessToken
   }
 
-  const appKey = getDropboxEnv('DROPBOX_APP_KEY')
-  const appSecret = getDropboxEnv('DROPBOX_APP_SECRET')
-  const refreshToken = getDropboxEnv('DROPBOX_REFRESH_TOKEN')
-  const credentials = Buffer.from(`${appKey}:${appSecret}`).toString('base64')
-
-  const response = await fetch('https://api.dropbox.com/oauth2/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }),
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '')
-    throw new Error(`Failed to refresh Dropbox access token (${response.status}): ${errorText}`)
+  if (tokenRefreshPromise) {
+    return tokenRefreshPromise
   }
 
-  const payload = await response.json() as { access_token: string; expires_in?: number }
-  const expiresInSeconds = typeof payload.expires_in === 'number' ? payload.expires_in : 14_400
+  tokenRefreshPromise = (async () => {
+    const refreshStartedAt = Date.now()
+    const appKey = getDropboxEnv('DROPBOX_APP_KEY')
+    const appSecret = getDropboxEnv('DROPBOX_APP_SECRET')
+    const refreshToken = getDropboxEnv('DROPBOX_REFRESH_TOKEN')
+    const credentials = Buffer.from(`${appKey}:${appSecret}`).toString('base64')
 
-  console.log(`[DROPBOX] Access token refreshed, expires in ${expiresInSeconds}s`)
+    const response = await fetchDropboxWithRetry('https://api.dropbox.com/oauth2/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    }, 'oauth2/token')
 
-  tokenCache = {
-    accessToken: payload.access_token,
-    expiresAt: now + expiresInSeconds * 1000,
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '')
+      throw new Error(`Failed to refresh Dropbox access token (${response.status}): ${errorText}`)
+    }
+
+    const payload = await response.json() as { access_token: string; expires_in?: number }
+    const expiresInSeconds = typeof payload.expires_in === 'number' ? payload.expires_in : 14_400
+
+    console.log(`[DROPBOX] Access token refreshed, expires in ${expiresInSeconds}s`)
+
+    tokenCache = {
+      accessToken: payload.access_token,
+      expiresAt: refreshStartedAt + expiresInSeconds * 1000,
+    }
+
+    return payload.access_token
+  })()
+
+  try {
+    return await tokenRefreshPromise
+  } finally {
+    tokenRefreshPromise = null
   }
-
-  return payload.access_token
 }
 
 async function callDropboxJson<T>(endpoint: string, body: unknown): Promise<T> {
   const accessToken = await fetchDropboxAccessToken()
-  const response = await fetch(`${DROPBOX_API_BASE}${endpoint}`, {
+  const response = await fetchDropboxWithRetry(`${DROPBOX_API_BASE}${endpoint}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  })
+  }, endpoint)
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '')
@@ -224,7 +282,7 @@ async function callDropboxContent(
     duplex: body ? 'half' : undefined,
   }
 
-  return fetch(`${DROPBOX_CONTENT_BASE}${endpoint}`, requestInit)
+  return fetchDropboxWithRetry(`${DROPBOX_CONTENT_BASE}${endpoint}`, requestInit, endpoint)
 }
 
 export async function createTemporaryDropboxLink(rawPath: string, dropboxRelPath?: string | null): Promise<string> {
@@ -245,14 +303,14 @@ function getDropboxParentRelPath(relPath: string): string | null {
 
 async function deleteDropboxApiPath(apiPath: string): Promise<boolean> {
   const accessToken = await fetchDropboxAccessToken()
-  const response = await fetch(`${DROPBOX_API_BASE}/files/delete_v2`, {
+  const response = await fetchDropboxWithRetry(`${DROPBOX_API_BASE}/files/delete_v2`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ path: apiPath }),
-  })
+  }, '/files/delete_v2')
 
   if (response.ok) return true
 

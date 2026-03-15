@@ -5,6 +5,28 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-03-15
+
+### Added
+- **Storage Overview section in Admin Settings** — a new "Storage Overview" panel in Admin Settings shows a live breakdown of disk usage across all content types (original videos, video previews, video assets, comment attachments, original photos, photo ZIPs, project files, client files, and user files); when the storage root is on a local filesystem the panel also reports total capacity and available free space; the data is fetched from a new `/api/settings/storage-overview` endpoint and refreshes on demand
+- **Auto-delete previews toggle relocated to Storage Overview** — the "Auto-delete video previews and timeline sprites when project is closed" toggle has been moved from the Project Behavior section into the new Storage Overview panel where it sits alongside the breakdown chart for clearer context
+- **Recalculate storage totals relocated to Storage Overview** — the "Recalculate totals" action (previously in Developer Tools) is now surfaced inside the Storage Overview panel
+
+### Changed
+- **"Original Photos" storage row now counts full-resolution files only** — social-sized photo derivatives are no longer included in the "Original Photos" total; they are now counted under "Photo ZIP files & previews" in both the Project Data panel on project pages and the Storage Overview section in Admin Settings
+- **"Video Previews" label simplified** — "Video Previews (inc. timeline previews)" has been shortened to "Video Previews" in both the Project Data panel and the Storage Overview section
+- **Storage Overview section header no longer shows an icon** — the hard-drive icon next to the "Storage Overview" card title has been removed for consistency with other settings sections
+- **Dropbox token refresh deduplicated** — concurrent calls to `fetchDropboxAccessToken` now share a single in-flight refresh promise; previously rapid parallel requests could trigger multiple simultaneous token refreshes against the Dropbox OAuth endpoint
+- **Dropbox API calls retry on transient network errors** — all Dropbox HTTP requests now retry up to 2 times (1 s delay) on fetch-level errors such as `ECONNRESET`, `ETIMEDOUT`, and `fetch failed`; non-retryable errors and HTTP-level failures are surfaced immediately without retrying
+- **Notification backlog purge tool shows stale vs. recent breakdown and larger sample** — the dry-run response now separately counts stale (>7 days old) and recent pending entries, returns up to 50 stale sample rows (up from 20) with a truncation flag, and serialises dates as ISO strings for consistent display
+- **Worker notification log labels are more specific** — `project-key-date-reminders` and `user-key-date-reminders` jobs now log as "Project Key Date reminders check" and "User Key Date reminders check" respectively (previously both were "Key Date check"); the label logic is extracted into a shared `getNotificationWorkerJobLabel` helper used by both the `completed` and `failed` handlers
+- **Worker Dropbox consistency scan logs the full error object** — the error logged when a Dropbox storage consistency scan fails is now the raw caught value rather than `e.message`, preserving stack traces and non-Error objects
+- **Deleting an email prunes empty storage directories** — the email DELETE endpoint now removes the raw-email directory and each attachment directory after file deletion, then prunes any empty parent directories up to the project root; Dropbox-prefixed paths are stripped to a local path before pruning so the cleanup works regardless of storage provider
+
+### Removed
+- **Migrate project storage tool removed from Developer Tools** — the one-time `migrate-project-storage-yearmonth` API route and its associated UI panel have been removed; the storage migration was completed in v1.2.0 and the tool is no longer needed
+- **Regenerate missing thumbnails tool removed from Developer Tools** — the `regenerate-missing-thumbnails` API route and its Developer Tools panel have been removed from the settings UI; thumbnail repair remains available via the worker
+
 ## [1.2.2] - 2026-03-14
 
 ### Added
