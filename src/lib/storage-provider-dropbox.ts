@@ -57,6 +57,24 @@ export function dropboxRelPathToApiPath(relPath: string): string {
   return fullPath.startsWith('/') ? fullPath : `/${fullPath}`
 }
 
+export async function dropboxPathExists(relPath: string): Promise<boolean> {
+  const normalized = normalizeDropboxRelPath(relPath)
+  if (!normalized) return false
+
+  try {
+    await callDropboxJson('/files/get_metadata', {
+      path: dropboxRelPathToApiPath(normalized),
+    })
+    return true
+  } catch (error: any) {
+    const message = typeof error?.message === 'string' ? error.message : ''
+    if (/not_found|path_lookup|lookup_failed/i.test(message)) {
+      return false
+    }
+    throw error
+  }
+}
+
 export function isDropboxStorageConfigured(): boolean {
   return Boolean(
     process.env.DROPBOX_APP_KEY?.trim()
@@ -122,6 +140,10 @@ export function toDropboxStoragePath(rawPath: string): string {
 
 function toDropboxRelativePath(rawPath: string): string {
   return stripDropboxStoragePrefix(rawPath).trim().replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+function normalizeDropboxRelPath(rawPath: string): string {
+  return rawPath.trim().replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
 }
 
 async function fetchDropboxAccessToken(): Promise<string> {
@@ -257,10 +279,38 @@ async function isDropboxFolderEmpty(relPath: string): Promise<boolean | null> {
   }
 }
 
-async function cleanupDropboxEmptyParents(relPath: string): Promise<void> {
+function inferDropboxCleanupStopRelPath(relPath: string): string | null {
+  const normalized = normalizeDropboxRelPath(relPath)
+  if (!normalized) return null
+
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length === 0) return null
+
+  if (parts[0] === 'clients') {
+    if (parts[1] && parts[2] === 'projects' && parts[3]) {
+      return parts.slice(0, 4).join('/')
+    }
+
+    if (parts[1]) {
+      return parts.slice(0, 2).join('/')
+    }
+
+    return 'clients'
+  }
+
+  return parts[0]
+}
+
+type DropboxDeleteOptions = {
+  pruneEmptyParents?: boolean
+  stopAtRelPath?: string | null
+}
+
+async function cleanupDropboxEmptyParents(relPath: string, stopAtRelPath?: string | null): Promise<void> {
+  const normalizedStopAt = stopAtRelPath ? normalizeDropboxRelPath(stopAtRelPath) : null
   let parentRelPath = getDropboxParentRelPath(relPath)
 
-  while (parentRelPath) {
+  while (parentRelPath && parentRelPath !== normalizedStopAt) {
     const empty = await isDropboxFolderEmpty(parentRelPath)
     if (empty !== true) return
 
@@ -272,13 +322,23 @@ async function cleanupDropboxEmptyParents(relPath: string): Promise<void> {
   }
 }
 
-export async function deleteDropboxFile(rawPath: string, dropboxRelPath?: string | null): Promise<void> {
+export async function deleteDropboxPath(rawPath: string, dropboxRelPath?: string | null, options?: DropboxDeleteOptions): Promise<void> {
   const apiPath = dropboxRelPath ? dropboxRelPathToApiPath(dropboxRelPath) : toDropboxApiPath(rawPath)
   const cleanupRelPath = dropboxRelPath || toDropboxRelativePath(rawPath)
-  console.log(`[DROPBOX] Deleting file: ${apiPath}`)
+  console.log(`[DROPBOX] Deleting path: ${apiPath}`)
   const deleted = await deleteDropboxApiPath(apiPath)
   if (!deleted) return
-  await cleanupDropboxEmptyParents(cleanupRelPath)
+
+  if (options?.pruneEmptyParents === false) {
+    return
+  }
+
+  const stopAtRelPath = options?.stopAtRelPath ?? inferDropboxCleanupStopRelPath(cleanupRelPath)
+  await cleanupDropboxEmptyParents(cleanupRelPath, stopAtRelPath)
+}
+
+export async function deleteDropboxFile(rawPath: string, dropboxRelPath?: string | null, options?: DropboxDeleteOptions): Promise<void> {
+  await deleteDropboxPath(rawPath, dropboxRelPath, options)
 }
 
 /**
@@ -307,7 +367,7 @@ export async function moveDropboxPath(fromRelPath: string, toRelPath: string): P
     throw err
   }
 
-  await cleanupDropboxEmptyParents(fromRelPath)
+  await cleanupDropboxEmptyParents(fromRelPath, inferDropboxCleanupStopRelPath(fromRelPath))
 }
 
 export async function materializeDropboxPathToTempFile(params: {

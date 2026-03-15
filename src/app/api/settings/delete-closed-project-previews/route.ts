@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
               { preview480Path: { not: null } },
               { preview720Path: { not: null } },
               { preview1080Path: { not: null } },
+              { timelinePreviewVttPath: { not: null } },
               { timelinePreviewSpritesPath: { not: null } },
             ],
           },
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
             preview480Path: true,
             preview720Path: true,
             preview1080Path: true,
+            timelinePreviewVttPath: true,
             timelinePreviewSpritesPath: true,
             timelinePreviewsReady: true,
           },
@@ -83,6 +85,11 @@ export async function POST(request: NextRequest) {
         ].filter(Boolean) as string[]
         totalPreviewFiles += previewPaths.length
 
+        const timelineVttPath = video.timelinePreviewVttPath || null
+        if (timelineVttPath) {
+          totalPreviewFiles++
+        }
+
         if (video.timelinePreviewSpritesPath) {
           totalTimelineDirs++
         }
@@ -101,7 +108,17 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          if (previewPaths.length > 0) {
+          if (timelineVttPath) {
+            try {
+              await deleteFile(timelineVttPath)
+              deletedPreviewFiles++
+            } catch (err: any) {
+              failedPreviewFiles++
+              errors.push({ projectId: project.id, path: timelineVttPath, error: err?.message || 'Unknown error' })
+            }
+          }
+
+          if (previewPaths.length > 0 || timelineVttPath) {
             updateData.preview480Path = null
             updateData.preview720Path = null
             updateData.preview1080Path = null

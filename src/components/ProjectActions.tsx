@@ -533,11 +533,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                   Configure SMTP in Settings to enable email notifications
                 </p>
               )}
-              {smtpConfigured && !hasRecipientWithEmail && (
-                <p className="text-xs text-muted-foreground mt-1 px-1">
-                  No client recipients with email addresses are configured. You can still send internal invites.
-                </p>
-              )}
+
             </div>
           )}
 

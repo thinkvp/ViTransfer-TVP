@@ -10,13 +10,15 @@ import {
   PROJECT_REDIRECTS_INDEX_FILENAME,
   STORAGE_ROOT,
 } from '@/lib/storage'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 
 export type ProjectStorageOrphanCleanupResult = {
   ok: true
   dryRun: boolean
-  scannedProjectDirectories: number
+  scannedDirectories: number
+  scannedProjects: number
   scannedFiles: number
   orphanFiles: number
   orphanFileBytes: number
@@ -36,6 +38,8 @@ type ProjectStorageReferences = {
   exactFilePaths: Set<string>
   protectedDirectoryPrefixes: Set<string>
 }
+
+type ProjectRootIndex = Map<string, string>
 
 type OrphanFileEntry = {
   absPath: string
@@ -59,6 +63,15 @@ function isProtectedMetadataFile(relPath: string): boolean {
   )
 }
 
+function isIgnoredStoragePath(relPath: string): boolean {
+  const normalized = normalizeRelativeStoragePath(relPath)
+  return (
+    normalized === '.tus-tmp'
+    || normalized.startsWith('.tus-tmp/')
+    || isProtectedMetadataFile(normalized)
+  )
+}
+
 function extractProjectId(relPath: string): string | null {
   const parts = normalizeRelativeStoragePath(relPath).split('/').filter(Boolean)
   if (parts[0] !== 'projects') return null
@@ -69,6 +82,21 @@ function extractProjectId(relPath: string): string | null {
 
 function shouldPruneEmptyDir(relPath: string): boolean {
   const parts = normalizeRelativeStoragePath(relPath).split('/').filter(Boolean)
+  if (parts.length === 0) return false
+
+  if (parts[0] === 'branding') {
+    return parts.length > 1
+  }
+
+  if (parts[0] === 'users') {
+    return parts.length > 2
+  }
+
+  if (parts[0] === 'clients') {
+    if (parts[2] === 'files') return parts.length > 3
+    return parts[2] === 'projects' && parts.length > 4
+  }
+
   if (parts[0] !== 'projects') return false
   if (parts[1] === 'closed') return false
 
@@ -77,6 +105,46 @@ function shouldPruneEmptyDir(relPath: string): boolean {
   }
 
   return parts.length > 2
+}
+
+async function buildProjectRootIndex(): Promise<ProjectRootIndex> {
+  const index: ProjectRootIndex = new Map()
+
+  const projects = await prisma.project.findMany({
+    select: {
+      id: true,
+      storagePath: true,
+      title: true,
+      companyName: true,
+      client: { select: { name: true } },
+    },
+  })
+
+  for (const project of projects) {
+    const projectStoragePath = project.storagePath
+      || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title)
+
+    index.set(normalizeRelativeStoragePath(projectStoragePath), project.id)
+  }
+
+  return index
+}
+
+function lookupProjectIdForPath(relPath: string, projectRootIndex: ProjectRootIndex): string | null {
+  const normalized = normalizeRelativeStoragePath(relPath)
+  const legacyProjectId = extractProjectId(normalized)
+  if (legacyProjectId) return legacyProjectId
+
+  let bestMatch: string | null = null
+  for (const projectRoot of projectRootIndex.keys()) {
+    if (normalized === projectRoot || normalized.startsWith(`${projectRoot}/`)) {
+      if (!bestMatch || projectRoot.length > bestMatch.length) {
+        bestMatch = projectRoot
+      }
+    }
+  }
+
+  return bestMatch ? projectRootIndex.get(bestMatch) || null : null
 }
 
 function isReferencedPath(relPath: string, refs: ProjectStorageReferences): boolean {
@@ -92,19 +160,32 @@ function isReferencedPath(relPath: string, refs: ProjectStorageReferences): bool
   return false
 }
 
+function normalizeStoredReferencePath(storagePath: string | null | undefined): string | null {
+  if (!storagePath) return null
+
+  const trimmed = storagePath.trim()
+  if (!trimmed) return null
+
+  return isDropboxStoragePath(trimmed)
+    ? stripDropboxStoragePrefix(trimmed)
+    : trimmed
+}
+
 function addResolvedFilePath(target: Set<string>, storagePath: string | null | undefined) {
-  if (!storagePath) return
+  const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
+  if (!normalizedStoragePath) return
   try {
-    target.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(storagePath))))
+    target.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(normalizedStoragePath))))
   } catch {
     // Ignore malformed historical paths; the cleanup only acts on proven orphans.
   }
 }
 
 function addResolvedDirectoryPrefix(target: Set<string>, storagePath: string | null | undefined) {
-  if (!storagePath) return
+  const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
+  if (!normalizedStoragePath) return
   try {
-    target.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(storagePath))))
+    target.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(normalizedStoragePath))))
   } catch {
     // Ignore malformed historical paths; the cleanup only acts on proven orphans.
   }
@@ -114,7 +195,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   const exactFilePaths = new Set<string>()
   const protectedDirectoryPrefixes = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums] = await Promise.all([
+  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums, clientFiles, userFiles, settings] = await Promise.all([
     prisma.video.findMany({
       select: {
         projectId: true,
@@ -149,6 +230,16 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         },
       },
     }),
+    prisma.clientFile.findMany({ select: { storagePath: true } }),
+    prisma.userFile.findMany({ select: { storagePath: true } }),
+    prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: {
+        companyLogoPath: true,
+        darkLogoPath: true,
+        companyFaviconPath: true,
+      },
+    }),
   ])
 
   for (const video of videos) {
@@ -172,6 +263,12 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
 
   for (const projectEmail of projectEmails) addResolvedFilePath(exactFilePaths, projectEmail.rawStoragePath)
   for (const attachment of projectEmailAttachments) addResolvedFilePath(exactFilePaths, attachment.storagePath)
+  for (const clientFile of clientFiles) addResolvedFilePath(exactFilePaths, clientFile.storagePath)
+  for (const userFile of userFiles) addResolvedFilePath(exactFilePaths, userFile.storagePath)
+
+  addResolvedFilePath(exactFilePaths, settings?.companyLogoPath)
+  addResolvedFilePath(exactFilePaths, settings?.darkLogoPath)
+  addResolvedFilePath(exactFilePaths, settings?.companyFaviconPath)
 
   for (const album of albums) {
     const projectStoragePath = album.project.storagePath
@@ -191,32 +288,19 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
 }
 
 async function listPhysicalProjectRoots(): Promise<Array<{ absPath: string; relPath: string }>> {
-  const projectsRootAbs = getRawStoragePath('projects')
-  if (!fs.existsSync(projectsRootAbs)) return []
-
   const roots: Array<{ absPath: string; relPath: string }> = []
-  const topLevelEntries = await fs.promises.readdir(projectsRootAbs, { withFileTypes: true }).catch(() => [])
 
-  for (const entry of topLevelEntries) {
+  const entries = await fs.promises.readdir(STORAGE_ROOT, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    if (entry.name === 'closed') continue
 
-    const entryAbs = path.join(projectsRootAbs, entry.name)
-    const entryRel = `projects/${entry.name}`
+    const relPath = normalizeRelativeStoragePath(entry.name)
+    if (isIgnoredStoragePath(relPath)) continue
 
-    if (YEAR_MONTH_RE.test(entry.name)) {
-      const projectDirs = await fs.promises.readdir(entryAbs, { withFileTypes: true }).catch(() => [])
-      for (const projectDir of projectDirs) {
-        if (!projectDir.isDirectory()) continue
-        roots.push({
-          absPath: path.join(entryAbs, projectDir.name),
-          relPath: `${entryRel}/${projectDir.name}`,
-        })
-      }
-      continue
-    }
-
-    roots.push({ absPath: entryAbs, relPath: entryRel })
+    roots.push({
+      absPath: path.join(STORAGE_ROOT, entry.name),
+      relPath,
+    })
   }
 
   return roots
@@ -237,7 +321,9 @@ async function walkProjectFiles(
 
   for (const entry of entries) {
     const entryAbs = path.join(dirAbs, entry.name)
-    const entryRel = `${dirRel}/${entry.name}`
+    const entryRel = normalizeRelativeStoragePath(`${dirRel}/${entry.name}`)
+
+    if (isIgnoredStoragePath(entryRel)) continue
 
     if (entry.isDirectory()) {
       await walkProjectFiles(entryAbs, entryRel, out, refs, errors, stats)
@@ -301,8 +387,11 @@ async function pruneEmptyDirectories(dirRels: string[], dryRun: boolean): Promis
 }
 
 export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<ProjectStorageOrphanCleanupResult> {
-  const refs = await buildProjectStorageReferences()
-  const roots = await listPhysicalProjectRoots()
+  const [refs, roots, projectRootIndex] = await Promise.all([
+    buildProjectStorageReferences(),
+    listPhysicalProjectRoots(),
+    buildProjectRootIndex(),
+  ])
   const errors: Array<{ path: string; error: string }> = []
   const orphanFiles: OrphanFileEntry[] = []
   const stats = { scannedFiles: 0 }
@@ -315,7 +404,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   const sampleProjectIds = Array.from(
     new Set(
       orphanFiles
-        .map((file) => extractProjectId(file.relPath))
+        .map((file) => lookupProjectIdForPath(file.relPath, projectRootIndex))
         .filter((projectId): projectId is string => Boolean(projectId))
     )
   ).slice(0, 20)
@@ -324,7 +413,8 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     return {
       ok: true,
       dryRun: true,
-      scannedProjectDirectories: roots.length,
+      scannedDirectories: roots.length,
+      scannedProjects: projectRootIndex.size,
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
       orphanFileBytes,
@@ -353,7 +443,8 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   return {
     ok: true,
     dryRun: false,
-    scannedProjectDirectories: roots.length,
+    scannedDirectories: roots.length,
+    scannedProjects: projectRootIndex.size,
     scannedFiles: stats.scannedFiles,
     orphanFiles: orphanFiles.length,
     orphanFileBytes,

@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
-import { KeyRound, ArrowLeft, CheckCircle2, Loader2, AlertCircle, XCircle } from 'lucide-react'
+import { KeyRound, ArrowLeft, CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { PasswordRequirements } from '@/components/PasswordRequirements'
 
 function ResetPasswordForm() {
   const router = useRouter()
@@ -263,29 +264,7 @@ function ResetPasswordForm() {
                   />
                 </div>
 
-                <div className="bg-muted p-3 rounded-lg">
-                  <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    Password Requirements
-                  </p>
-                  <ul className="text-xs text-muted-foreground space-y-1">
-                    <li className={password.length >= 12 ? 'text-success' : ''}>
-                      • At least 12 characters
-                    </li>
-                    <li className={/[A-Z]/.test(password) ? 'text-success' : ''}>
-                      • One uppercase letter
-                    </li>
-                    <li className={/[a-z]/.test(password) ? 'text-success' : ''}>
-                      • One lowercase letter
-                    </li>
-                    <li className={/[0-9]/.test(password) ? 'text-success' : ''}>
-                      • One number
-                    </li>
-                    <li className={/[^A-Za-z0-9]/.test(password) ? 'text-success' : ''}>
-                      • One special character (!@#$%^&*)
-                    </li>
-                  </ul>
-                </div>
+                <PasswordRequirements password={password} />
 
                 <Button
                   type="submit"

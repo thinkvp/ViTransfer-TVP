@@ -48,6 +48,7 @@ export async function GET(
       projectId: true,
       name: true,
       storageFolderName: true,
+      socialCopiesEnabled: true,
       project: {
         select: {
           storagePath: true,
@@ -81,7 +82,7 @@ export async function GET(
   })
 
   const fullReady = albumZipExists(fullZipStoragePath)
-  const socialReady = albumZipExists(socialZipStoragePath)
+  const socialReady = album.socialCopiesEnabled ? albumZipExists(socialZipStoragePath) : false
 
   return NextResponse.json({
     zip: {

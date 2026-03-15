@@ -26,6 +26,8 @@ function asNumberBigInt(v: unknown): number {
 const createAlbumSchema = z.object({
   name: z.string().min(1).max(200),
   notes: z.string().max(500).nullable().optional(),
+  socialCopiesEnabled: z.boolean().optional(),
+  dropboxEnabled: z.boolean().optional(),
 })
 
 // GET /api/projects/[id]/albums - list albums (admin)
@@ -148,7 +150,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       name,
       storageFolderName,
       notes,
-      ...(isDropboxStorageConfigured() ? { dropboxEnabled: true } : {}),
+      socialCopiesEnabled: parsed.data.socialCopiesEnabled !== false,
+      dropboxEnabled: parsed.data.dropboxEnabled === true || (parsed.data.dropboxEnabled !== false && isDropboxStorageConfigured()),
     },
   })
 

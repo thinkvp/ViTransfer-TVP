@@ -161,22 +161,28 @@ export async function PATCH(
     }
 
     if (username !== undefined) {
-      // Check if username is already taken by another user
-      const existingUsername = await prisma.user.findFirst({
-        where: {
-          username,
-          NOT: { id },
-        },
-      })
+      const trimmedUsername = typeof username === 'string' ? username.trim() : ''
+      if (trimmedUsername) {
+        // Check if username is already taken by another user
+        const existingUsername = await prisma.user.findFirst({
+          where: {
+            username: { equals: trimmedUsername, mode: 'insensitive' },
+            NOT: { id },
+          },
+        })
 
-      if (existingUsername) {
-        return NextResponse.json(
-          { error: 'Username already taken' },
-          { status: 409 }
-        )
+        if (existingUsername) {
+          return NextResponse.json(
+            { error: 'Username already taken' },
+            { status: 409 }
+          )
+        }
+
+        updateData.username = trimmedUsername
+      } else {
+        // Clearing the username
+        updateData.username = null
       }
-
-      updateData.username = username || null
     }
 
     if (name !== undefined) {

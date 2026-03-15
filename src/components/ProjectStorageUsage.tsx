@@ -10,6 +10,8 @@ type StorageSummary = {
   totalBytes: number
   diskTotalBytes?: number | null
   diskOtherBytes?: number | null
+  dropboxConfigured?: boolean
+  dropboxBytes?: number | null
   capacityBytes?: number | null
   availableBytes?: number | null
   breakdown: {
@@ -72,7 +74,7 @@ export function ProjectStorageUsage({
       setLoading(true)
       setError(null)
       try {
-        const res = await apiFetch(`/api/projects/${projectId}/storage`)
+        const res = await apiFetch(`/api/projects/${projectId}/storage?includeDisk=1`)
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
           throw new Error(body?.error || 'Failed to load storage usage')
@@ -82,13 +84,13 @@ export function ProjectStorageUsage({
           setData((prev) => ({
             ...(prev || {}),
             ...json,
-            diskTotalBytes: prev?.diskTotalBytes ?? null,
-            diskOtherBytes: prev?.diskOtherBytes ?? null,
+            diskTotalBytes: prev?.diskTotalBytes ?? json.diskTotalBytes ?? null,
+            diskOtherBytes: prev?.diskOtherBytes ?? json.diskOtherBytes ?? null,
             capacityBytes: prev?.capacityBytes ?? json.capacityBytes,
             availableBytes: prev?.availableBytes ?? json.availableBytes,
-            diskBreakdown: prev?.diskBreakdown ?? null,
+            diskBreakdown: prev?.diskBreakdown ?? json.diskBreakdown ?? null,
           }))
-          setHasLoadedDiskDetails(false)
+          setHasLoadedDiskDetails(true)
         }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Failed to load storage usage')
@@ -211,6 +213,12 @@ export function ProjectStorageUsage({
     return formatFileSize(available)
   }, [data])
 
+  const dropboxLabel = useMemo(() => {
+    const dropboxBytes = Number(data?.dropboxBytes ?? NaN)
+    if (!Number.isFinite(dropboxBytes) || dropboxBytes < 0) return null
+    return formatFileSize(dropboxBytes)
+  }, [data])
+
   return (
     <Card className="border-border">
       <CardHeader
@@ -256,6 +264,12 @@ export function ProjectStorageUsage({
                     <div className="text-xs text-muted-foreground tabular-nums">
                       On disk{typeof data.diskOtherBytes === 'number' && data.diskOtherBytes > 0 ? ` • ${formatFileSize(data.diskOtherBytes)} other` : ''}
                     </div>
+                  </div>
+                )}
+                {data.dropboxConfigured && dropboxLabel && (
+                  <div className="mt-1 flex items-baseline justify-between gap-3">
+                    <div className="text-xs text-muted-foreground">Dropbox (not counted in totals)</div>
+                    <div className="text-xs text-muted-foreground tabular-nums">{dropboxLabel}</div>
                   </div>
                 )}
                 {availableLabel && (

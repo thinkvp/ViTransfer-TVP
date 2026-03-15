@@ -9,6 +9,7 @@ import { isDropboxStorageConfigured, deleteDropboxFile } from '@/lib/storage-pro
 import { getFilePath } from '@/lib/storage'
 import fs from 'fs'
 import { z } from 'zod'
+import { clearResolvedDropboxStorageIssueEntities } from '@/lib/dropbox-storage-inconsistency-log'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -99,6 +100,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         socialZipDropboxPath: null,
       },
     })
+
+    await clearResolvedDropboxStorageIssueEntities([
+      {
+        entityType: 'album-zip',
+        entityId: `${album.id}:full`,
+        projectId: album.projectId,
+      },
+      {
+        entityType: 'album-zip',
+        entityId: `${album.id}:social`,
+        projectId: album.projectId,
+      },
+    ])
 
     return NextResponse.json({ ok: true, enabled: false })
   }

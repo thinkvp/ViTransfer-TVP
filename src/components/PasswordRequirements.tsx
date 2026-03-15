@@ -13,6 +13,30 @@ interface Requirement {
   test: (password: string) => boolean
 }
 
+const commonPasswords = [
+  'password', '123456', '12345678', 'qwerty', 'abc123',
+  'monkey', '1234567', 'letmein', 'trustno1', 'dragon',
+  'baseball', '111111', 'iloveyou', 'master', 'sunshine',
+  'ashley', 'bailey', 'passw0rd', 'shadow', '123123',
+  'football', 'jesus', 'michael', 'ninja', 'mustang',
+  'password1', 'password123', 'admin', 'welcome', 'login'
+]
+
+const sequences = ['0123456789', 'abcdefghijklmnopqrstuvwxyz', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm']
+
+function hasSequentialChars(password: string): boolean {
+  const lower = password.toLowerCase()
+  for (const seq of sequences) {
+    for (let i = 0; i <= seq.length - 4; i++) {
+      const subseq = seq.substring(i, i + 4)
+      if (lower.includes(subseq) || lower.includes(subseq.split('').reverse().join(''))) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 const requirements: Requirement[] = [
   {
     label: 'At least 12 characters',
@@ -33,6 +57,18 @@ const requirements: Requirement[] = [
   {
     label: 'One special character (!@#$%^&*...)',
     test: (pwd) => /[^A-Za-z0-9]/.test(pwd),
+  },
+  {
+    label: 'Not a common password',
+    test: (pwd) => pwd.length === 0 || !commonPasswords.includes(pwd.toLowerCase()),
+  },
+  {
+    label: 'No repeated characters (e.g. aaaa)',
+    test: (pwd) => pwd.length === 0 || !/(.)\1{3,}/.test(pwd),
+  },
+  {
+    label: 'No sequential characters (e.g. abcd, 1234)',
+    test: (pwd) => pwd.length === 0 || !hasSequentialChars(pwd),
   },
 ]
 

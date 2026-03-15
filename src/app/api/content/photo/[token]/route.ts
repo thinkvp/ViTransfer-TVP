@@ -90,6 +90,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     storagePath = photo.socialStoragePath
   }
 
+  // Preview: serve the social-sized derivative (2048px long edge) when ready,
+  // otherwise fall through to the original so the viewer is never broken.
+  if (variant === 'preview') {
+    if (photo.socialStatus === 'READY' && photo.socialStoragePath) {
+      const previewFullPath = getFilePath(photo.socialStoragePath)
+      if (existsSync(previewFullPath)) {
+        const previewStat = statSync(previewFullPath)
+        const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+        const previewStream = createReadStream(previewFullPath, { highWaterMark: downloadChunkSizeBytes })
+        return new NextResponse(createWebReadableStream(previewStream), {
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Content-Length': previewStat.size.toString(),
+            'Cache-Control': 'private, max-age=86400, immutable',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+          },
+        })
+      }
+    }
+    // Social derivative not ready yet — fall through and serve the original as a graceful fallback.
+  }
+
   const fullPath = getFilePath(storagePath)
   if (!existsSync(fullPath)) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
 

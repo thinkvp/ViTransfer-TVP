@@ -3,6 +3,7 @@ import { DropboxUploadJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { uploadLocalFileToDropboxPathWithProgress } from '../lib/storage-provider-dropbox'
 import { getFilePath } from '../lib/storage'
+import { clearResolvedDropboxStorageIssueEntities } from '../lib/dropbox-storage-inconsistency-log'
 import fs from 'fs'
 
 type WithOptionalDropboxPath = {
@@ -88,6 +89,14 @@ export async function processDropboxUpload(job: Job<DropboxUploadJob>) {
       },
     })
 
+    await clearResolvedDropboxStorageIssueEntities([
+      {
+        entityType: 'video',
+        entityId: videoId,
+        projectId: video.projectId,
+      },
+    ])
+
     console.log(`[DROPBOX-WORKER] Upload complete for video ${videoId}`)
   } catch (error: any) {
     console.error(`[DROPBOX-WORKER] Upload failed for video ${videoId}:`, error)
@@ -110,7 +119,18 @@ async function processAssetDropboxUpload(job: Job<DropboxUploadJob>) {
   console.log(`[DROPBOX-WORKER] Starting Dropbox upload for asset ${assetId}`)
 
   try {
-    const asset = await prisma.videoAsset.findUnique({ where: { id: assetId! } })
+    const asset = await prisma.videoAsset.findUnique({
+      where: { id: assetId! },
+      select: {
+        id: true,
+        dropboxPath: true,
+        video: {
+          select: {
+            projectId: true,
+          },
+        },
+      },
+    })
     if (!asset) {
       console.warn(`[DROPBOX-WORKER] Asset ${assetId} no longer exists, skipping`)
       return
@@ -145,6 +165,14 @@ async function processAssetDropboxUpload(job: Job<DropboxUploadJob>) {
       where: { id: assetId! },
       data: { dropboxUploadStatus: 'COMPLETE', dropboxUploadProgress: 100, dropboxUploadError: null },
     })
+
+    await clearResolvedDropboxStorageIssueEntities([
+      {
+        entityType: 'asset',
+        entityId: assetId!,
+        projectId: asset.video.projectId,
+      },
+    ])
 
     console.log(`[DROPBOX-WORKER] Upload complete for asset ${assetId}`)
   } catch (error: any) {

@@ -51,6 +51,7 @@ export async function GET(
       notes: true,
       createdAt: true,
       storageFolderName: true,
+      socialCopiesEnabled: true,
       dropboxEnabled: true,
       project: {
         select: {
@@ -89,6 +90,7 @@ export async function GET(
         fileSize: p.fileSize.toString(),
         createdAt: p.createdAt,
         url: `/api/content/photo/${tokenValue}`,
+        previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
         downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         socialDownloadUrl: `/api/content/photo/${tokenValue}?download=true&variant=social`,
         socialReady: p.socialStatus === 'READY' && Boolean(p.socialStoragePath),
@@ -114,10 +116,10 @@ export async function GET(
   })
 
   const fullZipReady = photos.length === 0 ? false : albumZipExists(fullZipStoragePath)
-  const socialZipReady = photos.length === 0 ? false : albumZipExists(socialZipStoragePath)
+  const socialZipReady = !album.socialCopiesEnabled ? false : (photos.length === 0 ? false : albumZipExists(socialZipStoragePath))
 
   // Best-effort: if ZIPs are missing, enqueue generation so they can become available without manual admin action.
-  if (photos.length > 0 && (!fullZipReady || !socialZipReady)) {
+  if (photos.length > 0 && (!fullZipReady || (album.socialCopiesEnabled && !socialZipReady))) {
     try {
       const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
       const q = getAlbumPhotoZipQueue()
@@ -128,7 +130,7 @@ export async function GET(
         await q.remove(jobId).catch(() => {})
         await q.add('generate-album-zip', { albumId: album.id, variant: 'full' }, { jobId, delay: delayMs }).catch(() => {})
       }
-      if (!socialZipReady) {
+      if (album.socialCopiesEnabled && !socialZipReady) {
         const jobId = getAlbumZipJobId({ albumId: album.id, variant: 'social' })
         await q.remove(jobId).catch(() => {})
         await q.add('generate-album-zip', { albumId: album.id, variant: 'social' }, { jobId, delay: delayMs }).catch(() => {})
@@ -145,6 +147,7 @@ export async function GET(
       notes: album.notes,
       createdAt: album.createdAt,
       photoCount: photos.length,
+      socialCopiesEnabled: album.socialCopiesEnabled,
       dropboxEnabled: album.dropboxEnabled,
       zip: {
         fullReady: fullZipReady,

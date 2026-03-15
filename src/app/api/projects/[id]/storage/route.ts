@@ -6,6 +6,7 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -87,6 +88,11 @@ async function sumStorageEntrySizes(paths: Array<string | null | undefined>): Pr
   return sizes.reduce((total, size) => total + size, 0)
 }
 
+function hasStoredDropboxCopy(dropboxPath: string | null | undefined, uploadStatus: string | null | undefined): boolean {
+  if (!dropboxPath) return false
+  return uploadStatus !== 'PENDING' && uploadStatus !== 'UPLOADING'
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
@@ -116,6 +122,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const includeDisk = url.searchParams.get('includeDisk') === '1'
 
     const storageRoot = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
+    const includeDropbox = includeDisk && isDropboxStorageConfigured()
 
     // Use stored project totalBytes for consistency with the dashboard.
     // Breakdown is computed from DB fields for UI display.
@@ -129,11 +136,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       projectEmailAttachmentAgg,
       albumPhotoAgg,
       albumAgg,
+      dropboxVideos,
+      dropboxAssets,
+      dropboxAlbums,
     ] = await Promise.all([
       prisma.project.findUnique({
         where: { id: projectId },
         select: {
           totalBytes: true,
+          diskBytes: true,
           title: true,
           storagePath: true,
           client: { select: { name: true } },
@@ -147,6 +158,39 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
       prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true } }),
       prisma.album.aggregate({ where: { projectId }, _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
+      includeDropbox
+        ? prisma.video.findMany({
+            where: { projectId, dropboxEnabled: true },
+            select: {
+              originalFileSize: true,
+              dropboxPath: true,
+              dropboxUploadStatus: true,
+            },
+          })
+        : Promise.resolve([]),
+      includeDropbox
+        ? prisma.videoAsset.findMany({
+            where: { video: { projectId }, dropboxEnabled: true },
+            select: {
+              fileSize: true,
+              dropboxPath: true,
+              dropboxUploadStatus: true,
+            },
+          })
+        : Promise.resolve([]),
+      includeDropbox
+        ? prisma.album.findMany({
+            where: { projectId, dropboxEnabled: true },
+            select: {
+              fullZipFileSize: true,
+              fullZipDropboxPath: true,
+              fullZipDropboxStatus: true,
+              socialZipFileSize: true,
+              socialZipDropboxPath: true,
+              socialZipDropboxStatus: true,
+            },
+          })
+        : Promise.resolve([]),
     ])
 
     const videosBytes = asNumberBigInt(videoAgg._sum.originalFileSize)
@@ -173,12 +217,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     let videoPreviewsBytes = 0
 
     const totalBytes = asNumberBigInt(project?.totalBytes)
+    const storedDiskBytes = asNumberBigInt(project?.diskBytes)
+    const dropboxBytes = includeDropbox
+      ? dropboxVideos.reduce((total, video) => {
+          if (!hasStoredDropboxCopy(video.dropboxPath, video.dropboxUploadStatus)) return total
+          return total + asNumberBigInt(video.originalFileSize)
+        }, 0)
+        + dropboxAssets.reduce((total, asset) => {
+          if (!hasStoredDropboxCopy(asset.dropboxPath, asset.dropboxUploadStatus)) return total
+          return total + asNumberBigInt(asset.fileSize)
+        }, 0)
+        + dropboxAlbums.reduce((total, album) => {
+          let albumTotal = total
+          if (hasStoredDropboxCopy(album.fullZipDropboxPath, album.fullZipDropboxStatus)) {
+            albumTotal += asNumberBigInt(album.fullZipFileSize)
+          }
+          if (hasStoredDropboxCopy(album.socialZipDropboxPath, album.socialZipDropboxStatus)) {
+            albumTotal += asNumberBigInt(album.socialZipFileSize)
+          }
+          return albumTotal
+        }, 0)
+      : 0
 
     // Optional: compute on-disk totals by walking the project directory.
     // This matches the bytes you see in the volume (including derived/transcoded files
     // such as previews, thumbnails, timeline sprites/VTT, etc. that may not be tracked
     // in DB size fields).
-    let diskTotalBytes: number | null = null
+    let diskTotalBytes: number | null = project?.diskBytes == null ? null : Math.max(0, storedDiskBytes)
     let diskOtherBytes: number | null = null
     let diskBreakdown:
       | {
@@ -196,14 +261,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (includeDisk) {
       const projectRootRel = project?.storagePath || buildProjectStorageRoot(project?.client?.name || 'Client', project?.title || projectId)
-      const videoAssetsRel = `${projectRootRel}/videos/assets`
       const commentsRel = `${projectRootRel}/comments`
       const communicationRel = `${projectRootRel}/communication`
       const filesRel = `${projectRootRel}/files`
 
-      const [projectRootAbs, videoAssetsAbs, commentsAbs, communicationAbs, filesAbs] = [
+      const [projectRootAbs, commentsAbs, communicationAbs, filesAbs] = [
         projectRootRel,
-        videoAssetsRel,
         commentsRel,
         communicationRel,
         filesRel,
@@ -211,10 +274,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
       const [
         videoEntries,
+        videoAssetEntries,
         albumPhotoEntries,
         albumEntries,
         rootBytes,
-        videoAssetsBytesDisk,
         commentsBytesDisk,
         communicationBytesDisk,
         filesBytesDisk,
@@ -231,6 +294,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             timelinePreviewSpritesPath: true,
           },
         }),
+        prisma.videoAsset.findMany({
+          where: { video: { projectId } },
+          select: { storagePath: true },
+        }),
         prisma.albumPhoto.findMany({
           where: { album: { projectId } },
           select: {
@@ -243,13 +310,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           select: { id: true, name: true, storageFolderName: true },
         }),
         computeDirectorySizeBytes(projectRootAbs),
-        computeDirectorySizeBytes(videoAssetsAbs),
         computeDirectorySizeBytes(commentsAbs),
         computeDirectorySizeBytes(communicationAbs),
         computeDirectorySizeBytes(filesAbs),
       ])
 
-      const [originalVideosBytesDisk, videoPreviewsBytesDisk, originalPhotosBytesDisk, photoZipBytesDisk] = await Promise.all([
+      const [originalVideosBytesDisk, videoPreviewsBytesDisk, videoAssetsBytesDisk, originalPhotosBytesDisk, photoZipBytesDisk] = await Promise.all([
         sumStorageEntrySizes(videoEntries.map((video) => video.originalStoragePath)),
         sumStorageEntrySizes(
           videoEntries.flatMap((video) => {
@@ -270,6 +336,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             return previewPaths
           })
         ),
+        sumStorageEntrySizes(videoAssetEntries.map((a) => a.storagePath)),
         sumStorageEntrySizes(
           albumPhotoEntries.flatMap((photo) => [photo.storagePath, photo.socialStoragePath])
         ),
@@ -346,6 +413,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       totalBytes,
       diskTotalBytes,
       diskOtherBytes,
+      dropboxConfigured: includeDropbox,
+      dropboxBytes: includeDropbox ? dropboxBytes : null,
       capacityBytes,
       availableBytes,
       breakdown: {

@@ -53,6 +53,7 @@ export async function POST(
         projectId: true,
         name: true,
         storageFolderName: true,
+        socialCopiesEnabled: true,
         project: {
           select: {
             storagePath: true,
@@ -75,6 +76,10 @@ export async function POST(
     }
 
     const variant = parsed.data.variant || 'full'
+
+    if (variant === 'social' && !album.socialCopiesEnabled) {
+      return NextResponse.json({ error: 'Social downloads are not enabled for this album' }, { status: 400 })
+    }
 
     // Always download all photos as a pre-generated ZIP.
     const readyCount = await prisma.albumPhoto.count({

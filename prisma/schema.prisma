@@ -419,6 +419,9 @@ model Album {
   fullZipFileSize   BigInt @default(0)
   socialZipFileSize BigInt @default(0)
 
+  // Whether social-media-sized photo derivatives (long edge scaled to 2048px) are generated for this album.
+  socialCopiesEnabled Boolean @default(true)
+
   // Dropbox upload tracking for generated ZIP files.
   // null = not queued; PENDING = queued; UPLOADING = in progress; COMPLETE = done; ERROR = failed.
   dropboxEnabled           Boolean @default(false)

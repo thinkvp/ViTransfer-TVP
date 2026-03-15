@@ -4,6 +4,9 @@ import { Prisma } from '@prisma/client'
 import { requireApiAdmin } from '@/lib/auth'
 import { canSeeMenu } from '@/lib/rbac'
 import { rateLimit } from '@/lib/rate-limit'
+import {
+  PINNED_SYSTEM_NOTIFICATION_TYPES,
+} from '@/lib/dropbox-storage-inconsistency-notification'
 
 // Security/auth events (UNAUTHORIZED_OTP, FAILED_LOGIN, SUCCESSFUL_ADMIN_LOGIN,
 // FAILED_SHARE_PASSWORD, SHARE_ACCESS, GUEST_VIDEO_LINK_ACCESS, PASSWORD_RESET_* etc.)
@@ -17,6 +20,8 @@ const SALES_TYPES = [
   'SALES_INVOICE_VIEWED',
   'SALES_INVOICE_PAID',
 ]
+
+const SETTINGS_TYPES: string[] = []
 
 // Notification types for users with Projects menu access
 const PROJECT_TYPES = [
@@ -33,6 +38,13 @@ export const dynamic = 'force-dynamic'
 const noStoreHeaders = {
   'Cache-Control': 'no-store',
   Pragma: 'no-cache',
+} as const
+
+const pinnedNotificationFilter = {
+  OR: [
+    { type: { in: [...PINNED_SYSTEM_NOTIFICATION_TYPES] } },
+    { details: { path: ['__controls', 'pinned'], equals: true } },
+  ],
 } as const
 
 /**
@@ -102,6 +114,7 @@ export async function GET(request: NextRequest) {
       const permissions = authResult.permissions
       // Sales access is gated on menu visibility (no per-doc assignment model).
       const hasSalesAccess = permissions ? canSeeMenu(permissions, 'sales') : false
+      const hasSettingsAccess = permissions ? canSeeMenu(permissions, 'settings') : false
 
       // Project notifications are gated on project *assignment*, not menu visibility.
       // A user may be assigned to projects without having the Projects menu in their role,
@@ -116,6 +129,7 @@ export async function GET(request: NextRequest) {
       const allowedTypes: string[] = []
       if (hasAssignedProjects) allowedTypes.push(...PROJECT_TYPES)
       if (hasSalesAccess) allowedTypes.push(...SALES_TYPES)
+      if (hasSettingsAccess) allowedTypes.push(...SETTINGS_TYPES)
 
       if (allowedTypes.length === 0) {
         // User has no assigned projects and no sales access
@@ -131,23 +145,32 @@ export async function GET(request: NextRequest) {
 
       typeFilter = { in: allowedTypes }
 
+      const projectScopeOrClauses: any[] = []
+
       if (hasAssignedProjects) {
         // Project-related notifications: only show if in an assigned project.
-        // Sales-related notifications: no per-project restriction.
         // Note: we intentionally exclude projectId: null here — project-type
         // events should always have a projectId; leaking null-projectId rows
         // to unassigned users would be incorrect.
-        const projectScopeOrClauses: any[] = [
+        projectScopeOrClauses.push(
           {
             AND: [
               { type: { in: PROJECT_TYPES } },
               { projectId: { in: assignedProjectIds } },
             ],
-          },
-        ]
-        if (hasSalesAccess) {
-          projectScopeOrClauses.push({ type: { in: SALES_TYPES } })
-        }
+          }
+        )
+      }
+
+      if (hasSalesAccess) {
+        projectScopeOrClauses.push({ type: { in: SALES_TYPES } })
+      }
+
+      if (hasSettingsAccess) {
+        projectScopeOrClauses.push({ type: { in: SETTINGS_TYPES } })
+      }
+
+      if (projectScopeOrClauses.length > 0) {
         andConditions.push({ OR: projectScopeOrClauses })
       }
     }
@@ -164,13 +187,36 @@ export async function GET(request: NextRequest) {
       select: { lastSeenAt: true },
     })
 
+    const pinnedItems = beforeValid
+      ? []
+      : await prisma.pushNotificationLog.findMany({
+          where: {
+            ...baseWhere,
+            ...pinnedNotificationFilter,
+          },
+          orderBy: { sentAt: 'desc' },
+          select: {
+            id: true,
+            type: true,
+            projectId: true,
+            success: true,
+            statusCode: true,
+            message: true,
+            details: true,
+            sentAt: true,
+          },
+        })
+
+    const remainingSlots = Math.max(limit - pinnedItems.length, 0)
+
     const rows = await prisma.pushNotificationLog.findMany({
       where: {
         ...baseWhere,
         ...(beforeValid ? { sentAt: { lt: before } } : {}),
+        ...(pinnedItems.length > 0 ? { id: { notIn: pinnedItems.map((item) => item.id) } } : {}),
       },
       orderBy: { sentAt: 'desc' },
-      take: limit + 1,
+      take: beforeValid ? limit + 1 : remainingSlots + 1,
       select: {
         id: true,
         type: true,
@@ -183,8 +229,13 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const hasMore = rows.length > limit
-    const items = hasMore ? rows.slice(0, limit) : rows
+    const combinedRows = pinnedItems.length > 0
+      ? [...pinnedItems, ...rows.slice(0, remainingSlots)]
+      : rows
+    const hasMore = beforeValid
+      ? combinedRows.length > limit
+      : pinnedItems.length > limit || rows.length > remainingSlots
+    const items = hasMore ? combinedRows.slice(0, limit) : combinedRows
     const nextBefore = hasMore ? items[items.length - 1]?.sentAt?.toISOString() : null
 
     // Unread badge count:

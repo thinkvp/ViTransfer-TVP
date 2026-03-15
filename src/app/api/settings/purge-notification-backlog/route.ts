@@ -6,6 +6,35 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 
 export const runtime = 'nodejs'
 
+function summarizeNotificationData(data: unknown): string | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+
+  const record = data as Record<string, unknown>
+  const fields: string[] = []
+
+  const commentId = typeof record.commentId === 'string' ? record.commentId : null
+  const videoId = typeof record.videoId === 'string' ? record.videoId : null
+  const videoName = typeof record.videoName === 'string' ? record.videoName : null
+  const authorName = typeof record.authorName === 'string' ? record.authorName : null
+  const timestamp = typeof record.timestamp === 'string' ? record.timestamp : null
+  const isReply = typeof record.isReply === 'boolean' ? record.isReply : null
+  const content = typeof record.content === 'string' ? record.content.trim() : null
+
+  if (videoName) fields.push(`video=${videoName}`)
+  if (authorName) fields.push(`author=${authorName}`)
+  if (timestamp) fields.push(`timestamp=${timestamp}`)
+  if (isReply === true) fields.push('reply=yes')
+  if (commentId) fields.push(`commentId=${commentId}`)
+  if (videoId) fields.push(`videoId=${videoId}`)
+
+  if (content) {
+    const collapsed = content.replace(/\s+/g, ' ').trim()
+    fields.push(`content=${collapsed.length > 120 ? `${collapsed.slice(0, 117)}...` : collapsed}`)
+  }
+
+  return fields.length ? fields.join(' | ') : null
+}
+
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
@@ -36,8 +65,19 @@ export async function POST(request: NextRequest) {
         createdAt: true,
         projectId: true,
         type: true,
+        clientAttempts: true,
+        adminAttempts: true,
+        clientFailed: true,
+        adminFailed: true,
+        lastError: true,
+        data: true,
         sentToClients: true,
         sentToAdmins: true,
+        project: {
+          select: {
+            title: true,
+          },
+        },
       },
       orderBy: { createdAt: 'asc' },
     })
@@ -45,6 +85,27 @@ export async function POST(request: NextRequest) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const stale = pending.filter(r => r.createdAt < sevenDaysAgo)
     const recent = pending.filter(r => r.createdAt >= sevenDaysAgo)
+    const sample = pending.slice(0, 20).map((entry) => ({
+      id: entry.id,
+      createdAt: entry.createdAt,
+      projectId: entry.projectId,
+      projectTitle: entry.project?.title || null,
+      type: entry.type,
+      pendingTargets: [
+        !entry.sentToClients && !entry.clientFailed ? 'clients' : null,
+        !entry.sentToAdmins && !entry.adminFailed ? 'admins' : null,
+      ].filter((value): value is string => Boolean(value)),
+      attempts: {
+        clients: entry.clientAttempts,
+        admins: entry.adminAttempts,
+      },
+      failed: {
+        clients: entry.clientFailed,
+        admins: entry.adminFailed,
+      },
+      lastError: entry.lastError || null,
+      summary: summarizeNotificationData(entry.data),
+    }))
 
     if (dryRun) {
       return NextResponse.json({
@@ -54,6 +115,7 @@ export async function POST(request: NextRequest) {
         staleCount: stale.length,
         recentCount: recent.length,
         oldestCreatedAt: pending[0]?.createdAt ?? null,
+        sample,
       })
     }
 
@@ -76,6 +138,8 @@ export async function POST(request: NextRequest) {
       dryRun: false,
       dismissed: result.count,
       recentCount: recent.length,
+      oldestCreatedAt: pending[0]?.createdAt ?? null,
+      sample,
     })
   } catch (err: any) {
     console.error('[purge-notification-backlog]', err)

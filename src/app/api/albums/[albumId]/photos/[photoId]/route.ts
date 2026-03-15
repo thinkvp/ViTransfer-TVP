@@ -113,7 +113,7 @@ export async function DELETE(
     try {
       const albumRow = await prisma.album.findUnique({
         where: { id: albumId },
-        select: { dropboxEnabled: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
+        select: { socialCopiesEnabled: true, dropboxEnabled: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
       })
 
       await prisma.album.update({
@@ -127,19 +127,25 @@ export async function DELETE(
         albumName: photo.album.name,
         variant: 'full',
       })
-      const socialZipPath = getAlbumZipStoragePath({
-        projectId: photo.album.projectId,
-        albumId,
-        albumName: photo.album.name,
-        variant: 'social',
-      })
 
       await deleteFile(fullZipPath).catch(() => {})
-      await deleteFile(socialZipPath).catch(() => {})
+
+      if (albumRow?.socialCopiesEnabled) {
+        const socialZipPath = getAlbumZipStoragePath({
+          projectId: photo.album.projectId,
+          albumId,
+          albumName: photo.album.name,
+          variant: 'social',
+        })
+        await deleteFile(socialZipPath).catch(() => {})
+      }
 
       // Delete old Dropbox copies and reset tracking so re-upload queues after new ZIPs are ready
       if (albumRow?.dropboxEnabled) {
-        const dbxPaths = [albumRow.fullZipDropboxPath, albumRow.socialZipDropboxPath].filter(Boolean) as string[]
+        const dbxPaths = [
+          albumRow.fullZipDropboxPath,
+          ...(albumRow.socialCopiesEnabled ? [albumRow.socialZipDropboxPath] : []),
+        ].filter(Boolean) as string[]
         if (isDropboxStorageConfigured()) {
           await Promise.allSettled(dbxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
         }
@@ -150,10 +156,12 @@ export async function DELETE(
             fullZipDropboxProgress: 0,
             fullZipDropboxError: null,
             fullZipDropboxPath: null,
-            socialZipDropboxStatus: null,
-            socialZipDropboxProgress: 0,
-            socialZipDropboxError: null,
-            socialZipDropboxPath: null,
+            ...(albumRow.socialCopiesEnabled ? {
+              socialZipDropboxStatus: null,
+              socialZipDropboxProgress: 0,
+              socialZipDropboxError: null,
+              socialZipDropboxPath: null,
+            } : {}),
           },
         }).catch(() => {})
       }
@@ -165,13 +173,14 @@ export async function DELETE(
       const delayMs = 10_000
 
       const fullJobId = getAlbumZipJobId({ albumId, variant: 'full' })
-      const socialJobId = getAlbumZipJobId({ albumId, variant: 'social' })
-
       await q.remove(fullJobId).catch(() => {})
-      await q.remove(socialJobId).catch(() => {})
-
       await q.add('generate-album-zip', { albumId, variant: 'full' }, { jobId: fullJobId, delay: delayMs }).catch(() => {})
-      await q.add('generate-album-zip', { albumId, variant: 'social' }, { jobId: socialJobId, delay: delayMs }).catch(() => {})
+
+      if (albumRow?.socialCopiesEnabled) {
+        const socialJobId = getAlbumZipJobId({ albumId, variant: 'social' })
+        await q.remove(socialJobId).catch(() => {})
+        await q.add('generate-album-zip', { albumId, variant: 'social' }, { jobId: socialJobId, delay: delayMs }).catch(() => {})
+      }
     } catch {
       // ignore
     }

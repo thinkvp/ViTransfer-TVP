@@ -3,6 +3,7 @@ import { AlbumZipDropboxUploadJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { uploadLocalFileToDropboxPathWithProgress } from '../lib/storage-provider-dropbox'
 import { getFilePath } from '../lib/storage'
+import { clearResolvedDropboxStorageIssueEntities } from '../lib/dropbox-storage-inconsistency-log'
 import fs from 'fs'
 
 const STATUS_FIELD = {
@@ -67,6 +68,14 @@ export async function processAlbumZipDropboxUpload(job: Job<AlbumZipDropboxUploa
         [fields.error]: null,
       },
     })
+
+    await clearResolvedDropboxStorageIssueEntities([
+      {
+        entityType: 'album-zip',
+        entityId: `${albumId}:${variant}`,
+        projectId: album.projectId,
+      },
+    ])
 
     console.log(`[DROPBOX-WORKER] Upload complete for album ${albumId} ${variant} ZIP`)
   } catch (error: any) {

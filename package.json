@@ -33,7 +33,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.3.2",
-    "file-type": "^19.0.0",
+    "file-type": "^21.3.2",
     "html-to-text": "^9.0.5",
     "ioredis": "^5.10.0",
     "isomorphic-dompurify": "^3.1.0",
@@ -78,6 +78,7 @@
     "esbuild": "0.27.0",
     "glob": "13.0.6",
     "jsdom": "28.1.0",
+    "undici": "7.24.3",
     "parse5": "7.2.1",
     "minimatch": "10.2.3",
     "bn.js": "4.12.3"

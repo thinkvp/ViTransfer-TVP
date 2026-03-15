@@ -1329,12 +1329,13 @@ export async function PATCH(
             socialZipFileSize: { equals: 0 },
             photos: { some: {} },
           },
-          select: { id: true },
+          select: { id: true, socialCopiesEnabled: true },
         })
         if (albums.length > 0) {
           const q = getAlbumPhotoZipQueue()
           for (const album of albums) {
-            for (const variant of ['full', 'social'] as AlbumZipVariant[]) {
+            const variants: AlbumZipVariant[] = album.socialCopiesEnabled ? ['full', 'social'] : ['full']
+            for (const variant of variants) {
               const jobId = getAlbumZipJobId({ albumId: album.id, variant })
               await q.remove(jobId).catch(() => {})
               await q.add('generate-album-zip', { albumId: album.id, variant }, { jobId })

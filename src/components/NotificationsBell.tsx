@@ -2,12 +2,17 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, BellOff, BellRing } from 'lucide-react'
+import { Bell, BellOff, BellRing, Pin, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { apiFetch, apiJson, apiPost } from '@/lib/api-client'
+import { apiDelete, apiFetch, apiJson, apiPost } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
 import { formatDateTime } from '@/lib/utils'
+import {
+  isClearablePinnedNotificationDetails,
+  isPinnedSystemNotificationDetails,
+  isPinnedSystemNotificationType,
+} from '@/lib/dropbox-storage-inconsistency-notification'
 
 type NotificationRow = {
   id: string
@@ -119,6 +124,24 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return outputArray
 }
 
+function getNewestSentAt(items: NotificationRow[]): string | null {
+  if (items.length === 0) return null
+
+  let newestItem = items[0]
+  let newestTime = Date.parse(items[0].sentAt)
+
+  for (let i = 1; i < items.length; i += 1) {
+    const candidateTime = Date.parse(items[i].sentAt)
+    if (Number.isNaN(candidateTime)) continue
+    if (Number.isNaN(newestTime) || candidateTime > newestTime) {
+      newestItem = items[i]
+      newestTime = candidateTime
+    }
+  }
+
+  return newestItem.sentAt
+}
+
 async function getAdminSwRegistration(): Promise<ServiceWorkerRegistration | null> {
   const regs = await navigator.serviceWorker.getRegistrations()
   return regs.find((r) => r.scope?.includes('/admin')) || null
@@ -140,6 +163,7 @@ export default function NotificationsBell() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [unreadCount, setUnreadCount] = useState(0)
   const [lastSeenAt, setLastSeenAt] = useState<string | null>(null)
+  const [clearingId, setClearingId] = useState<string | null>(null)
 
   const pollingRef = useRef<number | null>(null)
   const itemsRef = useRef<NotificationRow[]>([])
@@ -256,15 +280,17 @@ export default function NotificationsBell() {
       return
     }
 
-    const newest = currentItems[0]
+    const newestSentAt = getNewestSentAt(currentItems)
+    if (!newestSentAt) return
+
     try {
       const res = await apiFetch('/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lastSeenAt: newest.sentAt }),
+        body: JSON.stringify({ lastSeenAt: newestSentAt }),
       })
       if (res.ok) {
-        setLastSeenAt(newest.sentAt)
+        setLastSeenAt(newestSentAt)
         setUnreadCount(0)
       }
     } catch {
@@ -339,6 +365,29 @@ export default function NotificationsBell() {
       if (pollingRef.current) window.clearInterval(pollingRef.current)
     }
   }, [fetchPage])
+
+  function isPinnedNotification(notification: NotificationRow): boolean {
+    return isPinnedSystemNotificationType(notification.type)
+      || isPinnedSystemNotificationDetails(notification.details)
+  }
+
+  function canClearNotification(notification: NotificationRow): boolean {
+    return isClearablePinnedNotificationDetails(notification.details)
+  }
+
+  async function clearNotification(id: string) {
+    if (clearingId) return
+
+    setClearingId(id)
+    try {
+      await apiDelete(`/api/notifications/${encodeURIComponent(id)}`)
+      await fetchPage({ replace: true, silent: true, markSeen: openRef.current })
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to clear notification')
+    } finally {
+      setClearingId(null)
+    }
+  }
 
   return (
     <DropdownMenu
@@ -424,25 +473,15 @@ export default function NotificationsBell() {
                   const title = payloadMessage || payloadTitle || n.type
                   const href = resolveHref(n)
                   const clickable = Boolean(href)
-                  return (
-                    <button
-                      key={n.id}
-                      type="button"
-                      className={
-                        clickable
-                          ? 'w-full text-left px-4 sm:px-5 py-3 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                          : 'w-full text-left px-4 sm:px-5 py-3 cursor-default'
-                      }
-                      disabled={!clickable}
-                      onClick={() => {
-                        if (!href) return
-                        setOpen(false)
-                        router.push(href)
-                      }}
-                    >
+                  const pinned = isPinnedNotification(n)
+                  const clearable = canClearNotification(n)
+                  const content = (
+                    <>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-medium text-foreground truncate">{title}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium text-foreground break-words">{title}</div>
+                          </div>
                           {projectName ? <div className="text-xs text-muted-foreground truncate">{projectName}</div> : null}
                         </div>
                         <div className="text-[11px] text-muted-foreground whitespace-nowrap">{formatDateTime(n.sentAt)}</div>
@@ -460,7 +499,52 @@ export default function NotificationsBell() {
                       {!n.success ? (
                         <div className="mt-2 text-xs text-red-600">Send failed: {n.message || 'Unknown error'}</div>
                       ) : null}
-                    </button>
+                    </>
+                  )
+
+                  return (
+                    <div key={n.id} className="px-4 sm:px-5 py-3">
+                      {clearable ? (
+                        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-border">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-500">
+                            <Pin className="w-3 h-3 flex-shrink-0" />
+                            <span>System Notification</span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground flex-shrink-0"
+                            disabled={clearingId === n.id}
+                            onClick={() => clearNotification(n.id)}
+                            title="Dismiss"
+                          >
+                            {clearingId === n.id
+                              ? <span className="text-[10px] leading-none">…</span>
+                              : <X className="w-3.5 h-3.5" />}
+                          </Button>
+                        </div>
+                      ) : null}
+                      <div className="flex items-start gap-3">
+                        {clickable ? (
+                          <button
+                            type="button"
+                            className="flex-1 text-left hover:bg-accent/30 rounded-md px-0 py-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => {
+                              if (!href) return
+                              setOpen(false)
+                              router.push(href)
+                            }}
+                          >
+                            {content}
+                          </button>
+                        ) : (
+                          <div className="flex-1 min-w-0">
+                            {content}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )
                 })}
               </div>

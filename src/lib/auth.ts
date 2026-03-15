@@ -281,10 +281,14 @@ export async function revokePresentedTokens(tokens: { accessToken?: string | nul
 
 export async function verifyCredentials(usernameOrEmail: string, password: string): Promise<AuthUser | null> {
   try {
+    const trimmed = usernameOrEmail.trim()
     const user = await prisma.user.findFirst({
       where: {
         active: true,
-        OR: [{ email: usernameOrEmail }, { username: usernameOrEmail }],
+        OR: [
+          { email: { equals: trimmed, mode: 'insensitive' } },
+          { username: { equals: trimmed, mode: 'insensitive' } },
+        ],
       },
       select: {
         id: true,

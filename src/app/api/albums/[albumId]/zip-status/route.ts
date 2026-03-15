@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { albumZipExists, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getActiveDropboxStorageIssueEntities } from '@/lib/dropbox-storage-inconsistency-log'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       name: true,
       storageFolderName: true,
       status: true,
+      socialCopiesEnabled: true,
       dropboxEnabled: true,
       fullZipDropboxStatus: true,
       socialZipDropboxStatus: true,
@@ -111,10 +113,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // bug fixes were deployed.
   let albumStatus = album.status
   if (album.status !== 'READY' && album.status !== 'ERROR') {
-    const socialZipRequired = socialReadyCount > 0
+    const socialZipRequired = album.socialCopiesEnabled && socialReadyCount > 0
     const allDone =
       uploadingCount === 0 &&
-      socialPendingCount === 0 &&
+      (album.socialCopiesEnabled ? socialPendingCount === 0 : true) &&
       (readyCount === 0 || fullReady) &&
       (!socialZipRequired || socialReady)
     if (allDone) {
@@ -123,8 +125,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
+  const activeDropboxIssues = await getActiveDropboxStorageIssueEntities(album.projectId)
+  const hasDropboxStorageIssue = activeDropboxIssues.some(
+    (entry) => entry.entityType === 'album-zip' && entry.entityId.startsWith(`${albumId}:`),
+  )
+
   return NextResponse.json({
     album: { status: albumStatus },
+    socialCopiesEnabled: album.socialCopiesEnabled,
     zip: {
       fullReady,
       socialReady,
@@ -144,6 +152,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       socialProgress: album.socialZipDropboxProgress,
       fullError: album.fullZipDropboxError,
       socialError: album.socialZipDropboxError,
+      hasStorageIssue: hasDropboxStorageIssue,
     },
   })
 }

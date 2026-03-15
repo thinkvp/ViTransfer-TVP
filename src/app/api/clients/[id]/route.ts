@@ -3,8 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { moveDirectory } from '@/lib/storage'
-import { moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import { deleteDirectory, moveDirectory } from '@/lib/storage'
+import { deleteDropboxPath, isDropboxStorageConfigured, moveDropboxPath } from '@/lib/storage-provider-dropbox'
 import {
   buildClientStorageRoot,
   replaceStoredStoragePathPrefix,
@@ -510,9 +510,44 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   )
   if (rateLimitResult) return rateLimitResult
 
-  const client = await prisma.client.findFirst({ where: { id, deletedAt: null }, select: { id: true } })
+  const client = await prisma.client.findFirst({
+    where: { id, deletedAt: null },
+    select: {
+      id: true,
+      name: true,
+      _count: {
+        select: {
+          projects: true,
+        },
+      },
+    },
+  })
   if (!client) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
 
+  if (client._count.projects > 0) {
+    return NextResponse.json(
+      { error: 'Delete this client\'s projects first before deleting the client.' },
+      { status: 409 }
+    )
+  }
+
   await prisma.client.update({ where: { id }, data: { deletedAt: new Date() } })
+
+  const clientStorageRoot = buildClientStorageRoot(client.name)
+
+  try {
+    await deleteDirectory(clientStorageRoot)
+  } catch (error) {
+    console.error(`Failed to delete local client directory for ${id}:`, error)
+  }
+
+  if (isDropboxStorageConfigured()) {
+    try {
+      await deleteDropboxPath('', clientStorageRoot, { pruneEmptyParents: false })
+    } catch (error) {
+      console.error(`Failed to delete Dropbox client directory for ${id}:`, error)
+    }
+  }
+
   return NextResponse.json({ ok: true })
 }

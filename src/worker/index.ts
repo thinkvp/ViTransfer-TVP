@@ -30,6 +30,9 @@ import { processAutoStartProjectsOnShootingKeyDate } from './auto-start-projects
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
+import { runDropboxStorageConsistencyScanAndSyncNotification } from '@/lib/dropbox-storage-consistency'
+import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
+import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -385,6 +388,8 @@ async function main() {
       if (job.name === 'project-key-date-reminders') return true
       if (job.name === 'user-key-date-reminders') return true
       if (job.name === 'auto-start-projects-on-shooting-key-date') return true
+      if (job.name === 'dropbox-storage-consistency-scan') return true
+      if (job.name === 'orphan-project-files-scan') return true
       return false
     })
 
@@ -519,6 +524,34 @@ async function main() {
     }
   )
 
+  // Dropbox storage consistency scan (hourly at :15, offset from notifications at :00)
+  await notificationQueue.add(
+    'dropbox-storage-consistency-scan',
+    {},
+    {
+      repeat: {
+        pattern: '15 * * * *',
+      },
+      jobId: 'dropbox-storage-consistency-scan',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
+  // Orphan project files scan (weekly on Sunday at 03:00 server/container time)
+  await notificationQueue.add(
+    'orphan-project-files-scan',
+    {},
+    {
+      repeat: {
+        pattern: '0 3 * * 0',
+      },
+      jobId: 'orphan-project-files-scan',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Add repeatable daily job to pull QuickBooks data (if enabled)
   // Note: Schedule is configurable via Sales > Settings > QuickBooks.
   // Runs at the configured HH:MM server/container time (see TZ env var).
@@ -630,6 +663,34 @@ async function main() {
           const msg = e instanceof Error ? e.message : String(e)
           await recordQuickBooksDailyPullAttempt({ attemptedAt, succeeded: false, message: msg })
           console.warn('[QBO] Daily pull errored:', msg)
+        }
+        return
+      }
+
+      if (job.name === 'dropbox-storage-consistency-scan') {
+        try {
+          console.log('[CONSISTENCY] Running scheduled Dropbox storage consistency scan...')
+          const result = await runDropboxStorageConsistencyScanAndSyncNotification()
+          console.log(`[CONSISTENCY] Dropbox scan completed (checked=${result.checkedCount}, issues=${result.inconsistencyCount})`)
+        } catch (e) {
+          console.error('[CONSISTENCY] Dropbox storage consistency scan failed:', e instanceof Error ? e.message : e)
+        }
+        return
+      }
+
+      if (job.name === 'orphan-project-files-scan') {
+        try {
+          console.log('[CONSISTENCY] Running scheduled orphan project files scan (dry run)...')
+          const result = await cleanupProjectStorageOrphans(true)
+          if (result.orphanFiles > 0) {
+            await upsertOrphanProjectFilesScanNotification(result, new Date().toISOString())
+            console.log(`[CONSISTENCY] Orphan scan completed: ${result.orphanFiles} orphan files found (${result.orphanFileBytes} bytes)`)
+          } else {
+            await clearOrphanProjectFilesScanNotifications()
+            console.log('[CONSISTENCY] Orphan scan completed: no orphan files found')
+          }
+        } catch (e) {
+          console.error('[CONSISTENCY] Orphan project files scan failed:', e instanceof Error ? e.message : e)
         }
         return
       }

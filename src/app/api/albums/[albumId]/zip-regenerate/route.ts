@@ -39,6 +39,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       projectId: true,
       name: true,
       storageFolderName: true,
+      socialCopiesEnabled: true,
       dropboxEnabled: true,
       fullZipDropboxPath: true,
       socialZipDropboxPath: true,
@@ -87,19 +88,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     albumName: album.name,
     variant: 'full',
   })
-  const socialZipPath = getAlbumZipStoragePath({
-    projectStoragePath,
-    albumFolderName,
-    albumName: album.name,
-    variant: 'social',
-  })
 
   await deleteFile(fullZipPath).catch(() => {})
-  await deleteFile(socialZipPath).catch(() => {})
+
+  if (album.socialCopiesEnabled) {
+    const socialZipPath = getAlbumZipStoragePath({
+      projectStoragePath,
+      albumFolderName,
+      albumName: album.name,
+      variant: 'social',
+    })
+    await deleteFile(socialZipPath).catch(() => {})
+  }
 
   // Delete Dropbox copies if they exist and reset tracking so re-upload queues after new ZIPs are ready.
   if (album.dropboxEnabled) {
-    const dropboxPaths = [album.fullZipDropboxPath, album.socialZipDropboxPath].filter(Boolean) as string[]
+    const dropboxPaths = [
+      album.fullZipDropboxPath,
+      ...(album.socialCopiesEnabled ? [album.socialZipDropboxPath] : []),
+    ].filter(Boolean) as string[]
     if (isDropboxStorageConfigured()) {
       await Promise.allSettled(dropboxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
     }
@@ -110,10 +117,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         fullZipDropboxProgress: 0,
         fullZipDropboxError: null,
         fullZipDropboxPath: null,
-        socialZipDropboxStatus: null,
-        socialZipDropboxProgress: 0,
-        socialZipDropboxError: null,
-        socialZipDropboxPath: null,
+        ...(album.socialCopiesEnabled ? {
+          socialZipDropboxStatus: null,
+          socialZipDropboxProgress: 0,
+          socialZipDropboxError: null,
+          socialZipDropboxPath: null,
+        } : {}),
       },
     }).catch(() => {})
   }
@@ -126,13 +135,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const q = getAlbumPhotoZipQueue()
 
     const fullJobId = getAlbumZipJobId({ albumId: album.id, variant: 'full' })
-    const socialJobId = getAlbumZipJobId({ albumId: album.id, variant: 'social' })
-
     await q.remove(fullJobId).catch(() => {})
-    await q.remove(socialJobId).catch(() => {})
-
     await q.add('generate-album-zip', { albumId: album.id, variant: 'full' }, { jobId: fullJobId }).catch(() => {})
-    await q.add('generate-album-zip', { albumId: album.id, variant: 'social' }, { jobId: socialJobId }).catch(() => {})
+
+    if (album.socialCopiesEnabled) {
+      const socialJobId = getAlbumZipJobId({ albumId: album.id, variant: 'social' })
+      await q.remove(socialJobId).catch(() => {})
+      await q.add('generate-album-zip', { albumId: album.id, variant: 'social' }, { jobId: socialJobId }).catch(() => {})
+    }
   } catch {
     // ignore
   }

@@ -5,6 +5,26 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-03-14
+
+### Added
+- **System Alert notifications** - Added daily scans that check and report on app related issues, such as Dropbox vs local server inconsistencies, daily Quickbooks pull fails; a pinned notification advises users of issues and any affected videos or albums show an alert icon to highlight there is an issue
+- **Social media copies toggle on album creation** — albums now have a "Create social media sized copies" checkbox (enabled by default) that controls whether social-sized photo derivatives (long edge scaled to 2048px) and the Social Media Sized ZIP are generated; when disabled, social derivative jobs are skipped, the social ZIP download button is hidden on share pages, and the admin status display reflects that social copies are disabled
+- **Dropbox upload toggle on album creation** — albums now have an "Upload to Dropbox" checkbox that controls whether album ZIPs are uploaded to Dropbox; previously Dropbox upload was automatic when configured — this gives users explicit control; when disabled, ZIPs remain on the local server only
+- **Social copies toggle on existing albums** — a Layers icon button next to the Dropbox cloud button lets admins enable or disable social-media-sized copies after album creation; enabling queues social derivative generation for all existing READY photos and a social ZIP build; disabling deletes all social derivative files, the social ZIP, and any Dropbox social ZIP copy, and frees the associated storage
+
+### Removed
+- **Orphan Comments cleanup developer tool** — removed; the historical missing-video comment bug was fixed in an earlier release and the cleanup tool is no longer required
+
+### Changed
+- **Video deletion prunes empty storage folders** — after a version is deleted, the empty version-label folder is removed and, when it was the last remaining version, the now-empty parent video folder is also removed; pruning stops at the project's `videos/` root
+- **Deleting a Dropbox-backed video also removes the local server copy** — the storage delete path cleans up both the Dropbox object and the mirrored local file from `STORAGE_ROOT`
+- **Dropbox folder cleanup scope limited to the project root** — ordinary file and version deletes no longer prune through `projects/` or the client folder; deleting a project still removes the full project root explicitly while client-root folders are left untouched even when otherwise empty
+- **Deleting a client removes the client storage root when safe** — the client delete route removes the full client folder on both local and Dropbox when no projects remain; if projects still exist, the delete is blocked to avoid orphaning project records while removing their files
+- **Orphaned files cleanup scans managed storage beyond project roots** — the orphan-file scanner walks the full managed storage root and cross-checks project media, imported emails, comment and project uploads, client files, user files, and stored branding assets while still ignoring temporary upload chunks and redirect metadata
+- **Notification backlog tool includes diagnostic sample rows and system-local dates** — the backlog dry run includes a sample of pending queue entries with type, project, pending targets, retry counts, failure flags, and payload; `Oldest entry` uses the shared timezone-aware formatter
+- **Delete previews for closed projects tool includes timeline VTT files** — the closed-project preview cleanup detects and removes `timelinePreviewVttPath` files alongside preview MP4s and timeline sprite directories
+
 ## [1.2.1] - 2026-03-13
 
 ### Added

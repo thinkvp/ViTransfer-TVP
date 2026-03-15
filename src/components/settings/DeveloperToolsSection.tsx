@@ -13,31 +13,12 @@ import {
   MIN_UPLOAD_CHUNK_SIZE_MB,
 } from '@/lib/transfer-tuning'
 
-type OrphanCommentCleanupResult = {
-  ok: true
-  dryRun: boolean
-  limit: number
-  orphanComments: number
-  orphanCommentFiles: number
-  orphanCommentFileBytes: number
-  uniqueStoragePaths: number
-  sample?: {
-    commentIds: string[]
-    projectIds: string[]
-    videoIds: string[]
-  }
-  deleted?: {
-    comments: number
-    filesDeleted: number
-    filesFailed: number
-  }
-  errors?: Array<{ storagePath: string; error: string }>
-}
-
 type OrphanProjectFileCleanupResult = {
   ok: true
   dryRun: boolean
-  scannedProjectDirectories: number
+  scannedDirectories: number
+  scannedProjectDirectories?: number
+  scannedProjects?: number
   scannedFiles: number
   orphanFiles: number
   orphanFileBytes: number
@@ -168,10 +149,6 @@ export function DeveloperToolsSection({
   show,
   setShow,
 }: DeveloperToolsSectionProps) {
-  const [cleanupLoading, setCleanupLoading] = useState(false)
-  const [cleanupResult, setCleanupResult] = useState<OrphanCommentCleanupResult | null>(null)
-  const [cleanupError, setCleanupError] = useState<string | null>(null)
-
   const [orphanProjectFilesLoading, setOrphanProjectFilesLoading] = useState(false)
   const [orphanProjectFilesResult, setOrphanProjectFilesResult] = useState<OrphanProjectFileCleanupResult | null>(null)
   const [orphanProjectFilesError, setOrphanProjectFilesError] = useState<string | null>(null)
@@ -248,33 +225,12 @@ export function DeveloperToolsSection({
     }
   }
 
-  const cleanupSummary = useMemo(() => {
-    if (!cleanupResult) return null
-    const line1 = `${cleanupResult.orphanComments} orphan comments, ${cleanupResult.orphanCommentFiles} files (${formatBytes(cleanupResult.orphanCommentFileBytes)})`
-    const line2 = `${cleanupResult.uniqueStoragePaths} unique storage paths (limit ${cleanupResult.limit})`
-    return { line1, line2 }
-  }, [cleanupResult])
-
   const orphanProjectFilesSummary = useMemo(() => {
     if (!orphanProjectFilesResult) return null
     const line1 = `${orphanProjectFilesResult.orphanFiles} orphan files (${formatBytes(orphanProjectFilesResult.orphanFileBytes)})`
-    const line2 = `${orphanProjectFilesResult.scannedFiles} files scanned across ${orphanProjectFilesResult.scannedProjectDirectories} project folders`
+    const line2 = `${orphanProjectFilesResult.scannedFiles} files scanned across ${orphanProjectFilesResult.scannedProjects ?? orphanProjectFilesResult.scannedDirectories ?? orphanProjectFilesResult.scannedProjectDirectories} project${(orphanProjectFilesResult.scannedProjects ?? 1) === 1 ? '' : 's'}`
     return { line1, line2 }
   }, [orphanProjectFilesResult])
-
-  async function runOrphanCleanup(dryRun: boolean) {
-    setCleanupLoading(true)
-    setCleanupError(null)
-
-    try {
-      const res = await apiPost('/api/settings/cleanup-orphan-comments', { dryRun, limit: 5000 })
-      setCleanupResult(res as OrphanCommentCleanupResult)
-    } catch (e: any) {
-      setCleanupError(e?.message || 'Failed to run cleanup')
-    } finally {
-      setCleanupLoading(false)
-    }
-  }
 
   async function runOrphanProjectFilesCleanup(dryRun: boolean) {
     setOrphanProjectFilesLoading(true)
@@ -411,103 +367,6 @@ export function DeveloperToolsSection({
               >
                 {recalculateProjectDataTotalsLoading ? 'Queuing…' : 'Recalculate now'}
               </Button>
-            </div>
-          </div>
-
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <Label>Orphan Comments cleanup</Label>
-                <p className="text-xs text-muted-foreground">
-                  Finds share-page comments whose linked video no longer exists (historical data created before FK enforcement).
-                  Run a dry-run first to preview impact.
-                </p>
-
-                {cleanupError ? (
-                  <p className="text-xs text-destructive">{cleanupError}</p>
-                ) : null}
-
-                {cleanupSummary ? (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">{cleanupSummary.line1}</p>
-                    <p className="text-xs text-muted-foreground">{cleanupSummary.line2}</p>
-                    {cleanupResult?.deleted ? (
-                      <p className="text-xs text-muted-foreground">
-                        Deleted: {cleanupResult.deleted.comments} comments, {cleanupResult.deleted.filesDeleted} files
-                        {cleanupResult.deleted.filesFailed ? ` (${cleanupResult.deleted.filesFailed} file deletes failed)` : ''}
-                      </p>
-                    ) : null}
-                    {cleanupResult?.errors?.length ? (
-                      <p className="text-xs text-muted-foreground">File delete errors: {cleanupResult.errors.length}</p>
-                    ) : null}
-
-                    {cleanupResult?.sample ? (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          Show sample IDs
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Comment IDs</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {cleanupResult.sample.commentIds.join('\n')}
-                            </pre>
-                          </div>
-
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Project IDs</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {cleanupResult.sample.projectIds.join('\n')}
-                            </pre>
-                          </div>
-
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Video IDs</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {cleanupResult.sample.videoIds.join('\n')}
-                            </pre>
-                          </div>
-
-                          {cleanupResult?.errors?.length ? (
-                            <div>
-                              <div className="text-[11px] font-medium text-muted-foreground">File delete errors (first 20)</div>
-                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                                {cleanupResult.errors
-                                  .slice(0, 20)
-                                  .map((e) => `${e.storagePath}: ${e.error}`)
-                                  .join('\n')}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </div>
-                      </details>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={cleanupLoading}
-                  onClick={() => void runOrphanCleanup(true)}
-                >
-                  {cleanupLoading ? 'Running…' : 'Dry run'}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={cleanupLoading}
-                  onClick={() => {
-                    if (!confirm('Delete orphan comments and their uploaded files? This cannot be undone.')) return
-                    void runOrphanCleanup(false)
-                  }}
-                >
-                  {cleanupLoading ? 'Running…' : 'Clean up'}
-                </Button>
-              </div>
             </div>
           </div>
 

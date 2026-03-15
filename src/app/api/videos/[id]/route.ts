@@ -1,7 +1,8 @@
+import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { deleteDirectory, deleteFile, moveDirectory } from '@/lib/storage'
+import { deleteDirectory, deleteFile, moveDirectory, pruneEmptyParentDirectories } from '@/lib/storage'
 import { getFilePath } from '@/lib/storage'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
@@ -14,13 +15,16 @@ import {
   allocateUniqueStorageName,
   buildProjectStorageRoot,
   buildVideoAssetDropboxPath,
+  buildVideoAssetsStorageRoot,
   buildVideoStorageRoot,
+  buildVideoVersionRoot,
   buildVideoDropboxRoot,
   buildVideoOriginalDropboxPath,
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
+import { clearResolvedDropboxStorageIssueEntities } from '@/lib/dropbox-storage-inconsistency-log'
 export const runtime = 'nodejs'
 
 function findExistingVideoOriginalPath(video: Parameters<typeof resolveVideoOriginalPath>[0]): string | null {
@@ -625,6 +629,19 @@ export async function PATCH(
           }
           console.log(`[VIDEO] Disabled Dropbox for ${assets.length} asset(s) of video ${id}`)
         }
+
+        await clearResolvedDropboxStorageIssueEntities([
+          {
+            entityType: 'video',
+            entityId: id,
+            projectId: video.projectId,
+          },
+          ...assets.map((asset) => ({
+            entityType: 'asset' as const,
+            entityId: asset.id,
+            projectId: video.projectId,
+          })),
+        ])
       }
     }
 
@@ -844,7 +861,16 @@ export async function DELETE(
       where: { id },
       include: {
         assets: true,
-        project: { select: { status: true, assignedUsers: { select: { userId: true } } } },
+        project: {
+          select: {
+            status: true,
+            title: true,
+            storagePath: true,
+            companyName: true,
+            client: { select: { name: true } },
+            assignedUsers: { select: { userId: true } },
+          },
+        },
       }
     })
 
@@ -978,6 +1004,25 @@ export async function DELETE(
 
     // Update the stored project data total
     await recalculateAndStoreProjectTotalBytes(projectId)
+
+    const projectStoragePath = video.project.storagePath
+      || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
+    const videoFolderName = video.storageFolderName || video.name || id
+    const versionLabel = video.versionLabel || `v${video.version}`
+    const pruneStopAt = path.posix.join(projectStoragePath, 'videos')
+
+    try {
+      await pruneEmptyParentDirectories(
+        buildVideoAssetsStorageRoot(projectStoragePath, videoFolderName, versionLabel),
+        pruneStopAt,
+      )
+      await pruneEmptyParentDirectories(
+        buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel),
+        pruneStopAt,
+      )
+    } catch (error) {
+      console.error(`Failed to prune empty folders for video ${video.id}:`, error)
+    }
 
     return NextResponse.json({
       success: true,

@@ -663,7 +663,7 @@ async function handleAlbumPhotoUploadFinish(
 
   console.log(`[UPLOAD] Album photo uploaded and marked READY: ${photoId}`)
 
-  // Queue social-size derivative generation
+  // Queue social-size derivative generation (always — used as preview)
   try {
     const { getAlbumPhotoSocialQueue } = await import('@/lib/queue')
     const q = getAlbumPhotoSocialQueue()
@@ -692,22 +692,25 @@ async function handleAlbumPhotoUploadFinish(
       albumName: photo.album.name,
       variant: 'full',
     })
-    const socialZipPath = getAlbumZipStoragePath({
-      projectId: photo.album.projectId,
-      albumId: photo.albumId,
-      albumName: photo.album.name,
-      variant: 'social',
-    })
 
     await deleteFile(fullZipPath).catch(() => {})
-    await deleteFile(socialZipPath).catch(() => {})
+
+    if (photo.album.socialCopiesEnabled) {
+      const socialZipPath = getAlbumZipStoragePath({
+        projectId: photo.album.projectId,
+        albumId: photo.albumId,
+        albumName: photo.album.name,
+        variant: 'social',
+      })
+      await deleteFile(socialZipPath).catch(() => {})
+    }
 
     // Delete old Dropbox copies and reset tracking so re-upload queues after new ZIPs are ready
     if (photo.album.dropboxEnabled) {
       const { isDropboxStorageConfigured, deleteDropboxFile } = await import('@/lib/storage-provider-dropbox')
       const dbxPaths = [
         photo.album.fullZipDropboxPath,
-        photo.album.socialZipDropboxPath,
+        ...(photo.album.socialCopiesEnabled ? [photo.album.socialZipDropboxPath] : []),
       ].filter(Boolean) as string[]
       if (isDropboxStorageConfigured()) {
         await Promise.allSettled(dbxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
@@ -719,10 +722,12 @@ async function handleAlbumPhotoUploadFinish(
           fullZipDropboxProgress: 0,
           fullZipDropboxError: null,
           fullZipDropboxPath: null,
-          socialZipDropboxStatus: null,
-          socialZipDropboxProgress: 0,
-          socialZipDropboxError: null,
-          socialZipDropboxPath: null,
+          ...(photo.album.socialCopiesEnabled ? {
+            socialZipDropboxStatus: null,
+            socialZipDropboxProgress: 0,
+            socialZipDropboxError: null,
+            socialZipDropboxPath: null,
+          } : {}),
         },
       }).catch(() => {})
     }
@@ -732,15 +737,17 @@ async function handleAlbumPhotoUploadFinish(
     const zipQueue = getAlbumPhotoZipQueue()
 
     const fullJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'full' })
-    const socialJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'social' })
-
     await zipQueue.remove(fullJobId).catch(() => {})
-    await zipQueue.remove(socialJobId).catch(() => {})
 
     // Delay to allow large batches to finish; the worker also skips if uploads are still in progress.
     const delayMs = 30_000
     await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'full' }, { jobId: fullJobId, delay: delayMs })
-    await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'social' }, { jobId: socialJobId, delay: delayMs })
+
+    if (photo.album.socialCopiesEnabled) {
+      const socialJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'social' })
+      await zipQueue.remove(socialJobId).catch(() => {})
+      await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'social' }, { jobId: socialJobId, delay: delayMs })
+    }
   } catch (e) {
     console.warn('[UPLOAD] Failed to schedule album ZIP regeneration:', e)
   }

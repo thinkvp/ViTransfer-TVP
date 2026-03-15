@@ -610,16 +610,19 @@ export async function downloadFile(filePath: string): Promise<Readable> {
 }
 
 export async function deleteFile(filePath: string): Promise<void> {
+  const resolvedPath = isDropboxStoragePath(filePath)
+    ? stripDropboxStoragePrefix(filePath)
+    : filePath
+
   if (isDropboxStoragePath(filePath)) {
     await deleteDropboxFile(filePath)
-    return
   }
 
-  const base = validatePathBase(filePath)
+  const base = validatePathBase(resolvedPath)
   const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
   const candidates = redirected && redirected !== base.fullPath
     ? [redirected, base.fullPath]
-    : [validatePath(filePath)]
+    : [validatePath(resolvedPath)]
 
   for (const fullPath of candidates) {
     if (!fs.existsSync(fullPath)) continue
@@ -645,6 +648,59 @@ export async function deleteDirectory(dirPath: string): Promise<void> {
   if (legacyInfo && redirected && base.fullPath !== fullPath && fs.existsSync(base.fullPath)) {
     await fs.promises.rm(base.fullPath, { recursive: true, force: true })
   }
+}
+
+async function removeDirectoryIfEmpty(fullPath: string): Promise<boolean> {
+  if (!fs.existsSync(fullPath)) {
+    return false
+  }
+
+  const stats = await fs.promises.stat(fullPath).catch(() => null)
+  if (!stats?.isDirectory()) {
+    return false
+  }
+
+  const children = await fs.promises.readdir(fullPath).catch(() => null)
+  if (!children || children.length > 0) {
+    return false
+  }
+
+  await fs.promises.rmdir(fullPath).catch(() => {})
+  return !fs.existsSync(fullPath)
+}
+
+export async function pruneEmptyParentDirectories(dirPath: string, stopAt?: string): Promise<number> {
+  const stopAtNormalized = stopAt ? validatePathBase(stopAt).posixNormalized : null
+  let current = validatePathBase(dirPath).posixNormalized
+  let pruned = 0
+
+  while (current && current !== '.' && current !== stopAtNormalized) {
+    const base = validatePathBase(current)
+    const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
+    const candidates = redirected && redirected !== base.fullPath
+      ? [redirected, base.fullPath]
+      : [base.fullPath]
+
+    let removedAny = false
+    for (const fullPath of candidates) {
+      if (await removeDirectoryIfEmpty(fullPath)) {
+        removedAny = true
+      }
+    }
+
+    if (!removedAny) {
+      break
+    }
+
+    pruned += 1
+    const parent = path.posix.dirname(current)
+    if (parent === current) {
+      break
+    }
+    current = parent
+  }
+
+  return pruned
 }
 
 async function moveDirectoryContents(fromFullPath: string, toFullPath: string): Promise<void> {

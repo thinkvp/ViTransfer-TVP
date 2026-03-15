@@ -83,6 +83,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       projectId: true,
       name: true,
       storageFolderName: true,
+      socialCopiesEnabled: true,
       fullZipFileSize: true,
       socialZipFileSize: true,
       project: {
@@ -114,6 +115,14 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
   // Keep album-level status in sync with background work.
   await prisma.album.update({ where: { id: albumRowId }, data: { status: 'PROCESSING' } }).catch(() => {})
 
+  // Skip social ZIP generation when social downloads are disabled for this album.
+  if (variant === 'social' && !album.socialCopiesEnabled) {
+    if (DEBUG) {
+      console.log(`[WORKER DEBUG] Skipping social ZIP generation; social downloads disabled for album ${albumId}`)
+    }
+    return
+  }
+
   async function maybeMarkAlbumReady() {
     try {
       const uploadingCount = await prisma.albumPhoto.count({ where: { albumId, status: 'UPLOADING' } })
@@ -126,6 +135,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
           OR: [{ socialStatus: 'PENDING' }, { socialStatus: 'PROCESSING' }],
         },
       })
+      // Social derivatives are always generated (used as previews); wait for them.
       if (pendingSocialCount > 0) return
 
       const zipFullPath = getFilePath(
@@ -145,13 +155,13 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
         return
       }
 
-      // Only require a social ZIP when at least one usable social derivative exists.
+      // Only require a social ZIP when social downloads are enabled and at least one usable social derivative exists.
       // If all social derivatives errored, the social ZIP will never be created —
       // don't let that block the album from becoming READY.
       const socialUsableCount = await prisma.albumPhoto.count({
         where: { albumId, status: 'READY', socialStatus: 'READY', NOT: { socialStoragePath: null } },
       })
-      const needSocialZip = socialUsableCount > 0
+      const needSocialZip = album!.socialCopiesEnabled && socialUsableCount > 0
 
       if (fullExists && (!needSocialZip || socialExists)) {
         await prisma.album.update({ where: { id: albumRowId }, data: { status: 'READY' } })

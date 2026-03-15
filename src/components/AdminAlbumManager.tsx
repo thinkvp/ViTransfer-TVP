@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Cloud, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Cloud, Loader2, Layers } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
+import { Checkbox } from '@/components/ui/checkbox'
 import { AlbumPhotoUploadQueue } from '@/components/AlbumPhotoUploadQueue'
 import { InlineEdit } from '@/components/InlineEdit'
 
@@ -17,6 +18,7 @@ type AlbumSummary = {
   name: string
   notes: string | null
   status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'ERROR'
+  socialCopiesEnabled: boolean
   createdAt: string
   updatedAt: string
   _count?: { photos?: number }
@@ -37,6 +39,7 @@ type AlbumPhoto = {
 
 type AlbumZipStatus = {
   album?: { status?: string }
+  socialCopiesEnabled?: boolean
   zip: { fullReady: boolean; socialReady: boolean }
   counts: {
     uploading: number
@@ -76,6 +79,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
   const [showNewAlbumForm, setShowNewAlbumForm] = useState(false)
   const [newAlbumName, setNewAlbumName] = useState('')
   const [newAlbumNotes, setNewAlbumNotes] = useState('')
+  const [newAlbumSocialCopies, setNewAlbumSocialCopies] = useState(true)
+  const [newAlbumDropbox, setNewAlbumDropbox] = useState(dropboxConfigured)
   const [creating, setCreating] = useState(false)
 
   const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null)
@@ -93,6 +98,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const [togglingDropboxAlbumId, setTogglingDropboxAlbumId] = useState<string | null>(null)
+  const [togglingSocialCopiesAlbumId, setTogglingSocialCopiesAlbumId] = useState<string | null>(null)
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => {
@@ -320,6 +326,25 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
     }
   }, [togglingDropboxAlbumId, fetchZipStatus])
 
+  const handleToggleSocialCopies = useCallback(async (albumId: string, currentlyEnabled: boolean) => {
+    if (togglingSocialCopiesAlbumId) return
+
+    if (currentlyEnabled) {
+      if (!confirm('Disable social media downloads? The social-sized ZIP will be deleted.')) return
+    }
+
+    setTogglingSocialCopiesAlbumId(albumId)
+    try {
+      await apiPost(`/api/albums/${albumId}/social-copies`, { enabled: !currentlyEnabled })
+      setAlbums((prev) => prev.map((a) => a.id === albumId ? { ...a, socialCopiesEnabled: !currentlyEnabled } : a))
+      void fetchZipStatus(albumId)
+    } catch (e: any) {
+      alert(e?.message || 'Failed to toggle social downloads')
+    } finally {
+      setTogglingSocialCopiesAlbumId(null)
+    }
+  }, [togglingSocialCopiesAlbumId, fetchZipStatus])
+
   const handleDeleteAlbum = async (albumId: string, albumName: string) => {
     if (!canDelete) return
     if (!confirm(`Delete album "${albumName}" and all photos?`)) return
@@ -426,10 +451,14 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
       const res = await apiPost(`/api/projects/${projectId}/albums`, {
         name,
         notes: notes ? notes : null,
+        socialCopiesEnabled: newAlbumSocialCopies,
+        dropboxEnabled: newAlbumDropbox,
       })
 
       setNewAlbumName('')
       setNewAlbumNotes('')
+      setNewAlbumSocialCopies(true)
+      setNewAlbumDropbox(dropboxConfigured)
       setShowNewAlbumForm(false)
 
       await fetchAlbums()
@@ -577,9 +606,9 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                           return (
                             <>
                               <p>Full resolution ZIP: {full}</p>
-                              <p>Social media ZIP: {social}</p>
+                              {album.socialCopiesEnabled && <p>Social media ZIP: {social}</p>}
                               <p>
-                                Uploads in progress: {status.counts.uploading} • Social derivatives: {status.counts.socialReady} ready, {status.counts.socialPending} pending, {status.counts.socialError} error
+                                Uploads in progress: {status.counts.uploading} • Social previews: {status.counts.socialReady} ready, {status.counts.socialPending} pending, {status.counts.socialError} error
                               </p>
                             </>
                           )
@@ -588,6 +617,26 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          'h-8 w-8',
+                          album.socialCopiesEnabled
+                            ? 'text-primary hover:text-primary/80 hover:bg-primary/5'
+                            : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
+                        )}
+                        disabled={togglingSocialCopiesAlbumId === album.id}
+                        onClick={() => handleToggleSocialCopies(album.id, album.socialCopiesEnabled)}
+                        title={album.socialCopiesEnabled ? 'Disable social media downloads' : 'Enable social media downloads'}
+                      >
+                        {togglingSocialCopiesAlbumId === album.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Layers className="w-4 h-4" />
+                        )}
+                      </Button>
                       {dropboxConfigured && (
                         (() => {
                           const dbx = zipStatusByAlbumId[album.id]?.dropbox
@@ -780,6 +829,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                     setShowNewAlbumForm(false)
                     setNewAlbumName('')
                     setNewAlbumNotes('')
+                    setNewAlbumSocialCopies(true)
+                    setNewAlbumDropbox(dropboxConfigured)
                   }}
                   disabled={creating}
                   title="Close"
@@ -814,6 +865,39 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                     maxLength={500}
                     disabled={creating}
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Allow social media downloads</div>
+                    <div className="flex items-center gap-2 h-10">
+                      <Checkbox
+                        checked={newAlbumSocialCopies}
+                        onCheckedChange={(v) => setNewAlbumSocialCopies(Boolean(v))}
+                        disabled={creating}
+                        aria-label="Allow social media downloads"
+                      />
+                      <span className={newAlbumSocialCopies ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                        {newAlbumSocialCopies ? 'Social-sized ZIP available for download' : 'Full resolution downloads only'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Upload to Dropbox</div>
+                    <div className="flex items-center gap-2 h-10">
+                      <Checkbox
+                        checked={newAlbumDropbox}
+                        onCheckedChange={(v) => setNewAlbumDropbox(Boolean(v))}
+                        disabled={creating || !dropboxConfigured}
+                        aria-label="Upload to Dropbox"
+                      />
+                      <Cloud className={`w-4 h-4 ${newAlbumDropbox && dropboxConfigured ? 'text-primary' : 'text-muted-foreground/50'}`} />
+                      <span className={newAlbumDropbox && dropboxConfigured ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                        {!dropboxConfigured ? 'Dropbox not configured' : newAlbumDropbox ? 'ZIPs uploaded to Dropbox' : 'Local storage only'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-end">

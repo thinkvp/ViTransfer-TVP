@@ -44,7 +44,7 @@ function LazyAlbumThumbnail({ src, alt }: { src: string; alt: string }) {
           src={src}
           alt={alt}
           fill
-          sizes="(min-width: 1536px) 12vw, (min-width: 1280px) 16vw, (min-width: 1024px) 20vw, (min-width: 640px) 33vw, 50vw"
+          unoptimized
           className="object-cover"
           loading="lazy"
         />
@@ -59,6 +59,7 @@ type ShareAlbum = {
   id: string
   name: string
   notes: string | null
+  socialCopiesEnabled?: boolean
   dropboxEnabled?: boolean
   zip?: {
     fullReady: boolean
@@ -70,6 +71,7 @@ type ShareAlbumPhoto = {
   id: string
   fileName: string
   url: string
+  previewUrl?: string
   downloadUrl: string
   socialDownloadUrl: string
   socialReady: boolean
@@ -151,7 +153,7 @@ export function ShareAlbumViewer({
     const zip = album?.zip
     if (!zip) return
 
-    if (zip.fullReady && zip.socialReady) return
+    if (zip.fullReady && (zip.socialReady || album?.socialCopiesEnabled === false)) return
 
     const tick = async () => {
       try {
@@ -190,7 +192,7 @@ export function ShareAlbumViewer({
         zipPollTimeoutRef.current = null
       }
     }
-  }, [album?.zip, albumId, headers, loading, photos.length, shareSlug])
+  }, [album?.zip, album?.socialCopiesEnabled, albumId, headers, loading, photos.length, shareSlug])
 
   const requestZip = async (variant: 'full' | 'social', forceLocal = false) => {
     try {
@@ -341,7 +343,7 @@ export function ShareAlbumViewer({
                       title="Click to view"
                     >
                       <div className="relative w-full h-36 sm:h-40">
-                        <LazyAlbumThumbnail src={p.url} alt={p.fileName} />
+                        <LazyAlbumThumbnail src={p.previewUrl || p.url} alt={p.fileName} />
                       </div>
                       <div className="absolute inset-x-0 bottom-0 bg-background/80 backdrop-blur-sm px-2 py-1">
                         <p className="text-xs truncate">{p.fileName}</p>
@@ -367,16 +369,18 @@ export function ShareAlbumViewer({
                   This is a low resolution preview. Use the buttons to download the original versions.
                 </p>
                 <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center sm:gap-2 sm:shrink-0">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => triggerDownload(viewerPhoto.socialDownloadUrl)}
-                    disabled={!viewerPhoto.socialReady}
-                    className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Download Social Media Sized
-                  </Button>
+                  {album?.socialCopiesEnabled !== false && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => triggerDownload(viewerPhoto.socialDownloadUrl)}
+                      disabled={!viewerPhoto.socialReady}
+                      className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Download Social Media Sized
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="default"
@@ -392,10 +396,10 @@ export function ShareAlbumViewer({
               <div className="rounded-lg overflow-hidden border bg-muted/20">
                 <div className="relative w-full h-[80dvh] group">
                   <Image
-                    src={viewerPhoto.url}
+                    src={viewerPhoto.previewUrl || viewerPhoto.url}
                     alt={viewerPhoto.fileName}
                     fill
-                    sizes="(min-width: 1024px) 1024px, 100vw"
+                    unoptimized
                     className="object-contain"
                     priority
                     onContextMenu={(e) => e.preventDefault()}
@@ -527,28 +531,30 @@ export function ShareAlbumViewer({
                 </div>
               </button>
 
-              <button
-                type="button"
-                onClick={() => void requestZip('social', useLocalServer)}
-                disabled={!album?.zip?.socialReady || photos.length === 0}
-                className={`w-full p-4 border-2 border-border rounded-lg text-left transition-colors ${
-                  !album?.zip?.socialReady || photos.length === 0
-                    ? 'opacity-50 cursor-not-allowed'
-                    : 'hover:border-primary cursor-pointer'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                    <Download className="h-5 w-5" />
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-medium">Social Media Sized Photos</p>
-                    <p className="text-sm text-muted-foreground">
-                      {album?.zip?.socialReady ? 'Smaller photos optimized for social media sharing' : 'Preparing archive…'}
-                    </p>
+              {album?.socialCopiesEnabled !== false && (
+                <button
+                  type="button"
+                  onClick={() => void requestZip('social', useLocalServer)}
+                  disabled={!album?.zip?.socialReady || photos.length === 0}
+                  className={`w-full p-4 border-2 border-border rounded-lg text-left transition-colors ${
+                    !album?.zip?.socialReady || photos.length === 0
+                      ? 'opacity-50 cursor-not-allowed'
+                      : 'hover:border-primary cursor-pointer'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                      <Download className="h-5 w-5" />
+                    </span>
+                    <div className="flex-1">
+                      <p className="font-medium">Social Media Sized Photos</p>
+                      <p className="text-sm text-muted-foreground">
+                        {album?.zip?.socialReady ? 'Smaller photos optimized for social media sharing' : 'Preparing archive…'}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+              )}
             </div>
 
             {error && (

@@ -206,6 +206,17 @@ export function buildAlbumPhotoStoragePath(projectStoragePath: string, albumFold
   return path.posix.join(buildAlbumStorageRoot(projectStoragePath, albumFolderName), fileName)
 }
 
+/**
+ * Derives the preview storage path for an album photo.
+ * Previews live in a `previews/` subfolder in the same album directory as the original.
+ * e.g.  albums/AlbumName/photo.jpg  →  albums/AlbumName/previews/photo.jpg
+ */
+export function buildAlbumPhotoPreviewStoragePath(photoStoragePath: string): string {
+  const lastSlash = photoStoragePath.lastIndexOf('/')
+  if (lastSlash === -1) return `previews/${photoStoragePath}`
+  return `${photoStoragePath.substring(0, lastSlash)}/previews/${photoStoragePath.substring(lastSlash + 1)}`
+}
+
 export function buildAlbumZipStoragePath(
   projectStoragePath: string,
   albumFolderName: string,
