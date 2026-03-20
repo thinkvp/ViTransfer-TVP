@@ -32,6 +32,7 @@ export type UploadJob = {
   status: UploadJobStatus
   error: string | null
   createdAt: number
+  completedAt: number | null
 }
 
 /** Server-side processing job from polling. */
@@ -242,6 +243,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         status: j.status,
         error: j.error,
         createdAt: j.createdAt,
+        completedAt: j.completedAt,
       })),
     )
   }, [])
@@ -327,7 +329,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         clearFileContext(next.file)
         clearUploadMetadata(next.file)
         clearTUSFingerprint(next.file)
-        patchJob(next.id, { status: 'success', progress: 100, speed: 0 })
+        patchJob(next.id, { status: 'success', progress: 100, speed: 0, completedAt: Date.now() })
         activeIdsRef.current.delete(next.id)
 
         // Notify listeners (project pages, etc.)
@@ -373,7 +375,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           clearTUSFingerprint(next.file)
         }
 
-        patchJob(next.id, { status: 'error', error: errorMessage, speed: 0 })
+        patchJob(next.id, { status: 'error', error: errorMessage, speed: 0, completedAt: Date.now() })
         activeIdsRef.current.delete(next.id)
         processNextRef.current()
       },
@@ -625,6 +627,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         status: 'queued',
         error: null,
         createdAt: Date.now(),
+        completedAt: null,
         tusUpload: null,
         onComplete: config.onComplete,
         cancelled: false,

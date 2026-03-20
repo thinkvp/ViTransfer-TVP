@@ -451,8 +451,28 @@ export default function RunningJobsBell() {
   const activeUploads = uploads.filter(
     (u) => u.status === 'queued' || u.status === 'uploading' || u.status === 'paused',
   )
-  const finishedUploads = uploads.filter((u) => u.status === 'success' || u.status === 'error')
-  const hasAnything = activeUploads.length > 0 || finishedUploads.length > 0 || processingJobs.length > 0 || dropboxJobs.length > 0 || albumZipJobs.length > 0 || albumZipDropboxJobs.length > 0 || completedServerJobs.length > 0
+  const completedUploads = uploads
+    .filter((u) => u.status === 'success')
+    .sort((a, b) => (b.completedAt ?? b.createdAt) - (a.completedAt ?? a.createdAt))
+  const failedUploads = uploads
+    .filter((u) => u.status === 'error')
+    .sort((a, b) => (b.completedAt ?? b.createdAt) - (a.completedAt ?? a.createdAt))
+  const successfulServerJobs = completedServerJobs
+    .filter((job) => !job.error)
+    .sort((a, b) => b.completedAt - a.completedAt)
+  const failedServerJobs = completedServerJobs
+    .filter((job) => job.error)
+    .sort((a, b) => b.completedAt - a.completedAt)
+  const completedCount = completedUploads.length + successfulServerJobs.length
+  const failedCount = failedUploads.length + failedServerJobs.length
+  const hasAnything =
+    activeUploads.length > 0 ||
+    completedCount > 0 ||
+    failedCount > 0 ||
+    processingJobs.length > 0 ||
+    dropboxJobs.length > 0 ||
+    albumZipJobs.length > 0 ||
+    albumZipDropboxJobs.length > 0
 
   return (
     <DropdownMenu
@@ -587,30 +607,41 @@ export default function RunningJobsBell() {
                   </div>
                 )}
 
-                {/* Finished uploads */}
-                {finishedUploads.length > 0 && (
+                {/* Failed jobs */}
+                {failedCount > 0 && (
                   <div>
                     <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      Recent ({finishedUploads.length})
+                      Failed ({failedCount})
                     </div>
                     <div className="divide-y divide-border">
-                      {finishedUploads.map((job) => (
+                      {failedUploads.map((job) => (
                         <UploadJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                      ))}
+                      {failedServerJobs.map((job) => (
+                        <CompletedServerJobRow
+                          key={`failed-${job.type}-${job.id}`}
+                          job={job}
+                          onNavigate={handleNavigate}
+                          onDismiss={dismissCompletedJob}
+                        />
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Completed server-side jobs */}
-                {completedServerJobs.length > 0 && (
+                {/* Completed jobs */}
+                {completedCount > 0 && (
                   <div>
                     <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      Completed ({completedServerJobs.length})
+                      Completed ({completedCount})
                     </div>
                     <div className="divide-y divide-border">
-                      {completedServerJobs.map((job) => (
+                      {completedUploads.map((job) => (
+                        <UploadJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                      ))}
+                      {successfulServerJobs.map((job) => (
                         <CompletedServerJobRow
-                          key={`done-${job.id}`}
+                          key={`done-${job.type}-${job.id}`}
                           job={job}
                           onNavigate={handleNavigate}
                           onDismiss={dismissCompletedJob}
