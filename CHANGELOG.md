@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-03-20
+
+### Added
+- **Running Jobs correctly surfaces upload and processing errors** — Dropbox upload failures (video originals, video assets, and album ZIP variants) and video processing failures are now reported as distinct error entries in the Running Jobs panel; each failed job shows a red `XCircle` icon and a descriptive "…failed" label instead of the previous green "…complete" badge; errored jobs are returned directly from the API so they appear immediately rather than relying on disappearance detection
+- **Failed jobs in Running Jobs require manual dismissal** — completed jobs that finished with an error are never auto-purged from the Running Jobs panel; they persist until the user explicitly dismisses them, ensuring failures are not silently swept away by the 30-minute cleanup timer that still applies to successful completions
+- **"UPLOAD FAILED" badge on video cards** — when any version in a video group has a Dropbox upload error (`dropboxUploadStatus: ERROR`), the collapsed video card header now shows a red "UPLOAD FAILED" badge (with `XCircle` icon) alongside the existing FAILED / PROCESSING / QUEUED badges
+- **Error badges on album cards** — the album card header now shows a red "FAILED" badge when the album itself is in `ERROR` status, and a red "UPLOAD FAILED" badge (with `XCircle` icon) when a Dropbox ZIP upload has failed; the Dropbox cloud icon on the album also switches to a red `XCircle` with destructive styling and an "Dropbox upload failed" tooltip when `fullZipDropboxStatus` or `socialZipDropboxStatus` is `ERROR`
+- **Running Jobs panel now shows recently completed processing jobs** — video versions that reached `READY` status within the past 30 minutes are now included in the Running Jobs API response and displayed in the panel alongside Dropbox upload completions, giving a unified view of recent activity without requiring a page reload
+- **Dropbox cloud icon on Project Analytics download entries** — download-related entries in Project Analytics (Video Download, Asset Download, ZIP Download, Album Download) now show a small cloud icon (☁) next to the description when the file was served from Dropbox; album ZIP analytics now record the download source in a new `details` column on `AlbumAnalytics` so the indicator is accurate for both video and album downloads
+
+### Fixed
+- **Video processing failures no longer appear as silent completions** — previously, when a video encoding job failed the video would disappear from Running Jobs with no trace, or be detected by the client's disappearance logic and incorrectly shown as "Processing complete"; the `/api/running-jobs` endpoint now queries videos with `status: ERROR` (within the past 30 minutes) and returns them as errored processing entries with `error: true`
+- **Running Jobs dismiss buttons now use type-scoped keys** — dismissing a completed or errored job entry now keys on `{type}:{id}` rather than `{id}` alone, preventing a dismissed job from accidentally suppressing a different job type that happened to share the same database ID
+- **Dismissing a pinned system notification no longer returns "Notification not found"** — the delete endpoint was filtering candidates by a hardcoded type allow-list before accepting the delete, so any row whose type was valid but not in that exact list returned a 404 and the item reappeared on the next refresh; the endpoint now looks up the record by its ID and validates clearability from `details.__controls` — the same logic used when rendering the dismiss button
+- **Session timeout in one tab no longer logs out other open browser tabs** — the inactivity timer now calls `expireCurrentWindowSession()`, which sets a per-window `sessionStorage` flag and clears tokens only for that tab; other tabs retain their in-memory and persisted tokens and continue working; a fresh login in any tab clears the flag so normal navigation resumes
+
 ## [1.2.3] - 2026-03-15
 
 ### Added

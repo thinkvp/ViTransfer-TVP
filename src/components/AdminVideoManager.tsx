@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X, XCircle } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
 import { InlineEdit } from './InlineEdit'
@@ -166,6 +166,7 @@ export default function AdminVideoManager({
         const hasProcessing = groupVideos.some((v) => v?.status === 'PROCESSING')
         const hasQueued = groupVideos.some((v) => v?.status === 'QUEUED')
         const hasFailed = groupVideos.some((v) => v?.status === 'ERROR')
+        const hasDropboxError = groupVideos.some((v) => (v as any)?.dropboxUploadStatus === 'ERROR')
 
         return (
           <Card key={groupName} className="overflow-hidden">
@@ -247,6 +248,12 @@ export default function AdminVideoManager({
                     {hasFailed && (
                       <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
                         FAILED
+                      </span>
+                    )}
+                    {hasDropboxError && !hasFailed && (
+                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
+                        <XCircle className="w-3 h-3" />
+                        UPLOAD FAILED
                       </span>
                     )}
                     {isExpanded ? (

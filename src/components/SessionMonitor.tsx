@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { getAccessToken, getRefreshToken, clearTokens } from '@/lib/token-store'
+import { expireCurrentWindowSession } from '@/lib/token-store'
 
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
@@ -12,25 +12,13 @@ export default function SessionMonitor() {
   const [showWarning, setShowWarning] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
   const lastActivityRef = useRef<number>(0)
+  const didExpireRef = useRef(false)
 
-  const handleLogout = useCallback(async () => {
-    const accessToken = getAccessToken()
-    const refreshToken = getRefreshToken()
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: {
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          ...(refreshToken ? { 'X-Refresh-Token': `Bearer ${refreshToken}` } : {}),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refreshToken }),
-      })
-    } catch (error) {
-      // Continue with logout even if API call fails
-    }
+  const handleTimeout = useCallback(() => {
+    if (didExpireRef.current) return
+    didExpireRef.current = true
 
-    clearTokens()
+    expireCurrentWindowSession()
     setShowWarning(false)
     router.push('/login?sessionExpired=true')
   }, [router])
@@ -54,7 +42,7 @@ export default function SessionMonitor() {
       const timeUntilLogout = INACTIVITY_TIMEOUT - timeSinceActivity
 
       if (timeUntilLogout <= 0) {
-        handleLogout()
+        handleTimeout()
       } else if (timeUntilLogout <= 2 * 60 * 1000) {
         setShowWarning(true)
         setTimeRemaining(Math.ceil(timeUntilLogout / 1000))
@@ -69,7 +57,7 @@ export default function SessionMonitor() {
       })
       clearInterval(inactivityTimer)
     }
-  }, [handleLogout])
+  }, [handleTimeout])
 
   if (!showWarning) {
     return null

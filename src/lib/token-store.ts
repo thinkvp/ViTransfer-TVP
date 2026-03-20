@@ -3,12 +3,35 @@ let cachedRefreshToken: string | null = null
 
 const REFRESH_TOKEN_KEY = 'vitransfer_refresh_token'
 const REMEMBER_DEVICE_KEY = 'vitransfer_remember_device'
+const LOCAL_SESSION_TIMEOUT_KEY = 'vitransfer_local_session_timed_out'
 const TOKEN_CHANNEL_NAME = 'vitransfer_auth_tokens'
 
 type TokenChangeListener = (tokens: { accessToken: string | null; refreshToken: string | null }) => void
 const listeners = new Set<TokenChangeListener>()
 let tokenChannel: BroadcastChannel | null = null
 let tokenChannelInitialized = false
+
+function isCurrentWindowSessionTimedOutUnsafe(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.sessionStorage.getItem(LOCAL_SESSION_TIMEOUT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function setCurrentWindowSessionTimedOutFlag(timedOut: boolean) {
+  if (typeof window === 'undefined') return
+  try {
+    if (timedOut) {
+      window.sessionStorage.setItem(LOCAL_SESSION_TIMEOUT_KEY, '1')
+    } else {
+      window.sessionStorage.removeItem(LOCAL_SESSION_TIMEOUT_KEY)
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 /**
  * Persist a refresh token received from another window (via BroadcastChannel / storage event)
@@ -173,11 +196,13 @@ export function setRememberDeviceEnabled(enabled: boolean) {
 
 export function getAccessToken(): string | null {
   ensureTokenChannel()
+  if (isCurrentWindowSessionTimedOutUnsafe()) return null
   return inMemoryAccessToken
 }
 
 export function getRefreshToken(): string | null {
   ensureTokenChannel()
+  if (isCurrentWindowSessionTimedOutUnsafe()) return null
   // Trust in-memory cache first — it's kept fresh by BroadcastChannel and
   // storage event listeners. Fall back to storage only on first load (cold start).
   if (cachedRefreshToken) return cachedRefreshToken
@@ -185,6 +210,7 @@ export function getRefreshToken(): string | null {
 }
 
 export function setTokens(tokens: { accessToken: string; refreshToken: string }) {
+  setCurrentWindowSessionTimedOutFlag(false)
   inMemoryAccessToken = tokens.accessToken
   cachedRefreshToken = tokens.refreshToken
 
@@ -223,6 +249,7 @@ export function updateAccessToken(accessToken: string) {
 }
 
 export function clearTokens() {
+  setCurrentWindowSessionTimedOutFlag(false)
   inMemoryAccessToken = null
   cachedRefreshToken = null
 
@@ -237,6 +264,25 @@ export function clearTokens() {
 
   notifyListeners()
   broadcastTokens({ type: 'clear' })
+}
+
+export function expireCurrentWindowSession() {
+  setCurrentWindowSessionTimedOutFlag(true)
+  inMemoryAccessToken = null
+
+  if (typeof window !== 'undefined') {
+    try {
+      window.sessionStorage.removeItem(REFRESH_TOKEN_KEY)
+    } catch {
+      // ignore
+    }
+  }
+
+  notifyListeners()
+}
+
+export function isCurrentWindowSessionTimedOut(): boolean {
+  return isCurrentWindowSessionTimedOutUnsafe()
 }
 
 export function subscribe(listener: TokenChangeListener): () => void {

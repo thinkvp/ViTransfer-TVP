@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play, ArrowUpDown, Images } from 'lucide-react'
+import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play, ArrowUpDown, Images, Cloud } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
@@ -61,6 +61,7 @@ interface DownloadActivity {
   averageMbps?: number | null
   bytesTransferred?: number | null
   durationMs?: number | null
+  fromDropbox?: boolean
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   ipAddress: string | null
@@ -72,6 +73,7 @@ interface AlbumDownloadActivity {
   type: 'ALBUM_DOWNLOAD'
   albumName: string
   variant: string | null
+  fromDropbox?: boolean
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   ipAddress: string | null
@@ -693,6 +695,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                         {pagedActivity.map((event) => {
                         const hasDetails = hasExpandableDetails(event)
                         const mainText = getMainText(event)
+                        const showDropboxCloud = (event.type === 'DOWNLOAD' || event.type === 'ALBUM_DOWNLOAD')
+                          && !!(event as DownloadActivity | AlbumDownloadActivity).fromDropbox
                         const metaValue = getEventMetaValue(event)
                         const showMeta = metaValue !== '—'
                         const metaLabel = isIpAddress(metaValue) ? 'IP' : 'By'
@@ -870,10 +874,17 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                 <div className="sm:hidden text-right text-xs text-muted-foreground whitespace-nowrap tabular-nums">
                                   {formatDateTime(event.createdAt)}
                                 </div>
-                                <TruncatedText
-                                  text={mainText}
-                                  className="hidden sm:block text-muted-foreground text-sm whitespace-normal break-words"
-                                />
+                                <span className="hidden sm:inline-flex items-center gap-1">
+                                  <TruncatedText
+                                    text={mainText}
+                                    className="text-muted-foreground text-sm whitespace-normal break-words"
+                                  />
+                                  {showDropboxCloud && (
+                                    <span title="Served from Dropbox" aria-label="Served from Dropbox">
+                                      <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
+                                    </span>
+                                  )}
+                                </span>
                               </td>
                               <td className="py-2 px-3 align-middle text-xs text-muted-foreground whitespace-nowrap tabular-nums hidden sm:table-cell">
                                 {metaValue}
@@ -896,7 +907,11 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     <div className="space-y-2">
                                       <div className="grid grid-cols-[80px_1fr] items-start gap-2">
                                         <span className="text-xs font-semibold text-foreground">Description</span>
-                                        <span className="text-sm text-muted-foreground break-words">{mainText}</span>
+                                        <span className="text-sm text-muted-foreground break-words">{mainText}{showDropboxCloud && (
+                                          <span title="Served from Dropbox" aria-label="Served from Dropbox">
+                                            <Cloud className="inline w-3 h-3 ml-1 flex-shrink-0 text-sky-500" aria-hidden="true" />
+                                          </span>
+                                        )}</span>
                                       </div>
                                       {showMeta && (
                                         <div className="grid grid-cols-[80px_1fr] items-start gap-2">
@@ -916,7 +931,11 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                   <div className="space-y-2">
                                     <div className="grid grid-cols-[80px_1fr] items-start gap-2">
                                       <span className="text-xs font-semibold text-foreground">Description</span>
-                                      <span className="text-sm text-muted-foreground break-words">{mainText}</span>
+                                      <span className="text-sm text-muted-foreground break-words">{mainText}{showDropboxCloud && (
+                                        <span title="Served from Dropbox" aria-label="Served from Dropbox">
+                                          <Cloud className="inline w-3 h-3 ml-1 flex-shrink-0 text-sky-500" aria-hidden="true" />
+                                        </span>
+                                      )}</span>
                                     </div>
                                     {showMeta && (
                                       <div className="grid grid-cols-[80px_1fr] items-start gap-2">

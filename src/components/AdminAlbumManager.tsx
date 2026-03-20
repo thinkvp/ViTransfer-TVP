@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Cloud, Loader2, Layers } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Cloud, Loader2, Layers, XCircle } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -567,6 +567,24 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
+                {album.status === 'ERROR' && (
+                  <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
+                    FAILED
+                  </span>
+                )}
+                {album.status !== 'ERROR' && (() => {
+                  const dbx = zipStatusByAlbumId[album.id]?.dropbox
+                  const hasDropboxError = dbx?.fullError || dbx?.socialError
+                  if (hasDropboxError) {
+                    return (
+                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
+                        <XCircle className="w-3 h-3" />
+                        UPLOAD FAILED
+                      </span>
+                    )
+                  }
+                  return null
+                })()}
                 {(album.status === 'UPLOADING' || album.status === 'PROCESSING') && Number(count) > 0 && (
                   <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-primary-visible text-primary border-2 border-primary-visible">
                     <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
@@ -642,6 +660,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                           const dbx = zipStatusByAlbumId[album.id]?.dropbox
                           const isUploading = dbx?.fullStatus === 'PENDING' || dbx?.fullStatus === 'UPLOADING' ||
                             dbx?.socialStatus === 'PENDING' || dbx?.socialStatus === 'UPLOADING'
+                          const hasDropboxError = dbx?.fullStatus === 'ERROR' || dbx?.socialStatus === 'ERROR'
                           const isProcessing = album.status === 'PROCESSING' || album.status === 'UPLOADING'
                           const spinning = isUploading || (dbx?.enabled && isProcessing)
 
@@ -652,22 +671,28 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                               size="icon"
                               className={cn(
                                 'h-8 w-8',
-                                dbx?.enabled
-                                  ? 'text-primary hover:text-primary/80 hover:bg-primary/5'
-                                  : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
+                                hasDropboxError
+                                  ? 'text-destructive hover:text-destructive hover:bg-destructive-visible'
+                                  : dbx?.enabled
+                                    ? 'text-primary hover:text-primary/80 hover:bg-primary/5'
+                                    : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
                               )}
                               disabled={togglingDropboxAlbumId === album.id}
                               onClick={() => handleToggleDropbox(album.id, dbx?.enabled || false)}
                               title={
-                                dbx?.enabled
-                                  ? isUploading
-                                    ? 'Uploading ZIPs to Dropbox…'
-                                    : 'Remove ZIPs from Dropbox'
-                                  : 'Upload ZIPs to Dropbox'
+                                hasDropboxError
+                                  ? 'Dropbox upload failed'
+                                  : dbx?.enabled
+                                    ? isUploading
+                                      ? 'Uploading ZIPs to Dropbox…'
+                                      : 'Remove ZIPs from Dropbox'
+                                    : 'Upload ZIPs to Dropbox'
                               }
                             >
                               {togglingDropboxAlbumId === album.id ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : hasDropboxError ? (
+                                <XCircle className="w-4 h-4" />
                               ) : spinning ? (
                                 <span className="relative inline-flex h-4 w-4">
                                   <span className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />

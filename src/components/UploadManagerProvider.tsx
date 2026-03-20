@@ -92,6 +92,16 @@ export type CompletedServerJob = {
   sublabel: string
   projectId: string
   completedAt: number
+  /** True when the job finished with an error (not a successful completion). */
+  error?: boolean
+}
+
+function getCompletedServerJobKey(job: Pick<CompletedServerJob, 'id' | 'type'>): string {
+  return `${job.type}:${job.id}`
+}
+
+function getCompletedServerJobKeyByParts(type: CompletedServerJob['type'], id: string): string {
+  return `${type}:${id}`
 }
 
 export type StartUploadConfig = {
@@ -425,7 +435,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
             // Detect jobs that disappeared (completed)
             for (const prevId of prevProcessingIdsRef.current) {
-              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('processing', prevId))) {
                 const prev = prevProcessingMapRef.current.get(prevId)
                 if (prev) {
                   newCompleted.push({
@@ -451,7 +461,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             const incomingIds = new Set(incoming.map((j: DropboxUploadJob) => j.id))
 
             for (const prevId of prevDropboxIdsRef.current) {
-              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('dropbox', prevId))) {
                 const prev = prevDropboxMapRef.current.get(prevId)
                 if (prev) {
                   newCompleted.push({
@@ -471,8 +481,22 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             setDropboxJobs(incoming)
           }
 
+          if (Array.isArray(data.completedProcessingJobs) && data.completedProcessingJobs.length > 0) {
+            newCompleted.push(...(data.completedProcessingJobs as CompletedServerJob[]))
+          }
+
           if (Array.isArray(data.completedDropboxJobs) && data.completedDropboxJobs.length > 0) {
             newCompleted.push(...(data.completedDropboxJobs as CompletedServerJob[]))
+          }
+
+          // Errored album ZIP Dropbox uploads from API
+          if (Array.isArray(data.erroredAlbumZipDropboxJobs) && data.erroredAlbumZipDropboxJobs.length > 0) {
+            newCompleted.push(...(data.erroredAlbumZipDropboxJobs as CompletedServerJob[]))
+          }
+
+          // Errored video processing jobs from API
+          if (Array.isArray(data.erroredProcessingJobs) && data.erroredProcessingJobs.length > 0) {
+            newCompleted.push(...(data.erroredProcessingJobs as CompletedServerJob[]))
           }
 
           // --- Album ZIP jobs ---
@@ -481,7 +505,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             const incomingIds = new Set(incoming.map((j: AlbumZipJob) => j.id))
 
             for (const prevId of prevAlbumZipIdsRef.current) {
-              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('albumZip', prevId))) {
                 const prev = prevAlbumZipMapRef.current.get(prevId)
                 if (prev) {
                   const variantLabel = prev.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
@@ -508,7 +532,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             const incomingIds = new Set(incoming.map((j: AlbumZipDropboxJob) => j.id))
 
             for (const prevId of prevAlbumZipDropboxIdsRef.current) {
-              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(prevId)) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('albumZipDropbox', prevId))) {
                 const prev = prevAlbumZipDropboxMapRef.current.get(prevId)
                 if (prev) {
                   const variantLabel = prev.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
@@ -529,31 +553,34 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             setAlbumZipDropboxJobs(incoming)
           }
 
-          // Merge new completions and purge stale (>30 min)
+          // Merge new completions and purge stale (>30 min, but keep errors)
           if (newCompleted.length > 0) {
             setCompletedServerJobs((prev) => {
               const merged = new Map<string, CompletedServerJob>()
 
               for (const job of prev) {
-                if (now - job.completedAt < 1_800_000) {
-                  merged.set(job.id, job)
+                // Keep error jobs indefinitely; only auto-purge successful completions after 30 min
+                if (job.error || now - job.completedAt < 1_800_000) {
+                  merged.set(getCompletedServerJobKey(job), job)
                 }
               }
 
               for (const job of newCompleted) {
-                if (dismissedServerJobIdsRef.current.has(job.id)) continue
-                const existing = merged.get(job.id)
-                if (!existing || existing.completedAt < job.completedAt) {
-                  merged.set(job.id, job)
+                const jobKey = getCompletedServerJobKey(job)
+                if (dismissedServerJobIdsRef.current.has(jobKey)) continue
+                const existing = merged.get(jobKey)
+                // Prefer entries with error info from the API over disappearance-detected ones
+                if (!existing || existing.completedAt < job.completedAt || (job.error && !existing.error)) {
+                  merged.set(jobKey, job)
                 }
               }
 
               return Array.from(merged.values()).sort((a, b) => b.completedAt - a.completedAt)
             })
           } else {
-            // Purge stale entries even when no new completions
+            // Purge stale entries even when no new completions (keep errors)
             setCompletedServerJobs((prev) => {
-              const filtered = prev.filter((j) => now - j.completedAt < 1_800_000)
+              const filtered = prev.filter((j) => j.error || now - j.completedAt < 1_800_000)
               return filtered.length !== prev.length ? filtered : prev
             })
           }
@@ -710,9 +737,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   )
 
   const dismissCompletedJob = useCallback(
-    (id: string) => {
-      dismissedServerJobIdsRef.current.add(id)
-      setCompletedServerJobs((prev) => prev.filter((j) => j.id !== id))
+    (jobKey: string) => {
+      dismissedServerJobIdsRef.current.add(jobKey)
+      setCompletedServerJobs((prev) => prev.filter((j) => getCompletedServerJobKey(j) !== jobKey))
     },
     [],
   )

@@ -226,7 +226,7 @@ export async function GET(request: NextRequest) {
 
     const recentDropboxCompletionCutoff = new Date(Date.now() - 30 * 60 * 1000)
 
-    const [completedDropboxVideos, completedDropboxAssets] = await Promise.all([
+    const [completedDropboxVideos, completedDropboxAssets, erroredDropboxVideos, erroredDropboxAssets, completedProcessingVideos] = await Promise.all([
       prisma.video.findMany({
         where: {
           dropboxUploadStatus: 'COMPLETE',
@@ -273,6 +273,75 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { updatedAt: 'desc' },
       }),
+      // Errored Dropbox video uploads (no time cutoff — persist until resolved)
+      prisma.video.findMany({
+        where: {
+          dropboxUploadStatus: 'ERROR',
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin
+              ? {}
+              : { assignedUsers: { some: { userId: authResult.id } } }),
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          projectId: true,
+          updatedAt: true,
+          project: { select: { title: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      // Errored Dropbox asset uploads (no time cutoff — persist until resolved)
+      prisma.videoAsset.findMany({
+        where: {
+          dropboxUploadStatus: 'ERROR',
+          video: {
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin
+                ? {}
+                : { assignedUsers: { some: { userId: authResult.id } } }),
+            },
+          },
+        },
+        select: {
+          id: true,
+          fileName: true,
+          updatedAt: true,
+          video: {
+            select: {
+              projectId: true,
+              project: { select: { title: true } },
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      prisma.video.findMany({
+        where: {
+          status: 'READY',
+          processingPhase: null,
+          processingProgress: 100,
+          updatedAt: { gte: recentDropboxCompletionCutoff },
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin
+              ? {}
+              : { assignedUsers: { some: { userId: authResult.id } } }),
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          versionLabel: true,
+          projectId: true,
+          updatedAt: true,
+          project: { select: { title: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
     ])
 
     const completedDropboxJobs = [
@@ -292,7 +361,35 @@ export async function GET(request: NextRequest) {
         projectId: asset.video.projectId,
         completedAt: asset.updatedAt.getTime(),
       })),
+      // Errored uploads — included as completed entries with error flag
+      ...erroredDropboxVideos.map((video) => ({
+        id: video.id,
+        type: 'dropbox' as const,
+        label: video.name,
+        sublabel: video.project.title,
+        projectId: video.projectId,
+        completedAt: video.updatedAt.getTime(),
+        error: true,
+      })),
+      ...erroredDropboxAssets.map((asset) => ({
+        id: asset.id,
+        type: 'dropbox' as const,
+        label: asset.fileName,
+        sublabel: asset.video.project.title,
+        projectId: asset.video.projectId,
+        completedAt: asset.updatedAt.getTime(),
+        error: true,
+      })),
     ]
+
+    const completedProcessingJobs = completedProcessingVideos.map((video) => ({
+      id: video.id,
+      type: 'processing' as const,
+      label: video.name + (video.versionLabel ? ` ${video.versionLabel}` : ''),
+      sublabel: video.project.title,
+      projectId: video.projectId,
+      completedAt: video.updatedAt.getTime(),
+    }))
 
     // -----------------------------------------------------------------------
     // Album ZIP generation jobs (queried from BullMQ)
@@ -450,12 +547,113 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // -----------------------------------------------------------------------
+    // Errored album ZIP Dropbox uploads (persist until resolved)
+    // -----------------------------------------------------------------------
+    const erroredAlbumZipDropboxAlbums = await prisma.album.findMany({
+      where: {
+        OR: [
+          { fullZipDropboxStatus: 'ERROR' },
+          { socialZipDropboxStatus: 'ERROR' },
+        ],
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin
+            ? {}
+            : { assignedUsers: { some: { userId: authResult.id } } }),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        projectId: true,
+        fullZipDropboxStatus: true,
+        socialZipDropboxStatus: true,
+        updatedAt: true,
+        project: { select: { title: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+
+    const erroredAlbumZipDropboxJobs: Array<{
+      id: string
+      type: 'albumZipDropbox'
+      label: string
+      sublabel: string
+      projectId: string
+      completedAt: number
+      error: boolean
+    }> = []
+
+    for (const a of erroredAlbumZipDropboxAlbums) {
+      if (a.fullZipDropboxStatus === 'ERROR') {
+        erroredAlbumZipDropboxJobs.push({
+          id: `${a.id}:full:dropbox`,
+          type: 'albumZipDropbox',
+          label: a.name,
+          sublabel: `${a.project.title} · Full Res ZIP`,
+          projectId: a.projectId,
+          completedAt: a.updatedAt.getTime(),
+          error: true,
+        })
+      }
+      if (a.socialZipDropboxStatus === 'ERROR') {
+        erroredAlbumZipDropboxJobs.push({
+          id: `${a.id}:social:dropbox`,
+          type: 'albumZipDropbox',
+          label: a.name,
+          sublabel: `${a.project.title} · Social Sized ZIP`,
+          projectId: a.projectId,
+          completedAt: a.updatedAt.getTime(),
+          error: true,
+        })
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Errored video processing jobs (persist until resolved/deleted)
+    // -----------------------------------------------------------------------
+    const erroredProcessingVideos = await prisma.video.findMany({
+      where: {
+        status: 'ERROR',
+        updatedAt: { gte: recentDropboxCompletionCutoff },
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin
+            ? {}
+            : { assignedUsers: { some: { userId: authResult.id } } }),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        versionLabel: true,
+        projectId: true,
+        updatedAt: true,
+        project: { select: { title: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+
+    const erroredProcessingJobs = erroredProcessingVideos.map((video) => ({
+      id: video.id,
+      type: 'processing' as const,
+      label: video.name + (video.versionLabel ? ` ${video.versionLabel}` : ''),
+      sublabel: video.project.title,
+      projectId: video.projectId,
+      completedAt: video.updatedAt.getTime(),
+      error: true,
+    }))
+
     return NextResponse.json({
       jobs,
       dropboxJobs: [...dropboxJobs, ...assetDropboxJobs],
+      completedProcessingJobs,
       completedDropboxJobs,
+      erroredProcessingJobs,
       albumZipJobs,
       albumZipDropboxJobs,
+      erroredAlbumZipDropboxJobs,
     })
   } catch (err: any) {
     console.error('[running-jobs]', err)

@@ -94,6 +94,7 @@ export async function GET(
               variant,
               sessionId: tokenData.sessionId,
               ipAddress: getClientIpAddress(request) || undefined,
+              details: { source: 'Dropbox' },
             },
           }).catch(() => {})
         }

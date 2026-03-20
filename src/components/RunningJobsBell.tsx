@@ -371,8 +371,17 @@ function CompletedServerJobRow({
   onNavigate: (projectId: string) => void
   onDismiss: (id: string) => void
 }) {
-  const typeLabel =
-    job.type === 'processing'
+  const isError = !!job.error
+
+  const typeLabel = isError
+    ? job.type === 'processing'
+      ? 'Processing failed'
+      : job.type === 'dropbox'
+        ? 'Dropbox upload failed'
+        : job.type === 'albumZip'
+          ? 'ZIP build failed'
+          : 'Album Dropbox upload failed'
+    : job.type === 'processing'
       ? 'Processing complete'
       : job.type === 'dropbox'
         ? 'Dropbox upload complete'
@@ -401,7 +410,7 @@ function CompletedServerJobRow({
         <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            onClick={() => onDismiss(job.id)}
+            onClick={() => onDismiss(`${job.type}:${job.id}`)}
             className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
             title="Dismiss"
           >
@@ -409,10 +418,17 @@ function CompletedServerJobRow({
           </button>
         </div>
       </div>
-      <div className="flex items-center gap-1.5 text-[11px] text-success">
-        <CheckCircle2 className="w-3.5 h-3.5" />
-        {typeLabel}
-      </div>
+      {isError ? (
+        <div className="flex items-center gap-1.5 text-[11px] text-destructive">
+          <XCircle className="w-3.5 h-3.5" />
+          {typeLabel}
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 text-[11px] text-success">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          {typeLabel}
+        </div>
+      )}
     </div>
   )
 }

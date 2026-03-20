@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import {
-	PINNED_SYSTEM_NOTIFICATION_TYPES,
 	isClearablePinnedNotificationDetails,
 } from '@/lib/dropbox-storage-inconsistency-notification'
 
@@ -32,7 +31,6 @@ export async function DELETE(
 		const notification = await prisma.pushNotificationLog.findFirst({
 			where: {
 				id,
-				type: { in: [...PINNED_SYSTEM_NOTIFICATION_TYPES] },
 			},
 			select: {
 				id: true,

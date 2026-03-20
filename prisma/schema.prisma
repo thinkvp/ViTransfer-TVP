@@ -1580,6 +1580,9 @@ model AlbumAnalytics {
   // Optional: full or social variants for album/photo downloads
   variant String?
 
+  // Additional context, e.g. { source: 'Dropbox' } for Dropbox-served downloads
+  details Json?
+
   ipAddress String?
   sessionId String?
   createdAt DateTime @default(now())
