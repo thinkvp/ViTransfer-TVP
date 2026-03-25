@@ -6,6 +6,7 @@ import { deleteFile, uploadFile } from '@/lib/storage'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import type { Prisma } from '@prisma/client'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { invalidateSettingsCaches } from '@/lib/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -102,6 +103,8 @@ export async function POST(request: NextRequest) {
       update: updateData,
       create: createData,
     })
+
+    invalidateSettingsCaches()
 
     const response = NextResponse.json({ success: true, companyFaviconPath: storagePath })
     response.headers.set('Cache-Control', 'no-store')

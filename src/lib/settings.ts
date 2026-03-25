@@ -20,6 +20,21 @@ const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0
 const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
 const cachedAutoApproveProject: CachedValue<boolean> = { value: true, expiresAt: 0 }
 const cachedExcludeInternalIpsFromAnalytics: CachedValue<boolean> = { value: true, expiresAt: 0 }
+type BrandingSettingsSnapshot = {
+  companyName: string | null
+  companyFaviconMode: string | null
+  companyFaviconPath: string | null
+  companyFaviconUrl: string | null
+  updatedAt: Date | null
+  accentColor: string | null
+  accentTextMode: string | null
+  defaultTheme: string | null
+  allowThemeToggle: boolean | null
+}
+const cachedBrandingSettings: CachedValue<BrandingSettingsSnapshot | null> = {
+  value: null,
+  expiresAt: 0,
+}
 const cachedTransferTuning: CachedValue<{ uploadChunkSizeMB: number; downloadChunkSizeMB: number }> = {
   value: {
     uploadChunkSizeMB: DEFAULT_UPLOAD_CHUNK_SIZE_MB,
@@ -53,7 +68,40 @@ export function invalidateSettingsCaches() {
   cachedSmtpConfigured.expiresAt = 0
   cachedAutoApproveProject.expiresAt = 0
   cachedExcludeInternalIpsFromAnalytics.expiresAt = 0
+  cachedBrandingSettings.expiresAt = 0
   cachedTransferTuning.expiresAt = 0
+}
+
+export async function getBrandingSettingsSnapshot(): Promise<BrandingSettingsSnapshot | null> {
+  const now = Date.now()
+  if (cachedBrandingSettings.expiresAt > now) {
+    return cachedBrandingSettings.value
+  }
+
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: {
+        companyName: true,
+        companyFaviconMode: true,
+        companyFaviconPath: true,
+        companyFaviconUrl: true,
+        updatedAt: true,
+        accentColor: true,
+        accentTextMode: true,
+        defaultTheme: true,
+        allowThemeToggle: true,
+      },
+    })
+
+    cachedBrandingSettings.value = settings
+    cachedBrandingSettings.expiresAt = now + SETTINGS_CACHE_TTL_MS
+
+    return settings
+  } catch (error) {
+    console.error('Error fetching branding settings snapshot:', error)
+    return cachedBrandingSettings.value
+  }
 }
 
 /**
@@ -62,10 +110,7 @@ export function invalidateSettingsCaches() {
  */
 export async function getCompanyName(): Promise<string> {
   try {
-    const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
-      select: { companyName: true },
-    })
+    const settings = await getBrandingSettingsSnapshot()
 
     return settings?.companyName || 'Studio'
   } catch (error) {

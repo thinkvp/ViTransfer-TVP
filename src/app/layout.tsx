@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import { prisma } from '@/lib/db'
+import { getBrandingSettingsSnapshot } from '@/lib/settings'
 import { unstable_noStore as noStore } from 'next/cache'
 
 // Force Node.js runtime across the app to allow use of Node APIs (e.g., crypto).
@@ -62,18 +62,7 @@ function buildAccentOverrideCss(hex: string, textMode?: string | null): string |
 export async function generateMetadata(): Promise<Metadata> {
   noStore()
 
-  const settings = await prisma.settings
-    .findUnique({
-      where: { id: 'default' },
-      select: {
-        companyName: true,
-        companyFaviconMode: true,
-        companyFaviconPath: true,
-        companyFaviconUrl: true,
-        updatedAt: true,
-      },
-    })
-    .catch(() => null)
+  const settings = await getBrandingSettingsSnapshot()
 
   const companyName = typeof settings?.companyName === 'string' ? settings.companyName.trim() : ''
   const siteName = companyName || 'Portal'
@@ -112,12 +101,7 @@ export default async function RootLayout({
   noStore()
 
   // Read accent colour and theme settings from database.
-  const brandingSettings = await prisma.settings
-    .findUnique({
-      where: { id: 'default' },
-      select: { accentColor: true, accentTextMode: true, defaultTheme: true, allowThemeToggle: true },
-    })
-    .catch(() => null)
+  const brandingSettings = await getBrandingSettingsSnapshot()
 
   const accentCss = brandingSettings?.accentColor
     ? buildAccentOverrideCss(brandingSettings.accentColor, brandingSettings.accentTextMode)

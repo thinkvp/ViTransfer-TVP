@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
-import { invalidateEmailSettingsCache, isSmtpConfigured } from '@/lib/email'
+import { invalidateEmailSettingsCache } from '@/lib/email'
 import { invalidateSettingsCaches } from '@/lib/settings'
 import {
   MAX_DOWNLOAD_CHUNK_SIZE_MB,
@@ -40,33 +40,49 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   try {
-    // Get or create the default settings
-    let settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
-    })
+    // Get or create the default settings records.
+    let [settings, securitySettings] = await Promise.all([
+      prisma.settings.findUnique({
+        where: { id: 'default' },
+      }),
+      prisma.securitySettings.findUnique({
+        where: { id: 'default' },
+      }),
+    ])
+
+    const createMissingRecords: Array<Promise<void>> = []
 
     if (!settings) {
-      // Create default settings if they don't exist
-      settings = await prisma.settings.create({
-        data: {
-          id: 'default',
-        },
-      })
+      createMissingRecords.push(
+        prisma.settings.create({
+          data: {
+            id: 'default',
+          },
+        }).then((created) => {
+          settings = created
+        })
+      )
     }
-
-    // Get security settings
-    let securitySettings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
-    })
 
     if (!securitySettings) {
-      // Create default security settings if they don't exist
-      securitySettings = await prisma.securitySettings.create({
-        data: {
-          id: 'default',
-        },
-      })
+      createMissingRecords.push(
+        prisma.securitySettings.create({
+          data: {
+            id: 'default',
+          },
+        }).then((created) => {
+          securitySettings = created
+        })
+      )
     }
+
+    if (createMissingRecords.length > 0) {
+      await Promise.all(createMissingRecords)
+    }
+
+    // After the create-if-missing block, both records are guaranteed to exist.
+    settings = settings!
+    securitySettings = securitySettings!
 
     // Decrypt sensitive fields before sending to admin
     const decryptedSettings = {
@@ -74,8 +90,12 @@ export async function GET(request: NextRequest) {
       smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
     }
 
-    // Check SMTP configuration status (reuse centralized helper)
-    const smtpConfigured = await isSmtpConfigured()
+    const smtpConfigured = !!(
+      settings.smtpServer &&
+      settings.smtpPort &&
+      settings.smtpUsername &&
+      settings.smtpPassword
+    )
 
     // Dropbox storage status (env-var driven, read-only)
     const dropboxConfigured = Boolean(

@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile, uploadFile } from '@/lib/storage'
 import { invalidateEmailSettingsCache } from '@/lib/email'
+import { invalidateSettingsCaches } from '@/lib/settings'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import type { Prisma } from '@prisma/client'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
     })
 
     invalidateEmailSettingsCache()
+    invalidateSettingsCaches()
 
     const response = NextResponse.json({ success: true, companyLogoPath: storagePath })
     response.headers.set('Cache-Control', 'no-store')

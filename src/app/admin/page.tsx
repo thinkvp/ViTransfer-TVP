@@ -11,28 +11,26 @@ export default function AdminIndexPage() {
   useEffect(() => {
     const pickLandingPage = async () => {
       try {
-        const sessionRes = await apiFetch('/api/auth/session')
+        const [sessionRes, settingsRes] = await Promise.all([
+          apiFetch('/api/auth/session'),
+          apiFetch('/api/settings').catch(() => null),
+        ])
+
         if (!sessionRes.ok) {
           router.replace('/login')
           return
         }
 
-        const sessionData = await sessionRes.json()
+        const [sessionData, settingsData] = await Promise.all([
+          sessionRes.json(),
+          settingsRes?.ok ? settingsRes.json() : Promise.resolve(null),
+        ])
+
         const permissions = sessionData?.user?.permissions
           ? normalizeRolePermissions(sessionData.user.permissions)
           : adminAllPermissions()
 
-        // Security link also depends on server settings.
-        let securityEnabled = false
-        try {
-          const settingsRes = await apiFetch('/api/settings')
-          if (settingsRes.ok) {
-            const settingsData = await settingsRes.json()
-            securityEnabled = settingsData?.security?.viewSecurityEvents ?? false
-          }
-        } catch {
-          // ignore
-        }
+        const securityEnabled = settingsData?.security?.viewSecurityEvents ?? false
 
         const candidates = [
           canSeeMenu(permissions, 'projects') ? '/admin/projects' : null,

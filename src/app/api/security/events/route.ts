@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getRedis } from '@/lib/redis'
 export const runtime = 'nodejs'
 
 
@@ -169,6 +170,16 @@ export async function DELETE(request: NextRequest) {
         }
       })
       message = `Deleted ${result.count} events older than ${olderThan} days`
+    }
+
+    // Trim Redis recent events list to remove stale entries
+    // (Redis list is capped at 1000 entries with auto-trim, so clearing
+    // the whole list is acceptable — new events will repopulate it)
+    try {
+      const redis = getRedis()
+      await redis.del('security:events:recent')
+    } catch {
+      // Non-critical — ignore Redis errors during cleanup
     }
 
     const response = NextResponse.json({

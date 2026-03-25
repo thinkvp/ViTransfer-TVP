@@ -108,14 +108,19 @@ export async function resolveCommentAuthor(params: {
 }): Promise<{ authorEmail: string | null; fallbackName: string }> {
   const { projectId, authorEmail, recipientId } = params
 
-  // Get primary recipient for author name fallback
-  const primaryRecipient = await getPrimaryRecipient(projectId)
-
-  // Get project company name
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { companyName: true }
-  })
+  const [primaryRecipient, project, recipient] = await Promise.all([
+    getPrimaryRecipient(projectId),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { companyName: true }
+    }),
+    recipientId
+      ? prisma.projectRecipient.findUnique({
+          where: { id: recipientId },
+          select: { email: true, projectId: true }
+        })
+      : Promise.resolve(null),
+  ])
 
   // Priority: companyName → primary recipient → 'Client'
   const fallbackName = project?.companyName || primaryRecipient?.name || 'Client'
@@ -123,15 +128,8 @@ export async function resolveCommentAuthor(params: {
   // If recipientId provided, use that recipient's email
   let finalAuthorEmail = authorEmail || null
 
-  if (recipientId) {
-    const recipient = await prisma.projectRecipient.findUnique({
-      where: { id: recipientId },
-      select: { email: true, projectId: true }
-    })
-
-    if (recipient && recipient.projectId === projectId) {
-      finalAuthorEmail = recipient.email
-    }
+  if (recipient && recipient.projectId === projectId) {
+    finalAuthorEmail = recipient.email
   }
 
   return { authorEmail: finalAuthorEmail, fallbackName }
@@ -229,35 +227,34 @@ export async function handleCommentNotifications(params: {
       return
     }
 
-    // Get project with notification schedule
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        clientNotificationSchedule: true,
-      }
-    })
+    const [project, video, settings] = await Promise.all([
+      prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          clientNotificationSchedule: true,
+        }
+      }),
+      videoId
+        ? prisma.video.findUnique({
+            where: { id: videoId },
+            select: { name: true, versionLabel: true }
+          })
+        : Promise.resolve(null),
+      prisma.settings.findUnique({
+        where: { id: 'default' },
+        select: { adminNotificationSchedule: true }
+      }),
+    ])
 
     if (!project) {
       console.log('[COMMENT-NOTIFICATION] Project not found')
       return
     }
 
-    // Get video info
-    const video = videoId ? await prisma.video.findUnique({
-      where: { id: videoId },
-      select: { name: true, versionLabel: true }
-    }) : null
-
     console.log('[COMMENT-NOTIFICATION] Video:', video?.name || 'None')
-
-    // Get settings for admin schedule
-    const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
-      select: { adminNotificationSchedule: true }
-    })
 
     // IMPORTANT: author identity is not the same as visibility.
     // Internal users can create share-visible comments (isInternal === false).

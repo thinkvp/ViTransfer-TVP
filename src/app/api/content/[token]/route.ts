@@ -254,29 +254,38 @@ export async function GET(
       return NextResponse.json({ error: 'Access denied' }, { status: 401 })
     }
 
-    // Session-based rate limiting using lightweight INCR to avoid heavy payloads per chunk
-    const sessionCounterKey = `content-session-count:${sessionId}`
-    const sessionCount = await redis.incr(sessionCounterKey)
-    if (sessionCount === 1) {
-      await redis.expire(sessionCounterKey, 60)
-    }
-    const effectiveSessionLimit = isAdminRequest
-      ? securitySettings.sessionRateLimit
-      : securitySettings.shareSessionRateLimit
-    if (sessionCount > effectiveSessionLimit) {
-      await logSecurityEvent({
-        type: 'RATE_LIMIT_HIT',
-        severity: 'INFO',
-        projectId: preliminaryTokenData.projectId,
-        sessionId,
-        ipAddress: getClientIpAddress(request),
-        details: { limit: 'Session-based', window: '1 minute' },
-        wasBlocked: true
-      })
+    // Range requests (video scrubbing/seeking) are normal browser behaviour and are
+    // already guarded by the IP rate limit, hotlink detection, and the per-video
+    // frequency counter in detectHotlinking (>3000 req / 5 min). Only count
+    // non-range requests (initial video loads, downloads, thumbnails) against the
+    // session budget so that scrubbing never triggers a 429.
+    const rangeHeader = request.headers.get('range')
+    const isRangeRequest = !!rangeHeader
 
-      return NextResponse.json({
-        error: 'Video streaming rate limit exceeded. Please wait a moment.'
-      }, { status: 429, headers: { 'Retry-After': '60' } })
+    if (!isRangeRequest) {
+      const sessionCounterKey = `content-session-count:${sessionId}`
+      const sessionCount = await redis.incr(sessionCounterKey)
+      if (sessionCount === 1) {
+        await redis.expire(sessionCounterKey, 60)
+      }
+      const effectiveSessionLimit = isAdminRequest
+        ? securitySettings.sessionRateLimit
+        : securitySettings.shareSessionRateLimit
+      if (sessionCount > effectiveSessionLimit) {
+        await logSecurityEvent({
+          type: 'RATE_LIMIT_HIT',
+          severity: 'INFO',
+          projectId: preliminaryTokenData.projectId,
+          sessionId,
+          ipAddress: getClientIpAddress(request),
+          details: { limit: 'Session-based', window: '1 minute' },
+          wasBlocked: true
+        })
+
+        return NextResponse.json({
+          error: 'Video streaming rate limit exceeded. Please wait a moment.'
+        }, { status: 429, headers: { 'Retry-After': '60' } })
+      }
     }
 
     const verifiedToken = await verifyVideoAccessToken(token, request, sessionId)

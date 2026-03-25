@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
@@ -313,7 +313,7 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
-function TruncatedText({ text, className }: { text: string; className?: string }) {
+function TruncatedText({ text, className, suffix }: { text: string; className?: string; suffix?: ReactNode }) {
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLSpanElement>(null)
 
@@ -340,6 +340,7 @@ function TruncatedText({ text, className }: { text: string; className?: string }
   return (
     <span ref={textRef} className={className} title={isTruncated ? text : undefined}>
       {text}
+      {suffix}
     </span>
   )
 }
@@ -874,17 +875,19 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                 <div className="sm:hidden text-right text-xs text-muted-foreground whitespace-nowrap tabular-nums">
                                   {formatDateTime(event.createdAt)}
                                 </div>
-                                <span className="hidden sm:inline-flex items-center gap-1">
-                                  <TruncatedText
-                                    text={mainText}
-                                    className="text-muted-foreground text-sm whitespace-normal break-words"
-                                  />
-                                  {showDropboxCloud && (
-                                    <span title="Served from Dropbox" aria-label="Served from Dropbox">
+                                <TruncatedText
+                                  text={mainText}
+                                  className="hidden sm:inline text-muted-foreground text-sm whitespace-normal break-words"
+                                  suffix={showDropboxCloud ? (
+                                    <span
+                                      className="inline-flex items-center whitespace-nowrap align-baseline ml-1"
+                                      title="Served from Dropbox"
+                                      aria-label="Served from Dropbox"
+                                    >
                                       <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
                                     </span>
-                                  )}
-                                </span>
+                                  ) : undefined}
+                                />
                               </td>
                               <td className="py-2 px-3 align-middle text-xs text-muted-foreground whitespace-nowrap tabular-nums hidden sm:table-cell">
                                 {metaValue}
@@ -907,11 +910,19 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     <div className="space-y-2">
                                       <div className="grid grid-cols-[80px_1fr] items-start gap-2">
                                         <span className="text-xs font-semibold text-foreground">Description</span>
-                                        <span className="text-sm text-muted-foreground break-words">{mainText}{showDropboxCloud && (
-                                          <span title="Served from Dropbox" aria-label="Served from Dropbox">
-                                            <Cloud className="inline w-3 h-3 ml-1 flex-shrink-0 text-sky-500" aria-hidden="true" />
-                                          </span>
-                                        )}</span>
+                                        <TruncatedText
+                                          text={mainText}
+                                          className="text-sm text-muted-foreground break-words"
+                                          suffix={showDropboxCloud ? (
+                                            <span
+                                              className="inline-flex items-center whitespace-nowrap align-baseline ml-1"
+                                              title="Served from Dropbox"
+                                              aria-label="Served from Dropbox"
+                                            >
+                                              <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
+                                            </span>
+                                          ) : undefined}
+                                        />
                                       </div>
                                       {showMeta && (
                                         <div className="grid grid-cols-[80px_1fr] items-start gap-2">
@@ -931,11 +942,19 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                   <div className="space-y-2">
                                     <div className="grid grid-cols-[80px_1fr] items-start gap-2">
                                       <span className="text-xs font-semibold text-foreground">Description</span>
-                                      <span className="text-sm text-muted-foreground break-words">{mainText}{showDropboxCloud && (
-                                        <span title="Served from Dropbox" aria-label="Served from Dropbox">
-                                          <Cloud className="inline w-3 h-3 ml-1 flex-shrink-0 text-sky-500" aria-hidden="true" />
-                                        </span>
-                                      )}</span>
+                                      <TruncatedText
+                                        text={mainText}
+                                        className="text-sm text-muted-foreground break-words"
+                                        suffix={showDropboxCloud ? (
+                                          <span
+                                            className="inline-flex items-center whitespace-nowrap align-baseline ml-1"
+                                            title="Served from Dropbox"
+                                            aria-label="Served from Dropbox"
+                                          >
+                                            <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
+                                          </span>
+                                        ) : undefined}
+                                      />
                                     </div>
                                     {showMeta && (
                                       <div className="grid grid-cols-[80px_1fr] items-start gap-2">

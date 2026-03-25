@@ -5,6 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-03-25
+
+### Changed
+- **Branding settings cached in-process** — a new `getBrandingSettingsSnapshot()` helper in `src/lib/settings.ts` reads branding fields once and caches them for the standard settings TTL; `layout.tsx` previously issued two separate `prisma.settings.findUnique()` calls per page render (one for metadata, one for accent/theme), both of which are now served from the shared cache; `getCompanyName()` also reuses the same snapshot; the cache is invalidated when the company logo, dark logo, or favicon is uploaded
+- **Admin landing page parallelizes session and settings fetches** — the `pickLandingPage` effect previously awaited the session check before fetching settings; both requests are now issued concurrently with `Promise.all`, reducing the delay before the redirect to the first permitted menu
+- **Settings API GET fetches settings and security settings in parallel** — previously the two records were fetched sequentially; they are now fetched together with `Promise.all` in a single round-trip
+- **Comment notification helpers batch database reads** — `resolveCommentAuthor` previously issued sequential awaits for primary recipient, project, and recipient lookups; `handleCommentNotifications` did the same for project, video, and settings; all reads within each function are now batched with `Promise.all`
+- **Video streaming session rate limit skips range requests** — byte-range requests (video seeking and scrubbing) are normal browser behaviour already covered by IP rate limiting and hotlink detection; only initial load requests (non-range) are counted against the per-session budget, preventing legitimate scrubbing activity from triggering a 429
+
+### Fixed
+- **Running Jobs panel separates failed and completed entries into distinct sections** — the panel previously grouped all finished activity under a single "Recent" label; failed uploads and failed server-side jobs (processing errors, Dropbox upload failures) now appear together under a red-labelled "Failed" section, while successful uploads and successful server jobs appear under the "Completed" section; this makes it immediately obvious when something went wrong without having to scan a mixed list
+- **Running Jobs completed and failed entries sorted newest-first by finish time** — uploads now record a `completedAt` timestamp when they succeed or error, and both the completed and failed lists are ordered by that timestamp (falling back to `createdAt`); server-side completed jobs follow the same ordering so the most recent activity always appears at the top of each section
+- **Running Jobs server job keys no longer collide across job types** — `CompletedServerJobRow` keys used bare numeric IDs (`done-{id}`), which could collide when a Dropbox job and a processing job happened to share the same database ID; keys now include the job type (`done-{type}-{id}` and `failed-{type}-{id}`), eliminating React reconciliation errors caused by duplicate keys
+- **Deleting security events now invalidates the Redis recent-events cache** — bulk-deleting events from the security dashboard left the `security:events:recent` Redis list intact; the delete endpoint now removes that key after the database purge so the panel immediately reflects the cleared state instead of serving stale cached entries
+- **Deleting a project now cascades to its security events** — the `SecurityEvent` → `Project` relation was `onDelete: SetNull`, which left orphaned event rows when a project was deleted; changed to `onDelete: Cascade` so security events are removed along with the project
+- **Dropbox cloud icon in Project Analytics no longer clips long description text** — the cloud icon was rendered as a sibling element wrapping `TruncatedText`, breaking the truncation width measurement; the icon is now passed as a `suffix` prop so it renders inside the measured span and the text tooltip fires correctly on truncated entries; fixed in both the table row and the expanded detail view
+
 ## [1.2.4] - 2026-03-20
 
 ### Added
