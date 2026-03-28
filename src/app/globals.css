@@ -55,76 +55,76 @@ input.no-picker-icon::-webkit-inner-spin-button {
   /* Light Mode Theme */
   :root {
     /* Base colors - light theme */
-    --background: 220 14% 93%;
-    --foreground: 220 14% 10%;
+    --background: 220 20% 96%;
+    --foreground: 222 20% 8%;
 
-    /* Card colors - elevated surfaces */
-    --card: 220 13% 95%;
-    --card-foreground: 220 14% 10%;
+    /* Card colors - pure white elevated surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 222 20% 8%;
 
     /* Popover colors */
-    --popover: 220 13% 97%;
-    --popover-foreground: 220 14% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 20% 8%;
 
     /* Primary - Blue (#007AFF) */
     --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
-    --primary-visible: 211 100% 92%;
+    --primary-visible: 211 100% 94%;
 
-    /* Secondary - Gray */
-    --secondary: 220 14% 84%;
+    /* Secondary - Light gray */
+    --secondary: 220 16% 91%;
     --secondary-foreground: 220 14% 10%;
 
     /* Muted - subtle backgrounds */
-    --muted: 220 14% 84%;
-    --muted-foreground: 220 10% 38%;
+    --muted: 220 16% 93%;
+    --muted-foreground: 220 12% 44%;
 
-    /* Accent - tint color */
-    --accent: 220 14% 84%;
-    --accent-foreground: 211 100% 45%;
+    /* Accent - subtle blue tint for hover states */
+    --accent: 211 60% 96%;
+    --accent-foreground: 211 100% 42%;
 
     /* Success - Green (#34C759) */
     --success: 145 63% 42%;
     --success-foreground: 0 0% 100%;
-    --success-visible: 145 55% 90%;
+    --success-visible: 145 55% 92%;
 
     /* Warning - Orange (#FF9500) */
     --warning: 33 100% 50%;
     --warning-foreground: 0 0% 10%;
-    --warning-visible: 33 90% 90%;
+    --warning-visible: 33 90% 92%;
 
     /* Pending - Yellow (for Not Started) */
     --pending: 48 100% 38%;
     --pending-foreground: 0 0% 10%;
-    --pending-visible: 48 85% 88%;
+    --pending-visible: 48 85% 90%;
 
     /* Destructive - Red (#FF3B30) */
     --destructive: 4 90% 55%;
     --destructive-foreground: 0 0% 100%;
-    --destructive-visible: 4 80% 92%;
+    --destructive-visible: 4 80% 94%;
 
     /* Info - Light Blue */
     --info: 200 100% 45%;
     --info-foreground: 0 0% 100%;
-    --info-visible: 200 90% 92%;
+    --info-visible: 200 90% 93%;
 
     /* Border and input */
-    --border: 220 14% 78%;
-    --input: 220 14% 78%;
+    --border: 220 15% 91%;
+    --input: 220 15% 87%;
     --ring: 211 100% 50%;
 
     /* Border radius values */
-    --radius: 0.75rem;
+    --radius: 0.875rem;
     --radius-sm: 0.5rem;
-    --radius-lg: 1rem;
+    --radius-lg: 1.25rem;
     --radius-full: 9999px;
 
-    /* Shadow definitions */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.08);
-    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.12), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.12), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.12), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    /* Shadow definitions - soft, refined */
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.07);
+    --shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.09), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.10), 0 2px 6px -2px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.12), 0 6px 12px -4px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0 24px 40px -8px rgba(0, 0, 0, 0.15), 0 10px 20px -6px rgba(0, 0, 0, 0.10);
 
     /* Layout helpers */
     --admin-header-height: 0px;
@@ -132,71 +132,71 @@ input.no-picker-icon::-webkit-inner-spin-button {
 
   /* Dark Mode Theme */
   .dark {
-    /* Base colors - dark theme */
-    --background: 0 0% 7%;
-    --foreground: 0 0% 98%;
+    /* Base colors - dark theme (blue-tinted for depth) */
+    --background: 222 25% 8%;
+    --foreground: 220 15% 95%;
 
-    /* Card colors - elevated dark surfaces */
-    --card: 0 0% 12%;
-    --card-foreground: 0 0% 98%;
+    /* Card colors - elevated blue-tinted surfaces */
+    --card: 222 20% 13%;
+    --card-foreground: 220 15% 95%;
 
     /* Popover colors – elevated surface for dialogs & dropdowns */
-    --popover: 0 0% 15%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 222 20% 16%;
+    --popover-foreground: 220 15% 95%;
 
     /* Primary - Bright Blue (#0A84FF) */
     --primary: 209 100% 60%;
     --primary-foreground: 0 0% 100%;
     --primary-visible: 209 100% 20%;
 
-    /* Secondary - Dark gray */
-    --secondary: 240 4% 20%;
-    --secondary-foreground: 0 0% 98%;
+    /* Secondary - Blue-tinted dark gray */
+    --secondary: 222 16% 19%;
+    --secondary-foreground: 220 15% 95%;
 
-    /* Muted - subtle dark backgrounds */
-    --muted: 240 4% 20%;
-    --muted-foreground: 0 0% 65%;
+    /* Muted - subtle blue-tinted backgrounds */
+    --muted: 222 16% 19%;
+    --muted-foreground: 220 10% 62%;
 
-    /* Accent - elevated surface */
-    --accent: 240 4% 20%;
-    --accent-foreground: 209 100% 60%;
+    /* Accent - elevated blue-tinted surface */
+    --accent: 222 16% 22%;
+    --accent-foreground: 209 100% 65%;
 
     /* Success - Bright Green (#30D158) */
     --success: 145 73% 52%;
     --success-foreground: 0 0% 100%;
-    --success-visible: 145 73% 20%;
+    --success-visible: 145 73% 18%;
 
     /* Warning - Bright Orange (#FF9F0A) */
     --warning: 37 100% 52%;
     --warning-foreground: 0 0% 13%;
-    --warning-visible: 37 100% 20%;
+    --warning-visible: 37 100% 18%;
 
     /* Pending - Yellow (for Not Started) */
     --pending: 48 100% 55%;
     --pending-foreground: 0 0% 13%;
-    --pending-visible: 48 100% 20%;
+    --pending-visible: 48 100% 18%;
 
     /* Destructive - Bright Red (#FF453A) */
     --destructive: 3 100% 61%;
     --destructive-foreground: 0 0% 100%;
-    --destructive-visible: 3 100% 20%;
+    --destructive-visible: 3 100% 18%;
 
     /* Info - Bright Light Blue */
     --info: 200 100% 60%;
     --info-foreground: 0 0% 100%;
-    --info-visible: 200 100% 20%;
+    --info-visible: 200 100% 18%;
 
-    /* Border and input - more visible in dark mode */
-    --border: 240 4% 25%;
-    --input: 240 4% 25%;
+    /* Border and input - blue-tinted, visible in dark mode */
+    --border: 222 14% 24%;
+    --input: 222 14% 24%;
     --ring: 209 100% 60%;
 
-    /* Shadows - adapted for dark mode */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
-    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
+    /* Shadows - deep for dark mode */
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.35);
+    --shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.45), 0 1px 2px -1px rgba(0, 0, 0, 0.40);
+    --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.50);
+    --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.65), 0 6px 12px -4px rgba(0, 0, 0, 0.50);
+    --shadow-xl: 0 24px 40px -8px rgba(0, 0, 0, 0.75), 0 10px 20px -6px rgba(0, 0, 0, 0.60);
   }
 }
 
@@ -207,12 +207,12 @@ input.no-picker-icon::-webkit-inner-spin-button {
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
   }
@@ -222,6 +222,7 @@ input.no-picker-icon::-webkit-inner-spin-button {
   /* Button variants */
   .btn-primary {
     @apply bg-primary text-primary-foreground;
+    background-image: linear-gradient(180deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.88) 100%);
   }
 
   .btn-success {
@@ -247,7 +248,7 @@ input.no-picker-icon::-webkit-inner-spin-button {
 
   /* Elevated card style */
   .card-elevated {
-    @apply bg-card rounded-xl shadow-md border border-border/50;
+    @apply bg-card rounded-xl shadow-elevation border border-border/60;
   }
 
   /* Focus ring style */

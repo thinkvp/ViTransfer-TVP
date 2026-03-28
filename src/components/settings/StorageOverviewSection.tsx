@@ -49,6 +49,7 @@ type ClosedProjectPreviewCleanupResult = {
 interface StorageOverviewSectionProps {
   show: boolean
   setShow: (value: boolean) => void
+  hideCollapse?: boolean
   autoDeletePreviewsOnClose: boolean
   setAutoDeletePreviewsOnClose: (value: boolean) => void
   onRecalculateProjectDataTotals?: () => void
@@ -64,6 +65,7 @@ export function StorageOverviewSection({
   onRecalculateProjectDataTotals,
   recalculateProjectDataTotalsLoading,
   recalculateProjectDataTotalsResult,
+  hideCollapse,
 }: StorageOverviewSectionProps) {
   const [data, setData] = useState<StorageOverview | null>(null)
   const [loading, setLoading] = useState(false)
@@ -169,8 +171,8 @@ export function StorageOverviewSection({
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShow(!show)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShow(!show)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -179,15 +181,15 @@ export function StorageOverviewSection({
               System-wide storage usage and preview management
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-6 border-t pt-4">
           {/* Storage bars */}
           <div className="space-y-4">

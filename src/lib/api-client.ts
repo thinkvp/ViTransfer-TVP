@@ -1,4 +1,4 @@
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './token-store'
+import { clearTokens, getAccessToken, getRefreshToken, isCurrentWindowSessionTimedOut, setTokens } from './token-store'
 
 let isRedirecting = false
 let refreshInFlight: Promise<boolean> | null = null
@@ -26,7 +26,12 @@ export async function apiFetch(
       const isAuthEndpoint = url.includes('/api/auth')
       if (!isSharePage && !isAuthEndpoint && !isRedirecting) {
         if (!getAccessToken() && !getRefreshToken()) {
-          handleSessionExpired()
+          // Don't broadcast a global logout if this window's session was already
+          // locally expired by the inactivity monitor — that would log out every
+          // other active browser window sharing the same origin.
+          if (!isCurrentWindowSessionTimedOut()) {
+            handleSessionExpired()
+          }
         }
       }
     }
@@ -155,7 +160,13 @@ export async function attemptRefresh(): Promise<boolean> {
         if (response.status === 401 || response.status === 403) {
           const latestRefreshToken = getRefreshToken()
           if (!latestRefreshToken || latestRefreshToken === presentedRefreshToken) {
-            clearTokens()
+            // Don't broadcast a global token clear if this window's inactivity
+            // timer already expired the local session — getRefreshToken() returns
+            // null in that state, which would otherwise look identical to a genuine
+            // revocation and wipe every other open window.
+            if (!isCurrentWindowSessionTimedOut()) {
+              clearTokens()
+            }
           }
         }
         return false

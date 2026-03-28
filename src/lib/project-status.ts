@@ -27,23 +27,23 @@ export function projectStatusLabel(status: string): string {
 export function projectStatusBadgeClass(status: string): string {
   switch (status) {
     case 'REVIEWED':
-      return 'bg-emerald-200 text-emerald-800 border border-foreground/20 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-foreground/20'
+      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300'
     case 'APPROVED':
-      return 'bg-success text-success-visible border border-foreground/20 dark:bg-success/20 dark:text-success dark:border-foreground/20'
+      return 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300'
     case 'SHARE_ONLY':
-      return 'bg-info text-info-visible border border-foreground/20 dark:bg-info/20 dark:text-info dark:border-foreground/20'
+      return 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300'
     case 'ON_HOLD':
-      return 'bg-warning text-warning-visible border border-foreground/20 dark:bg-warning/20 dark:text-warning dark:border-foreground/20'
+      return 'bg-warning text-warning-visible dark:bg-warning/20 dark:text-warning'
     case 'IN_REVIEW':
-      return 'bg-blue-600 text-blue-50 border border-foreground/20 dark:bg-blue-500/20 dark:text-blue-300 dark:border-foreground/20'
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300'
     case 'IN_PROGRESS':
-      return 'bg-violet-800 text-violet-100 border border-foreground/20 dark:bg-violet-500/20 dark:text-violet-300 dark:border-foreground/20'
+      return 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300'
     case 'NOT_STARTED':
-      return 'bg-pending text-pending-visible border border-foreground/20 dark:bg-pending/20 dark:text-pending dark:border-foreground/20'
+      return 'bg-pending text-pending-visible dark:bg-pending/20 dark:text-pending'
     case 'CLOSED':
-      return 'bg-muted text-muted-foreground border border-foreground/20 dark:border-foreground/20'
+      return 'bg-muted text-muted-foreground'
     default:
-      return 'bg-muted text-muted-foreground border border-border'
+      return 'bg-muted text-muted-foreground'
   }
 }
 

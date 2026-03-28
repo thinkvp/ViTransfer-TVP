@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus, RefreshCw, T
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { useAuth } from '@/components/AuthProvider'
 import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
-import { formatDate } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
@@ -346,21 +346,28 @@ export default function ProjectsDashboardKeyDates() {
 
   useEffect(() => {
     if (!canSeeSales) return
-    if (salesByMonth[monthKey]) return
 
-    const load = async () => {
+    const prevMK = ymForDateLocal(addMonths(monthCursor, -1))
+    const nextMK = ymForDateLocal(addMonths(monthCursor, 1))
+    const monthsToLoad = [prevMK, monthKey, nextMK].filter((m) => !salesByMonth[m])
+
+    if (monthsToLoad.length === 0) return
+
+    const loadMonth = async (m: string) => {
       try {
-        const result = await apiJson<{ items?: SalesCalendarItemRow[] }>(`/api/admin/sales/calendar?month=${monthKey}`)
+        const result = await apiJson<{ items?: SalesCalendarItemRow[] }>(`/api/admin/sales/calendar?month=${m}`)
         const items = Array.isArray(result?.items) ? result.items : []
-        setSalesByMonth((prev) => ({ ...prev, [monthKey]: items }))
+        setSalesByMonth((prev) => ({ ...prev, [m]: items }))
       } catch {
         // No sales access or temporarily unavailable; treat as no sales calendar entries.
-        setSalesByMonth((prev) => ({ ...prev, [monthKey]: [] }))
+        setSalesByMonth((prev) => ({ ...prev, [m]: [] }))
       }
     }
 
-    void load()
-  }, [canSeeSales, monthKey, salesByMonth])
+    for (const m of monthsToLoad) {
+      void loadMonth(m)
+    }
+  }, [canSeeSales, monthKey, monthCursor, salesByMonth])
 
   const reload = async () => {
     try {
@@ -436,28 +443,35 @@ export default function ProjectsDashboardKeyDates() {
   }, [monthCursor])
 
   const monthCells = useMemo(() => {
-    const firstOfMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1)
+    const year = monthCursor.getFullYear()
+    const month = monthCursor.getMonth()
+    const firstOfMonth = new Date(year, month, 1)
     const startWeekday = firstOfMonth.getDay() // 0 = Sun
-    const daysInMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0).getDate()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-    const cells: Array<{ ymd: string | null; day: number | null }> = []
+    const cells: Array<{ ymd: string; day: number; isCurrentMonth: boolean }> = []
 
-    for (let i = 0; i < startWeekday; i++) {
-      cells.push({ ymd: null, day: null })
+    // Fill leading days from the previous month
+    if (startWeekday > 0) {
+      const prevMonthLastDay = new Date(year, month, 0) // last day of previous month
+      for (let i = startWeekday - 1; i >= 0; i--) {
+        const dt = new Date(prevMonthLastDay.getFullYear(), prevMonthLastDay.getMonth(), prevMonthLastDay.getDate() - i)
+        cells.push({ ymd: ymdForDateLocal(dt), day: dt.getDate(), isCurrentMonth: false })
+      }
     }
 
+    // Fill current month days
     for (let day = 1; day <= daysInMonth; day++) {
-      const dt = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), day)
-      cells.push({ ymd: ymdForDateLocal(dt), day })
+      const dt = new Date(year, month, day)
+      cells.push({ ymd: ymdForDateLocal(dt), day, isCurrentMonth: true })
     }
 
-    while (cells.length % 7 !== 0) {
-      cells.push({ ymd: null, day: null })
-    }
-
-    // Keep a consistent grid height (6 rows)
+    // Fill trailing days from the next month to complete exactly 6 rows (42 cells)
+    let nextDay = 1
     while (cells.length < 42) {
-      cells.push({ ymd: null, day: null })
+      const dt = new Date(year, month + 1, nextDay)
+      cells.push({ ymd: ymdForDateLocal(dt), day: nextDay, isCurrentMonth: false })
+      nextDay++
     }
 
     return cells
@@ -479,7 +493,13 @@ export default function ProjectsDashboardKeyDates() {
     }
 
     if (canSeeSales) {
-      for (const s of salesByMonth[monthKey] || []) {
+      const prevMK = ymForDateLocal(addMonths(monthCursor, -1))
+      const nextMK = ymForDateLocal(addMonths(monthCursor, 1))
+      for (const s of [
+        ...(salesByMonth[prevMK] || []),
+        ...(salesByMonth[monthKey] || []),
+        ...(salesByMonth[nextMK] || []),
+      ]) {
         const list = map.get(s.date) || []
         list.push(s)
         map.set(s.date, list)
@@ -499,7 +519,7 @@ export default function ProjectsDashboardKeyDates() {
     }
 
     return map
-  }, [canSeeSales, data?.keyDates, data?.personalKeyDates, monthKey, salesByMonth])
+  }, [canSeeSales, data?.keyDates, data?.personalKeyDates, monthCursor, monthKey, salesByMonth])
 
   const openPersonalDialog = async () => {
     setPersonalError(null)
@@ -1020,22 +1040,36 @@ export default function ProjectsDashboardKeyDates() {
 
               <div className="grid grid-cols-7 gap-1">
                 {monthCells.map((cell, idx) => {
-                  const isToday = cell.ymd != null && cell.ymd === today
-                  const dayKeyDates = cell.ymd ? keyDatesByYmd.get(cell.ymd) || [] : []
+                  const isToday = cell.ymd === today
+                  const dayKeyDates = keyDatesByYmd.get(cell.ymd) || []
 
                   return (
                     <div
-                      key={`${idx}-${cell.ymd || 'empty'}`}
-                      className={`min-h-[72px] rounded-md border border-border p-1.5 overflow-hidden min-w-0 ${
-                        isToday ? 'bg-primary/5 border-primary/30' : 'bg-background'
-                      }`}
+                      key={`${idx}-${cell.ymd}`}
+                      className={cn(
+                        'min-h-[72px] rounded-md border p-1.5 overflow-hidden min-w-0 transition-colors',
+                        isToday
+                          ? 'bg-primary/5 border-primary/30'
+                          : cell.isCurrentMonth
+                            ? 'bg-card border-border/60'
+                            : 'bg-muted/20 border-border/25'
+                      )}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="text-xs tabular-nums text-muted-foreground">{cell.day || ''}</div>
+                        <div className={cn(
+                          'text-xs tabular-nums',
+                          isToday
+                            ? 'font-semibold text-primary'
+                            : cell.isCurrentMonth
+                              ? 'text-foreground/80'
+                              : 'text-muted-foreground/40'
+                        )}>
+                          {cell.day}
+                        </div>
                       </div>
 
                       {dayKeyDates.length > 0 ? (
-                        <div className="mt-1 flex flex-col gap-1 min-w-0">
+                        <div className={cn('mt-1 flex flex-col gap-1 min-w-0', !cell.isCurrentMonth && 'opacity-40')}>
                           {dayKeyDates.slice(0, 6).map((k) => {
                             if (k.kind === 'project') {
                               const colors = typeColorClasses(k.type)

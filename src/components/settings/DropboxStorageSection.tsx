@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, Cloud, CloudOff } from 'lucide-react'
 interface DropboxStorageSectionProps {
   show: boolean
   setShow: (show: boolean) => void
+  hideCollapse?: boolean
   dropboxConfigured: boolean
   dropboxRootPath: string
 }
@@ -15,12 +16,13 @@ export function DropboxStorageSection({
   setShow,
   dropboxConfigured,
   dropboxRootPath,
+  hideCollapse,
 }: DropboxStorageSectionProps) {
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShow(!show)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShow(!show)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -38,14 +40,14 @@ export function DropboxStorageSection({
                 : 'All files use local storage'}
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
           {dropboxConfigured ? (
             <div className="space-y-3">

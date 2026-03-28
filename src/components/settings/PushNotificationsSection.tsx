@@ -43,6 +43,7 @@ interface PushNotificationsSectionProps {
   setNotifyPasswordResetSuccess: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
+  hideCollapse?: boolean
 }
 
 export function PushNotificationsSection({
@@ -82,12 +83,13 @@ export function PushNotificationsSection({
   setNotifyPasswordResetSuccess,
   show,
   setShow,
+  hideCollapse,
 }: PushNotificationsSectionProps) {
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShow(!show)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShow(!show)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -96,15 +98,15 @@ export function PushNotificationsSection({
               Configure push notifications to Gotify
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
           {/* Enable/Disable Toggle */}
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">

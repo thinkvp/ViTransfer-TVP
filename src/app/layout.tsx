@@ -1,7 +1,14 @@
 import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
 import './globals.css'
 import { getBrandingSettingsSnapshot } from '@/lib/settings'
 import { unstable_noStore as noStore } from 'next/cache'
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+})
 
 // Force Node.js runtime across the app to allow use of Node APIs (e.g., crypto).
 export const runtime = 'nodejs'
@@ -113,7 +120,7 @@ export default async function RootLayout({
   const allowThemeToggle = brandingSettings?.allowThemeToggle ?? true
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={inter.variable}>
       <head>
         {accentCss && (
           <style dangerouslySetInnerHTML={{ __html: accentCss }} />

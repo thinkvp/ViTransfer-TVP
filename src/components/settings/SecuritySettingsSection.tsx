@@ -54,6 +54,7 @@ interface SecuritySettingsSectionProps {
   onAddDomain: (e: React.FormEvent) => void
   onRemoveDomain: (id: string) => void
   blocklistsLoading: boolean
+  hideCollapse?: boolean
 }
 
 export function SecuritySettingsSection({
@@ -105,12 +106,13 @@ export function SecuritySettingsSection({
   onAddDomain,
   onRemoveDomain,
   blocklistsLoading,
+  hideCollapse,
 }: SecuritySettingsSectionProps) {
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShowSecuritySettings(!showSecuritySettings)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShowSecuritySettings(!showSecuritySettings)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -119,15 +121,15 @@ export function SecuritySettingsSection({
               Configure advanced security options
             </CardDescription>
           </div>
-          {showSecuritySettings ? (
+          {!hideCollapse && (showSecuritySettings ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {showSecuritySettings && (
+      {(showSecuritySettings || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
           <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-md">
             <p className="text-sm font-semibold text-warning">

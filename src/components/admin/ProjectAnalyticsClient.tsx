@@ -391,7 +391,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   }, [id, denied])
 
   const activity = useMemo(() => data?.activity ?? [], [data?.activity])
-  const pageSize = 20
+  const pageSize = 50
   const sortedActivity = useMemo(() => {
     const sorted = [...activity].sort((a, b) => {
       let cmp = 0

@@ -295,14 +295,11 @@ export default function SecurityEventsClient() {
 
         {/* Stats Overview */}
         <Card className="mb-4">
-          <CardHeader className="p-3 sm:p-4 pb-2">
-            <CardTitle className="text-sm font-medium">Overview</CardTitle>
-          </CardHeader>
-          <CardContent className="p-3 pt-0 sm:p-4">
+          <CardContent className="p-3 sm:p-4">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                  <Shield className="w-4 h-4 text-primary" />
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                  <Shield className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Events</p>
@@ -311,8 +308,8 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                  <Tag className="w-4 h-4 text-primary" />
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                  <Tag className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Types</p>
@@ -321,8 +318,8 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0 col-span-2 sm:col-span-1">
-                <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                  <XCircle className="w-4 h-4 text-primary" />
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                  <XCircle className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Blocked</p>

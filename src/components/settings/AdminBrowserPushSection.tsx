@@ -33,9 +33,10 @@ type ServerSubscription = {
 interface AdminBrowserPushSectionProps {
   show: boolean
   setShow: (value: boolean) => void
+  hideCollapse?: boolean
 }
 
-export function AdminBrowserPushSection({ show, setShow }: AdminBrowserPushSectionProps) {
+export function AdminBrowserPushSection({ show, setShow, hideCollapse }: AdminBrowserPushSectionProps) {
   const [supported, setSupported] = useState<boolean | null>(null)
   const [allowed, setAllowed] = useState<boolean | null>(null)
 
@@ -284,8 +285,8 @@ export function AdminBrowserPushSection({ show, setShow }: AdminBrowserPushSecti
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShow(!show)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShow(!show)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -294,15 +295,15 @@ export function AdminBrowserPushSection({ show, setShow }: AdminBrowserPushSecti
               {statusSummary} · {registeredSummary}
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
           <div className="text-sm text-muted-foreground">
             Browser push notifications work inside the admin area. All admin users can subscribe their devices and will receive notifications relevant to their access level.

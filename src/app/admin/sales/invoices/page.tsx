@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -41,6 +42,7 @@ type InvoiceRow = {
 }
 
 export default function SalesInvoicesPage() {
+  const router = useRouter()
   const [tick, setTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
@@ -488,9 +490,17 @@ export default function SalesInvoicesPage() {
                       </tr>
                     ) : (
                       visibleInvoices.map((row) => (
-                        <tr key={row.invoice.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
+                        <tr
+                          key={row.invoice.id}
+                          className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
+                          onClick={() => router.push(`/admin/sales/invoices/${row.invoice.id}`)}
+                        >
                           <td className="px-3 py-2 font-medium">
-                            <Link href={`/admin/sales/invoices/${row.invoice.id}`} className="hover:underline">
+                            <Link
+                              href={`/admin/sales/invoices/${row.invoice.id}`}
+                              className="hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {row.invoice.invoiceNumber}
                             </Link>
                           </td>
@@ -502,7 +512,7 @@ export default function SalesInvoicesPage() {
                             </span>
                           </td>
                           <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
-                          <td className="px-3 py-2 text-muted-foreground">
+                          <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.invoice.clientId ? (
                               <Link href={`/admin/clients/${row.invoice.clientId}`} className="hover:underline">
                                 {clientNameById[row.invoice.clientId] ?? row.invoice.clientId}
@@ -511,7 +521,7 @@ export default function SalesInvoicesPage() {
                               '—'
                             )}
                           </td>
-                          <td className="px-3 py-2 text-muted-foreground">
+                          <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.invoice.projectId ? (
                               <Link href={`/admin/projects/${row.invoice.projectId}`} className="hover:underline">
                                 {projectTitleById[row.invoice.projectId] ?? row.invoice.projectId}
@@ -520,7 +530,7 @@ export default function SalesInvoicesPage() {
                               '—'
                             )}
                           </td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-end gap-2">
                               {overdueInvoiceRemindersEnabled ? (
                                 <SalesRemindersBellButton

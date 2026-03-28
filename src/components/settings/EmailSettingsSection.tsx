@@ -45,6 +45,7 @@ interface EmailSettingsSectionProps {
   // Collapsible state
   show: boolean
   setShow: (value: boolean) => void
+  hideCollapse?: boolean
 }
 
 export function EmailSettingsSection({
@@ -77,12 +78,13 @@ export function EmailSettingsSection({
   setAdminNotificationDay,
   show,
   setShow,
+  hideCollapse,
 }: EmailSettingsSectionProps) {
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShow(!show)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShow(!show)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -91,15 +93,15 @@ export function EmailSettingsSection({
               Configure SMTP settings and notification schedules
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
         <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
           <Label className="text-base">SMTP Configuration</Label>

@@ -16,7 +16,8 @@ import { apiFetch } from '@/lib/api-client'
 import { sanitizeSlug } from '@/lib/password-utils'
 import { apiPatch, apiPost } from '@/lib/api-client'
 import Link from 'next/link'
-import { ArrowLeft, Save, RefreshCw, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, Save, RefreshCw, Copy, Check, ChevronDown, ChevronUp, FileText, Bell, Video, GitBranch, MessageSquare, Shield } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
@@ -170,6 +171,9 @@ export default function ProjectSettingsPage() {
   const [showRevisionTracking, setShowRevisionTracking] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showSecurity, setShowSecurity] = useState(false)
+
+  // Active section for desktop two-column nav
+  const [activeSection, setActiveSection] = useState('project-details')
 
   // Track original processing settings for change detection
   const [originalSettings, setOriginalSettings] = useState({
@@ -342,6 +346,14 @@ export default function ProjectSettingsPage() {
       setSharePassword('')
     }
   }, [authMode, initialLoadComplete])
+
+  // Reset active desktop section when video sections become unavailable
+  useEffect(() => {
+    const videoOnlySections = ['video-processing', 'revision-tracking', 'feedback']
+    if (!enableVideos && videoOnlySections.includes(activeSection)) {
+      setActiveSection('project-details')
+    }
+  }, [enableVideos, activeSection])
 
   async function handleSave() {
     if (!canChangeProjectSettings) {
@@ -584,6 +596,17 @@ export default function ProjectSettingsPage() {
     )
   }
 
+  const projectSections = [
+    { id: 'project-details', label: 'Project Details', description: 'Basic project information and client details', icon: FileText },
+    { id: 'notifications', label: 'Notifications', description: 'Set notification schedule for client recipients', icon: Bell },
+    ...(enableVideos ? [
+      { id: 'video-processing', label: 'Video Processing', description: 'Configure how videos are processed and displayed', icon: Video },
+      { id: 'revision-tracking', label: 'Revision Tracking', description: 'Manage how video revisions are tracked and limited', icon: GitBranch },
+      { id: 'feedback', label: 'Feedback & Client Uploads', description: "Control clients ability to see or leave feedback and upload files", icon: MessageSquare },
+    ] : []),
+    { id: 'security', label: 'Security', description: 'Password protection for the share page', icon: Shield },
+  ]
+
   if (!project) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
@@ -595,7 +618,6 @@ export default function ProjectSettingsPage() {
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="max-w-4xl mx-auto">
         <div className="mb-4 sm:mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -631,7 +653,8 @@ export default function ProjectSettingsPage() {
           </div>
         )}
 
-        <div className="space-y-4 sm:space-y-6">
+        {/* Mobile: stacked collapsible cards (hidden on desktop) */}
+        <div className="lg:hidden space-y-4 sm:space-y-6">
           {/* Project Details */}
           <Card className="border-border">
             <CardHeader
@@ -1408,6 +1431,410 @@ export default function ProjectSettingsPage() {
 
         </div>
 
+        {/* Desktop: sidebar nav + content panel (hidden on mobile) */}
+        <div className="hidden lg:flex gap-6 mt-4">
+          {/* Left sidebar */}
+          <div className="w-52 xl:w-60 flex-shrink-0">
+            <nav className="space-y-0.5 sticky top-6">
+              {projectSections.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className={cn(
+                    'w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center gap-2.5 transition-colors',
+                    activeSection === section.id
+                      ? 'bg-accent text-accent-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                  )}
+                >
+                  <section.icon className="w-4 h-4 flex-shrink-0" />
+                  {section.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Right content panel */}
+          <div className="flex-1 min-w-0">
+            {activeSection === 'project-details' && (
+              <Card className="border-border">
+                <CardHeader>
+                  <CardTitle>Project Details</CardTitle>
+                  <CardDescription>Basic project information and client details</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="space-y-2">
+                      <Label htmlFor="title-d">Project Title</Label>
+                      <Input id="title-d" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Brand Video Project" />
+                      <p className="text-xs text-muted-foreground">The name of this project as shown to clients and in the admin panel</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Project Type</Label>
+                      <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                        <div className="min-w-0">
+                          <label className="inline-flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={enableVideos} onChange={(e) => setEnableVideos(e.target.checked)} disabled={(project?._count?.videos ?? 0) > 0 && enableVideos} className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60" />
+                            Video
+                          </label>
+                          {(project?._count?.videos ?? 0) > 0 && <p className="text-xs text-muted-foreground mt-1">Remove existing videos to disable them in this project.</p>}
+                        </div>
+                        <div className="min-w-0">
+                          <label className="inline-flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={enablePhotos} onChange={(e) => setEnablePhotos(e.target.checked)} disabled={(project?._count?.albums ?? 0) > 0 && enablePhotos} className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60" />
+                            Photo
+                          </label>
+                          {(project?._count?.albums ?? 0) > 0 && <p className="text-xs text-muted-foreground mt-1">Remove existing albums to disable them in this project.</p>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="description-d">Project Description</Label>
+                      <Textarea id="description-d" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Marketing video for Q4 campaign" rows={3} />
+                      <p className="text-xs text-muted-foreground">Optional description to help identify and organize this project</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="companyName-d">Company/Brand Name</Label>
+                      <div className="relative" ref={clientSearchRef}>
+                        <Input id="companyName-d" type="text" value={companyName} onChange={(e) => { setCompanyName(e.target.value); setSelectedClientId(null) }} placeholder="Search clients..." maxLength={100} autoComplete="off" />
+                        {clientSuggestions.length > 0 && !selectedClientId && (
+                          <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-card shadow-sm overflow-hidden">
+                            {clientSuggestions.map((c) => (
+                              <button key={c.id} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40" onClick={() => { setSelectedClientId(c.id); setCompanyName(c.name); setClientSuggestions([]) }}>
+                                {c.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Choose an existing Client. Start typing to search.{clientsLoading ? ' Searching…' : ''}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="useCustomSlug-d">Custom Link</Label>
+                        <p className="text-xs text-muted-foreground">Use a custom share link instead of auto-generated from project title</p>
+                      </div>
+                      <Switch id="useCustomSlug-d" checked={useCustomSlug} onCheckedChange={setUseCustomSlug} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="slug-d">Share Link</Label>
+                      <div className="flex gap-2 items-center">
+                        <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">/share/</span>
+                        {useCustomSlug ? (
+                          <>
+                            <Input id="slug-d" type="text" value={customSlugValue} onChange={(e) => setCustomSlugValue(e.target.value)} placeholder="e.g., custom-link-name" className="flex-1" />
+                            <Button type="button" variant="outline" size="sm" onClick={() => setCustomSlugValue(generateRandomSlug())} title="Generate random URL" className="h-10 w-10 p-0 flex-shrink-0">
+                              <RefreshCw className="w-4 h-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Input id="slug-d" type="text" value={autoGeneratedSlug} disabled className="flex-1 opacity-60" />
+                        )}
+                      </div>
+                      {useCustomSlug && customSlugValue && customSlugValue !== sanitizedSlug && (
+                        <p className="text-xs text-warning">Will be saved as: <span className="font-mono font-semibold">{sanitizedSlug}</span></p>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {useCustomSlug ? 'Custom share link. Only lowercase letters, numbers, and hyphens allowed.' : 'Auto-generated from project title. Enable "Custom Link" to set your own.'}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {activeSection === 'notifications' && (
+              <Card className="border-border">
+                <CardHeader>
+                  <CardTitle>Notifications</CardTitle>
+                  <CardDescription>Set notification schedule for client recipients</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <ScheduleSelector
+                      schedule={clientNotificationSchedule}
+                      time={clientNotificationTime}
+                      day={clientNotificationDay}
+                      onScheduleChange={setClientNotificationSchedule}
+                      onTimeChange={setClientNotificationTime}
+                      onDayChange={setClientNotificationDay}
+                      label="Client Notification Schedule"
+                      description="Configure when clients receive summaries of your replies for this project. Note: Approval emails are always sent immediately."
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {activeSection === 'video-processing' && (
+              <Card className="border-border">
+                <CardHeader>
+                  <CardTitle>Video Processing</CardTitle>
+                  <CardDescription>Configure how videos are processed and displayed</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="space-y-2">
+                      <Label>Preview Resolutions</Label>
+                      <div className="space-y-2">
+                        {[
+                          { value: '480p', label: '480p (854x480 or 480x854 for vertical)' },
+                          { value: '720p', label: '720p (1280x720 or 720x1280 for vertical)' },
+                          { value: '1080p', label: '1080p (1920x1080 or 1080x1920 for vertical)' },
+                        ].map((opt) => (
+                          <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={previewResolutions.includes(opt.value)} onChange={() => { setPreviewResolutions(prev => { if (prev.includes(opt.value)) { if (prev.length <= 1) return prev; return prev.filter(r => r !== opt.value) } return [...prev, opt.value] }) }} className="rounded border-border" />
+                            <span className="text-sm">{opt.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Select at least one resolution. Higher resolutions take longer to process and use more storage.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="watermarkEnabled-d">Enable Watermarks</Label>
+                        <p className="text-xs text-muted-foreground">Add watermarks to processed videos</p>
+                      </div>
+                      <Switch id="watermarkEnabled-d" checked={watermarkEnabled} onCheckedChange={setWatermarkEnabled} />
+                    </div>
+                    {watermarkEnabled && (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="customWatermark-d">Custom Watermark Text</Label>
+                            <p className="text-xs text-muted-foreground">Override default watermark format</p>
+                          </div>
+                          <Switch id="customWatermark-d" checked={useCustomWatermark} onCheckedChange={setUseCustomWatermark} />
+                        </div>
+                        {useCustomWatermark && (
+                          <div className="space-y-2">
+                            <Input value={watermarkText} onChange={(e) => setWatermarkText(e.target.value)} placeholder="e.g., CONFIDENTIAL, DRAFT, REVIEW COPY" className="font-mono" maxLength={100} />
+                            <p className="text-xs text-muted-foreground">Leave empty to use default format: PREVIEW-{project?.title}-[version]<br /><span className="text-warning">Only letters, numbers, spaces, and these characters: - _ . ( )</span></p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="timelinePreviewsEnabled-d">Enable Timeline Previews</Label>
+                        <p className="text-xs text-muted-foreground">Show preview thumbnails when hovering or scrubbing the timeline</p>
+                      </div>
+                      <Switch id="timelinePreviewsEnabled-d" checked={timelinePreviewsEnabled} onCheckedChange={setTimelinePreviewsEnabled} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {activeSection === 'revision-tracking' && (
+              <Card className="border-border">
+                <CardHeader>
+                  <CardTitle>Revision Tracking</CardTitle>
+                  <CardDescription>Manage how video revisions are tracked and limited</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="enableRevisions-d">Enable Revision Tracking</Label>
+                        <p className="text-xs text-muted-foreground">Track and limit the number of video revisions</p>
+                      </div>
+                      <Switch id="enableRevisions-d" checked={enableRevisions} onCheckedChange={setEnableRevisions} />
+                    </div>
+                    {enableRevisions && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="maxRevisions-d">Maximum Revisions</Label>
+                          <Input id="maxRevisions-d" type="number" min="1" max="20" value={maxRevisions} onChange={(e) => { const val = e.target.value; if (val === '') { setMaxRevisions('') } else { const num = parseInt(val, 10); if (!isNaN(num)) setMaxRevisions(num) } }} onBlur={(e) => { const val = e.target.value; if (val === '') { setMaxRevisions(1) } else { const num = parseInt(val, 10); if (isNaN(num) || num < 1) setMaxRevisions(1); else if (num > 20) setMaxRevisions(20) } }} />
+                          <p className="text-xs text-muted-foreground">Must be at least 1. Applies to each video name independently.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {activeSection === 'feedback' && (
+              <Card className="border-border">
+                <CardHeader>
+                  <CardTitle>Feedback &amp; Client Uploads</CardTitle>
+                  <CardDescription>Control clients ability to see or leave feedback and upload files</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 border-t pt-4">
+                  {(project as any)?.status === 'SHARE_ONLY' && (
+                    <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
+                      <p className="text-sm text-warning font-medium">This project is currently set to <b>Share Only</b> mode, which overrides some settings. The Feedback Section is always hidden in this mode and videos are restricted to their latest version. If a video is manually approved by Admin, authenticated clients (i.e. OTP and Password users) will be able to download the video.</p>
+                    </div>
+                  )}
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="hideFeedback-d">Hide Feedback Section</Label>
+                        <p className="text-xs text-muted-foreground">Completely hide the Feedback &amp; Discussion window from clients</p>
+                      </div>
+                      <Switch id="hideFeedback-d" checked={hideFeedback} onCheckedChange={setHideFeedback} />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="restrictComments-d">Restrict Comments to Latest Version</Label>
+                        <p className="text-xs text-muted-foreground">Only allow feedback on the most recent video version</p>
+                      </div>
+                      <Switch id="restrictComments-d" checked={restrictCommentsToLatestVersion} onCheckedChange={setRestrictCommentsToLatestVersion} />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="useFullTimecode-d">Display Full Timecode</Label>
+                        <p className="text-xs text-muted-foreground">Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.</p>
+                      </div>
+                      <Switch id="useFullTimecode-d" checked={useFullTimecode} onCheckedChange={setUseFullTimecode} />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="allowClientDeleteComments-d">Allow clients to delete client comments</Label>
+                        <p className="text-xs text-muted-foreground">All clients will be able to delete any comment left by a client.</p>
+                      </div>
+                      <Switch id="allowClientDeleteComments-d" checked={allowClientDeleteComments} onCheckedChange={setAllowClientDeleteComments} />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="allowClientUploadFiles-d">Allow clients to upload files with comments</Label>
+                        <p className="text-xs text-muted-foreground">Clients can attach files to comments (up to 5 per comment). Supported: Images, Videos, PDFs, Documents, Fonts, Archives.</p>
+                      </div>
+                      <Switch id="allowClientUploadFiles-d" checked={allowClientUploadFiles} onCheckedChange={setAllowClientUploadFiles} />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="maxClientUploadAllocationMB-d">Max allowed data allocation for client uploads</Label>
+                        <p className="text-xs text-muted-foreground">Clients will not be allowed to upload more than this amount for the entire project. Zero = no limit.</p>
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Input id="maxClientUploadAllocationMB-d" type="number" min={0} value={maxClientUploadAllocationMB} onChange={(e) => { const val = e.target.value; setMaxClientUploadAllocationMB(val === '' ? '' : Math.max(0, parseInt(val, 10) || 0)) }} className="w-20" />
+                        <span className="text-sm text-muted-foreground">MB</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {activeSection === 'security' && (
+              <Card className="border-border">
+                <CardHeader>
+                  <CardTitle>Security</CardTitle>
+                  <CardDescription>Password protection for the share page</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 border-t pt-4">
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="space-y-2">
+                      <Label htmlFor="authMode-d">Authentication Method</Label>
+                      <select id="authMode-d" value={authMode} onChange={(e) => setAuthMode(e.target.value)} className="w-full px-3 py-2 bg-card border border-border rounded-md">
+                        <option value="PASSWORD">Password Only</option>
+                        <option value="OTP" disabled={!smtpConfigured || !hasRecipientWithEmail}>Email OTP Only {!smtpConfigured || !hasRecipientWithEmail ? '(requires SMTP & recipients)' : ''}</option>
+                        <option value="BOTH" disabled={!smtpConfigured || !hasRecipientWithEmail}>Both Password and OTP {!smtpConfigured || !hasRecipientWithEmail ? '(requires SMTP & recipients)' : ''}</option>
+                        <option value="NONE">No Authentication</option>
+                      </select>
+                      <p className="text-xs text-muted-foreground">
+                        {authMode === 'PASSWORD' && 'Clients must enter a password to access the project'}
+                        {authMode === 'OTP' && 'Clients receive a one-time code via email (must be a registered recipient)'}
+                        {authMode === 'BOTH' && 'Clients can choose between password or email OTP authentication'}
+                        {authMode === 'NONE' && 'Anyone with the share link can access the project'}
+                      </p>
+                      {!smtpConfigured && authMode !== 'NONE' && <p className="text-xs text-muted-foreground mt-1">Configure SMTP in Settings to enable OTP authentication options</p>}
+                      {smtpConfigured && !hasRecipientWithEmail && authMode !== 'NONE' && <p className="text-xs text-muted-foreground mt-1">Add at least one recipient with an email address to enable OTP authentication options</p>}
+                    </div>
+                    {authMode === 'NONE' && (
+                      <div className="flex items-start gap-2 p-3 bg-warning-visible border-2 border-warning-visible rounded-md">
+                        <span className="text-warning text-sm font-bold">!</span>
+                        <p className="text-sm text-warning font-medium">Without authentication, anyone with the share link can access your project. {guestMode ? 'Guest mode limits access to videos only.' : 'Full access allows comments and approvals from anyone.'}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="guestMode-d">Guest Mode</Label>
+                        <p className="text-xs text-muted-foreground">Limit access to videos only (no comments, approval, or project details)</p>
+                      </div>
+                      <Switch id="guestMode-d" checked={guestMode} onCheckedChange={setGuestMode} />
+                    </div>
+                    {authMode === 'NONE' && !guestMode && (
+                      <div className="flex items-start gap-2 p-3 bg-primary-visible border border-primary-visible rounded-md">
+                        <span className="text-primary text-sm font-bold">i</span>
+                        <p className="text-sm text-primary"><strong>Recommended:</strong> Enable Guest Mode for better security. Without it, anyone with the link can comment and approve videos.</p>
+                      </div>
+                    )}
+                    {guestMode && (
+                      <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
+                        <div className="space-y-0.5 flex-1">
+                          <Label htmlFor="guestLatestOnly-d">Restrict to Latest Version</Label>
+                          <p className="text-xs text-muted-foreground">Guests can only view the latest version of each video</p>
+                        </div>
+                        <Switch id="guestLatestOnly-d" checked={guestLatestOnly} onCheckedChange={setGuestLatestOnly} />
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
+                      <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="allowAuthenticatedProjectSwitching-d">Allow authenticated clients to switch current projects</Label>
+                        <p className="text-xs text-muted-foreground">Password and OTP recipients can switch from this project to other current client projects and vice-versa when both projects allow it.</p>
+                        {(project?.globalAllowAuthenticatedProjectSwitching ?? true) === false && (
+                          <p className="text-xs text-muted-foreground mt-1">This setting is currently disabled globally in Default Project Settings.</p>
+                        )}
+                      </div>
+                      <Switch id="allowAuthenticatedProjectSwitching-d" checked={allowAuthenticatedProjectSwitching} onCheckedChange={setAllowAuthenticatedProjectSwitching} disabled={(project?.globalAllowAuthenticatedProjectSwitching ?? true) === false} />
+                    </div>
+                    {authMode === 'NONE' && !guestMode && (
+                      <div className="flex items-start gap-2 p-2 bg-warning-visible/50 border border-warning-visible rounded-md">
+                        <span className="text-warning text-xs font-bold">!</span>
+                        <p className="text-xs text-warning font-medium">Guest mode is recommended with no authentication to prevent unauthorized comments and approvals.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {(authMode === 'PASSWORD' || authMode === 'BOTH') && (
+                    <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                      <div className="space-y-2">
+                        <Label htmlFor="password-d">Share Page Password</Label>
+                        <div className="flex gap-2 w-full">
+                          <PasswordInput id="password-d" value={sharePassword} onChange={(e) => setSharePassword(e.target.value)} placeholder="Enter password for share page" className="flex-1" />
+                          <Button type="button" variant="outline" size="sm" onClick={() => setSharePassword(generateSecurePassword())} title="Generate random password" className="h-10 w-10 p-0 flex-shrink-0">
+                            <RefreshCw className="w-4 h-4" />
+                          </Button>
+                          {sharePassword && (
+                            <Button type="button" variant="outline" size="sm" onClick={copyPassword} title={copiedPassword ? 'Copied!' : 'Copy password'} className="h-10 w-10 p-0 flex-shrink-0">
+                              {copiedPassword ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                            </Button>
+                          )}
+                        </div>
+                        {sharePassword && <SharePasswordRequirements password={sharePassword} />}
+                        <p className="text-xs text-muted-foreground">Clients will need this password to access the share page</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+
         {/* Error notification at bottom */}
         {error && (
           <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
@@ -1444,7 +1871,6 @@ export default function ProjectSettingsPage() {
           title={reprocessModalTitle}
           description={reprocessModalDescription}
         />
-        </div>
       </div>
     </div>
   )

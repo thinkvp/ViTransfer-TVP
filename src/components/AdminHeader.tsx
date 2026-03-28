@@ -57,7 +57,7 @@ export default function AdminHeader() {
   }
 
   return (
-    <div className="relative z-50 isolate transform-gpu bg-card border-b border-border/50 shadow-elevation-sm">
+    <div className="relative z-50 isolate transform-gpu bg-card border-b border-border/60 shadow-elevation-sm">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-6 flex-1 min-w-0">

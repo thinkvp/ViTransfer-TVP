@@ -2,10 +2,24 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { expireCurrentWindowSession } from '@/lib/token-store'
+import { expireCurrentWindowSession, getAccessToken, isCurrentWindowSessionTimedOut, subscribe } from '@/lib/token-store'
+import { attemptRefresh } from '@/lib/api-client'
 
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
+const PROACTIVE_REFRESH_BEFORE_MS = 5 * 60 * 1000 // Refresh 5 min before access token expires
+
+/** Decode the exp claim from a JWT without verifying the signature. */
+function getJwtExpMs(token: string): number | null {
+  try {
+    const b64 = token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/')
+    if (!b64) return null
+    const payload = JSON.parse(atob(b64))
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
 
 export default function SessionMonitor() {
   const router = useRouter()
@@ -22,6 +36,42 @@ export default function SessionMonitor() {
     setShowWarning(false)
     router.push('/login?sessionExpired=true')
   }, [router])
+
+  // Proactive token refresh: silently renew the access token before it expires
+  // so there is no 401-triggered race when multiple browser windows share a
+  // refresh token and all detect expiry simultaneously.
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+    function scheduleProactiveRefresh() {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+      const token = getAccessToken()
+      if (!token || isCurrentWindowSessionTimedOut()) return
+      const expMs = getJwtExpMs(token)
+      if (!expMs) return
+      const msUntilRefresh = expMs - Date.now() - PROACTIVE_REFRESH_BEFORE_MS
+      if (msUntilRefresh <= 0) {
+        // Already inside the refresh window — trigger immediately
+        attemptRefresh().catch(() => {})
+        return
+      }
+      refreshTimer = setTimeout(() => {
+        if (!isCurrentWindowSessionTimedOut()) {
+          attemptRefresh().catch(() => {})
+        }
+      }, msUntilRefresh)
+    }
+
+    scheduleProactiveRefresh()
+    const unsubscribe = subscribe(() => scheduleProactiveRefresh())
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer)
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     // Initialize last activity time

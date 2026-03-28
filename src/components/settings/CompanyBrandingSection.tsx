@@ -47,6 +47,7 @@ interface CompanyBrandingSectionProps {
   setAllowThemeToggle: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
+  hideCollapse?: boolean
 }
 
 const COMPANY_LOGO_MAX_WIDTH = 800
@@ -95,6 +96,7 @@ export function CompanyBrandingSection({
   setAllowThemeToggle,
   show,
   setShow,
+  hideCollapse,
 }: CompanyBrandingSectionProps) {
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
@@ -299,8 +301,8 @@ export function CompanyBrandingSection({
   return (
     <Card className="border-border">
       <CardHeader
-        className="cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={() => setShow(!show)}
+        className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
+        onClick={hideCollapse ? undefined : () => setShow(!show)}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -309,15 +311,15 @@ export function CompanyBrandingSection({
               Customize how your company appears in the application
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <Label htmlFor="companyName">Company Name</Label>

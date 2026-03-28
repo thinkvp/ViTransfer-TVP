@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Settings as SettingsIcon, Save } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Cloud, Video, FolderKanban, Wrench, Bell, Smartphone, Shield } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { CompanyBrandingSection } from '@/components/settings/CompanyBrandingSection'
 import { DomainConfigurationSection } from '@/components/settings/DomainConfigurationSection'
 import { EmailSettingsSection } from '@/components/settings/EmailSettingsSection'
@@ -122,6 +123,21 @@ interface PushNotificationSettings {
   notifyPasswordResetRequested: boolean
   notifyPasswordResetSuccess: boolean
 }
+
+const SETTING_SECTIONS = [
+  { id: 'company-branding', label: 'Company Branding', icon: Palette },
+  { id: 'domain', label: 'Domain Configuration', icon: Globe },
+  { id: 'email', label: 'Email & SMTP', icon: Mail },
+  { id: 'cpu', label: 'CPU Configuration', icon: Cpu },
+  { id: 'storage', label: 'Storage Overview', icon: HardDrive },
+  { id: 'dropbox', label: 'Dropbox Storage', icon: Cloud },
+  { id: 'video-processing', label: 'Default Project Settings', icon: Video },
+  { id: 'project-behavior', label: 'Project Behavior', icon: FolderKanban },
+  { id: 'developer-tools', label: 'Developer Tools', icon: Wrench },
+  { id: 'gotify', label: 'Gotify Notifications', icon: Bell },
+  { id: 'browser-push', label: 'Browser Push (Admin)', icon: Smartphone },
+  { id: 'security', label: 'Advanced Security', icon: Shield },
+] as const
 
 export default function GlobalSettingsPage() {
   const router = useRouter()
@@ -281,6 +297,9 @@ export default function GlobalSettingsPage() {
 
   const [recalcProjectDataLoading, setRecalcProjectDataLoading] = useState(false)
   const [recalcProjectDataResult, setRecalcProjectDataResult] = useState<string | null>(null)
+
+  // Active section for desktop two-column nav
+  const [activeSection, setActiveSection] = useState<typeof SETTING_SECTIONS[number]['id']>('company-branding')
 
   useEffect(() => {
     async function loadSettings() {
@@ -483,6 +502,13 @@ export default function GlobalSettingsPage() {
       loadBlocklists()
     }
   }, [showSecuritySettings])
+
+  function handleSectionChange(sectionId: typeof SETTING_SECTIONS[number]['id']) {
+    setActiveSection(sectionId)
+    if (sectionId === 'security') {
+      loadBlocklists()
+    }
+  }
 
   const handleAddIP = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -887,7 +913,6 @@ export default function GlobalSettingsPage() {
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="max-w-4xl mx-auto">
         <div className="mb-4 sm:mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -927,7 +952,8 @@ export default function GlobalSettingsPage() {
           </div>
         )}
 
-        <div className="space-y-4 sm:space-y-6">
+        {/* Mobile: stacked collapsible cards (hidden on desktop) */}
+        <div className="lg:hidden space-y-4 sm:space-y-6">
           <CompanyBrandingSection
             companyName={companyName}
             setCompanyName={setCompanyName}
@@ -1235,6 +1261,372 @@ export default function GlobalSettingsPage() {
           />
         </div>
 
+        {/* Desktop: sidebar nav + content panel (hidden on mobile) */}
+        <div className="hidden lg:flex gap-6 mt-4">
+          {/* Left sidebar */}
+          <div className="w-52 xl:w-60 flex-shrink-0">
+            <nav className="space-y-0.5 sticky top-6">
+              {SETTING_SECTIONS.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => handleSectionChange(section.id)}
+                  className={cn(
+                    'w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center gap-2.5 transition-colors',
+                    activeSection === section.id
+                      ? 'bg-accent text-accent-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                  )}
+                >
+                  <section.icon className="w-4 h-4 flex-shrink-0" />
+                  {section.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Right content panel */}
+          <div className="flex-1 min-w-0">
+            {activeSection === 'company-branding' && (
+              <CompanyBrandingSection
+                companyName={companyName}
+                setCompanyName={setCompanyName}
+                companyLogoMode={companyLogoMode}
+                setCompanyLogoMode={setCompanyLogoMode}
+                companyLogoLinkUrl={companyLogoUrl}
+                setCompanyLogoLinkUrl={setCompanyLogoUrl}
+                companyLogoConfigured={companyLogoMode === 'UPLOAD' && !!settings?.companyLogoPath}
+                companyLogoUrl={
+                  companyLogoMode === 'UPLOAD'
+                    ? (settings?.companyLogoPath ? `/api/branding/logo?v=${companyLogoVersion}` : null)
+                    : (companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null)
+                }
+                darkLogoEnabled={darkLogoEnabled}
+                setDarkLogoEnabled={setDarkLogoEnabled}
+                darkLogoMode={darkLogoMode}
+                setDarkLogoMode={setDarkLogoMode}
+                darkLogoLinkUrl={darkLogoUrl}
+                setDarkLogoLinkUrl={setDarkLogoUrl}
+                darkLogoConfigured={darkLogoMode === 'UPLOAD' && !!settings?.darkLogoPath}
+                darkLogoUrl={
+                  darkLogoMode === 'UPLOAD'
+                    ? (settings?.darkLogoPath ? `/api/branding/dark-logo?v=${darkLogoVersion}` : null)
+                    : (darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null)
+                }
+                onDarkLogoUploaded={() => {
+                  setDarkLogoVersion(Date.now())
+                  apiFetch('/api/settings')
+                    .then((r) => r.ok ? r.json() : null)
+                    .then((d) => {
+                      if (!d) return
+                      setSettings(d)
+                      setDarkLogoEnabled(!!d.darkLogoEnabled)
+                      setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
+                      setDarkLogoUrl(d.darkLogoUrl || '')
+                    })
+                    .catch(() => {})
+                }}
+                companyFaviconMode={companyFaviconMode}
+                setCompanyFaviconMode={setCompanyFaviconMode}
+                companyFaviconLinkUrl={companyFaviconUrl}
+                setCompanyFaviconLinkUrl={setCompanyFaviconUrl}
+                companyFaviconConfigured={companyFaviconMode === 'UPLOAD' && !!settings?.companyFaviconPath}
+                companyFaviconUrl={
+                  companyFaviconMode === 'UPLOAD'
+                    ? (settings?.companyFaviconPath ? `/api/branding/favicon?v=${companyFaviconVersion}` : null)
+                    : (companyFaviconMode === 'LINK' ? (companyFaviconUrl || null) : null)
+                }
+                onCompanyLogoUploaded={() => {
+                  setCompanyLogoVersion(Date.now())
+                  setCompanyFaviconVersion(Date.now())
+                  apiFetch('/api/settings')
+                    .then((r) => r.ok ? r.json() : null)
+                    .then((d) => {
+                      if (!d) return
+                      setSettings(d)
+                      setCompanyLogoMode((d.companyLogoMode as any) || 'NONE')
+                      setCompanyLogoUrl(d.companyLogoUrl || '')
+                      setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
+                      setCompanyFaviconUrl(d.companyFaviconUrl || '')
+                      setDarkLogoEnabled(!!d.darkLogoEnabled)
+                      setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
+                      setDarkLogoUrl(d.darkLogoUrl || '')
+                    })
+                    .catch(() => {})
+                }}
+                onCompanyFaviconUploaded={() => {
+                  setCompanyFaviconVersion(Date.now())
+                  apiFetch('/api/settings')
+                    .then((r) => r.ok ? r.json() : null)
+                    .then((d) => {
+                      if (!d) return
+                      setSettings(d)
+                      setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
+                      setCompanyFaviconUrl(d.companyFaviconUrl || '')
+                    })
+                    .catch(() => {})
+                }}
+                accentColor={accentColor}
+                setAccentColor={setAccentColor}
+                accentTextMode={accentTextMode}
+                setAccentTextMode={setAccentTextMode}
+                emailHeaderColor={emailHeaderColor}
+                setEmailHeaderColor={setEmailHeaderColor}
+                emailHeaderTextMode={emailHeaderTextMode}
+                setEmailHeaderTextMode={setEmailHeaderTextMode}
+                defaultTheme={defaultTheme}
+                setDefaultTheme={setDefaultTheme}
+                allowThemeToggle={allowThemeToggle}
+                setAllowThemeToggle={setAllowThemeToggle}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'domain' && (
+              <DomainConfigurationSection
+                appDomain={appDomain}
+                setAppDomain={setAppDomain}
+                mainCompanyDomain={mainCompanyDomain}
+                setMainCompanyDomain={setMainCompanyDomain}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'email' && (
+              <EmailSettingsSection
+                smtpServer={smtpServer}
+                setSmtpServer={setSmtpServer}
+                smtpPort={smtpPort}
+                setSmtpPort={setSmtpPort}
+                smtpUsername={smtpUsername}
+                setSmtpUsername={setSmtpUsername}
+                smtpPassword={smtpPassword}
+                setSmtpPassword={setSmtpPassword}
+                emailTrackingPixelsEnabled={emailTrackingPixelsEnabled}
+                setEmailTrackingPixelsEnabled={setEmailTrackingPixelsEnabled}
+                emailCustomFooterText={emailCustomFooterText}
+                setEmailCustomFooterText={setEmailCustomFooterText}
+                smtpFromAddress={smtpFromAddress}
+                setSmtpFromAddress={setSmtpFromAddress}
+                smtpSecure={smtpSecure}
+                setSmtpSecure={setSmtpSecure}
+                testEmailAddress={testEmailAddress}
+                setTestEmailAddress={setTestEmailAddress}
+                testEmailSending={testEmailSending}
+                testEmailResult={testEmailResult}
+                handleTestEmail={handleTestEmail}
+                adminNotificationSchedule={adminNotificationSchedule}
+                setAdminNotificationSchedule={setAdminNotificationSchedule}
+                adminNotificationTime={adminNotificationTime}
+                setAdminNotificationTime={setAdminNotificationTime}
+                adminNotificationDay={adminNotificationDay}
+                setAdminNotificationDay={setAdminNotificationDay}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'cpu' && (
+              <CpuConfigurationSection
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+                detectedThreads={cpuDetectedThreads}
+                budgetThreads={cpuBudgetThreads}
+                reservedSystemThreads={cpuReservedSystemThreads}
+                maxFfmpegThreadsPerJob={cpuMaxFfmpegThreadsPerJob}
+                ffmpegThreadsPerJob={cpuFfmpegThreadsPerJob}
+                setFfmpegThreadsPerJob={setCpuFfmpegThreadsPerJob}
+                videoWorkerConcurrency={cpuVideoWorkerConcurrency}
+                setVideoWorkerConcurrency={setCpuVideoWorkerConcurrency}
+                dynamicThreadAllocation={cpuDynamicThreadAllocation}
+                setDynamicThreadAllocation={setCpuDynamicThreadAllocation}
+                defaultFfmpegThreadsPerJob={cpuDefaultFfmpegThreadsPerJob}
+                defaultVideoWorkerConcurrency={cpuDefaultVideoWorkerConcurrency}
+              />
+            )}
+
+            {activeSection === 'storage' && (
+              <StorageOverviewSection
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+                autoDeletePreviewsOnClose={autoDeletePreviewsOnClose}
+                setAutoDeletePreviewsOnClose={setAutoDeletePreviewsOnClose}
+                onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
+                recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
+                recalculateProjectDataTotalsResult={recalcProjectDataResult}
+              />
+            )}
+
+            {activeSection === 'dropbox' && (
+              <DropboxStorageSection
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+                dropboxConfigured={dropboxConfigured}
+                dropboxRootPath={dropboxRootPath}
+              />
+            )}
+
+            {activeSection === 'video-processing' && (
+              <VideoProcessingSettingsSection
+                defaultPreviewResolutions={defaultPreviewResolutions}
+                setDefaultPreviewResolutions={setDefaultPreviewResolutions}
+                defaultWatermarkEnabled={defaultWatermarkEnabled}
+                setDefaultWatermarkEnabled={setDefaultWatermarkEnabled}
+                defaultTimelinePreviewsEnabled={defaultTimelinePreviewsEnabled}
+                setDefaultTimelinePreviewsEnabled={setDefaultTimelinePreviewsEnabled}
+                defaultWatermarkText={defaultWatermarkText}
+                setDefaultWatermarkText={setDefaultWatermarkText}
+                defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
+                setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
+                defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
+                setDefaultAllowClientUploadFiles={setDefaultAllowClientUploadFiles}
+                defaultAllowAuthenticatedProjectSwitching={defaultAllowAuthenticatedProjectSwitching}
+                setDefaultAllowAuthenticatedProjectSwitching={setDefaultAllowAuthenticatedProjectSwitching}
+                defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
+                setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'project-behavior' && (
+              <ProjectBehaviorSection
+                autoApproveProject={autoApproveProject}
+                setAutoApproveProject={setAutoApproveProject}
+                autoCloseApprovedProjectsEnabled={autoCloseApprovedProjectsEnabled}
+                setAutoCloseApprovedProjectsEnabled={setAutoCloseApprovedProjectsEnabled}
+                autoCloseApprovedProjectsAfterDays={autoCloseApprovedProjectsAfterDays}
+                setAutoCloseApprovedProjectsAfterDays={setAutoCloseApprovedProjectsAfterDays}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'developer-tools' && (
+              <DeveloperToolsSection
+                excludeInternalIpsFromAnalytics={excludeInternalIpsFromAnalytics}
+                setExcludeInternalIpsFromAnalytics={setExcludeInternalIpsFromAnalytics}
+                uploadChunkSizeMB={uploadChunkSizeMB}
+                setUploadChunkSizeMB={setUploadChunkSizeMB}
+                downloadChunkSizeMB={downloadChunkSizeMB}
+                setDownloadChunkSizeMB={setDownloadChunkSizeMB}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'gotify' && (
+              <PushNotificationsSection
+                enabled={pushEnabled}
+                setEnabled={setPushEnabled}
+                webhookUrl={pushWebhookUrl}
+                setWebhookUrl={setPushWebhookUrl}
+                titlePrefix={pushTitlePrefix}
+                setTitlePrefix={setPushTitlePrefix}
+                notifyUnauthorizedOTP={pushNotifyUnauthorizedOTP}
+                setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
+                notifyFailedAdminLogin={pushNotifyFailedAdminLogin}
+                setNotifyFailedAdminLogin={setPushNotifyFailedAdminLogin}
+                notifySuccessfulAdminLogin={pushNotifySuccessfulAdminLogin}
+                setNotifySuccessfulAdminLogin={setPushNotifySuccessfulAdminLogin}
+                notifyFailedSharePasswordAttempt={pushNotifyFailedSharePasswordAttempt}
+                setNotifyFailedSharePasswordAttempt={setPushNotifyFailedSharePasswordAttempt}
+                notifySuccessfulShareAccess={pushNotifySuccessfulShareAccess}
+                setNotifySuccessfulShareAccess={setPushNotifySuccessfulShareAccess}
+                notifyGuestVideoLinkAccess={pushNotifyGuestVideoLinkAccess}
+                setNotifyGuestVideoLinkAccess={setPushNotifyGuestVideoLinkAccess}
+                notifyClientComments={pushNotifyClientComments}
+                setNotifyClientComments={setPushNotifyClientComments}
+                notifyVideoApproval={pushNotifyVideoApproval}
+                setNotifyVideoApproval={setPushNotifyVideoApproval}
+                notifySalesQuoteViewed={pushNotifySalesQuoteViewed}
+                setNotifySalesQuoteViewed={setPushNotifySalesQuoteViewed}
+                notifySalesQuoteAccepted={pushNotifySalesQuoteAccepted}
+                setNotifySalesQuoteAccepted={setPushNotifySalesQuoteAccepted}
+                notifySalesInvoiceViewed={pushNotifySalesInvoiceViewed}
+                setNotifySalesInvoiceViewed={setPushNotifySalesInvoiceViewed}
+                notifySalesInvoicePaid={pushNotifySalesInvoicePaid}
+                setNotifySalesInvoicePaid={setPushNotifySalesInvoicePaid}
+                notifyPasswordResetRequested={pushNotifyPasswordResetRequested}
+                setNotifyPasswordResetRequested={setPushNotifyPasswordResetRequested}
+                notifyPasswordResetSuccess={pushNotifyPasswordResetSuccess}
+                setNotifyPasswordResetSuccess={setPushNotifyPasswordResetSuccess}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'browser-push' && (
+              <AdminBrowserPushSection show={true} setShow={() => {}} hideCollapse />
+            )}
+
+            {activeSection === 'security' && (
+              <SecuritySettingsSection
+                showSecuritySettings={true}
+                setShowSecuritySettings={() => {}}
+                hideCollapse
+                httpsEnabled={httpsEnabled}
+                hotlinkProtection={hotlinkProtection}
+                setHotlinkProtection={setHotlinkProtection}
+                ipRateLimit={ipRateLimit}
+                setIpRateLimit={setIpRateLimit}
+                sessionRateLimit={sessionRateLimit}
+                setSessionRateLimit={setSessionRateLimit}
+                shareSessionRateLimit={shareSessionRateLimit}
+                setShareSessionRateLimit={setShareSessionRateLimit}
+                shareTokenTtlSeconds={shareTokenTtlSeconds}
+                setShareTokenTtlSeconds={setShareTokenTtlSeconds}
+                passwordAttempts={passwordAttempts}
+                setPasswordAttempts={setPasswordAttempts}
+                sessionTimeoutValue={sessionTimeoutValue}
+                setSessionTimeoutValue={setSessionTimeoutValue}
+                sessionTimeoutUnit={sessionTimeoutUnit}
+                setSessionTimeoutUnit={setSessionTimeoutUnit}
+                trackAnalytics={trackAnalytics}
+                setTrackAnalytics={setTrackAnalytics}
+                trackSecurityLogs={trackSecurityLogs}
+                setTrackSecurityLogs={setTrackSecurityLogs}
+                viewSecurityEvents={viewSecurityEvents}
+                setViewSecurityEvents={setViewSecurityEvents}
+                maxInternalCommentsPerProject={maxInternalCommentsPerProject}
+                setMaxInternalCommentsPerProject={setMaxInternalCommentsPerProject}
+                maxCommentsPerVideoVersion={maxCommentsPerVideoVersion}
+                setMaxCommentsPerVideoVersion={setMaxCommentsPerVideoVersion}
+                maxProjectRecipients={maxProjectRecipients}
+                setMaxProjectRecipients={setMaxProjectRecipients}
+                maxProjectFilesPerProject={maxProjectFilesPerProject}
+                setMaxProjectFilesPerProject={setMaxProjectFilesPerProject}
+                blockedIPs={blockedIPs}
+                blockedDomains={blockedDomains}
+                newIP={newIP}
+                setNewIP={setNewIP}
+                newIPReason={newIPReason}
+                setNewIPReason={setNewIPReason}
+                newDomain={newDomain}
+                setNewDomain={setNewDomain}
+                newDomainReason={newDomainReason}
+                setNewDomainReason={setNewDomainReason}
+                onAddIP={handleAddIP}
+                onRemoveIP={handleRemoveIP}
+                onAddDomain={handleAddDomain}
+                onRemoveDomain={handleRemoveDomain}
+                blocklistsLoading={blocklistsLoading}
+              />
+            )}
+          </div>
+        </div>
+
         {/* Error notification at bottom */}
         {error && (
           <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
@@ -1255,7 +1647,6 @@ export default function GlobalSettingsPage() {
             <Save className="w-4 h-4 mr-2" />
             {saving ? 'Saving...' : 'Save Changes'}
           </Button>
-        </div>
         </div>
       </div>
     </div>

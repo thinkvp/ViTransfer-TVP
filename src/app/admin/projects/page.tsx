@@ -62,8 +62,8 @@ export default function AdminPage() {
   const permissions = normalizeRolePermissions(user?.permissions)
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
 
-  const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
-  const metricIconClassName = 'w-4 h-4 text-primary'
+  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20'
+  const metricIconClassName = 'w-5 h-5 text-primary'
 
   const overview = useMemo<OverviewStats>(() => {
     const list = filteredProjects ?? projects ?? []

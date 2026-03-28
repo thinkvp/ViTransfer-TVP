@@ -528,18 +528,18 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
             </CardContent>
           </Card>
         ) : (
-          <div className="rounded-md border border-border bg-card overflow-hidden">
+          <div className="rounded-xl border border-border/60 shadow-elevation-sm bg-card overflow-hidden">
             <div className="w-full overflow-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40">
-                  <tr className="border-b border-border">
-                    <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-muted-foreground w-8 md:hidden" aria-label="Expand" />
+                <thead className="bg-muted/30">
+                  <tr className="border-b border-border/60">
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground w-8 md:hidden" aria-label="Expand" />
                     {columnsConfig.visibleCols.map((col: any) => (
-                      <th key={col.key} scope="col" className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground', col.className)}>
+                      <th key={col.key} scope="col" className={cn('px-4 py-3 text-left text-xs font-semibold text-muted-foreground', col.className)}>
                         <button
                           type="button"
                           onClick={() => toggleTableSort(col.key)}
-                          className="inline-flex items-center gap-1 hover:text-foreground"
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
                           title="Sort"
                         >
                           <span>{col.label}</span>
@@ -613,7 +613,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                           <tr
                             key={project.id}
                             className={cn(
-                              'border-b border-border last:border-b-0 hover:bg-muted/40',
+                              'border-b border-border last:border-b-0 hover:bg-accent/40 transition-colors duration-150',
                               !isMobile && 'cursor-pointer'
                             )}
                             onClick={
@@ -646,7 +646,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               </button>
                             </td>
 
-                            <td className="px-3 py-2 font-medium">
+                            <td className="px-4 py-3 font-medium">
                               <button
                                 type="button"
                                 className="text-left hover:underline"
@@ -659,7 +659,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               </button>
                             </td>
 
-                            <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">
+                            <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
                               {project.clientId ? (
                                 <button
                                   type="button"
@@ -676,7 +676,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               )}
                             </td>
 
-                            <td className="px-3 py-2">
+                            <td className="px-4 py-3">
                               <ProjectStatusPicker
                                 value={effectiveStatus}
                                 disabled={isUpdatingStatus || !canChangeProjectStatuses}
@@ -688,7 +688,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                             </td>
 
                             {visibleColumns.has('users') && (
-                              <td className="px-2 pr-1 py-2 hidden md:table-cell">
+                              <td className="px-2 pr-1 py-3 hidden md:table-cell">
                                 {Array.isArray(project.assignedUsers) && project.assignedUsers.length > 0 ? (
                                   <div className="flex items-center -space-x-1">
                                     {project.assignedUsers.slice(0, 6).map((u, idx) => {
@@ -718,25 +718,25 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                             )}
 
                             {visibleColumns.has('videos') && (
-                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
+                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
                             )}
                             {visibleColumns.has('versions') && (
-                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
+                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
                             )}
                             {visibleColumns.has('comments') && (
-                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
+                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
                             )}
                             {visibleColumns.has('photos') && (
-                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
+                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
                             )}
                             {visibleColumns.has('data') && (
-                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{dataLabel}</td>
+                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{dataLabel}</td>
                             )}
                             {visibleColumns.has('createdAt') && (
-                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
+                              <td className="px-4 py-3 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
                             )}
                             {visibleColumns.has('updatedAt') && (
-                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}</td>
+                              <td className="px-4 py-3 tabular-nums hidden md:table-cell">{analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}</td>
                             )}
                           </tr>
 

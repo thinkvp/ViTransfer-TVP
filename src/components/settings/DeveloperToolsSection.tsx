@@ -82,6 +82,7 @@ interface DeveloperToolsSectionProps {
   setDownloadChunkSizeMB: (value: number | '') => void
   show: boolean
   setShow: (value: boolean) => void
+  hideCollapse?: boolean
 }
 
 function formatBytes(bytes: number) {
@@ -106,6 +107,7 @@ export function DeveloperToolsSection({
   setDownloadChunkSizeMB,
   show,
   setShow,
+  hideCollapse,
 }: DeveloperToolsSectionProps) {
   const [orphanProjectFilesLoading, setOrphanProjectFilesLoading] = useState(false)
   const [orphanProjectFilesResult, setOrphanProjectFilesResult] = useState<OrphanProjectFileCleanupResult | null>(null)
@@ -177,7 +179,7 @@ export function DeveloperToolsSection({
 
   return (
     <Card className="border-border">
-      <CardHeader className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setShow(!show)}>
+      <CardHeader className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"} onClick={hideCollapse ? undefined : () => setShow(!show)}>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Developer Tools</CardTitle>
@@ -185,15 +187,15 @@ export function DeveloperToolsSection({
               Maintenance and diagnostic actions (safe, allow-listed)
             </CardDescription>
           </div>
-          {show ? (
+          {!hideCollapse && (show ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
           ) : (
             <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-          )}
+          ))}
         </div>
       </CardHeader>
 
-      {show && (
+      {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-center justify-between gap-4">

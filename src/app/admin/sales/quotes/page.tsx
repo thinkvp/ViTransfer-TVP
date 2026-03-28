@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -35,6 +36,7 @@ type QuoteRow = {
 }
 
 export default function SalesQuotesPage() {
+  const router = useRouter()
   const [tick, setTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
@@ -478,9 +480,17 @@ export default function SalesQuotesPage() {
                       </tr>
                     ) : (
                       visibleQuotes.map((row) => (
-                        <tr key={row.quote.id} className="border-b border-border last:border-b-0 hover:bg-muted/40">
+                        <tr
+                          key={row.quote.id}
+                          className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
+                          onClick={() => router.push(`/admin/sales/quotes/${row.quote.id}`)}
+                        >
                           <td className="px-3 py-2 font-medium">
-                            <Link href={`/admin/sales/quotes/${row.quote.id}`} className="hover:underline">
+                            <Link
+                              href={`/admin/sales/quotes/${row.quote.id}`}
+                              className="hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {row.quote.quoteNumber}
                             </Link>
                           </td>
@@ -492,7 +502,7 @@ export default function SalesQuotesPage() {
                             </span>
                           </td>
                           <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
-                          <td className="px-3 py-2 text-muted-foreground">
+                          <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.quote.clientId ? (
                               <Link href={`/admin/clients/${row.quote.clientId}`} className="hover:underline">
                                 {clientNameById[row.quote.clientId] ?? row.quote.clientId}
@@ -501,7 +511,7 @@ export default function SalesQuotesPage() {
                               '—'
                             )}
                           </td>
-                          <td className="px-3 py-2 text-muted-foreground">
+                          <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.quote.projectId ? (
                               <Link href={`/admin/projects/${row.quote.projectId}`} className="hover:underline">
                                 {projectTitleById[row.quote.projectId] ?? row.quote.projectId}
@@ -510,7 +520,7 @@ export default function SalesQuotesPage() {
                               '—'
                             )}
                           </td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-end gap-2">
                               {quoteExpiryRemindersEnabled ? (
                                 <SalesRemindersBellButton
