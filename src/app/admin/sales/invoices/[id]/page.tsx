@@ -40,6 +40,7 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -69,6 +70,8 @@ export default function InvoiceDetailPage() {
 
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [success, setSuccess] = useState(false)
+  const [savedSnapshot, setSavedSnapshot] = useState('')
   const [nowIso, setNowIso] = useState<string | null>(null)
 
   const [settings, setSettings] = useState<SalesSettings>({
@@ -178,6 +181,21 @@ export default function InvoiceDetailPage() {
 
         setEditingClient(!Boolean(inv.clientId))
         setEditingProject(!Boolean(inv.projectId))
+
+        setSavedSnapshot(JSON.stringify({
+          status: inv.status,
+          clientId: inv.clientId ?? '',
+          projectId: inv.projectId ?? '',
+          issueDate: inv.issueDate,
+          dueDate: inv.dueDate ?? '',
+          notes: inv.notes,
+          terms: inv.terms ?? s.defaultTerms,
+          items: inv.items.map((it) => ({
+            ...it,
+            details: (it as any).details ?? '',
+            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
+          })),
+        }))
       } catch {
         if (!cancelled) {
           setInvoice(null)
@@ -454,6 +472,10 @@ export default function InvoiceDetailPage() {
     [allProjects, projects]
   )
 
+  const currentSnapshot = useMemo(() => JSON.stringify({ status, clientId, projectId, issueDate, dueDate, notes, terms, items }), [status, clientId, projectId, issueDate, dueDate, notes, terms, items])
+  const hasUnsavedChanges = loaded && savedSnapshot !== '' && currentSnapshot !== savedSnapshot
+  useUnsavedChanges(hasUnsavedChanges)
+
   const onSave = async () => {
     if (!invoice) return
     if (!clientId) {
@@ -482,7 +504,9 @@ export default function InvoiceDetailPage() {
       })
       setInvoice(next)
       setStatus(next.status)
-      alert('Saved')
+      setSavedSnapshot(currentSnapshot)
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to save invoice'
       if (msg === 'Conflict') {
@@ -665,6 +689,12 @@ export default function InvoiceDetailPage() {
           <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
         </div>
       </div>
+
+      {success && (
+        <div className="p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+          <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+        </div>
+      )}
 
       <Card>
         <CardContent className="space-y-4 pt-6">

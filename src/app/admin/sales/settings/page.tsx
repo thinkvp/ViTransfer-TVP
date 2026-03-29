@@ -10,15 +10,30 @@ import { Textarea } from '@/components/ui/textarea'
 import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi, fetchTaxRates, saveTaxRatesBulk } from '@/lib/sales/admin-api'
 import type { SalesTaxRate } from '@/lib/sales/types'
 import { apiFetch } from '@/lib/api-client'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Pencil, Plus, Star, Trash2 } from 'lucide-react'
+import { Bell, Building2, CreditCard, Link2, Pencil, Plus, ReceiptText, Save, Star, Trash2 } from 'lucide-react'
 import { getCurrencySymbol } from '@/lib/sales/currency'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+
+const SALES_SECTIONS = [
+  { id: 'sales-details', label: 'Sales Details', icon: Building2 },
+  { id: 'tax', label: 'Tax', icon: ReceiptText },
+  { id: 'sales-notifications', label: 'Sales Notifications', icon: Bell },
+  { id: 'stripe-checkout', label: 'Stripe Checkout', icon: CreditCard },
+  { id: 'quickbooks', label: 'Quickbooks Integration', icon: Link2 },
+] as const
+
+type SalesSection = typeof SALES_SECTIONS[number]['id']
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+
+  const [activeSection, setActiveSection] = useState<SalesSection>('sales-details')
+  const [universalSaving, setUniversalSaving] = useState(false)
+  const [universalSuccess, setUniversalSuccess] = useState(false)
 
   const [qbBusy, setQbBusy] = useState(false)
   const [qbLoaded, setQbLoaded] = useState(false)
@@ -85,6 +100,28 @@ export default function SalesSettingsPage() {
   const [overdueInvoiceBusinessDaysAfterDue, setOverdueInvoiceBusinessDaysAfterDue] = useState('3')
   const [quoteExpiryRemindersEnabled, setQuoteExpiryRemindersEnabled] = useState(false)
   const [quoteExpiryBusinessDaysBeforeValidUntil, setQuoteExpiryBusinessDaysBeforeValidUntil] = useState('3')
+
+  // Unsaved changes tracking
+  const [savedSnapshot, setSavedSnapshot] = useState('')
+  const settingsSnapshot = JSON.stringify({
+    businessName, address, abn, phone, email, website,
+    businessRegistrationLabel, currencyCode, fiscalYearStartMonth,
+    quoteLabel, invoiceLabel, taxLabel, taxEnabled, taxRatePercent,
+    defaultQuoteValidDays, defaultInvoiceDueDays, defaultTerms, paymentDetails,
+    stripeEnabled, stripeLabel, stripeFeePercent, stripeFeeFixed,
+    stripePublishableKey, stripeSecretKey, stripeDashboardPaymentDescription, stripeCurrencies,
+    qbDailyPullEnabled, qbDailyPullTime, qbLookbackDays,
+    overdueInvoiceRemindersEnabled, overdueInvoiceBusinessDaysAfterDue,
+    quoteExpiryRemindersEnabled, quoteExpiryBusinessDaysBeforeValidUntil,
+  })
+  const hasUnsavedChanges = loaded && savedSnapshot !== '' && settingsSnapshot !== savedSnapshot
+  useUnsavedChanges(hasUnsavedChanges)
+
+  useEffect(() => {
+    if (loaded && savedSnapshot === '') {
+      setSavedSnapshot(settingsSnapshot)
+    }
+  }, [loaded, savedSnapshot, settingsSnapshot])
 
   useEffect(() => {
     let cancelled = false
@@ -507,6 +544,124 @@ export default function SalesSettingsPage() {
     }
   }
 
+  const onSaveAll = async () => {
+    setUniversalSaving(true)
+    setUniversalSuccess(false)
+    try {
+      await Promise.all([
+        // Sales details + tax settings (same API)
+        (async () => {
+          const parsedTax = Number(taxRatePercent)
+          const parsedQuoteDays = Number(defaultQuoteValidDays)
+          const parsedInvoiceDays = Number(defaultInvoiceDueDays)
+          const parsedFyMonth = Number(fiscalYearStartMonth)
+          const fyMonth = Number.isFinite(parsedFyMonth) && parsedFyMonth >= 1 && parsedFyMonth <= 12 ? parsedFyMonth : 7
+          await saveSalesSettingsApi({
+            businessName, address, abn, phone, email, website,
+            businessRegistrationLabel: businessRegistrationLabel.trim() || 'ABN',
+            currencyCode: currencyCode.trim() || 'AUD',
+            fiscalYearStartMonth: fyMonth,
+            quoteLabel: quoteLabel.trim() || 'QUOTE',
+            invoiceLabel: invoiceLabel.trim() || 'INVOICE',
+            taxLabel: taxLabel.trim(),
+            taxEnabled,
+            taxRatePercent: Number.isFinite(parsedTax) ? parsedTax : 0,
+            defaultQuoteValidDays: Number.isFinite(parsedQuoteDays) ? parsedQuoteDays : 14,
+            defaultInvoiceDueDays: Number.isFinite(parsedInvoiceDays) ? parsedInvoiceDays : 7,
+            defaultTerms, paymentDetails,
+            updatedAt: new Date().toISOString(),
+          })
+        })(),
+        // Reminders
+        (async () => {
+          const parsedOverdue = Math.trunc(Number(overdueInvoiceBusinessDaysAfterDue))
+          const parsedExpiry = Math.trunc(Number(quoteExpiryBusinessDaysBeforeValidUntil))
+          const body = {
+            overdueInvoiceRemindersEnabled,
+            overdueInvoiceBusinessDaysAfterDue: Number.isFinite(parsedOverdue) ? Math.max(1, parsedOverdue) : 3,
+            quoteExpiryRemindersEnabled,
+            quoteExpiryBusinessDaysBeforeValidUntil: Number.isFinite(parsedExpiry) ? Math.max(1, parsedExpiry) : 3,
+          }
+          const res = await apiFetch('/api/admin/sales/reminder-settings', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          })
+          const json = await res.json().catch(() => null)
+          if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to save Sales Notifications settings')
+          if (json) {
+            setOverdueInvoiceRemindersEnabled(Boolean(json.overdueInvoiceRemindersEnabled))
+            setOverdueInvoiceBusinessDaysAfterDue(String(typeof json.overdueInvoiceBusinessDaysAfterDue === 'number' ? json.overdueInvoiceBusinessDaysAfterDue : body.overdueInvoiceBusinessDaysAfterDue))
+            setQuoteExpiryRemindersEnabled(Boolean(json.quoteExpiryRemindersEnabled))
+            setQuoteExpiryBusinessDaysBeforeValidUntil(String(typeof json.quoteExpiryBusinessDaysBeforeValidUntil === 'number' ? json.quoteExpiryBusinessDaysBeforeValidUntil : body.quoteExpiryBusinessDaysBeforeValidUntil))
+          }
+        })(),
+        // Stripe
+        (async () => {
+          const parsedFee = Number(stripeFeePercent)
+          const parsedFixed = Number(stripeFeeFixed)
+          const feeFixedCents = Number.isFinite(parsedFixed) ? Math.max(0, Math.round(parsedFixed * 100)) : 0
+          const res = await apiFetch('/api/admin/sales/stripe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              enabled: stripeEnabled, label: stripeLabel,
+              feePercent: Number.isFinite(parsedFee) ? parsedFee : 0,
+              feeFixedCents,
+              publishableKey: stripePublishableKey || null,
+              secretKey: stripeSecretKey || null,
+              dashboardPaymentDescription: stripeDashboardPaymentDescription,
+              currencies: stripeCurrencies,
+            }),
+          })
+          const json = await res.json().catch(() => null)
+          if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Unable to save Stripe settings')
+          if (json) {
+            setStripeEnabled(Boolean(json.enabled))
+            setStripeLabel(typeof json.label === 'string' ? json.label : stripeLabel)
+            setStripeFeePercent(String(typeof json.feePercent === 'number' ? json.feePercent : parsedFee))
+            setStripeFeeFixed(String(typeof json.feeFixedCents === 'number' ? (Math.max(0, Math.trunc(json.feeFixedCents)) / 100).toFixed(2) : (feeFixedCents / 100).toFixed(2)))
+            setStripePublishableKey(typeof json.publishableKey === 'string' ? json.publishableKey : stripePublishableKey)
+            setStripeDashboardPaymentDescription(typeof json.dashboardPaymentDescription === 'string' ? json.dashboardPaymentDescription : stripeDashboardPaymentDescription)
+            setStripeCurrencies(typeof json.currencies === 'string' ? json.currencies : stripeCurrencies)
+            setStripeHasSecretKey(Boolean(json.hasSecretKey))
+            const src = typeof json.secretKeySource === 'string' ? json.secretKeySource : stripeSecretKeySource
+            setStripeSecretKeySource(src === 'env' || src === 'db' || src === 'none' ? src : stripeSecretKeySource)
+            setStripeSecretKey('')
+          }
+        })(),
+        // QuickBooks settings
+        (async () => {
+          const parsedLookback = Number(qbLookbackDays)
+          const body = {
+            dailyPullEnabled: qbDailyPullEnabled,
+            dailyPullTime: qbDailyPullTime,
+            pullLookbackDays: Number.isFinite(parsedLookback) ? parsedLookback : 7,
+          }
+          const res = await apiFetch('/api/sales/quickbooks/settings', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          })
+          const json = await res.json().catch(() => null)
+          if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to save QuickBooks settings')
+          if (json) {
+            setQbDailyPullEnabled(Boolean(json.dailyPullEnabled))
+            setQbDailyPullTime(typeof json.dailyPullTime === 'string' ? json.dailyPullTime : qbDailyPullTime)
+            setQbLookbackDays(String(typeof json.pullLookbackDays === 'number' ? json.pullLookbackDays : Number(qbLookbackDays)))
+            setQbLastAttempt({
+              attemptedAt: typeof json.lastDailyPullAttemptAt === 'string' ? json.lastDailyPullAttemptAt : null,
+              succeeded: typeof json.lastDailyPullSucceeded === 'boolean' ? json.lastDailyPullSucceeded : null,
+              message: typeof json.lastDailyPullMessage === 'string' ? json.lastDailyPullMessage : null,
+            })
+          }
+        })(),
+      ])
+      setUniversalSuccess(true)
+      setSavedSnapshot('')
+      setTimeout(() => setUniversalSuccess(false), 2500)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      setUniversalSaving(false)
+    }
+  }
+
   if (!loaded) {
     return (
       <div className="flex items-center justify-center py-10 text-muted-foreground">Loading settings…</div>
@@ -514,12 +669,52 @@ export default function SalesSettingsPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Sales settings</h2>
-        <p className="text-sm text-muted-foreground">Defaults used when creating quotes and invoices.</p>
+    <div>
+      <div className="mb-4 sm:mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Sales settings</h2>
+            <p className="text-sm text-muted-foreground">Defaults used when creating quotes and invoices.</p>
+          </div>
+          <Button onClick={onSaveAll} disabled={universalSaving} size="lg" className="w-full sm:w-auto">
+            <Save className="w-4 h-4 mr-2" />
+            {universalSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </div>
       </div>
 
+      {universalSuccess && (
+        <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+          <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+        </div>
+      )}
+
+      <div className="lg:flex gap-6">
+        <div className="hidden lg:block w-52 xl:w-60 flex-shrink-0">
+          <nav className="space-y-0.5 sticky top-6">
+            {SALES_SECTIONS.map((section) => {
+              const SectionIcon = section.icon
+              return (
+                <button
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className={cn(
+                    'w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center gap-2.5 transition-colors',
+                    activeSection === section.id
+                      ? 'bg-accent text-accent-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                  )}
+                >
+                  <SectionIcon className="w-4 h-4 flex-shrink-0" />
+                  {section.label}
+                </button>
+              )
+            })}
+          </nav>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-4 sm:space-y-6">
+          <div className={cn(activeSection !== 'sales-details' && 'lg:hidden')}>
       <Card>
         <CardContent className="space-y-4 pt-6">
           {/* Row 1: Business name / Email / Address  |  Row 2: Phone / Website / Address continues */}
@@ -627,14 +822,11 @@ export default function SalesSettingsPage() {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2">
-            <Button onClick={onSave} disabled={saving}>
-              {saving ? 'Saving\u2026' : 'Save settings'}
-            </Button>
-          </div>
         </CardContent>
       </Card>
+          </div>
 
+          <div className={cn(activeSection !== 'tax' && 'lg:hidden')}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-base">Tax</CardTitle>
@@ -774,15 +966,12 @@ export default function SalesSettingsPage() {
               </table>
             </div>
 
-            <div className="flex justify-end gap-2">
-              <Button onClick={onSave} disabled={saving}>
-                {saving ? 'Saving\u2026' : 'Save tax'}
-              </Button>
-            </div>
           </CardContent>
         )}
       </Card>
+          </div>
 
+          <div className={cn(activeSection !== 'sales-notifications' && 'lg:hidden')}>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Sales Notifications</CardTitle>
@@ -842,16 +1031,13 @@ export default function SalesSettingsPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button onClick={onSaveReminders} disabled={remindersSaving}>
-                  {remindersSaving ? 'Saving…' : 'Save notifications'}
-                </Button>
-              </div>
             </>
           )}
         </CardContent>
       </Card>
+          </div>
 
+          <div className={cn(activeSection !== 'stripe-checkout' && 'lg:hidden')}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-base">Stripe Checkout</CardTitle>
@@ -946,16 +1132,13 @@ export default function SalesSettingsPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button onClick={() => void onSaveStripe()} disabled={stripeSaving}>
-                  {stripeSaving ? 'Saving…' : 'Save Stripe settings'}
-                </Button>
-              </div>
             </>
           )}
         </CardContent>
       </Card>
+          </div>
 
+          <div className={cn(activeSection !== 'quickbooks' && 'lg:hidden')}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-base">QuickBooks Integration (Pull only)</CardTitle>
@@ -978,33 +1161,27 @@ export default function SalesSettingsPage() {
             <div className="text-sm text-muted-foreground">Loading QuickBooks settings…</div>
           ) : (
             <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-2 sm:col-span-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
                 <Label>Daily pull task</Label>
                 <Input
                   type="time"
                   value={qbDailyPullTime}
                   onChange={(e) => setQbDailyPullTime(e.target.value)}
                   className="h-9"
-                  disabled={!qbDailyPullEnabled || qbBusy || qbSaving}
+                  disabled={!qbDailyPullEnabled || qbBusy || universalSaving}
                 />
               </div>
 
-              <div className="space-y-2 sm:col-span-1">
+              <div className="space-y-2">
                 <Label>Lookback (days)</Label>
                 <Input
                   value={qbLookbackDays}
                   onChange={(e) => setQbLookbackDays(e.target.value)}
                   className="h-9"
                   inputMode="numeric"
-                  disabled={qbBusy || qbSaving}
+                  disabled={qbBusy || universalSaving}
                 />
-              </div>
-
-              <div className="flex flex-wrap gap-2 sm:col-span-1 items-end justify-end">
-                <Button onClick={() => void onSaveQuickBooks()} disabled={qbBusy || qbSaving}>
-                  {qbSaving ? 'Saving…' : 'Save QuickBooks settings'}
-                </Button>
               </div>
             </div>
 
@@ -1080,6 +1257,23 @@ export default function SalesSettingsPage() {
           )}
         </CardContent>
       </Card>
+          </div>
+
+        </div>
+      </div>
+
+      {universalSuccess && (
+        <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+          <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+        </div>
+      )}
+
+      <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
+        <Button onClick={onSaveAll} disabled={universalSaving} size="lg" className="w-full sm:w-auto">
+          <Save className="w-4 h-4 mr-2" />
+          {universalSaving ? 'Saving...' : 'Save Changes'}
+        </Button>
+      </div>
 
       {/* Tax Rate Add/Edit Modal */}
       <Dialog open={taxRateModalOpen} onOpenChange={setTaxRateModalOpen}>

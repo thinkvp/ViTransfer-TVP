@@ -9,6 +9,7 @@ import {
   fetchSalesRollup,
   fetchSalesSettings,
 } from '@/lib/sales/admin-api'
+import { apiFetch } from '@/lib/api-client'
 import type { SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { InvoiceStatus, QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { invoiceStatusBadgeClass, invoiceStatusLabel, quoteStatusBadgeClass, quoteStatusLabel } from '@/lib/sales/badge'
@@ -24,6 +25,10 @@ export default function SalesDashboardPage() {
   const [clientNameById, setClientNameById] = useState<Record<string, string>>({})
 
   const [loading, setLoading] = useState(true)
+
+  const [qbActionsEnabled, setQbActionsEnabled] = useState<boolean | null>(null)
+  const [qbBusy, setQbBusy] = useState(false)
+  const [qbActionMessage, setQbActionMessage] = useState<{ text: string; isError: boolean } | null>(null)
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
     address: '',
@@ -63,7 +68,7 @@ export default function SalesDashboardPage() {
 
     ;(async () => {
       try {
-        const [s, r] = await Promise.all([
+        const [s, r, qbEnabled] = await Promise.all([
           fetchSalesSettings(),
           fetchSalesRollup({
             invoicesLimit: 2000,
@@ -71,10 +76,17 @@ export default function SalesDashboardPage() {
             paymentsLimit: 5000,
             stripePaymentsLimit: 200,
           }),
+          apiFetch('/api/sales/quickbooks/settings', { method: 'GET' })
+            .then(async (res) => {
+              const json = await res.json().catch(() => null)
+              return json?.dailyPullEnabled === true
+            })
+            .catch(() => false),
         ])
         if (cancelled) return
         setSettings(s)
         setRollup(r)
+        setQbActionsEnabled(qbEnabled)
       } catch {
         // ignore
       } finally {
@@ -98,6 +110,43 @@ export default function SalesDashboardPage() {
     }
     void run()
   }, [])
+
+  const runQbPull = async (
+    url: string,
+    singular: string,
+    plural: string,
+    extractCount: (json: any) => number,
+  ) => {
+    setQbBusy(true)
+    setQbActionMessage(null)
+    try {
+      const res = await apiFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 7 }),
+      })
+      const json = await res.json().catch(() => null)
+      if (res.ok) {
+        const count = extractCount(json)
+        const text =
+          count === 0
+            ? `No ${plural} to pull`
+            : count === 1
+            ? `Successfully pulled 1 ${singular}`
+            : `Successfully pulled ${count} ${plural}`
+        setQbActionMessage({ text, isError: false })
+        setTick((v) => v + 1)
+      } else {
+        const errText = typeof (json as any)?.error === 'string' ? (json as any).error : `Pull failed (${res.status}).`
+        setQbActionMessage({ text: errText, isError: true })
+      }
+    } catch (e) {
+      setQbActionMessage({ text: `Pull failed: ${e instanceof Error ? e.message : String(e)}`, isError: true })
+    } finally {
+      setQbBusy(false)
+      setTimeout(() => setQbActionMessage(null), 3000)
+    }
+  }
 
   const stats = useMemo(() => {
     return rollup?.stats ?? {
@@ -231,8 +280,8 @@ export default function SalesDashboardPage() {
         <CardContent className="p-3 sm:p-4">
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             <div className="flex items-center gap-2">
-              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                <FileText className="w-4 h-4 text-primary" />
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <FileText className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Open quotes</p>
@@ -241,8 +290,8 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                <Receipt className="w-4 h-4 text-primary" />
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <Receipt className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Open invoices</p>
@@ -251,8 +300,8 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                <DollarSign className="w-4 h-4 text-primary" />
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <DollarSign className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Awaiting payment</p>
@@ -261,8 +310,8 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                <AlertTriangle className="w-4 h-4 text-primary" />
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <AlertTriangle className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Overdue</p>
@@ -271,8 +320,8 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                <CreditCard className="w-4 h-4 text-primary" />
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <CreditCard className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Paid &lt;30 days</p>
@@ -281,8 +330,8 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                <BarChart3 className="w-4 h-4 text-primary" />
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <BarChart3 className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Sales FY{salesOverview.financialYearLabel}</p>
@@ -292,6 +341,61 @@ export default function SalesDashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {qbActionsEnabled && (
+        <Card>
+          <CardHeader>
+            <CardTitle>QuickBooks Actions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={qbBusy}
+                onClick={() => void runQbPull('/api/sales/quickbooks/pull/customers', 'client', 'clients', (j) => (j?.created ?? 0))}
+              >
+                {qbBusy ? 'Working…' : 'Pull Clients'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={qbBusy}
+                onClick={() => void runQbPull('/api/sales/quickbooks/pull/quotes', 'quote', 'quotes', (j) => (j?.stored?.created ?? 0))}
+              >
+                {qbBusy ? 'Working…' : 'Pull Quotes'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={qbBusy}
+                onClick={() => void runQbPull('/api/sales/quickbooks/pull/invoices', 'invoice', 'invoices', (j) => (j?.stored?.created ?? 0))}
+              >
+                {qbBusy ? 'Working…' : 'Pull Invoices'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={qbBusy}
+                onClick={() => void runQbPull('/api/sales/quickbooks/pull/payments', 'payment', 'payments', (j) => (j?.stored?.created ?? 0))}
+              >
+                {qbBusy ? 'Working…' : 'Pull Payments'}
+              </Button>
+            </div>
+            {qbActionMessage && (
+              <div className={`mt-3 p-3 sm:p-4 rounded-lg border-2 ${
+                qbActionMessage.isError
+                  ? 'bg-destructive-visible border-destructive-visible'
+                  : 'bg-success-visible border-success-visible'
+              }`}>
+                <p className={`text-xs sm:text-sm font-medium ${
+                  qbActionMessage.isError ? 'text-destructive' : 'text-success'
+                }`}>{qbActionMessage.text}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <Card>
@@ -309,22 +413,22 @@ export default function SalesDashboardPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left border-b border-border">
-                      <th className="py-2 pr-3">Quote</th>
-                      <th className="py-2 pr-3">Client</th>
-                      <th className="py-2 pr-3">Issue date</th>
-                      <th className="py-2 pr-3">Status</th>
-                      <th className="py-2 pr-3 text-right">Total</th>
+                      <th className="py-2 pr-3 whitespace-nowrap">Quote</th>
+                      <th className="py-2 pr-3 min-w-[120px]">Client</th>
+                      <th className="py-2 pr-3 whitespace-nowrap">Issue date</th>
+                      <th className="py-2 pr-3 whitespace-nowrap">Status</th>
+                      <th className="py-2 pr-3 text-right whitespace-nowrap">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dashboardData.quoteRows.map((r) => (
                       <tr key={r.quote.id} className="border-b border-border/60 last:border-b-0">
-                        <td className="py-2 pr-3 font-medium">
+                        <td className="py-2 pr-3 font-medium whitespace-nowrap">
                           <Link href={`/admin/sales/quotes/${encodeURIComponent(r.quote.id)}`} className="hover:underline">
                             {r.quote.quoteNumber}
                           </Link>
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">
+                        <td className="py-2 pr-3 text-muted-foreground min-w-[120px]">
                           {r.quote.clientId ? (
                             <Link href={`/admin/clients/${encodeURIComponent(r.quote.clientId)}`} className="hover:underline">
                               {clientNameById[r.quote.clientId] ?? r.quote.clientId}
@@ -333,13 +437,13 @@ export default function SalesDashboardPage() {
                             '—'
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">{formatDate(r.quote.issueDate)}</td>
-                        <td className="py-2 pr-3">
+                        <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">{formatDate(r.quote.issueDate)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${quoteStatusBadgeClass(r.effectiveStatus)}`}>
                             {quoteStatusLabel(r.effectiveStatus)}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
+                        <td className="py-2 pr-3 text-right font-medium whitespace-nowrap">{formatMoney(r.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -368,22 +472,22 @@ export default function SalesDashboardPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left border-b border-border">
-                      <th className="py-2 pr-3">Invoice</th>
-                      <th className="py-2 pr-3">Client</th>
-                      <th className="py-2 pr-3">Due date</th>
-                      <th className="py-2 pr-3">Status</th>
-                      <th className="py-2 pr-3 text-right">Balance</th>
+                      <th className="py-2 pr-3 whitespace-nowrap">Invoice</th>
+                      <th className="py-2 pr-3 min-w-[120px]">Client</th>
+                      <th className="py-2 pr-3 whitespace-nowrap">Due date</th>
+                      <th className="py-2 pr-3 whitespace-nowrap">Status</th>
+                      <th className="py-2 pr-3 text-right whitespace-nowrap">Balance</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dashboardData.invoiceRows.map((r) => (
                       <tr key={r.invoice.id} className="border-b border-border/60 last:border-b-0">
-                        <td className="py-2 pr-3 font-medium">
+                        <td className="py-2 pr-3 font-medium whitespace-nowrap">
                           <Link href={`/admin/sales/invoices/${encodeURIComponent(r.invoice.id)}`} className="hover:underline">
                             {r.invoice.invoiceNumber}
                           </Link>
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">
+                        <td className="py-2 pr-3 text-muted-foreground min-w-[120px]">
                           {r.invoice.clientId ? (
                             <Link href={`/admin/clients/${encodeURIComponent(r.invoice.clientId)}`} className="hover:underline">
                               {clientNameById[r.invoice.clientId] ?? r.invoice.clientId}
@@ -392,13 +496,13 @@ export default function SalesDashboardPage() {
                             '—'
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">{r.invoice.dueDate ? formatDate(r.invoice.dueDate) : '—'}</td>
-                        <td className="py-2 pr-3">
+                        <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">{r.invoice.dueDate ? formatDate(r.invoice.dueDate) : '—'}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs ${invoiceStatusBadgeClass(r.effectiveStatus)}`}>
                             {invoiceStatusLabel(r.effectiveStatus)}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium">{formatMoney(r.balanceCents, getCurrencySymbol(settings.currencyCode))}</td>
+                        <td className="py-2 pr-3 text-right font-medium whitespace-nowrap">{formatMoney(r.balanceCents, getCurrencySymbol(settings.currencyCode))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -428,20 +532,20 @@ export default function SalesDashboardPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b border-border">
-                    <th className="py-2 pr-3">Date</th>
-                    <th className="py-2 pr-3">Amount</th>
-                    <th className="py-2 pr-3">Client</th>
-                    <th className="py-2 pr-3">Invoice</th>
-                    <th className="py-2 pr-3">Method</th>
-                    <th className="py-2 pr-3">Reference</th>
+                    <th className="py-2 pr-3 whitespace-nowrap">Date</th>
+                    <th className="py-2 pr-3 whitespace-nowrap">Amount</th>
+                    <th className="py-2 pr-3 min-w-[120px]">Client</th>
+                    <th className="py-2 pr-3 whitespace-nowrap">Invoice</th>
+                    <th className="py-2 pr-3 whitespace-nowrap">Method</th>
+                    <th className="py-2 pr-3 whitespace-nowrap">Reference</th>
                   </tr>
                 </thead>
                 <tbody>
                   {dashboardData.recentPayments.map((p) => (
                     <tr key={p.id} className="border-b border-border/60 last:border-b-0">
-                      <td className="py-2 pr-3 text-muted-foreground">{formatDate(p.paymentDate)}</td>
-                      <td className="py-2 pr-3 font-medium">{formatMoney(p.amountCents, getCurrencySymbol(settings.currencyCode))}</td>
-                      <td className="py-2 pr-3 text-muted-foreground">
+                      <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">{formatDate(p.paymentDate)}</td>
+                      <td className="py-2 pr-3 font-medium whitespace-nowrap">{formatMoney(p.amountCents, getCurrencySymbol(settings.currencyCode))}</td>
+                      <td className="py-2 pr-3 text-muted-foreground min-w-[120px]">
                         {p.clientId ? (
                           <Link href={`/admin/clients/${encodeURIComponent(p.clientId)}`} className="hover:underline">
                             {clientNameById[p.clientId] ?? p.clientId}
@@ -450,7 +554,7 @@ export default function SalesDashboardPage() {
                           '—'
                         )}
                       </td>
-                      <td className="py-2 pr-3 text-muted-foreground">
+                      <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">
                         {p.invoiceId ? (
                           <Link href={`/admin/sales/invoices/${encodeURIComponent(p.invoiceId)}`} className="hover:underline">
                             {dashboardData.invoiceNumberById[p.invoiceId] ?? p.invoiceId}
@@ -459,8 +563,8 @@ export default function SalesDashboardPage() {
                           '—'
                         )}
                       </td>
-                      <td className="py-2 pr-3 text-muted-foreground">{p.method || '—'}</td>
-                      <td className="py-2 pr-3 text-muted-foreground">{p.reference || '—'}</td>
+                      <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">{p.method || '—'}</td>
+                      <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">{p.reference || '—'}</td>
                     </tr>
                   ))}
                 </tbody>

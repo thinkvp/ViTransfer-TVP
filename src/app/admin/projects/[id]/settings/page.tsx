@@ -20,6 +20,7 @@ import { ArrowLeft, Save, RefreshCw, Copy, Check, ChevronDown, ChevronUp, FileTe
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -164,6 +165,21 @@ export default function ProjectSettingsPage() {
   const [recipients, setRecipients] = useState<any[]>([])
   const hasRecipientWithEmail = recipients?.some((r: any) => r.email && r.email.trim() !== '') || false
 
+  // Unsaved changes tracking
+  const [savedSnapshot, setSavedSnapshot] = useState('')
+  const currentSnapshot = JSON.stringify({
+    title, description, companyName, enableVideos, enablePhotos, selectedClientId,
+    enableRevisions, maxRevisions, restrictCommentsToLatestVersion, hideFeedback,
+    useFullTimecode, allowClientDeleteComments, allowClientUploadFiles,
+    allowAuthenticatedProjectSwitching, maxClientUploadAllocationMB, sharePassword,
+    authMode, guestMode, guestLatestOnly, useCustomSlug, customSlugValue,
+    previewResolutions, watermarkEnabled, watermarkText, useCustomWatermark,
+    timelinePreviewsEnabled, clientNotificationSchedule, clientNotificationTime,
+    clientNotificationDay,
+  })
+  const hasUnsavedChanges = savedSnapshot !== '' && currentSnapshot !== savedSnapshot
+  useUnsavedChanges(hasUnsavedChanges)
+
   // Collapsible section state (all collapsed by default)
   const [showProjectDetails, setShowProjectDetails] = useState(false)
   const [showClientInfo, setShowClientInfo] = useState(false)
@@ -292,6 +308,9 @@ export default function ProjectSettingsPage() {
     loadProject()
   }, [projectId])
 
+  // Set the saved snapshot once initial load populates all state
+  // (effect is placed after the initialLoadComplete state declaration below)
+
   const loadClientSuggestions = useCallback(async (query: string) => {
     const q = query.trim()
     if (!q) {
@@ -339,6 +358,13 @@ export default function ProjectSettingsPage() {
 
   // Track if initial load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+
+  // Set the saved snapshot once initial load populates all state
+  useEffect(() => {
+    if (initialLoadComplete && savedSnapshot === '') {
+      setSavedSnapshot(currentSnapshot)
+    }
+  }, [initialLoadComplete, savedSnapshot, currentSnapshot])
 
   // Clear password when switching to a non-password mode (OTP or NONE)
   useEffect(() => {
@@ -533,6 +559,9 @@ export default function ProjectSettingsPage() {
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
 
+      // Reset unsaved changes tracking - will be refreshed after state update from reload
+      setSavedSnapshot('')
+
       // Reload project data to reflect changes
       const refreshResponse = await apiFetch(`/api/projects/${projectId}`)
       if (refreshResponse.ok) {
@@ -649,7 +678,7 @@ export default function ProjectSettingsPage() {
 
         {success && (
           <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">Settings saved successfully!</p>
+            <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
           </div>
         )}
 
@@ -1845,7 +1874,7 @@ export default function ProjectSettingsPage() {
         {/* Success notification at bottom */}
         {success && (
           <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">Settings saved successfully!</p>
+            <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
           </div>
         )}
 

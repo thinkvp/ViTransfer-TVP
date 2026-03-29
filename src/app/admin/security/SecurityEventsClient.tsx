@@ -44,6 +44,7 @@ interface SecurityEventsResponse {
     total: number
     pages: number
   }
+  blockedTotal: number
   stats: Array<{
     type: string
     count: number
@@ -112,6 +113,7 @@ function formatEventDateTime24(isoString: string): string {
 export default function SecurityEventsClient() {
   const [events, setEvents] = useState<SecurityEvent[]>([])
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 })
+  const [blockedTotal, setBlockedTotal] = useState(0)
   const [stats, setStats] = useState<Array<{ type: string; count: number }>>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
@@ -142,6 +144,7 @@ export default function SecurityEventsClient() {
       const data: SecurityEventsResponse = await response.json()
       setEvents(data.events)
       setPagination(data.pagination)
+      setBlockedTotal(data.blockedTotal ?? 0)
       setStats(data.stats)
     } catch (error) {
       console.error('Error loading security events:', error)
@@ -296,7 +299,7 @@ export default function SecurityEventsClient() {
         {/* Stats Overview */}
         <Card className="mb-4">
           <CardContent className="p-3 sm:p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
                   <Shield className="w-5 h-5 text-primary" />
@@ -317,13 +320,23 @@ export default function SecurityEventsClient() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 min-w-0 col-span-2 sm:col-span-1">
+              <div className="flex items-center gap-2 min-w-0">
                 <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
                   <XCircle className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Blocked</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{events.filter(e => e.wasBlocked).length}</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{blockedTotal.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                  <Unlock className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Rate Limits</p>
+                  <p className="text-base font-semibold tabular-nums truncate">{rateLimits.length.toLocaleString()}</p>
                 </div>
               </div>
             </div>

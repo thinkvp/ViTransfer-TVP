@@ -31,6 +31,7 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { quoteEffectiveStatus } from '@/lib/sales/status'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 function quoteStatusLabel(status: QuoteStatus): string {
   switch (status) {
@@ -75,6 +76,8 @@ export default function QuoteDetailPage() {
 
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [success, setSuccess] = useState(false)
+  const [savedSnapshot, setSavedSnapshot] = useState('')
 
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -156,6 +159,21 @@ export default function QuoteDetailPage() {
 
         setEditingClient(!Boolean(q.clientId))
         setEditingProject(!Boolean(q.projectId))
+
+        setSavedSnapshot(JSON.stringify({
+          status: q.status,
+          clientId: q.clientId ?? '',
+          projectId: q.projectId ?? '',
+          issueDate: q.issueDate,
+          validUntil: q.validUntil ?? '',
+          notes: q.notes,
+          terms: q.terms ?? s.defaultTerms,
+          items: q.items.map((it) => ({
+            ...it,
+            details: (it as any).details ?? '',
+            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
+          })),
+        }))
       } catch {
         if (!cancelled) setQuote(null)
       } finally {
@@ -285,6 +303,10 @@ export default function QuoteDetailPage() {
     [allProjects, projects]
   )
 
+  const currentSnapshot = useMemo(() => JSON.stringify({ status, clientId, projectId, issueDate, validUntil, notes, terms, items }), [status, clientId, projectId, issueDate, validUntil, notes, terms, items])
+  const hasUnsavedChanges = loaded && savedSnapshot !== '' && currentSnapshot !== savedSnapshot
+  useUnsavedChanges(hasUnsavedChanges)
+
   const onSave = async () => {
     if (!quote) return
     if (!clientId) {
@@ -314,7 +336,9 @@ export default function QuoteDetailPage() {
       })
       setQuote(next)
       setStatus(next.status)
-      alert('Saved')
+      setSavedSnapshot(currentSnapshot)
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
     } finally {
       setSaving(false)
     }
@@ -467,6 +491,12 @@ export default function QuoteDetailPage() {
           <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
         </div>
       </div>
+
+      {success && (
+        <div className="p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+          <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+        </div>
+      )}
 
       <Card>
         <CardContent className="space-y-4 pt-6">

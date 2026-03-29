@@ -92,6 +92,10 @@ export default function ProjectStatusPicker({
         {projectStatusLabel(normalizedValue)}
       </span>
 
+      {/* Wrap Dialog in a span so React portal events (overlay clicks, empty-area
+          clicks inside the modal) are stopped before they bubble through the React
+          component tree to any clickable parent row. */}
+      <span onClick={(e) => e.stopPropagation()}>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-sm">
           <DialogHeader>
@@ -143,6 +147,7 @@ export default function ProjectStatusPicker({
           </div>
         </DialogContent>
       </Dialog>
+      </span>
     </>
   )
 }

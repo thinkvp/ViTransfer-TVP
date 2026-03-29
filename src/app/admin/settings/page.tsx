@@ -26,6 +26,7 @@ import {
   MIN_DOWNLOAD_CHUNK_SIZE_MB,
   MIN_UPLOAD_CHUNK_SIZE_MB,
 } from '@/lib/transfer-tuning'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 interface Settings {
   id: string
@@ -301,6 +302,36 @@ export default function GlobalSettingsPage() {
   // Active section for desktop two-column nav
   const [activeSection, setActiveSection] = useState<typeof SETTING_SECTIONS[number]['id']>('company-branding')
 
+  // Unsaved changes tracking
+  const [savedSnapshot, setSavedSnapshot] = useState('')
+  const [dataLoaded, setDataLoaded] = useState(false)
+  const settingsSnapshot = JSON.stringify({
+    companyName, companyLogoMode, companyLogoUrl, companyFaviconMode, companyFaviconUrl,
+    darkLogoEnabled, darkLogoMode, darkLogoUrl, accentColor, accentTextMode,
+    emailHeaderColor, emailHeaderTextMode, defaultTheme, allowThemeToggle,
+    smtpServer, smtpPort, smtpUsername, smtpPassword, emailTrackingPixelsEnabled,
+    emailCustomFooterText, smtpFromAddress, smtpSecure, appDomain, mainCompanyDomain,
+    defaultPreviewResolutions, defaultWatermarkEnabled, defaultTimelinePreviewsEnabled,
+    defaultWatermarkText, defaultAllowClientDeleteComments, defaultAllowClientUploadFiles,
+    defaultAllowAuthenticatedProjectSwitching, defaultMaxClientUploadAllocationMB,
+    autoApproveProject, autoDeletePreviewsOnClose, excludeInternalIpsFromAnalytics,
+    uploadChunkSizeMB, downloadChunkSizeMB, autoCloseApprovedProjectsEnabled,
+    autoCloseApprovedProjectsAfterDays, adminNotificationSchedule, adminNotificationTime,
+    adminNotificationDay, httpsEnabled, hotlinkProtection, ipRateLimit, sessionRateLimit,
+    shareSessionRateLimit, shareTokenTtlSeconds, passwordAttempts, sessionTimeoutValue,
+    sessionTimeoutUnit, trackAnalytics, trackSecurityLogs, viewSecurityEvents,
+    maxInternalCommentsPerProject, maxCommentsPerVideoVersion, maxProjectRecipients,
+    maxProjectFilesPerProject, pushEnabled, pushWebhookUrl, pushTitlePrefix,
+    pushNotifyUnauthorizedOTP, pushNotifyFailedAdminLogin, pushNotifySuccessfulAdminLogin,
+    pushNotifyFailedSharePasswordAttempt, pushNotifySuccessfulShareAccess,
+    pushNotifyGuestVideoLinkAccess, pushNotifyClientComments, pushNotifyVideoApproval,
+    pushNotifySalesQuoteViewed, pushNotifySalesQuoteAccepted, pushNotifySalesInvoiceViewed,
+    pushNotifySalesInvoicePaid, pushNotifyPasswordResetRequested, pushNotifyPasswordResetSuccess,
+    cpuFfmpegThreadsPerJob, cpuVideoWorkerConcurrency, cpuDynamicThreadAllocation,
+  })
+  const hasUnsavedChanges = dataLoaded && savedSnapshot !== '' && settingsSnapshot !== savedSnapshot
+  useUnsavedChanges(hasUnsavedChanges)
+
   useEffect(() => {
     async function loadSettings() {
       try {
@@ -467,11 +498,19 @@ export default function GlobalSettingsPage() {
         setError('Failed to load settings')
       } finally {
         setLoading(false)
+        setDataLoaded(true)
       }
     }
 
     loadSettings()
   }, [])
+
+  // Set initial snapshot after data loads and all state has settled
+  useEffect(() => {
+    if (dataLoaded && savedSnapshot === '') {
+      setSavedSnapshot(settingsSnapshot)
+    }
+  }, [dataLoaded, savedSnapshot, settingsSnapshot])
 
   const loadBlocklists = async () => {
     setBlocklistsLoading(true)
@@ -752,6 +791,9 @@ export default function GlobalSettingsPage() {
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
 
+      // Reset unsaved changes tracking
+      setSavedSnapshot('')
+
       // Reload settings data to reflect changes
       const refreshResponse = await apiFetch('/api/settings')
       if (refreshResponse.ok) {
@@ -948,7 +990,7 @@ export default function GlobalSettingsPage() {
 
         {success && (
           <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">Settings saved successfully!</p>
+            <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
           </div>
         )}
 
@@ -1637,7 +1679,7 @@ export default function GlobalSettingsPage() {
         {/* Success notification at bottom */}
         {success && (
           <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">Settings saved successfully!</p>
+            <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
           </div>
         )}
 

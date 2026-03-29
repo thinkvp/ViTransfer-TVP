@@ -5,6 +5,27 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-03-29
+
+### Added
+- **`useUnsavedChanges` hook** — new `src/hooks/useUnsavedChanges.ts` registers a `beforeunload` guard when a form has unsaved changes and exports a `confirmNavigation()` helper for programmatic navigation (e.g. router.push); integrated into Global Settings, Project Settings, Client detail, User edit, Invoice detail, Quote detail, and Sales Settings pages so users are warned before losing work
+- **QuickBooks Actions card on Sales Dashboard** — when QuickBooks is configured a new card appears alongside the stats summary with Pull Clients, Pull Quotes, Pull Invoices, and Pull Payments buttons; each button posts to the corresponding pull endpoint with a 7-day lookback, displays a timed success or error banner, and refreshes the rollup totals; buttons are disabled while a pull is in progress
+- **Sales sub-navigation in admin header** — the Sales entry in the main nav now expands into a sub-menu listing Dashboard, Quotes, Invoices, Payments, and Settings; on desktop the sub-menu opens as a hover-activated fly-out with individual icons; on mobile the hamburger menu gains an expandable inline sub-list with the same entries and a chevron toggle
+
+### Changed
+- **Sales Settings redesigned as a sidebar-nav layout on desktop** — matching the pattern introduced in v1.2.6 for Global Settings and Project Settings, a persistent left sidebar on screens ≥1024 px lists five sections (Sales Details, Tax, Sales Notifications, Stripe Checkout, QuickBooks Integration) with matching icons; the per-section Save buttons are removed and replaced with a single unified "Save Changes" button at the top of the page that persists all sections concurrently via `Promise.all`; the stacked card layout is retained on mobile
+- **Security Events "Blocked" count now reflects all matching events, not just the current page** — the API runs a second scoped `count` query for `wasBlocked: true` under the same active filters and returns it as `blockedTotal`; the stats card displays that server-side total instead of counting only the rows visible on screen; a fourth stat card "Rate Limits" is added to the overview grid (layout changed from 3 to 4 columns)
+- **Client detail page tracks unsaved changes and shows inline success banner** — form data and recipient list are snapshot on load; a dirty-state comparison drives `useUnsavedChanges`; on successful save a green "Changes saved successfully!" banner appears for 3 seconds; navigating away while the form is dirty triggers a browser confirmation prompt
+- **User edit page stays on page after save and warns on dirty navigation** — previously a successful save redirected to `/admin/users`; the page now shows an inline success banner and keeps the user in the edit form; the Cancel button calls `confirmNavigation()` before routing so unsaved changes are not silently discarded
+- **Role dialog on Users page warns before closing with unsaved changes** — the role editor dialog intercepts all close paths (overlay click, Escape key, Cancel button) and shows a native confirm prompt when role name or permissions have been modified since the dialog was opened
+- **Invoice and quote detail pages replace `alert('Saved')` with success banners** — the blocking `alert` call on both pages is replaced by a timed green "Changes saved successfully!" banner; `useUnsavedChanges` is also wired up using a JSON snapshot of all editable fields so these pages now guard against accidental navigation
+- **Sales Dashboard tables use `whitespace-nowrap` on key columns** — quote number, issue date, status, and total columns (and the corresponding invoice columns) no longer wrap on narrow screens; client name columns retain a `min-w-[120px]` constraint
+- **Success message copy standardised to "Changes saved successfully!"** — the previous "Settings saved successfully!" label is replaced on Global Settings, Project Settings, Client detail, User edit, Invoice, Quote, and Sales Settings pages
+
+### Fixed
+- **Accent color rendered at the exact lightness the user chose** — `buildAccentOverrideCss` previously forced the CSS `--primary` variable to 50 % lightness in light mode and 60 % in dark mode regardless of the stored hex value; it now reads the actual `l` component of the stored color and applies it unchanged in both themes, so dark, muted, or very light brand colors are rendered faithfully instead of being silently brightened or dimmed
+- **ProjectStatusPicker dialog no longer triggers parent-row navigation** — click events originating inside the status-change dialog (overlay background clicks, empty-area clicks within the modal content) were bubbling through the React tree to the surrounding clickable table row and triggering a page navigation; the Dialog is now wrapped in a `<span onClick={stopPropagation}>` portal boundary that absorbs those events before they reach the row handler
+
 ## [1.2.6] - 2026-03-28
 
 ### Changed

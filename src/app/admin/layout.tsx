@@ -84,11 +84,11 @@ export default function AdminLayout({
   return (
     <AuthProvider requireAuth={true}>
       <UploadManagerProvider>
-      <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
+      <div className="flex flex-1 min-h-0 bg-background flex-col">
         <div ref={headerRef}>
           <AdminHeader />
         </div>
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col overflow-x-hidden">
           <AdminMenuAccessGuard>
             {children}
           </AdminMenuAccessGuard>

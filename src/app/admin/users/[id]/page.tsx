@@ -18,6 +18,7 @@ import { UserFileList } from '@/components/UserFileList'
 import { formatDate } from '@/lib/utils'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 interface Role {
   id: string
@@ -33,6 +34,7 @@ export default function EditUserPage() {
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [togglingActive, setTogglingActive] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -53,6 +55,18 @@ export default function EditUserPage() {
   const [roles, setRoles] = useState<Role[]>([])
   const [rolesLoading, setRolesLoading] = useState(true)
   const [fileRefresh, setFileRefresh] = useState(0)
+  const [savedFormData, setSavedFormData] = useState(formData)
+
+  const hasUnsavedChanges = formData.email !== savedFormData.email ||
+    formData.username !== savedFormData.username ||
+    formData.name !== savedFormData.name ||
+    formData.notes !== savedFormData.notes ||
+    formData.displayColor !== savedFormData.displayColor ||
+    formData.appRoleId !== savedFormData.appRoleId ||
+    formData.password !== '' ||
+    formData.oldPassword !== ''
+
+  const { confirmNavigation } = useUnsavedChanges(hasUnsavedChanges)
 
   // PassKey state
   const [passkeyAvailable, setPasskeyAvailable] = useState(false)
@@ -67,7 +81,7 @@ export default function EditUserPage() {
       if (!res.ok) throw new Error('Failed to fetch user')
       const data = await res.json()
       setCurrentUser(data.user)
-      setFormData({
+      const loaded = {
         email: data.user.email,
         username: data.user.username || '',
         name: data.user.name || '',
@@ -77,7 +91,9 @@ export default function EditUserPage() {
         oldPassword: '',
         password: '',
         confirmPassword: '',
-      })
+      }
+      setFormData(loaded)
+      setSavedFormData(loaded)
     } catch (err: any) {
       setError(err.message)
     }
@@ -299,7 +315,18 @@ export default function EditUserPage() {
       // Update user
       await apiPatch(`/api/users/${userId}`, updateData)
 
-      router.push('/admin/users')
+      // Update saved state so form is no longer dirty
+      const savedState = {
+        ...formData,
+        oldPassword: '',
+        password: '',
+        confirmPassword: '',
+      }
+      setFormData(savedState)
+      setSavedFormData(savedState)
+
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -630,13 +657,21 @@ export default function EditUserPage() {
               )}
             </div>
 
+            {success && (
+              <div className="mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+                <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+              </div>
+            )}
+
             <div className="flex flex-col-reverse gap-3 pt-6 justify-end sm:flex-row">
               <Button
                 type="button"
                 variant="outline"
                 size="lg"
                 className="w-full sm:w-auto"
-                onClick={() => router.push('/admin/users')}
+                onClick={() => {
+                  if (confirmNavigation()) router.push('/admin/users')
+                }}
                 disabled={loading}
               >
                 <X className="w-4 h-4 mr-2" />

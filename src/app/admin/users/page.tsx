@@ -111,6 +111,7 @@ export default function UsersPage() {
   const [activeRoleId, setActiveRoleId] = useState<string | null>(null)
   const [roleName, setRoleName] = useState('')
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => defaultRolePermissions())
+  const [savedRoleSnapshot, setSavedRoleSnapshot] = useState('')
 
   useEffect(() => {
     void fetchUsersAndRoles()
@@ -183,6 +184,7 @@ export default function UsersPage() {
     setRoleDialogError('')
     setRoleName('')
     setRolePermissions(defaultRolePermissions())
+    setSavedRoleSnapshot(JSON.stringify({ name: '', permissions: defaultRolePermissions() }))
     setRoleDialogOpen(true)
   }
 
@@ -192,6 +194,7 @@ export default function UsersPage() {
     setRoleDialogError('')
     setRoleName(role.name)
     setRolePermissions(normalizeRolePermissions(role.permissions))
+    setSavedRoleSnapshot(JSON.stringify({ name: role.name, permissions: normalizeRolePermissions(role.permissions) }))
     setRoleDialogOpen(true)
   }
 
@@ -204,6 +207,18 @@ export default function UsersPage() {
       next.projectVisibility.statuses = [...existing]
       return next
     })
+  }
+
+  const hasRoleUnsavedChanges = () => {
+    const current = JSON.stringify({ name: roleName, permissions: rolePermissions })
+    return current !== savedRoleSnapshot
+  }
+
+  const handleRoleDialogClose = (open: boolean) => {
+    if (!open && hasRoleUnsavedChanges()) {
+      if (!window.confirm('You have unsaved changes. Are you sure you want to close?')) return
+    }
+    setRoleDialogOpen(open)
   }
 
   const toggleArea = (area: keyof RolePermissions['menuVisibility'], enabled: boolean) => {
@@ -512,7 +527,7 @@ export default function UsersPage() {
           </Card>
         </div>
 
-        <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
+        <Dialog open={roleDialogOpen} onOpenChange={handleRoleDialogClose}>
           <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{roleDialogMode === 'create' ? 'Add New Role' : 'Edit Role'}</DialogTitle>
@@ -661,7 +676,7 @@ export default function UsersPage() {
             </div>
 
             <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
-              <Button className="w-full sm:w-auto" variant="outline" onClick={() => setRoleDialogOpen(false)} disabled={rolesLoading}>
+              <Button className="w-full sm:w-auto" variant="outline" onClick={() => handleRoleDialogClose(false)} disabled={rolesLoading}>
                 Cancel
               </Button>
               <Button className="w-full sm:w-auto" variant="default" onClick={() => void saveRole()} disabled={rolesLoading}>

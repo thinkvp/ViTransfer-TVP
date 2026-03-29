@@ -42,26 +42,25 @@ function hexToHslValues(hex: string): { h: number; s: number; l: number } | null
 function buildAccentOverrideCss(hex: string, textMode?: string | null): string | null {
   const hsl = hexToHslValues(hex)
   if (!hsl) return null
-  const { h, s } = hsl
-  // Light mode: use the colour at 50% lightness (vibrant), dark at 60%
-  const lightL = 50, darkL = 60
+  const { h, s, l } = hsl
+  // Use the exact lightness the user chose — no silent clamping.
   const lightVisibleL = 95, darkVisibleL = 20
   // Accent text: LIGHT = white (0 0% 100%), DARK = near-black (220 14% 7%)
   const foreground = textMode === 'DARK' ? '220 14% 7%' : '0 0% 100%'
   return `
     :root {
-      --primary: ${h} ${s}% ${lightL}%;
+      --primary: ${h} ${s}% ${l}%;
       --primary-foreground: ${foreground};
       --primary-visible: ${h} ${s}% ${lightVisibleL}%;
-      --accent-foreground: ${h} ${s}% ${lightL}%;
-      --ring: ${h} ${s}% ${lightL}%;
+      --accent-foreground: ${h} ${s}% ${l}%;
+      --ring: ${h} ${s}% ${l}%;
     }
     .dark {
-      --primary: ${h} ${s}% ${darkL}%;
+      --primary: ${h} ${s}% ${l}%;
       --primary-foreground: ${foreground};
       --primary-visible: ${h} ${s}% ${darkVisibleL}%;
-      --accent-foreground: ${h} ${s}% ${darkL}%;
-      --ring: ${h} ${s}% ${darkL}%;
+      --accent-foreground: ${h} ${s}% ${l}%;
+      --ring: ${h} ${s}% ${l}%;
     }
   `
 }

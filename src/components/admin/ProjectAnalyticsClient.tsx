@@ -464,8 +464,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   }
 
   const { project, stats, videoStats, albumStats } = data
-  const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
-  const metricIconClassName = 'w-4 h-4 text-primary'
+  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20'
+  const metricIconClassName = 'w-5 h-5 text-primary'
 
   const hasVideos = videoStats.length > 0
   const hasAlbums = albumStats.length > 0

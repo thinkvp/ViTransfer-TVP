@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     if (projectId) where.projectId = projectId
 
     // Fetch events with pagination
-    const [events, total] = await Promise.all([
+    const [events, total, blockedTotal] = await Promise.all([
       prisma.securityEvent.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -84,7 +84,8 @@ export async function GET(request: NextRequest) {
           }
         }
       }),
-      prisma.securityEvent.count({ where })
+      prisma.securityEvent.count({ where }),
+      prisma.securityEvent.count({ where: { ...where, wasBlocked: true } })
     ])
 
     // Get summary stats
@@ -103,6 +104,7 @@ export async function GET(request: NextRequest) {
         total,
         pages: Math.ceil(total / limit)
       },
+      blockedTotal,
       stats: stats.map(s => ({
         type: s.type,
         count: s._count.id

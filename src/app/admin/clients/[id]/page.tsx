@@ -29,6 +29,7 @@ import {
   invoiceEffectiveStatus as computeInvoiceEffectiveStatus,
   quoteEffectiveStatus as computeQuoteEffectiveStatus,
 } from '@/lib/sales/status'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 type ClientResponse = {
   id: string
@@ -73,6 +74,7 @@ export default function ClientDetailPage() {
   const [saving, setSaving] = useState(false)
   const [togglingActive, setTogglingActive] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
 
   const [client, setClient] = useState<ClientResponse | null>(null)
   const [formData, setFormData] = useState({
@@ -82,9 +84,20 @@ export default function ClientDetailPage() {
     website: '',
     notes: '',
   })
+  const [savedFormData, setSavedFormData] = useState(formData)
 
   const [recipients, setRecipients] = useState<EditableRecipient[]>([])
+  const [savedRecipients, setSavedRecipients] = useState<EditableRecipient[]>([])
   const [fileRefresh, setFileRefresh] = useState(0)
+
+  const hasUnsavedChanges = formData.name !== savedFormData.name ||
+    formData.address !== savedFormData.address ||
+    formData.phone !== savedFormData.phone ||
+    formData.website !== savedFormData.website ||
+    formData.notes !== savedFormData.notes ||
+    JSON.stringify(recipients) !== JSON.stringify(savedRecipients)
+
+  useUnsavedChanges(hasUnsavedChanges)
 
   const [clientProjects, setClientProjects] = useState<ClientProjectRow[]>([])
   const [projectsLoading, setProjectsLoading] = useState(false)
@@ -172,15 +185,16 @@ export default function ClientDetailPage() {
       const data = await res.json()
       const nextClient = data?.client as ClientResponse
       setClient(nextClient)
-      setFormData({
+      const loadedForm = {
         name: nextClient?.name || '',
         address: nextClient?.address || '',
         phone: nextClient?.phone || '',
         website: nextClient?.website || '',
         notes: nextClient?.notes || '',
-      })
-      setRecipients(
-        (nextClient?.recipients || []).map((r) => ({
+      }
+      setFormData(loadedForm)
+      setSavedFormData(loadedForm)
+      const loadedRecipients = (nextClient?.recipients || []).map((r) => ({
           id: r.id,
           name: r.name,
           email: r.email,
@@ -189,7 +203,8 @@ export default function ClientDetailPage() {
           receiveNotifications: r.receiveNotifications !== false,
           receiveSalesReminders: (r as any).receiveSalesReminders !== false,
         }))
-      )
+      setRecipients(loadedRecipients)
+      setSavedRecipients(loadedRecipients)
     } catch (err: any) {
       setError(err?.message || 'Failed to load client')
     } finally {
@@ -477,6 +492,9 @@ export default function ClientDetailPage() {
       })
 
       await loadClient()
+
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
     } catch (err: any) {
       setError(err?.message || 'Failed to save client')
     } finally {
@@ -606,6 +624,12 @@ export default function ClientDetailPage() {
                   showNotificationsToggle={false}
                   showSalesRemindersToggle
                 />
+
+                {success && (
+                  <div className="p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+                    <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-end">
                   <Button type="submit" disabled={saving}>
