@@ -15,7 +15,10 @@ const CONFIRM_MESSAGE = 'You have unsaved changes. Are you sure you want to leav
  */
 export function useUnsavedChanges(hasUnsavedChanges: boolean) {
   const dirtyRef = useRef(hasUnsavedChanges)
-  dirtyRef.current = hasUnsavedChanges
+
+  useEffect(() => {
+    dirtyRef.current = hasUnsavedChanges
+  }, [hasUnsavedChanges])
 
   // Browser close / reload guard
   useEffect(() => {
