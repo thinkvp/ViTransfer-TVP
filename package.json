@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -46,6 +46,7 @@
     "prisma": "^6.19.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
+    "recharts": "^3.8.1",
     "sharp": "^0.33.5",
     "stripe": "^14.24.0",
     "tailwind-merge": "^2.6.0",

@@ -5,9 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.9] - 2026-03-30
+
+### Added
+- **Sales Dashboard — Sales Overview chart** — a monthly column chart displays invoice revenue for the selected period, positioned immediately above the QuickBooks Actions section; the subheader shows the period total, average revenue per month, and (for Financial Year to Date and Year to Date periods) a projected full-year figure extrapolated from the current run-rate; the projection accounts for partial-month progress by weighting the current month proportionally to the number of elapsed days, avoiding inflated projections early in a month
+- **Sales Dashboard — Quotes Overview chart** — a dual line chart plots total quotes issued and accepted quotes per month side-by-side; "Total" counts every quote for the month by issue date regardless of status, while "Accepted" counts only quotes that reached accepted status; the subheader displays totals and a win-rate percentage; both lines share the same period selector
+- **Sales Dashboard — Projects Overview chart** — a composite chart combines a bar series (closed project count per month, left axis) with a line series (average invoiced value per project, right axis), giving simultaneous visibility of volume and deal size; only projects with `CLOSED` status are included; projects are bucketed by creation date; a new `/api/admin/sales/projects-chart` endpoint serves the data, computing each project's total invoiced amount by summing all linked invoice line items including tax
+- **Sales Dashboard — Clients Overview leaderboard** — a ranked list beneath the Projects Overview chart shows all clients who have closed projects in the selected period, ordered by total invoiced revenue descending; each row displays a gold/silver/bronze rank badge for the top three, a relative progress bar scaled to the highest-revenue client, the client name (linked to the client detail page), total revenue, project count, and average project value; the list is scrollable when there are many clients
+- **Period selector on all four charts** — each chart carries an independent dropdown offering Financial Year to Date (default), Last Financial Year, Year to Date, and Last 12 Months; all periods respect the `fiscalYearStartMonth` configured in Sales Settings
+
+### Changed
+- **QuickBooks Actions card layout redesigned** — the card header is removed and replaced with an inline title; on desktop the title and all four buttons sit on a single centred row; on mobile the title is centred above a 2 × 2 button grid (Pull Clients / Pull Quotes on the first row, Pull Invoices / Pull Payments on the second); each button now carries a matching icon — `Building2` for Pull Clients, `FileText` for Pull Quotes, `Receipt` for Pull Invoices, and `DollarSign` for Pull Payments, consistent with the icons used in the stat-card strip at the top of the dashboard
+
 ## [1.2.8] - 2026-03-30
 
 ### Added
+- **Admin and internal users can now upload attachments when leaving comments on the Share Page** — previously only possible by Clients / project recipients.
 - **`projectExternalCommunication` RBAC permission** — a new granular permission "External Communication" is added to the Projects permission group on the Users page; it controls access to email upload, email list/delete, and email attachment download routes; enabling Full Control automatically grants it, and disabling it (or Photo & Video Uploads) clears Full Control to avoid a misleading partial state
 - **Comment Attachments section on the Project page** — when a project has one or more comment attachment files a dedicated "Comment Attachments" read-only list appears in the project files area, visible to users with the `accessSharePage` permission; the list refreshes automatically when uploads or file changes occur
 - **Email Attachments section on the Project page** — when a project has non-inline email attachments a dedicated "Email Attachments" read-only list appears, visible to users with the new `projectExternalCommunication` permission; it refreshes in sync with email and storage changes

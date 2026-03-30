@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle, BarChart3, CreditCard, DollarSign, FileText, Receipt } from 'lucide-react'
+import { AlertTriangle, BarChart3, Building2, CreditCard, DollarSign, FileText, Receipt } from 'lucide-react'
 import {
   fetchSalesRollup,
   fetchSalesSettings,
@@ -18,6 +18,7 @@ import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } fr
 import { parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
 import { formatDate } from '@/lib/utils'
 import { getCurrencySymbol } from '@/lib/sales/currency'
+import { SalesDashboardCharts } from '@/components/sales/SalesDashboardCharts'
 
 export default function SalesDashboardPage() {
   const [tick, setTick] = useState(0)
@@ -342,45 +343,51 @@ export default function SalesDashboardPage() {
         </CardContent>
       </Card>
 
+      <SalesDashboardCharts rollup={rollup} settings={settings} nowIso={nowIso} />
+
       {qbActionsEnabled && (
         <Card>
-          <CardHeader>
-            <CardTitle>QuickBooks Actions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={qbBusy}
-                onClick={() => void runQbPull('/api/sales/quickbooks/pull/customers', 'client', 'clients', (j) => (j?.created ?? 0))}
-              >
-                {qbBusy ? 'Working…' : 'Pull Clients'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={qbBusy}
-                onClick={() => void runQbPull('/api/sales/quickbooks/pull/quotes', 'quote', 'quotes', (j) => (j?.stored?.created ?? 0))}
-              >
-                {qbBusy ? 'Working…' : 'Pull Quotes'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={qbBusy}
-                onClick={() => void runQbPull('/api/sales/quickbooks/pull/invoices', 'invoice', 'invoices', (j) => (j?.stored?.created ?? 0))}
-              >
-                {qbBusy ? 'Working…' : 'Pull Invoices'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={qbBusy}
-                onClick={() => void runQbPull('/api/sales/quickbooks/pull/payments', 'payment', 'payments', (j) => (j?.stored?.created ?? 0))}
-              >
-                {qbBusy ? 'Working…' : 'Pull Payments'}
-              </Button>
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-col items-center sm:flex-row sm:justify-center gap-3">
+              <p className="text-base font-semibold">QuickBooks Actions</p>
+              <div className="grid grid-cols-2 sm:flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={qbBusy}
+                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/customers', 'client', 'clients', (j) => (j?.created ?? 0))}
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  {qbBusy ? 'Working…' : 'Pull Clients'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={qbBusy}
+                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/quotes', 'quote', 'quotes', (j) => (j?.stored?.created ?? 0))}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  {qbBusy ? 'Working…' : 'Pull Quotes'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={qbBusy}
+                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/invoices', 'invoice', 'invoices', (j) => (j?.stored?.created ?? 0))}
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  {qbBusy ? 'Working…' : 'Pull Invoices'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={qbBusy}
+                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/payments', 'payment', 'payments', (j) => (j?.stored?.created ?? 0))}
+                >
+                  <DollarSign className="w-3.5 h-3.5" />
+                  {qbBusy ? 'Working…' : 'Pull Payments'}
+                </Button>
+              </div>
             </div>
             {qbActionMessage && (
               <div className={`mt-3 p-3 sm:p-4 rounded-lg border-2 ${
