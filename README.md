@@ -65,6 +65,11 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
   <br><em>Responsive mobile view of client share page</em>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/Dropbox Download.png" alt="Dropbox Download Options" width="600">
+  <br><em>Download Options modal — clients can choose between Dropbox (faster, more concurrent) or Local Server as the download source</em>
+</p>
+
 ### Sales & CRM Integration
 
 <p align="center">
@@ -75,6 +80,11 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 <p align="center">
   <img src="docs/screenshots/Sales - Invoice.jpg" alt="Invoice Page" width="800">
   <br><em>Invoice detail page with Stripe payment integration</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Sales Settings.jpg" alt="Sales Settings" width="800">
+  <br><em>Sales settings — configure business details, ABN, currency, quote/invoice labels, default terms and payment details</em>
 </p>
 
 ### Client & User Management
@@ -109,6 +119,16 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 <p align="center">
   <img src="docs/screenshots/Add Key Date modal.jpg" alt="Add Key Date" width="600">
   <br><em>Key date scheduling with automated reminders</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Settings - Storage Overview.jpg" alt="Storage Overview" width="800">
+  <br><em>Storage Overview — system-wide breakdown by category (videos, previews, assets, photos, etc.) with recalculation tools and auto-delete controls</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/Settings - CPU Configuration.jpg" alt="CPU Configuration" width="800">
+  <br><em>CPU Configuration — control FFmpeg thread allocation and concurrent video processing jobs with live peak-usage estimates</em>
 </p>
 
 ---
@@ -190,6 +210,11 @@ Optional Dropbox integration to offload large file delivery from your server:
 - **Running Jobs Visibility** — All Dropbox upload activity appears in the Running Jobs panel for real-time progress tracking
 - **Background Processing** — Uploads run as BullMQ background jobs with automatic retry (3 attempts, exponential backoff)
 - **Human-Readable Paths** — Files are stored in Dropbox under `clients/{Client Name}/projects/{Project Title}/...`, matching the same client-based folder structure used for local storage so files are easy to find in your Dropbox
+
+<p align="center">
+  <img src="docs/screenshots/Dropbox Download.png" alt="Dropbox Download Options" width="600">
+  <br><em>Download Options modal — clients choose between Dropbox or Local Server, with a fallback toggle if Dropbox is unavailable</em>
+</p>
 
 ### Export Feedback and Import in NLE
 - **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
