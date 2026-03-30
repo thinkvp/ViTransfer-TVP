@@ -49,6 +49,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     label: 'Projects',
     actions: [
       { key: 'projectsPhotoVideoUploads', label: 'Photo & Video Uploads' },
+      { key: 'projectExternalCommunication', label: 'External Communication' },
       { key: 'projectsFullControl', label: 'Full Control' },
     ],
   },
@@ -585,13 +586,14 @@ export default function UsersPage() {
                                     // Projects: Full Control implies Photo & Video Uploads.
                                     if (isProjectsGroup && item.key === 'projectsFullControl' && checked === true) {
                                       nextActions.projectsPhotoVideoUploads = true
+                                      nextActions.projectExternalCommunication = true
                                     }
 
-                                    // Projects: disabling Photo & Video Uploads clears Full Control too,
-                                    // since Full Control implies Photo & Video access.
+                                    // Projects: disabling child actions that are implied by Full Control
+                                    // clears Full Control to avoid a misleading partial state.
                                     if (
                                       isProjectsGroup &&
-                                      item.key === 'projectsPhotoVideoUploads' &&
+                                      (item.key === 'projectsPhotoVideoUploads' || item.key === 'projectExternalCommunication') &&
                                       checked !== true &&
                                       prev.actions.projectsFullControl === true
                                     ) {

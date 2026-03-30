@@ -65,10 +65,10 @@ export async function GET(request: NextRequest) {
     const originalVideosBytes = asNumber(videoAgg._sum.originalFileSize)
     const videoAssetsBytes = asNumber(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumber(commentFileAgg._sum.fileSize)
-    const projectFilesBytes =
-      asNumber(projectFileAgg._sum.fileSize) +
+    const communicationsBytes =
       asNumber(projectEmailAgg._sum.rawFileSize) +
       asNumber(projectEmailAttachmentAgg._sum.fileSize)
+    const projectFilesBytes = asNumber(projectFileAgg._sum.fileSize)
     const originalPhotosBytes = asNumber(albumPhotoAgg._sum.fileSize)
     const photoZipBytes =
       asNumber(albumPhotoAgg._sum.socialFileSize) +
@@ -109,6 +109,7 @@ export async function GET(request: NextRequest) {
         commentAttachmentsBytes,
         originalPhotosBytes,
         photoZipBytes,
+        communicationsBytes,
         projectFilesBytes,
         clientFilesBytes,
         userFilesBytes,

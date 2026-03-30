@@ -16,6 +16,7 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { ProjectFileUpload } from '@/components/ProjectFileUpload'
 import { ProjectFileList } from '@/components/ProjectFileList'
+import { ProjectReadonlyAttachmentList } from '@/components/ProjectReadonlyAttachmentList'
 import { ProjectEmailUpload } from '@/components/ProjectEmailUpload'
 import { ProjectEmailTable } from '@/components/ProjectEmailTable'
 import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
@@ -81,8 +82,10 @@ export default function ProjectPage() {
   const canUploadFilesToProjectInternal = canDoAction(permissions, 'uploadFilesToProjectInternal')
   const canMakeProjectComments = canDoAction(permissions, 'makeCommentsOnProjects')
   const canAccessSharePage = canDoAction(permissions, 'accessSharePage')
+  const canAccessExternalCommunication = canDoAction(permissions, 'projectExternalCommunication')
   const canAccessPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
   const canDeleteInternalFiles = canDoAction(permissions, 'projectsFullControl')
+  const hasTrackedProjectData = Math.max(Number(project?.totalBytes || 0), Number(project?.diskBytes || 0), 0) > 0
 
   const bumpProjectStorageRefresh = useCallback(() => {
     setProjectStorageRefresh((v) => v + 1)
@@ -697,7 +700,7 @@ export default function ProjectPage() {
               <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />
             )}
 
-            {sectionVisibility.externalCommunication && canDeleteInternalFiles && (
+            {sectionVisibility.externalCommunication && canAccessExternalCommunication && (
               <div className="border rounded-lg p-4 bg-card space-y-4">
                 {canUploadFilesToProjectInternal ? (
                   <ProjectEmailUpload
@@ -707,8 +710,8 @@ export default function ProjectPage() {
                     maxConcurrent={3}
                     onUploadComplete={() => {
                       setProjectEmailsRefresh((v) => v + 1)
-                      setProjectFilesRefresh((v) => v + 1)
                       bumpProjectStorageRefresh()
+                      void fetchProject()
                     }}
                   />
                 ) : (
@@ -722,8 +725,8 @@ export default function ProjectPage() {
                   refreshTrigger={projectEmailsRefresh}
                   canDelete={canUploadFilesToProjectInternal}
                     onExternalFilesChanged={() => {
-                      setProjectFilesRefresh((v) => v + 1)
                       bumpProjectStorageRefresh()
+                      void fetchProject()
                     }}
                 />
               </div>
@@ -842,6 +845,7 @@ export default function ProjectPage() {
                   onUploadComplete={() => {
                     setProjectFilesRefresh((v) => v + 1)
                     bumpProjectStorageRefresh()
+                    void fetchProject()
                   }}
                 />
               ) : (
@@ -854,12 +858,46 @@ export default function ProjectPage() {
                 projectId={project.id}
                 refreshTrigger={projectFilesRefresh}
                 canDelete={canDeleteInternalFiles}
-                onFilesChanged={bumpProjectStorageRefresh}
+                onFilesChanged={() => {
+                  bumpProjectStorageRefresh()
+                  void fetchProject()
+                }}
               />
               </div>
             )}
 
-            {sectionVisibility.projectData && canDeleteInternalFiles && (
+            {sectionVisibility.projectFiles && canAccessSharePage && Number(project?.commentAttachmentsCount || 0) > 0 && (
+              <div className="border rounded-lg p-4 bg-card space-y-4">
+                <div>
+                  <div className="text-base font-medium">Comment Attachments</div>
+                </div>
+
+                <ProjectReadonlyAttachmentList
+                  projectId={project.id}
+                  endpoint={`/api/projects/${project.id}/comment-attachments`}
+                  refreshTrigger={projectFilesRefresh + projectEmailsRefresh + projectStorageRefresh}
+                  emptyText="No comment attachments found."
+                  showUploadedBy
+                />
+              </div>
+            )}
+
+            {sectionVisibility.projectFiles && canAccessExternalCommunication && Number(project?.emailAttachmentsCount || 0) > 0 && (
+              <div className="border rounded-lg p-4 bg-card space-y-4">
+                <div>
+                  <div className="text-base font-medium">Email Attachments</div>
+                </div>
+
+                <ProjectReadonlyAttachmentList
+                  projectId={project.id}
+                  endpoint={`/api/projects/${project.id}/email-attachments`}
+                  refreshTrigger={projectEmailsRefresh + projectStorageRefresh}
+                  emptyText="No email attachments found."
+                />
+              </div>
+            )}
+
+            {sectionVisibility.projectData && canDeleteInternalFiles && hasTrackedProjectData && (
               <ProjectStorageUsage projectId={project.id} refreshTrigger={projectStorageRefresh} />
             )}
           </div>

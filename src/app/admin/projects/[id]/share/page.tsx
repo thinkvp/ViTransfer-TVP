@@ -14,8 +14,15 @@ import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+
+type DraftNavigationGuard = {
+  confirmDiscardDraft: () => boolean
+}
+
+const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 
 export default function AdminSharePage() {
   const params = useParams()
@@ -45,8 +52,14 @@ export default function AdminSharePage() {
   const [albums, setAlbums] = useState<any[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
+  const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
+
+  const confirmShareDraftNavigation = useCallback(() => {
+    const guard = draftGuardRef.current
+    return guard ? guard.confirmDiscardDraft() : true
+  }, [])
 
   // Fetch comments separately for security (same pattern as public share)
   const fetchComments = useCallback(async () => {
@@ -441,12 +454,16 @@ export default function AdminSharePage() {
 
   // Handle video selection (identical to public share)
   const handleVideoSelect = (videoName: string) => {
+    if (!activeAlbumId && activeVideoName === videoName) return
+    if (!confirmShareDraftNavigation()) return
     setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
   }
 
   const handleAlbumSelect = (albumId: string) => {
+    if (activeAlbumId === albumId) return
+    if (!confirmShareDraftNavigation()) return
     setActiveAlbumId(albumId)
   }
 
@@ -639,6 +656,9 @@ export default function AdminSharePage() {
                     companyName={companyName}
                     adminUser={adminUser}
                     clientDisplayName={clientDisplayName}
+                    onDraftGuardChange={(guard) => {
+                      draftGuardRef.current = guard
+                    }}
                   />
                 )}
               </div>
@@ -661,6 +681,7 @@ function AdminShareFeedbackGrid({
   companyName,
   adminUser,
   clientDisplayName,
+  onDraftGuardChange,
 }: {
   project: any
   readyVideos: any[]
@@ -672,6 +693,7 @@ function AdminShareFeedbackGrid({
   companyName: string
   adminUser: any
   clientDisplayName: string
+  onDraftGuardChange?: (guard: DraftNavigationGuard | null) => void
 }) {
   const [isDesktop, setIsDesktop] = useState(false)
   const [commentsWidth, setCommentsWidth] = useState(420)
@@ -874,6 +896,31 @@ function AdminShareFeedbackGrid({
     allowClientUploadFiles: false,
   })
 
+  const resetDraft = useCallback(() => {
+    management.resetDraft()
+  }, [management])
+
+  const { confirmNavigation } = useUnsavedChanges(management.hasUnsentComment, {
+    message: UNSENT_COMMENT_MESSAGE,
+    onDiscard: resetDraft,
+  })
+
+  const confirmDiscardDraft = useCallback(() => {
+    if (!management.hasUnsentComment) {
+      resetDraft()
+      return true
+    }
+
+    return confirmNavigation()
+  }, [confirmNavigation, management.hasUnsentComment, resetDraft])
+
+  useEffect(() => {
+    if (!onDraftGuardChange) return
+
+    onDraftGuardChange({ confirmDiscardDraft })
+    return () => onDraftGuardChange(null)
+  }, [confirmDiscardDraft, onDraftGuardChange])
+
   const isApproved = project.status === 'APPROVED' || project.status === 'SHARE_ONLY'
 
   const latestVideoVersion = readyVideos.length > 0
@@ -966,6 +1013,12 @@ function AdminShareFeedbackGrid({
                 loading={management.loading}
                 uploadProgress={management.uploadProgress}
                 uploadStatusText={management.uploadStatusText}
+                onFileSelect={management.onFileSelect}
+                attachedFiles={management.attachedFiles}
+                onRemoveFile={management.onRemoveFile}
+                allowFileUpload={true}
+                clientUploadQuota={management.clientUploadQuota}
+                onRefreshUploadQuota={management.refreshClientUploadQuota}
                 selectedTimestamp={management.selectedTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
                 selectedVideoFps={management.selectedVideoFps}
@@ -1049,6 +1102,7 @@ function AdminShareFeedbackGrid({
               shareToken={null}
               showShortcutsButton={true}
               allowClientDeleteComments={project.allowClientDeleteComments}
+              allowCommentFileUpload={true}
               hideInput={true}
               showApproveButton={false}
               management={management as any}
@@ -1064,6 +1118,12 @@ function AdminShareFeedbackGrid({
                 loading={management.loading}
                 uploadProgress={management.uploadProgress}
                 uploadStatusText={management.uploadStatusText}
+                onFileSelect={management.onFileSelect}
+                attachedFiles={management.attachedFiles}
+                onRemoveFile={management.onRemoveFile}
+                allowFileUpload={true}
+                clientUploadQuota={management.clientUploadQuota}
+                onRefreshUploadQuota={management.refreshClientUploadQuota}
                 selectedTimestamp={management.selectedTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
                 selectedVideoFps={management.selectedVideoFps}

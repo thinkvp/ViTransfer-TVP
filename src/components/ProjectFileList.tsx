@@ -36,7 +36,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/projects/${projectId}/files?includeEmailAttachments=1`)
+      const res = await apiFetch(`/api/projects/${projectId}/files`)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data?.error || 'Failed to fetch files')
@@ -127,11 +127,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
             </button>
             <div className="text-xs text-muted-foreground truncate">
               {formatFileSize(Number(f.fileSize))}
-              {f.sourceType === 'emailAttachment'
-                ? ' • Email Attachment'
-                : f.uploadedByName
-                  ? ` • Uploaded by ${f.uploadedByName}`
-                  : ''}
+              {f.uploadedByName ? ` • Uploaded by ${f.uploadedByName}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">

@@ -75,7 +75,7 @@ export async function GET(
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
+  const forbiddenAction = requireActionAccess(authResult, 'projectExternalCommunication')
   if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
@@ -174,6 +174,9 @@ export async function DELETE(
 
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
+
+  const forbiddenAccess = requireActionAccess(authResult, 'projectExternalCommunication')
+  if (forbiddenAccess) return forbiddenAccess
 
   const forbiddenAction = requireActionAccess(authResult, 'uploadFilesToProjectInternal')
   if (forbiddenAction) return forbiddenAction

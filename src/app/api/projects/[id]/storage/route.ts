@@ -197,7 +197,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const videoAssetsBytes = asNumberBigInt(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumberBigInt(commentFileAgg._sum.fileSize)
 
-    const projectFilesBytesRaw = asNumberBigInt(projectFileAgg._sum.fileSize)
+    const projectFilesBytes = asNumberBigInt(projectFileAgg._sum.fileSize)
     const communicationsBytes =
       asNumberBigInt(projectEmailAgg._sum.rawFileSize) +
       asNumberBigInt(projectEmailAttachmentAgg._sum.fileSize)
@@ -213,7 +213,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     // Fold sub-categories into the existing breakdown rows used by the UI.
     const photosBytes = originalPhotosBytes + photoZipBytes
-    const projectFilesBytes = projectFilesBytesRaw + communicationsBytes
     let videoPreviewsBytes = 0
 
     const totalBytes = asNumberBigInt(project?.totalBytes)
@@ -255,6 +254,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           originalPhotosBytes: number
           photoZipBytes: number
           photosBytes: number
+          communicationsBytes: number
           projectFilesBytes: number
         }
       | null = null
@@ -364,13 +364,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       ])
 
       videoPreviewsBytes = Math.max(0, videoPreviewsBytesDisk)
-      const projectFilesBytesDisk = Math.max(0, filesBytesDisk + communicationBytesDisk)
+      const projectFilesBytesDisk = Math.max(0, filesBytesDisk)
+      const communicationsBytesDisk = Math.max(0, communicationBytesDisk)
 
       diskTotalBytes = Math.max(0, rootBytes)
       const known =
         Math.max(0, commentsBytesDisk) +
         Math.max(0, originalPhotosBytesDisk) +
         Math.max(0, photoZipBytesDisk) +
+        Math.max(0, communicationsBytesDisk) +
         Math.max(0, projectFilesBytesDisk) +
         Math.max(0, originalVideosBytesDisk) +
         Math.max(0, videoPreviewsBytesDisk) +
@@ -386,6 +388,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         originalPhotosBytes: Math.max(0, originalPhotosBytesDisk),
         photoZipBytes: Math.max(0, photoZipBytesDisk),
         photosBytes: Math.max(0, originalPhotosBytesDisk + photoZipBytesDisk),
+        communicationsBytes: communicationsBytesDisk,
         projectFilesBytes: Math.max(0, projectFilesBytesDisk),
       }
     }
@@ -427,6 +430,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         originalPhotosBytes,
         photoZipBytes,
         photosBytes,
+        communicationsBytes,
         projectFilesBytes,
       },
       diskBreakdown,

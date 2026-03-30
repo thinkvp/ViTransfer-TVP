@@ -60,6 +60,7 @@ interface CommentSectionProps {
   showShortcutsButton?: boolean
   allowClientDeleteComments?: boolean
   allowClientUploadFiles?: boolean
+  allowCommentFileUpload?: boolean
   hideInput?: boolean
   showVideoActions?: boolean
   showThemeToggle?: boolean
@@ -179,6 +180,7 @@ export function CommentSectionView({
   showShortcutsButton = false,
   allowClientDeleteComments = false,
   allowClientUploadFiles = false,
+  allowCommentFileUpload = allowClientUploadFiles || isAdminView,
   hideInput = false,
   showVideoActions = true,
   showThemeToggle = false,
@@ -1202,7 +1204,7 @@ export function CommentSectionView({
                   onFileSelect={onFileSelect}
                   attachedFiles={attachedFiles}
                   onRemoveFile={onRemoveFile}
-                  allowFileUpload={allowClientUploadFiles && !isAdminView}
+                  allowFileUpload={allowCommentFileUpload}
                   clientUploadQuota={clientUploadQuota}
                   onRefreshUploadQuota={refreshClientUploadQuota}
                   selectedTimestamp={selectedTimestamp}
@@ -1640,7 +1642,7 @@ export function CommentSectionView({
             onFileSelect={onFileSelect}
             attachedFiles={attachedFiles}
             onRemoveFile={onRemoveFile}
-            allowFileUpload={allowClientUploadFiles && !isAdminView}
+            allowFileUpload={allowCommentFileUpload}
             clientUploadQuota={clientUploadQuota}
             onRefreshUploadQuota={refreshClientUploadQuota}
             selectedTimestamp={selectedTimestamp}

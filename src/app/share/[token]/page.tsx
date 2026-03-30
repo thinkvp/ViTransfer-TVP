@@ -20,6 +20,7 @@ import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
@@ -31,6 +32,12 @@ type SwitchableProject = {
   status: string
   updatedAt: string
 }
+
+type DraftNavigationGuard = {
+  confirmDiscardDraft: () => boolean
+}
+
+const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 
 export default function SharePage() {
   const params = useParams()
@@ -85,6 +92,7 @@ export default function SharePage() {
   const [switchProjectsLoading, setSwitchProjectsLoading] = useState(false)
   const [switchProjectsError, setSwitchProjectsError] = useState<string | null>(null)
   const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null)
+  const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const { isDark } = useTheme()
@@ -102,6 +110,11 @@ export default function SharePage() {
       return null
     }
   })()
+
+  const confirmShareDraftNavigation = useCallback(() => {
+    const guard = draftGuardRef.current
+    return guard ? guard.confirmDiscardDraft() : true
+  }, [])
 
   // Detect admin session (JWT) so we don't accidentally use a cached guest share token.
   useEffect(() => {
@@ -404,6 +417,7 @@ export default function SharePage() {
 
   const handleProjectSwitch = useCallback(async (targetProject: SwitchableProject) => {
     if (!shareToken || !token) return
+    if (!confirmShareDraftNavigation()) return
 
     setSwitchingProjectId(targetProject.id)
     setSwitchProjectsError(null)
@@ -455,7 +469,7 @@ export default function SharePage() {
     } finally {
       setSwitchingProjectId(null)
     }
-  }, [router, shareToken, storageKey, token])
+  }, [confirmShareDraftNavigation, router, shareToken, storageKey, token])
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
@@ -832,12 +846,16 @@ export default function SharePage() {
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {
+    if (!activeAlbumId && activeVideoName === videoName) return
+    if (!confirmShareDraftNavigation()) return
     setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
   }
 
   const handleAlbumSelect = (albumId: string) => {
+    if (activeAlbumId === albumId) return
+    if (!confirmShareDraftNavigation()) return
     setActiveVideoName('')
     setActiveVideosRaw([])
     setActiveAlbumId(albumId)
@@ -1425,6 +1443,9 @@ export default function SharePage() {
                   hasLogo={hasLogo}
                   hasDarkLogo={hasDarkLogo}
                   mainCompanyDomain={mainCompanyDomain}
+                  onDraftGuardChange={(guard) => {
+                    draftGuardRef.current = guard
+                  }}
                   onApprove={fetchProjectData}
                 />
               )}
@@ -1516,6 +1537,7 @@ function ShareFeedbackGrid({
   hasLogo,
   hasDarkLogo = false,
   mainCompanyDomain,
+  onDraftGuardChange,
   onApprove,
 }: {
   project: any
@@ -1533,6 +1555,7 @@ function ShareFeedbackGrid({
   hasLogo: boolean
   hasDarkLogo?: boolean
   mainCompanyDomain: string | null
+  onDraftGuardChange?: (guard: DraftNavigationGuard | null) => void
   onApprove: () => void
 }) {
   const { isDark } = useTheme()
@@ -1738,6 +1761,31 @@ function ShareFeedbackGrid({
   })
 
   const { authorName, setAuthorName } = management
+
+  const resetDraft = useCallback(() => {
+    management.resetDraft()
+  }, [management])
+
+  const { confirmNavigation } = useUnsavedChanges(management.hasUnsentComment, {
+    message: UNSENT_COMMENT_MESSAGE,
+    onDiscard: resetDraft,
+  })
+
+  const confirmDiscardDraft = useCallback(() => {
+    if (!management.hasUnsentComment) {
+      resetDraft()
+      return true
+    }
+
+    return confirmNavigation()
+  }, [confirmNavigation, management.hasUnsentComment, resetDraft])
+
+  useEffect(() => {
+    if (!onDraftGuardChange) return
+
+    onDraftGuardChange({ confirmDiscardDraft })
+    return () => onDraftGuardChange(null)
+  }, [confirmDiscardDraft, onDraftGuardChange])
 
   // Auto-select client display name based on OTP email matching a project recipient.
   // Only runs if the user hasn't already chosen a name.
@@ -1946,6 +1994,7 @@ function ShareFeedbackGrid({
               showShortcutsButton={true}
               allowClientDeleteComments={project.allowClientDeleteComments}
               allowClientUploadFiles={project.allowClientUploadFiles}
+              allowCommentFileUpload={Boolean(project.allowClientUploadFiles)}
               hideInput={true}
               showThemeToggle={true}
               management={management as any}

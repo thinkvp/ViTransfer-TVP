@@ -537,18 +537,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             </div>
           )}
 
-          {canViewSharePage && (
-            <Button
-              variant="outline"
-              size="default"
-              className="w-full"
-              onClick={handleViewSharePage}
-            >
-              <ExternalLink className="w-4 h-4 mr-2" />
-              View Share Page
-            </Button>
-          )}
-
           {canViewAnalytics && (
             <Button
               variant="outline"
@@ -584,6 +572,18 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 )}
               </Button>
             </div>
+          )}
+
+          {canViewSharePage && (
+            <Button
+              variant="default"
+              size="default"
+              className="w-full"
+              onClick={handleViewSharePage}
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              View Share Page
+            </Button>
           )}
 
           {canDeleteProjects && (

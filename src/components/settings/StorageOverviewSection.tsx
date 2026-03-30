@@ -20,6 +20,7 @@ type StorageOverview = {
     commentAttachmentsBytes: number
     originalPhotosBytes: number
     photoZipBytes: number
+    communicationsBytes: number
     projectFilesBytes: number
     clientFilesBytes: number
     userFilesBytes: number
@@ -140,6 +141,7 @@ export function StorageOverviewSection({
       },
       { key: 'originalPhotosBytes', label: 'Original Photos', bytes: b.originalPhotosBytes },
       { key: 'photoZipBytes', label: 'Photo ZIP files & previews', bytes: b.photoZipBytes },
+      { key: 'communicationsBytes', label: 'External Communication', bytes: b.communicationsBytes },
       { key: 'projectFilesBytes', label: 'Project Files', bytes: b.projectFilesBytes },
       { key: 'clientFilesBytes', label: 'Client Files', bytes: b.clientFilesBytes },
       { key: 'userFilesBytes', label: 'User Files', bytes: b.userFilesBytes },

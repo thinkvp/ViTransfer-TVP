@@ -72,6 +72,15 @@ export function CpuConfigurationSection({
 
       {(show || hideCollapse) && (
         <CardContent className="space-y-4 border-t pt-4">
+          <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-md">
+            <p className="text-sm font-semibold text-warning">
+              Warning: Advanced Configuration
+            </p>
+            <p className="text-xs text-warning font-medium mt-1">
+              These settings directly affect how aggressively video jobs consume CPU resources. Over-allocating threads or concurrency can degrade application responsiveness and starve the OS, database, or web server. Adjust these values carefully.
+            </p>
+          </div>
+
           {/* System Info */}
           <div className="p-3 bg-muted/30 border rounded-lg">
             <div className="text-sm font-medium mb-2">System Resources</div>
@@ -130,10 +139,10 @@ export function CpuConfigurationSection({
             </div>
 
             {/* Utilization Summary */}
-            <div className={`p-3 rounded-md ${exceedsSystemCapacity ? 'bg-destructive/10 border-2 border-destructive/30' : fullUtilization ? 'bg-warning-visible border-2 border-warning-visible' : highAllocation ? 'bg-orange-50 border-2 border-orange-100 dark:bg-orange-950 dark:border-orange-900' : 'bg-muted'}`}>
+            <div className={`p-3 rounded-md ${exceedsSystemCapacity ? 'bg-destructive/10 border-2 border-destructive/30' : fullUtilization || highAllocation ? 'bg-warning-visible border-2 border-warning-visible' : 'bg-muted'}`}>
               <div className="text-sm">
                 <span className="font-medium">Estimated peak usage:</span>{' '}
-                <span className={`font-medium tabular-nums ${exceedsSystemCapacity ? 'text-destructive' : fullUtilization ? 'text-warning' : ''}`}>
+                <span className={`font-medium tabular-nums ${exceedsSystemCapacity ? 'text-destructive' : fullUtilization || highAllocation ? 'text-warning' : ''}`}>
                   {estimatedMaxThreads} / {detectedThreads} threads
                 </span>
                 <span className="text-muted-foreground ml-1">
@@ -157,7 +166,7 @@ export function CpuConfigurationSection({
                 </div>
               )}
               {!exceedsSystemCapacity && !fullUtilization && highAllocation && (
-                <div className="flex items-start gap-2 mt-2 text-xs text-orange-600 dark:text-orange-400 font-medium">
+                <div className="flex items-start gap-2 mt-2 text-xs text-warning font-medium">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                   <span>
                     Peak usage may cause contention with system resources. Ensure enough headroom is left for your OS and any other running apps.

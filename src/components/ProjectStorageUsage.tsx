@@ -44,6 +44,7 @@ type StorageSummary = {
     originalPhotosBytes?: number
     photoZipBytes?: number
     photosBytes: number
+    communicationsBytes?: number
     projectFilesBytes: number
   } | null
 }
@@ -163,7 +164,8 @@ export function ProjectStorageUsage({
       originalPhotosBytes > 0 ||
       photoZipBytes > 0
 
-    const projectFilesBytes = Number(b.projectFilesBytes || 0) + Number((b as any).communicationsBytes || 0)
+    const communicationsBytes = Number((b as any).communicationsBytes || 0)
+    const projectFilesBytes = Number(b.projectFilesBytes || 0)
 
     const items: Array<{ key: Row['key']; label: string; bytes: number }> = hasSplitRows
       ? [
@@ -173,6 +175,7 @@ export function ProjectStorageUsage({
           { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
           { key: 'originalPhotosBytes', label: 'Original Photos', bytes: originalPhotosBytes },
           { key: 'photoZipBytes', label: 'Photo ZIP files & previews', bytes: photoZipBytes },
+          { key: 'communicationsBytes', label: 'External Communication', bytes: communicationsBytes },
           { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
         ]
       : [
@@ -192,10 +195,11 @@ export function ProjectStorageUsage({
               Number((b as any).albumZipFullBytes || 0) +
               Number((b as any).albumZipSocialBytes || 0),
           },
+          { key: 'communicationsBytes', label: 'External Communication', bytes: communicationsBytes },
           { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
         ]
 
-    return items.map((it) => {
+    return items.filter((it) => Math.max(0, it.bytes) > 0).map((it) => {
       const bytes = Math.max(0, it.bytes)
       const pct = effectiveTotal > 0 ? Math.round((bytes / effectiveTotal) * 1000) / 10 : 0
       return { ...it, bytes, pct }
@@ -218,6 +222,10 @@ export function ProjectStorageUsage({
     if (!Number.isFinite(dropboxBytes) || dropboxBytes < 0) return null
     return formatFileSize(dropboxBytes)
   }, [data])
+
+  if (!loading && !error && data && rows.length === 0 && Number((data.diskTotalBytes ?? data.totalBytes) || 0) <= 0) {
+    return null
+  }
 
   return (
     <Card className="border-border">

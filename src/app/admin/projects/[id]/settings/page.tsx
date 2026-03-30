@@ -1239,9 +1239,9 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="maxClientUploadAllocationMB">Max allowed data allocation for client uploads</Label>
+                    <Label htmlFor="maxClientUploadAllocationMB">Max allowed data allocation for comment attachments</Label>
                     <p className="text-xs text-muted-foreground">
-                      Clients will not be allowed to upload more than this amount for the entire project. Zero = no limit.
+                      Comment attachments will be restricted to upload more than this amount for the entire project. Zero = no limit.
                     </p>
                   </div>
                   <div className="flex items-center justify-end gap-2">
@@ -1751,8 +1751,8 @@ export default function ProjectSettingsPage() {
 
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="maxClientUploadAllocationMB-d">Max allowed data allocation for client uploads</Label>
-                        <p className="text-xs text-muted-foreground">Clients will not be allowed to upload more than this amount for the entire project. Zero = no limit.</p>
+                        <Label htmlFor="maxClientUploadAllocationMB-d">Max allowed data allocation for comment attachments</Label>
+                        <p className="text-xs text-muted-foreground">Comment attachments will be restricted to upload more than this amount for the entire project. Zero = no limit.</p>
                       </div>
                       <div className="flex items-center justify-end gap-2">
                         <Input id="maxClientUploadAllocationMB-d" type="number" min={0} value={maxClientUploadAllocationMB} onChange={(e) => { const val = e.target.value; setMaxClientUploadAllocationMB(val === '' ? '' : Math.max(0, parseInt(val, 10) || 0)) }} className="w-20" />

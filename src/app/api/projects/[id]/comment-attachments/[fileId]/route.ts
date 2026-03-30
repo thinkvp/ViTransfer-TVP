@@ -5,8 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import fs from 'fs'
-import { createReadStream } from 'fs'
+import fs, { createReadStream } from 'fs'
 
 export const runtime = 'nodejs'
 
@@ -39,12 +38,11 @@ async function assertProjectAccessOr404(projectId: string, auth: any) {
   return project
 }
 
-// GET /api/projects/[id]/emails/[emailId]/attachments/[attachmentId] - download attachment (internal only)
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; emailId: string; attachmentId: string }> }
+  { params }: { params: Promise<{ id: string; fileId: string }> }
 ) {
-  const { id: projectId, emailId, attachmentId } = await params
+  const { id: projectId, fileId } = await params
 
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
@@ -52,47 +50,36 @@ export async function GET(
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
 
-  const forbiddenAction = requireActionAccess(authResult, 'projectExternalCommunication')
+  const forbiddenAction = requireActionAccess(authResult, 'accessSharePage')
   if (forbiddenAction) return forbiddenAction
 
   const rateLimitResult = await rateLimit(
     request,
     { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many download requests. Please slow down.' },
-    'project-email-attachment-download'
+    'project-comment-attachment-download'
   )
   if (rateLimitResult) return rateLimitResult
 
   const project = await assertProjectAccessOr404(projectId, authResult)
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
-  const attachment = await prisma.projectEmailAttachment.findFirst({
-    where: {
-      id: attachmentId,
-      projectEmailId: emailId,
-      projectEmail: { projectId },
-    },
+  const file = await prisma.commentFile.findFirst({
+    where: { id: fileId, projectId },
     select: {
-      id: true,
       fileName: true,
       fileType: true,
       storagePath: true,
-      isInline: true,
     },
   })
 
-  if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
+  if (!file) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
-  const fullPath = getFilePath(attachment.storagePath)
+  const fullPath = getFilePath(file.storagePath)
   const stat = await fs.promises.stat(fullPath)
   if (!stat.isFile()) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
-  const url = new URL(request.url)
-  const inlineRequested = url.searchParams.get('inline') === '1'
-
-  const sanitizedFilename = sanitizeFilenameForHeader(attachment.fileName)
-  const contentType = isValidMimeType(attachment.fileType) ? attachment.fileType : 'application/octet-stream'
-
-  const dispositionType = inlineRequested && attachment.isInline ? 'inline' : 'attachment'
+  const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
+  const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
 
   const { downloadChunkSizeBytes } = await getTransferTuningSettings()
   const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
@@ -103,10 +90,16 @@ export async function GET(
         if (!closed) controller.enqueue(chunk)
       })
       fileStream.on('end', () => {
-        if (!closed) { closed = true; controller.close() }
+        if (!closed) {
+          closed = true
+          controller.close()
+        }
       })
       fileStream.on('error', (err) => {
-        if (!closed) { closed = true; controller.error(err) }
+        if (!closed) {
+          closed = true
+          controller.error(err)
+        }
       })
     },
     cancel() {
@@ -118,7 +111,7 @@ export async function GET(
   return new NextResponse(readableStream, {
     headers: {
       'Content-Type': contentType,
-      'Content-Disposition': `${dispositionType}; filename="${sanitizedFilename}"`,
+      'Content-Disposition': `attachment; filename="${sanitizedFilename}"`,
       'Content-Length': stat.size.toString(),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-cache',

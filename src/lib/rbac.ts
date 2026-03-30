@@ -5,6 +5,7 @@ export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'settings
 export type ActionKey =
   | 'projectsPhotoVideoUploads'
   | 'projectsFullControl'
+  | 'projectExternalCommunication'
   | 'accessSharePage'
   | 'manageSharePageComments'
   | 'manageClients'
@@ -42,6 +43,7 @@ const ALL_MENUS: MenuKey[] = ['projects', 'sharePage', 'clients', 'sales', 'sett
 const ALL_ACTIONS: ActionKey[] = [
   'projectsPhotoVideoUploads',
   'projectsFullControl',
+  'projectExternalCommunication',
   'accessSharePage',
   'manageSharePageComments',
   'manageClients',
@@ -176,6 +178,8 @@ export function canDoAction(permissions: RolePermissions, action: ActionKey): bo
       return projectsFullControl
     case 'projectsPhotoVideoUploads':
       return projectsPhotoVideo
+    case 'projectExternalCommunication':
+      return projectsEnabled && (projectsFullControl || permissions.actions.projectExternalCommunication === true)
 
     case 'uploadFilesToProjectInternal':
     case 'makeCommentsOnProjects':

@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Comment, Video } from '@prisma/client'
 import { useRouter } from 'next/navigation'
-import { apiPost, apiDelete } from '@/lib/api-client'
+import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
 import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
 import { getAccessToken } from '@/lib/token-store'
@@ -64,6 +64,7 @@ export function useCommentManagement({
   const [pendingCommentId, setPendingCommentId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStatusText, setUploadStatusText] = useState<string>('')
+  const previousSelectedVideoIdRef = useRef<string | null>(null)
 
   const [clientUploadQuota, setClientUploadQuota] = useState<{ usedBytes: number; limitMB: number } | null>(null)
 
@@ -318,9 +319,31 @@ export function useCommentManagement({
     }
   }, [selectedVideoId])
 
+  useEffect(() => {
+    const previousSelectedVideoId = previousSelectedVideoIdRef.current
+
+    if (previousSelectedVideoId && previousSelectedVideoId !== selectedVideoId) {
+      setReplyingToCommentId(null)
+    }
+
+    previousSelectedVideoIdRef.current = selectedVideoId
+  }, [selectedVideoId])
+
   const handleCommentChange = (value: string) => {
     setNewComment(value)
   }
+
+  const resetDraft = useCallback(() => {
+    setNewComment('')
+    setHasAutoFilledTimestamp(false)
+    setReplyingToCommentId(null)
+    setAttachedFiles([])
+    setPendingCommentId(null)
+    setUploadStatusText('')
+    setUploadProgress(null)
+  }, [])
+
+  const hasUnsentComment = Boolean(newComment.trim() || attachedFiles.length > 0)
 
   // Submit comment
   const handleSubmitComment = async () => {
@@ -516,9 +539,10 @@ export function useCommentManagement({
           const response = shareToken
             ? await fetch(`/api/comments?projectId=${projectId}`, {
                 headers: { Authorization: `Bearer ${shareToken}` },
+                cache: 'no-store',
               })
             : useAdminAuth
-              ? await fetch(`/api/comments?projectId=${projectId}`)
+              ? await apiFetch(`/api/comments?projectId=${projectId}`, { cache: 'no-store' })
               : null
 
           if (response?.ok) {
@@ -538,13 +562,7 @@ export function useCommentManagement({
       }))
 
       // Clear input only after send + uploads complete
-      setNewComment('')
-      setHasAutoFilledTimestamp(false)
-      setReplyingToCommentId(null)
-      setAttachedFiles([])
-      setPendingCommentId(null)
-      setUploadStatusText('')
-      setUploadProgress(null)
+      resetDraft()
 
       router.refresh()
     } catch (error) {
@@ -706,6 +724,7 @@ export function useCommentManagement({
   return {
     comments,
     newComment,
+    hasUnsentComment,
     selectedTimestamp,
     selectedVideoId,
     selectedVideoFps,
@@ -722,6 +741,7 @@ export function useCommentManagement({
     handleCancelReply,
     handleClearTimestamp,
     handleDeleteComment,
+    resetDraft,
     setAuthorName: handleAuthorNameChange,
     setRecipient: handleRecipientSelection,
     attachedFiles,

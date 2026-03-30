@@ -136,78 +136,82 @@ export async function GET(
     const { id } = await params
     const includeComments = new URL(request.url).searchParams.get('includeComments') !== 'false'
 
-    const project = await prisma.project.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: {
-            videos: true,
-            albums: true,
+    const [project, commentAttachmentsCount, emailAttachmentsCount] = await Promise.all([
+      prisma.project.findUnique({
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              videos: true,
+              albums: true,
+            },
           },
-        },
-        assignedUsers: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                displayColor: true,
-                appRole: {
-                  select: {
-                    id: true,
-                    name: true,
-                    isSystemAdmin: true,
-                    permissions: true,
+          assignedUsers: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  displayColor: true,
+                  appRole: {
+                    select: {
+                      id: true,
+                      name: true,
+                      isSystemAdmin: true,
+                      permissions: true,
+                    },
                   },
                 },
               },
             },
           },
-        },
-        videos: {
-          orderBy: { version: 'desc' },
-        },
-        ...(includeComments
-          ? {
-              comments: {
-                where: { parentId: null },
-                include: {
-                  user: {
-                    select: {
-                      id: true,
-                      name: true,
-                      username: true,
-                      email: true,
-                    }
-                  },
-                  replies: {
-                    include: {
-                      user: {
-                        select: {
-                          id: true,
-                          name: true,
-                          username: true,
-                          email: true,
-                        }
+          videos: {
+            orderBy: { version: 'desc' },
+          },
+          ...(includeComments
+            ? {
+                comments: {
+                  where: { parentId: null },
+                  include: {
+                    user: {
+                      select: {
+                        id: true,
+                        name: true,
+                        username: true,
+                        email: true,
                       }
                     },
-                    orderBy: { createdAt: 'asc' },
+                    replies: {
+                      include: {
+                        user: {
+                          select: {
+                            id: true,
+                            name: true,
+                            username: true,
+                            email: true,
+                          }
+                        }
+                      },
+                      orderBy: { createdAt: 'asc' },
+                    },
                   },
+                  orderBy: { createdAt: 'desc' },
                 },
-                orderBy: { createdAt: 'desc' },
-              },
-            }
-          : {}),
-        recipients: {
-          orderBy: [
-            { isPrimary: 'desc' },
-            { createdAt: 'asc' },
-          ],
+              }
+            : {}),
+          recipients: {
+            orderBy: [
+              { isPrimary: 'desc' },
+              { createdAt: 'asc' },
+            ],
+          },
         },
-      },
-    })
+      }),
+      prisma.commentFile.count({ where: { projectId: id } }),
+      prisma.projectEmailAttachment.count({ where: { projectEmail: { projectId: id }, isInline: false } }),
+    ])
 
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -304,6 +308,8 @@ export async function GET(
     // Convert BigInt fields to strings for JSON serialization
     const projectData = {
       ...project,
+      commentAttachmentsCount,
+      emailAttachmentsCount,
       totalBytes: asNumberBigInt((project as any).totalBytes),
       diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
       videos: project.videos.map((video: any) => ({
@@ -348,6 +354,7 @@ export async function GET(
     const canFullControl = canDoAction(permissions, 'projectsFullControl')
     const canPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
     const canAccessSharePage = canDoAction(permissions, 'accessSharePage')
+    const canAccessExternalCommunication = canDoAction(permissions, 'projectExternalCommunication')
 
     if (!canAccessSharePage && !canPhotoVideo && !canFullControl) {
       ;(projectData as any).videos = []
@@ -366,6 +373,14 @@ export async function GET(
     // (or has Photo & Video Uploads / Full Control).
     if (!canAccessSharePage && !canPhotoVideo && !canFullControl) {
       ;(projectData as any).comments = []
+    }
+
+    if (!canAccessSharePage) {
+      ;(projectData as any).commentAttachmentsCount = 0
+    }
+
+    if (!canAccessExternalCommunication) {
+      ;(projectData as any).emailAttachmentsCount = 0
     }
 
     return NextResponse.json(projectData)

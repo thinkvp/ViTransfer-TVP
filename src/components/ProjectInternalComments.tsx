@@ -16,7 +16,10 @@ import {
 } from 'lucide-react'
 import { apiDelete, apiJson, apiPost } from '@/lib/api-client'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { formatDateTime } from '@/lib/utils'
+
+const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 
 type InternalComment = {
   id: string
@@ -279,6 +282,16 @@ export function ProjectInternalComments(props: {
     }
   }, [replyingTo])
 
+  const resetDraft = useCallback(() => {
+    setNewComment('')
+    setReplyingTo(null)
+  }, [])
+
+  useUnsavedChanges(Boolean(newComment.trim()), {
+    message: UNSENT_COMMENT_MESSAGE,
+    onDiscard: resetDraft,
+  })
+
   const submit = useCallback(async () => {
     const trimmed = newComment.trim()
     if (!trimmed) return
@@ -295,8 +308,7 @@ export function ProjectInternalComments(props: {
         content: trimmed,
         parentId,
       })
-      setNewComment('')
-      setReplyingTo(null)
+      resetDraft()
       await fetchComments()
     } catch (e: any) {
       console.error('[INTERNAL COMMENTS] Failed to post:', e)
@@ -304,7 +316,7 @@ export function ProjectInternalComments(props: {
     } finally {
       setLoading(false)
     }
-  }, [canMakeComments, fetchComments, newComment, projectId, replyingTo])
+  }, [canMakeComments, fetchComments, newComment, projectId, replyingTo, resetDraft])
 
   const deleteOne = useCallback(
     async (comment: InternalComment) => {
@@ -335,8 +347,7 @@ export function ProjectInternalComments(props: {
     setError(null)
     try {
       await apiDelete(`/api/projects/${projectId}/internal-comments`)
-      setReplyingTo(null)
-      setNewComment('')
+      resetDraft()
       await fetchComments()
     } catch (e: any) {
       console.error('[INTERNAL COMMENTS] Failed to delete all:', e)
@@ -344,7 +355,7 @@ export function ProjectInternalComments(props: {
     } finally {
       setLoading(false)
     }
-  }, [fetchComments, projectId])
+  }, [fetchComments, projectId, resetDraft])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
