@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Download, Eye, Mail, Pencil, Trash2, X } from 'lucide-react'
+import { BadgeCheck, Check, Download, Eye, Loader2, Mail, Pencil, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -76,6 +76,7 @@ export default function QuoteDetailPage() {
 
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [acceptBusy, setAcceptBusy] = useState(false)
   const [success, setSuccess] = useState(false)
   const [savedSnapshot, setSavedSnapshot] = useState('')
 
@@ -358,6 +359,38 @@ export default function QuoteDetailPage() {
     })()
   }
 
+  const onAcceptToggle = async () => {
+    if (!quote || acceptBusy) return
+    setAcceptBusy(true)
+    try {
+      const next =
+        quote.status === 'ACCEPTED'
+          ? await patchSalesQuote(quote.id, {
+              status: quote.acceptedFromStatus ?? 'OPEN',
+              acceptedFromStatus: null,
+              version: quote.version,
+            })
+          : await patchSalesQuote(quote.id, {
+              status: 'ACCEPTED',
+              acceptedFromStatus: quote.status,
+              version: quote.version,
+            })
+      setQuote(next)
+      setStatus(next.status)
+      setSavedSnapshot(JSON.stringify({ status: next.status, clientId, projectId, issueDate, validUntil, notes, terms, items }))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to update quote'
+      if (msg === 'Conflict') {
+        alert('This quote was updated in another session. Reloading.')
+        window.location.reload()
+        return
+      }
+      alert(msg)
+    } finally {
+      setAcceptBusy(false)
+    }
+  }
+
   const onViewPublic = async () => {
     if (!quote) return
     const url = await createSalesDocShareUrl({
@@ -448,6 +481,16 @@ export default function QuoteDetailPage() {
               }}
             />
           ) : null}
+          <Button
+            variant="outline"
+            onClick={() => void onAcceptToggle()}
+            disabled={acceptBusy}
+            aria-label={acceptBusy ? 'Updating quote status' : (quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept')}
+            title={acceptBusy ? 'Updating…' : (quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept')}
+            className="w-10 px-0"
+          >
+            {acceptBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
+          </Button>
           <Button
             variant="outline"
             onClick={() => void onViewPublic()}

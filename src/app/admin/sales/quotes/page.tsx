@@ -567,13 +567,11 @@ export default function SalesQuotesPage() {
                                 size="icon"
                                 variant="outline"
                                 onClick={() => void onAccept(row.quote)}
-                                disabled={row.effectiveStatus === 'CLOSED' || acceptBusyId === row.quote.id}
+                                disabled={acceptBusyId === row.quote.id}
                                 title={
-                                  row.effectiveStatus === 'CLOSED'
-                                    ? 'Quote is closed'
-                                    : (acceptBusyId === row.quote.id
-                                      ? 'Updating…'
-                                      : (row.quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept'))
+                                  acceptBusyId === row.quote.id
+                                    ? 'Updating…'
+                                    : (row.quote.status === 'ACCEPTED' ? 'Unaccept' : 'Accept')
                                 }
                                 aria-label={
                                   acceptBusyId === row.quote.id
