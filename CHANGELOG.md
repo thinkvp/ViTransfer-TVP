@@ -5,6 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-04-02
+
+### Fixed
+- **Client detail Quotes and Invoices tables no longer wrap columns on mobile** — the Quote/Invoice number, Issue date, Amount, and Status columns now have minimum fixed widths so they cannot shrink below a readable size on narrow screens; the Project column has a 200 px minimum width so longer project names have more room; the Payments table Date, Amount, and Invoice columns likewise have minimum widths; the overflow-x-scroll wrapper on each table allows horizontal scrolling when the viewport is narrower than the total table width
+
+### Added
+- **Photos count on the Client detail project table** — the project table on the Client detail page now includes a "Photos" column showing the total number of photos across all albums in that project; the "Versions" and "Comments" columns have been removed; the `/api/clients/[id]/projects` endpoint now queries each project's albums and sums the photo count, returning a `photoCount` field per project row
+- **Skip preview transcoding when uploading to a closed project** — when "Auto-delete video previews and timeline sprites when project is closed" is enabled, uploading a video (or version) to a project that is already CLOSED no longer queues a full transcode job; a thumbnail-only job is queued instead so the video enters READY status with a poster image but without generating preview files that would be immediately redundant
+
+### Fixed
+- **Share-page quality selector correctly reflects available preview resolutions** — the Admin and public Share pages now only fetch stream tokens for resolutions that have an actual preview file stored; previously the fallback logic populated all resolution tokens with the original file, causing the quality selector to show "Auto / 480p / 720p / 1080p" even when no previews existed; a dedicated `streamUrlOriginal` field is now passed to `VideoPlayer`, which displays a non-interactive "Original" quality button on both desktop and mobile when no preview resolutions are available and streams the original file directly
+- **Client detail Quotes, Invoices, and Payments sorted by document date** — the Quotes and Invoices sections on the client detail page now sort by `issueDate` descending instead of `updatedAt`; the Payments section sorts by `paymentDate` descending instead of `createdAt`, matching the natural document ordering expected when reviewing a client's billing history
+- **Invoice paid-on date uses consistent date formatting** — the "Paid on" display and the payment detail summary lines on Invoice detail pages now use the shared `formatDate` utility rather than raw YYYY-MM-DD string replacement
+
 ## [1.3.1] - 2026-04-02
 
 ### Added

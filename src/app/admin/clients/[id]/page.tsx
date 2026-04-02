@@ -61,10 +61,11 @@ type ClientProjectRow = {
   lastActivityAt?: string | null
   lastAccessedAt?: string | null
   videos: any[]
+  photoCount?: number
   _count: { comments: number }
 }
 
-type ProjectSortKey = 'title' | 'status' | 'videos' | 'versions' | 'comments' | 'createdAt' | 'updatedAt'
+type ProjectSortKey = 'title' | 'status' | 'videos' | 'photos' | 'createdAt' | 'updatedAt'
 type ProjectSortDirection = 'asc' | 'desc'
 
 export default function ClientDetailPage() {
@@ -284,7 +285,7 @@ export default function ClientDetailPage() {
     return set.size
   }
 
-  const getVersionsCount = (project: ClientProjectRow) => (project.videos || []).length
+  const getPhotosCount = (project: ClientProjectRow) => Number(project.photoCount) || 0
 
   const getStatusRank = (status: string) => {
     switch (status) {
@@ -308,8 +309,7 @@ export default function ClientDetailPage() {
       if (projectsSortKey === 'title') return dir * a.title.localeCompare(b.title)
       if (projectsSortKey === 'status') return dir * (getStatusRank(String(a.status)) - getStatusRank(String(b.status)))
       if (projectsSortKey === 'videos') return dir * (getUniqueVideosCount(a) - getUniqueVideosCount(b))
-      if (projectsSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
-      if (projectsSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
+      if (projectsSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
       if (projectsSortKey === 'createdAt') {
         const aDate = getEffectiveStartDateYmd(a.startDate, a.createdAt) ?? ''
         const bDate = getEffectiveStartDateYmd(b.startDate, b.createdAt) ?? ''
@@ -354,9 +354,9 @@ export default function ClientDetailPage() {
 
     const invoiceNumberById = Object.fromEntries(invoices.map((i) => [i.id, i.invoiceNumber]))
 
-    quotes.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-    invoices.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-    payments.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    quotes.sort((a, b) => (a.issueDate < b.issueDate ? 1 : -1))
+    invoices.sort((a, b) => (a.issueDate < b.issueDate ? 1 : -1))
+    payments.sort((a, b) => (a.paymentDate < b.paymentDate ? 1 : -1))
 
     return {
       quotes,
@@ -712,8 +712,7 @@ export default function ClientDetailPage() {
                               { key: 'title', label: 'Project Name', className: 'min-w-[220px]', mobile: true },
                               { key: 'status', label: 'Status', className: 'min-w-[120px]', mobile: true },
                               { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
-                              { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
-                              { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
+                              { key: 'photos', label: 'Photos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
                               { key: 'createdAt', label: 'Start Date', className: 'w-[130px] hidden md:table-cell', mobile: false },
                               { key: 'updatedAt', label: 'Last Access', className: 'w-[130px] hidden md:table-cell', mobile: false },
                             ] as const
@@ -743,8 +742,7 @@ export default function ClientDetailPage() {
                       <tbody>
                         {pagedClientProjects.map((project) => {
                           const uniqueVideos = getUniqueVideosCount(project)
-                          const versionsCount = getVersionsCount(project)
-                          const commentsCount = project._count?.comments || 0
+                          const photosCount = getPhotosCount(project)
                           const isExpanded = Boolean(expandedProjectRows[project.id])
 
                           return (
@@ -774,7 +772,7 @@ export default function ClientDetailPage() {
                                   <div className="min-w-0">
                                     <div className="truncate">{project.title}</div>
                                     <div className="md:hidden text-xs text-muted-foreground tabular-nums mt-1">
-                                      Videos: {uniqueVideos} • Versions: {versionsCount}
+                                      Videos: {uniqueVideos} • Photos: {photosCount}
                                     </div>
                                   </div>
                                 </td>
@@ -791,8 +789,7 @@ export default function ClientDetailPage() {
                                 </td>
 
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
-                                <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
-                                <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
+                                <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
                                 <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(getEffectiveStartDateYmd(project.startDate, project.createdAt) ?? project.createdAt)}</td>
                                 <td className="px-3 py-2 tabular-nums hidden md:table-cell">{project.lastAccessedAt ? formatProjectDate(project.lastAccessedAt) : '—'}</td>
                               </tr>
@@ -805,17 +802,6 @@ export default function ClientDetailPage() {
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <div className="space-y-1 text-sm">
-                                      <div className="grid grid-cols-3 gap-2 tabular-nums">
-                                        <div className="text-left">
-                                          <span className="text-muted-foreground">Videos:</span> {uniqueVideos}
-                                        </div>
-                                        <div className="text-center">
-                                          <span className="text-muted-foreground">Versions:</span> {versionsCount}
-                                        </div>
-                                        <div className="text-right">
-                                          <span className="text-muted-foreground">Comments:</span> {commentsCount}
-                                        </div>
-                                      </div>
                                       <div className="flex items-center justify-between gap-4 tabular-nums">
                                         <div className="text-left">
                                           <span className="text-muted-foreground">Start Date:</span> {formatProjectDate(getEffectiveStartDateYmd(project.startDate, project.createdAt) ?? project.createdAt)}
@@ -869,11 +855,11 @@ export default function ClientDetailPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Quote</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Project</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Quote</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Amount</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Project</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -939,11 +925,11 @@ export default function ClientDetailPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Project</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Invoice</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Amount</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Project</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1009,10 +995,10 @@ export default function ClientDetailPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px]">Date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[120px]">Amount</th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Method</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Invoice</th>
                         </tr>
                       </thead>
                       <tbody>
