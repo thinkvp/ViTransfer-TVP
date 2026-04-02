@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Building2, Plus, Trash2, ArrowUp, ArrowDown, Filter } from 'lucide-react'
+import { Building2, Plus, Trash2, ArrowUp, ArrowDown, Filter, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
@@ -158,6 +158,37 @@ export default function ClientsPage() {
     }
   }
 
+  const handleExportEmails = async () => {
+    try {
+      const res = await apiFetch(`/api/clients?active=${encodeURIComponent(activeFilter)}&includeRecipients=1&export=1`)
+      if (!res.ok) throw new Error('Failed to fetch clients')
+      const data = await res.json()
+      const allClients: Array<{ name: string; recipients?: Array<{ name: string | null; email: string | null; isPrimary: boolean }> }> = data.clients || []
+      const rows: string[] = ['Name,Email,Client,Primary']
+      for (const c of allClients) {
+        const clientName = c.name.replace(/,/g, ' ').trim()
+        for (const r of c.recipients || []) {
+          if (r.email) {
+            const name = (r.name || '').replace(/,/g, ' ').trim()
+            const email = r.email.replace(/,/g, ' ').trim()
+            const isPrimary = r.isPrimary ? 'Yes' : 'No'
+            rows.push(`${name},${email},${clientName},${isPrimary}`)
+          }
+        }
+      }
+      const csv = rows.join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'client-emails.csv'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // ignore
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
@@ -202,26 +233,17 @@ export default function ClientsPage() {
             </div>
 
             <div className="flex items-center justify-end gap-2 flex-shrink-0">
-              <div className="inline-flex items-center">
-                <Select
-                  value={String(recordsPerPage)}
-                  onValueChange={(v) => {
-                    const parsed = Number(v)
-                    if (parsed === 20 || parsed === 50 || parsed === 100) {
-                      setRecordsPerPage(parsed)
-                    }
-                  }}
-                >
-                  <SelectTrigger className="h-9 w-[88px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    <SelectItem value="20">20</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                    <SelectItem value="100">100</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="inline-flex items-center text-muted-foreground hover:text-foreground"
+                aria-label="Export emails as CSV"
+                title="Export client emails"
+                onClick={() => void handleExportEmails()}
+              >
+                <Download className="w-4 h-4" />
+              </Button>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -252,6 +274,27 @@ export default function ClientsPage() {
                   </DropdownMenuCheckboxItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              <div className="inline-flex items-center">
+                <Select
+                  value={String(recordsPerPage)}
+                  onValueChange={(v) => {
+                    const parsed = Number(v)
+                    if (parsed === 20 || parsed === 50 || parsed === 100) {
+                      setRecordsPerPage(parsed)
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-[88px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         )}
@@ -418,24 +461,50 @@ export default function ClientsPage() {
                 <p className="text-xs text-muted-foreground tabular-nums">
                   Page {tablePage} of {tableTotalPages}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setTablePage(1)}
                     disabled={tablePage === 1}
+                    aria-label="First page"
                   >
-                    Previous
+                    <ChevronsLeft className="h-4 w-4" />
                   </Button>
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    disabled={tablePage === 1}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
                     onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
                     disabled={tablePage === tableTotalPages}
+                    aria-label="Next page"
                   >
-                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setTablePage(tableTotalPages)}
+                    disabled={tablePage === tableTotalPages}
+                    aria-label="Last page"
+                  >
+                    <ChevronsRight className="h-4 w-4" />
                   </Button>
                 </div>
               </div>

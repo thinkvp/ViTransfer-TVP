@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Save } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Save } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -109,6 +109,9 @@ export default function ClientDetailPage() {
   const [projectsIsMobile, setProjectsIsMobile] = useState(false)
   const [expandedProjectRows, setExpandedProjectRows] = useState<Record<string, boolean>>({})
   const [projectsPage, setProjectsPage] = useState(1)
+  const [quotesPage, setQuotesPage] = useState(1)
+  const [invoicesPage, setInvoicesPage] = useState(1)
+  const [paymentsPage, setPaymentsPage] = useState(1)
 
   const [salesTick, setSalesTick] = useState(0)
 
@@ -122,6 +125,7 @@ export default function ClientDetailPage() {
   const [extraProjectTitles, setExtraProjectTitles] = useState<Record<string, string>>({})
 
   const projectsPageSize = 10
+  const salesPageSize = 10
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)')
@@ -264,11 +268,7 @@ export default function ClientDetailPage() {
 
   const formatProjectDate = (date: string | Date) => {
     try {
-      const d = new Date(date)
-      const yyyy = d.getFullYear()
-      const mm = String(d.getMonth() + 1).padStart(2, '0')
-      const dd = String(d.getDate()).padStart(2, '0')
-      return `${yyyy}-${mm}-${dd}`
+      return formatDate(date)
     } catch {
       return ''
     }
@@ -365,6 +365,31 @@ export default function ClientDetailPage() {
       invoiceNumberById,
     }
   }, [salesInvoices, salesPayments, salesQuotes])
+
+  const quotesTotalPages = useMemo(() => Math.max(1, Math.ceil(sales.quotes.length / salesPageSize)), [sales.quotes.length])
+  const invoicesTotalPages = useMemo(() => Math.max(1, Math.ceil(sales.invoices.length / salesPageSize)), [sales.invoices.length])
+  const paymentsTotalPages = useMemo(() => Math.max(1, Math.ceil(sales.payments.length / salesPageSize)), [sales.payments.length])
+
+  const pagedQuotes = useMemo(() => {
+    const start = (quotesPage - 1) * salesPageSize
+    return sales.quotes.slice(start, start + salesPageSize)
+  }, [quotesPage, sales.quotes])
+
+  const pagedInvoices = useMemo(() => {
+    const start = (invoicesPage - 1) * salesPageSize
+    return sales.invoices.slice(start, start + salesPageSize)
+  }, [invoicesPage, sales.invoices])
+
+  const pagedPayments = useMemo(() => {
+    const start = (paymentsPage - 1) * salesPageSize
+    return sales.payments.slice(start, start + salesPageSize)
+  }, [paymentsPage, sales.payments])
+
+  useEffect(() => {
+    setQuotesPage(1)
+    setInvoicesPage(1)
+    setPaymentsPage(1)
+  }, [clientId])
 
   const invoicePaidCents = useCallback(
     (inv: SalesInvoice): number => {
@@ -541,7 +566,7 @@ export default function ClientDetailPage() {
           </Link>
         </div>
 
-        <div className="max-w-5xl mx-auto space-y-6">
+        <div className="space-y-6">
           <Card>
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div className="min-w-0">
@@ -811,28 +836,16 @@ export default function ClientDetailPage() {
                   </div>
 
                   {sortedClientProjects.length > projectsPageSize && (
-                    <div className="flex items-center justify-end gap-2 px-3 py-3 border-t border-border">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={projectsPage <= 1}
-                        onClick={() => setProjectsPage((p) => Math.max(1, p - 1))}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-xs text-muted-foreground tabular-nums">
+                    <div className="flex items-center justify-between gap-2 px-3 py-3 border-t border-border">
+                      <p className="text-xs text-muted-foreground tabular-nums">
                         Page {projectsPage} of {projectsTotalPages}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={projectsPage >= projectsTotalPages}
-                        onClick={() => setProjectsPage((p) => Math.min(projectsTotalPages, p + 1))}
-                      >
-                        Next
-                      </Button>
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={projectsPage <= 1} onClick={() => setProjectsPage(1)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={projectsPage <= 1} onClick={() => setProjectsPage((p) => Math.max(1, p - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={projectsPage >= projectsTotalPages} onClick={() => setProjectsPage((p) => Math.min(projectsTotalPages, p + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={projectsPage >= projectsTotalPages} onClick={() => setProjectsPage(projectsTotalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -848,7 +861,6 @@ export default function ClientDetailPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-medium">Quotes</div>
-                  <Link href="/admin/sales/quotes" className="text-sm text-muted-foreground hover:underline">View all</Link>
                 </div>
                 {sales.quotes.length === 0 ? (
                   <div className="text-sm text-muted-foreground">{salesLoading ? 'Loading…' : 'No quotes for this client yet.'}</div>
@@ -865,7 +877,7 @@ export default function ClientDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sales.quotes.slice(0, 10).map((q) => {
+                        {pagedQuotes.map((q) => {
                           const effectiveStatus = quoteEffectiveStatus(q)
                           const totalCents = sumLineItemsTotal(q.items, salesTaxRatePercent)
                           return (
@@ -901,6 +913,17 @@ export default function ClientDetailPage() {
                         })}
                       </tbody>
                     </table>
+                    {sales.quotes.length > salesPageSize && (
+                      <div className="flex items-center justify-between gap-2 px-3 py-3 border-t border-border">
+                        <p className="text-xs text-muted-foreground tabular-nums">Page {quotesPage} of {quotesTotalPages}</p>
+                        <div className="flex items-center gap-1">
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={quotesPage <= 1} onClick={() => setQuotesPage(1)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={quotesPage <= 1} onClick={() => setQuotesPage((p) => Math.max(1, p - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={quotesPage >= quotesTotalPages} onClick={() => setQuotesPage((p) => Math.min(quotesTotalPages, p + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={quotesPage >= quotesTotalPages} onClick={() => setQuotesPage(quotesTotalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -908,7 +931,6 @@ export default function ClientDetailPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-medium">Invoices</div>
-                  <Link href="/admin/sales/invoices" className="text-sm text-muted-foreground hover:underline">View all</Link>
                 </div>
                 {sales.invoices.length === 0 ? (
                   <div className="text-sm text-muted-foreground">{salesLoading ? 'Loading…' : 'No invoices for this client yet.'}</div>
@@ -925,7 +947,7 @@ export default function ClientDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sales.invoices.slice(0, 10).map((inv) => {
+                        {pagedInvoices.map((inv) => {
                           const effectiveStatus = invoiceEffectiveStatus(inv)
                           const totalCents = sumLineItemsTotal(inv.items, salesTaxRatePercent)
                           return (
@@ -961,6 +983,17 @@ export default function ClientDetailPage() {
                         })}
                       </tbody>
                     </table>
+                    {sales.invoices.length > salesPageSize && (
+                      <div className="flex items-center justify-between gap-2 px-3 py-3 border-t border-border">
+                        <p className="text-xs text-muted-foreground tabular-nums">Page {invoicesPage} of {invoicesTotalPages}</p>
+                        <div className="flex items-center gap-1">
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={invoicesPage <= 1} onClick={() => setInvoicesPage(1)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={invoicesPage <= 1} onClick={() => setInvoicesPage((p) => Math.max(1, p - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={invoicesPage >= invoicesTotalPages} onClick={() => setInvoicesPage((p) => Math.min(invoicesTotalPages, p + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={invoicesPage >= invoicesTotalPages} onClick={() => setInvoicesPage(invoicesTotalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -968,7 +1001,6 @@ export default function ClientDetailPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-medium">Payments</div>
-                  <Link href="/admin/sales/payments" className="text-sm text-muted-foreground hover:underline">View all</Link>
                 </div>
                 {sales.payments.length === 0 ? (
                   <div className="text-sm text-muted-foreground">{salesLoading ? 'Loading…' : 'No payments for this client yet.'}</div>
@@ -984,7 +1016,7 @@ export default function ClientDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sales.payments.slice(0, 10).map((p) => (
+                        {pagedPayments.map((p) => (
                           <tr key={p.id} className="border-b border-border/60 last:border-b-0">
                             <td className="px-3 py-2 tabular-nums">{formatDate(p.paymentDate)}</td>
                             <td className="px-3 py-2 font-medium">{formatMoney(p.amountCents)}</td>
@@ -1001,8 +1033,17 @@ export default function ClientDetailPage() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
-                  </div>
+                    </table>                    {sales.payments.length > salesPageSize && (
+                      <div className="flex items-center justify-between gap-2 px-3 py-3 border-t border-border">
+                        <p className="text-xs text-muted-foreground tabular-nums">Page {paymentsPage} of {paymentsTotalPages}</p>
+                        <div className="flex items-center gap-1">
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={paymentsPage <= 1} onClick={() => setPaymentsPage(1)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={paymentsPage <= 1} onClick={() => setPaymentsPage((p) => Math.max(1, p - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={paymentsPage >= paymentsTotalPages} onClick={() => setPaymentsPage((p) => Math.min(paymentsTotalPages, p + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={paymentsPage >= paymentsTotalPages} onClick={() => setPaymentsPage(paymentsTotalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+                        </div>
+                      </div>
+                    )}                  </div>
                 )}
               </div>
             </CardContent>

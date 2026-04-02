@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Shield, AlertTriangle, Info, XCircle, Trash2, RefreshCw, ChevronRight, Unlock, Tag, ArrowUp, ArrowDown } from 'lucide-react'
+import { Shield, AlertTriangle, Info, XCircle, Trash2, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Unlock, Tag, ArrowUp, ArrowDown } from 'lucide-react'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { formatDateTime } from '@/lib/utils'
 import {
@@ -738,25 +738,15 @@ export default function SecurityEventsClient() {
             {/* Pagination */}
             {pagination.pages > 1 && (
               <div className="mt-6 flex items-center justify-between">
-                <Button
-                  onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))}
-                  disabled={pagination.page === 1 || loading}
-                  variant="outline"
-                  size="sm"
-                >
-                  Previous
-                </Button>
-                <span className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   Page {pagination.page} of {pagination.pages}
-                </span>
-                <Button
-                  onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))}
-                  disabled={pagination.page === pagination.pages || loading}
-                  variant="outline"
-                  size="sm"
-                >
-                  Next
-                </Button>
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button onClick={() => setPagination(p => ({ ...p, page: 1 }))} disabled={pagination.page === 1 || loading} variant="ghost" size="icon" className="h-8 w-8" aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                  <Button onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))} disabled={pagination.page === 1 || loading} variant="ghost" size="icon" className="h-8 w-8" aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                  <Button onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))} disabled={pagination.page === pagination.pages || loading} variant="ghost" size="icon" className="h-8 w-8" aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                  <Button onClick={() => setPagination(p => ({ ...p, page: p.pages }))} disabled={pagination.page === pagination.pages || loading} variant="ghost" size="icon" className="h-8 w-8" aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+                </div>
               </div>
             )}
           </CardContent>

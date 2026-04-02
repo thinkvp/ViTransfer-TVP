@@ -222,7 +222,6 @@ input.no-picker-icon::-webkit-inner-spin-button {
   /* Button variants */
   .btn-primary {
     @apply bg-primary text-primary-foreground;
-    background-image: linear-gradient(180deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.88) 100%);
   }
 
   .btn-success {

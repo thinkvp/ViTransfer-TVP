@@ -199,10 +199,10 @@ function normalizeEstimateLines(raw: any): Array<{ description: string; quantity
     const salesDetail = detailType === 'SalesItemLineDetail' ? line?.SalesItemLineDetail : null
 
     const qtyRaw = salesDetail ? coerceNumber(salesDetail?.Qty) : null
-    const qty = qtyRaw && qtyRaw > 0 ? qtyRaw : 1
+    const qty = qtyRaw !== null ? qtyRaw : 1
 
     const unitPriceRaw = salesDetail ? coerceNumber(salesDetail?.UnitPrice) : null
-    const unitPrice = unitPriceRaw ?? (amount !== null ? amount / qty : 0)
+    const unitPrice = unitPriceRaw ?? (amount !== null ? (qty !== 0 ? amount / qty : 0) : 0)
 
     const descFromDetail = typeof salesDetail?.ItemRef?.name === 'string' ? salesDetail.ItemRef.name.trim() : ''
     const descFromLine = typeof line?.Description === 'string' ? line.Description.trim() : ''
@@ -236,10 +236,10 @@ function normalizeInvoiceLines(raw: any): Array<{ description: string; quantity:
     const salesDetail = detailType === 'SalesItemLineDetail' ? line?.SalesItemLineDetail : null
 
     const qtyRaw = salesDetail ? coerceNumber(salesDetail?.Qty) : null
-    const qty = qtyRaw && qtyRaw > 0 ? qtyRaw : 1
+    const qty = qtyRaw !== null ? qtyRaw : 1
 
     const unitPriceRaw = salesDetail ? coerceNumber(salesDetail?.UnitPrice) : null
-    const unitPrice = unitPriceRaw ?? (amount !== null ? amount / qty : 0)
+    const unitPrice = unitPriceRaw ?? (amount !== null ? (qty !== 0 ? amount / qty : 0) : 0)
 
     const descFromDetail = typeof salesDetail?.ItemRef?.name === 'string' ? salesDetail.ItemRef.name.trim() : ''
     const descFromLine = typeof line?.Description === 'string' ? line.Description.trim() : ''
@@ -365,11 +365,6 @@ async function pullCustomers(lookbackDays: number, auth: Awaited<ReturnType<type
       } else {
         skipped += 1
       }
-
-      if (nextEmail) {
-        await ensurePrimaryRecipient(existingByQb.id, nextEmail, nextRecipientName)
-        recipientsCreatedOrLinked += 1
-      }
       continue
     }
 
@@ -388,11 +383,6 @@ async function pullCustomers(lookbackDays: number, auth: Awaited<ReturnType<type
 
       await prisma.client.update({ where: { id: existingByName.id }, data })
       linkedByName += 1
-
-      if (nextEmail) {
-        await ensurePrimaryRecipient(existingByName.id, nextEmail, nextRecipientName)
-        recipientsCreatedOrLinked += 1
-      }
       continue
     }
 

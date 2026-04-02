@@ -18,7 +18,7 @@ import type { ClientOption, SalesInvoice } from '@/lib/sales/types'
 import { fetchClientOptions } from '@/lib/sales/lookups'
 import { centsToDollars, dollarsToCents, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getCurrencySymbol } from '@/lib/sales/currency'
-import { ArrowDown, ArrowUp, Filter, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Filter, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import {
   createSalesPayment,
@@ -368,23 +368,6 @@ export default function SalesPaymentsPage() {
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base">Payment history</CardTitle>
             <div className="flex items-center gap-2">
-              <Select
-                value={String(recordsPerPage)}
-                onValueChange={(v) => {
-                  const parsed = Number(v)
-                  if (parsed === 20 || parsed === 50 || parsed === 100) setRecordsPerPage(parsed)
-                }}
-              >
-                <SelectTrigger className="h-9 w-[88px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
-
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -428,6 +411,23 @@ export default function SalesPaymentsPage() {
                   })}
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              <Select
+                value={String(recordsPerPage)}
+                onValueChange={(v) => {
+                  const parsed = Number(v)
+                  if (parsed === 20 || parsed === 50 || parsed === 100) setRecordsPerPage(parsed)
+                }}
+              >
+                <SelectTrigger className="h-9 w-[88px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
@@ -543,24 +543,18 @@ export default function SalesPaymentsPage() {
                   <p className="text-xs text-muted-foreground tabular-nums">
                     Page {tablePage} of {tableTotalPages}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setTablePage((p) => Math.max(1, p - 1))}
-                      disabled={tablePage === 1}
-                    >
-                      Previous
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTablePage(1)} disabled={tablePage === 1}>
+                      <ChevronsLeft className="h-4 w-4" />
                     </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
-                      disabled={tablePage === tableTotalPages}
-                    >
-                      Next
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTablePage((p) => Math.max(1, p - 1))} disabled={tablePage === 1}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))} disabled={tablePage === tableTotalPages}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTablePage(tableTotalPages)} disabled={tablePage === tableTotalPages}>
+                      <ChevronsRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>

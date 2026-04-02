@@ -1301,30 +1301,50 @@ export async function PATCH(
               timelinePreviewsReady: true,
             },
           })
-          for (const video of videos) {
-            const previewPaths = [video.preview480Path, video.preview720Path, video.preview1080Path].filter(Boolean) as string[]
-            const updateData: Record<string, null | boolean> = {}
 
-            if (previewPaths.length > 0) {
-              await Promise.allSettled(previewPaths.map(p => deleteFile(p)))
-              updateData.preview480Path = null
-              updateData.preview720Path = null
-              updateData.preview1080Path = null
-            }
+          // Delete files first (can run in parallel across videos)
+          await Promise.allSettled(
+            videos.flatMap((video) => {
+              const paths: Promise<unknown>[] = []
+              const previewPaths = [video.preview480Path, video.preview720Path, video.preview1080Path].filter(Boolean) as string[]
+              paths.push(...previewPaths.map(p => deleteFile(p)))
+              if (video.timelinePreviewSpritesPath) {
+                paths.push(deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {}))
+              }
+              return paths
+            })
+          )
 
-            if (video.timelinePreviewSpritesPath) {
-              await deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {})
-              updateData.timelinePreviewsReady = false
-              updateData.timelinePreviewVttPath = null
-              updateData.timelinePreviewSpritesPath = null
-            }
+          // Null out path columns using raw SQL to avoid bumping updatedAt.
+          // Running Jobs uses video.updatedAt as a proxy for "recently completed",
+          // so a Prisma-managed update would cause all closed-project videos to
+          // surface as brand-new completions in the Running Jobs panel.
+          const videoIdsWithPreviews = videos
+            .filter((v) => v.preview480Path || v.preview720Path || v.preview1080Path)
+            .map((v) => v.id)
 
-            if (Object.keys(updateData).length > 0) {
-              await prisma.video.update({
-                where: { id: video.id },
-                data: updateData,
-              })
-            }
+          const videoIdsWithTimeline = videos
+            .filter((v) => v.timelinePreviewSpritesPath)
+            .map((v) => v.id)
+
+          if (videoIdsWithPreviews.length > 0) {
+            await prisma.$executeRaw`
+              UPDATE "Video"
+              SET "preview480Path" = NULL,
+                  "preview720Path" = NULL,
+                  "preview1080Path" = NULL
+              WHERE "id" = ANY(${videoIdsWithPreviews})
+            `
+          }
+
+          if (videoIdsWithTimeline.length > 0) {
+            await prisma.$executeRaw`
+              UPDATE "Video"
+              SET "timelinePreviewsReady" = false,
+                  "timelinePreviewVttPath" = NULL,
+                  "timelinePreviewSpritesPath" = NULL
+              WHERE "id" = ANY(${videoIdsWithTimeline})
+            `
           }
         }
       } catch (err) {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -21,7 +22,7 @@ import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/l
 import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getCurrencySymbol } from '@/lib/sales/currency'
-import { ArrowDown, ArrowUp, BadgeCheck, Download, Eye, Filter, Loader2, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, BadgeCheck, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Eye, Filter, Loader2, Send, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
@@ -77,6 +78,7 @@ export default function SalesQuotesPage() {
   const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc')
   const [recordsPerPage, setRecordsPerPage] = useState<20 | 50 | 100>(20)
   const [tablePage, setTablePage] = useState(1)
+  const [searchQuery, setSearchQuery] = useState('')
   const [quoteExpiryRemindersEnabled, setQuoteExpiryRemindersEnabled] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -126,7 +128,10 @@ export default function SalesQuotesPage() {
           version: q.version,
           remindersEnabled: !enabled,
         })
-        setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+        // Preserve hasOpenedEmail — it's derived from email tracking records and
+        // is not returned by PATCH. Without this, an "Opened" quote would flip
+        // to "Sent" after toggling reminders.
+        setQuotes((prev) => prev.map((x) => (x.id === next.id ? { ...next, hasOpenedEmail: q.hasOpenedEmail } : x)))
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Failed to update quote'
         if (msg === 'Conflict') {
@@ -180,7 +185,7 @@ export default function SalesQuotesPage() {
 
   useEffect(() => {
     setTablePage(1)
-  }, [recordsPerPage, tableSortDirection, tableSortKey, statusFilterSelected])
+  }, [recordsPerPage, tableSortDirection, tableSortKey, statusFilterSelected, searchQuery])
 
   const quoteTotalCents = useCallback(
     (q: SalesQuoteWithVersion): number => {
@@ -205,9 +210,16 @@ export default function SalesQuotesPage() {
   }, [quoteEffectiveStatusForRow, quoteTotalCents, quotes])
 
   const filteredQuotes = useMemo(() => {
-    if (statusFilterSelected.size === 0) return quoteRows
-    return quoteRows.filter((r) => statusFilterSelected.has(r.effectiveStatus))
-  }, [quoteRows, statusFilterSelected])
+    const byStatus = statusFilterSelected.size === 0 ? quoteRows : quoteRows.filter((r) => statusFilterSelected.has(r.effectiveStatus))
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return byStatus
+    return byStatus.filter((r) => {
+      const num = String(r.quote.quoteNumber || '').toLowerCase()
+      const client = r.quote.clientId ? (clientNameById[r.quote.clientId] ?? '').toLowerCase() : ''
+      const project = r.quote.projectId ? (projectTitleById[r.quote.projectId] ?? '').toLowerCase() : ''
+      return num.includes(q) || client.includes(q) || project.includes(q)
+    })
+  }, [clientNameById, projectTitleById, quoteRows, searchQuery, statusFilterSelected])
 
   const sortedQuotes = useMemo(() => {
     const dir = tableSortDirection === 'asc' ? 1 : -1
@@ -358,81 +370,87 @@ export default function SalesQuotesPage() {
         </Link>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex-1" />
-            <div className="flex items-center gap-2">
-              <Select
-                value={String(recordsPerPage)}
-                onValueChange={(v) => {
-                  const parsed = Number(v)
-                  if (parsed === 20 || parsed === 50 || parsed === 100) setRecordsPerPage(parsed)
-                }}
-              >
-                <SelectTrigger className="h-9 w-[88px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
+      {actionError ? (
+        <div className="text-sm text-red-600">{actionError}</div>
+      ) : null}
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant={statusFilterSelected.size > 0 ? 'default' : 'ghost'}
-                    size="sm"
-                    className={cn(
-                      'inline-flex items-center',
-                      statusFilterSelected.size > 0 ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                    )}
-                    aria-label="Filter statuses"
-                    title="Filter statuses"
+      <div className="flex flex-nowrap items-center justify-between gap-2 mb-3">
+        <div className="flex-1 min-w-0 sm:max-w-sm">
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search quotes…"
+            className="h-9"
+            aria-label="Search quotes"
+          />
+        </div>
+        <div className="flex flex-nowrap items-center justify-end gap-2 flex-shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant={statusFilterSelected.size > 0 ? 'default' : 'ghost'}
+                size="sm"
+                className={cn(
+                  'inline-flex items-center',
+                  statusFilterSelected.size > 0 ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
+                aria-label="Filter statuses"
+                title="Filter statuses"
+              >
+                <Filter className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
+              {(['OPEN', 'SENT', 'OPENED', 'ACCEPTED', 'CLOSED'] as const).map((s) => {
+                const checked = statusFilterSelected.has(s)
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={s}
+                    checked={checked}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={() => {
+                      setStatusFilterSelected((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(s)) next.delete(s)
+                        else next.add(s)
+                        return next
+                      })
+                    }}
                   >
-                    <Filter className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>Filter statuses</DropdownMenuLabel>
-                  {(['OPEN', 'SENT', 'OPENED', 'ACCEPTED', 'CLOSED'] as const).map((s) => {
-                    const checked = statusFilterSelected.has(s)
-                    return (
-                      <DropdownMenuCheckboxItem
-                        key={s}
-                        checked={checked}
-                        onSelect={(e) => e.preventDefault()}
-                        onCheckedChange={() => {
-                          setStatusFilterSelected((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(s)) next.delete(s)
-                            else next.add(s)
-                            return next
-                          })
-                        }}
-                      >
-                        {quoteStatusLabel(s)}
-                      </DropdownMenuCheckboxItem>
-                    )
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-          {actionError ? (
-            <div className="mt-3 text-sm text-red-600">{actionError}</div>
-          ) : null}
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="py-10 text-center text-muted-foreground">Loading…</div>
-          ) : quotes.length === 0 ? (
-            <div className="py-10 text-center text-muted-foreground">No quotes yet.</div>
-          ) : (
-            <div className="rounded-md border border-border bg-card overflow-hidden">
+                    {quoteStatusLabel(s)}
+                  </DropdownMenuCheckboxItem>
+                )
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Select
+            value={String(recordsPerPage)}
+            onValueChange={(v) => {
+              const parsed = Number(v)
+              if (parsed === 20 || parsed === 50 || parsed === 100) setRecordsPerPage(parsed)
+            }}
+          >
+            <SelectTrigger className="h-9 w-[88px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="20">20</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-10 text-center text-muted-foreground">Loading…</div>
+      ) : quotes.length === 0 ? (
+        <div className="py-10 text-center text-muted-foreground">No quotes yet.</div>
+      ) : (
+        <div className="rounded-md border border-border bg-card overflow-hidden">
               <div className="w-full overflow-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40">
@@ -609,32 +627,57 @@ export default function SalesQuotesPage() {
                   <p className="text-xs text-muted-foreground tabular-nums">
                     Page {tablePage} of {tableTotalPages}
                   </p>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
-                      onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setTablePage(1)}
                       disabled={tablePage === 1}
+                      aria-label="First page"
                     >
-                      Previous
+                      <ChevronsLeft className="h-4 w-4" />
                     </Button>
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                      disabled={tablePage === 1}
+                      aria-label="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
                       onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
                       disabled={tablePage === tableTotalPages}
+                      aria-label="Next page"
                     >
-                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setTablePage(tableTotalPages)}
+                      disabled={tablePage === tableTotalPages}
+                      aria-label="Last page"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
               )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          )
+        }
 
       {sendTarget ? (
         <SalesSendEmailDialog

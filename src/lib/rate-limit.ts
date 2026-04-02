@@ -3,6 +3,8 @@ import crypto from 'crypto'
 import { prisma } from './db'
 import { getClientIpAddress } from './utils'
 import { getRedis } from './redis'
+import { logSecurityEvent } from './video-access'
+import { upsertRateLimitAlertNotification } from './rate-limit-notifications'
 
 /**
  * Production-Ready Redis-based Rate Limiting
@@ -119,6 +121,14 @@ export async function rateLimit(
     // Check for active lockout
     if (entry?.lockoutUntil && entry.lockoutUntil > now) {
       const retryAfter = Math.ceil((entry.lockoutUntil - now) / 1000)
+      const ipAddress = getClientIpAddress(request) || undefined
+      void logSecurityEvent({
+        type: 'RATE_LIMIT_HIT',
+        severity: 'WARNING',
+        ipAddress,
+        details: { rateLimitType: identifier, retryAfter },
+        wasBlocked: true,
+      }).catch(() => {})
       return NextResponse.json(
         { error: options.message || 'Too many requests', retryAfter },
         {
@@ -156,6 +166,15 @@ export async function rateLimit(
       await setRateLimitEntry(key, updatedEntry, options.windowMs)
       
       const retryAfter = Math.ceil(options.windowMs / 1000)
+      const ipAddress = getClientIpAddress(request) || undefined
+      void logSecurityEvent({
+        type: 'RATE_LIMIT_HIT',
+        severity: 'WARNING',
+        ipAddress,
+        details: { rateLimitType: identifier, retryAfter, requestCount: newCount, maxRequests: options.maxRequests },
+        wasBlocked: true,
+      }).catch(() => {})
+      void upsertRateLimitAlertNotification({ rateLimitType: identifier, ipAddress, retryAfter }).catch(() => {})
       return NextResponse.json(
         { error: options.message || 'Too many requests', retryAfter },
         {

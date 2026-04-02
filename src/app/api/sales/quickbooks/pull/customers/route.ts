@@ -193,11 +193,6 @@ export async function POST(request: NextRequest) {
         } else {
           skipped += 1
         }
-
-        if (nextEmail) {
-          await ensurePrimaryRecipient(existingByQb.id, nextEmail, nextRecipientName)
-          recipientsCreatedOrLinked += 1
-        }
         continue
       }
 
@@ -216,11 +211,6 @@ export async function POST(request: NextRequest) {
 
         await prisma.client.update({ where: { id: existingByName.id }, data })
         linkedByName += 1
-
-        if (nextEmail) {
-          await ensurePrimaryRecipient(existingByName.id, nextEmail, nextRecipientName)
-          recipientsCreatedOrLinked += 1
-        }
         continue
       }
 

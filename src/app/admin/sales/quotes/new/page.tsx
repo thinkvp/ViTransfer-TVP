@@ -194,7 +194,7 @@ export default function NewQuotePage() {
         items: items.map((it) => ({
           ...it,
           details: it.details?.trim() ? it.details : undefined,
-          quantity: Number.isFinite(it.quantity) && it.quantity > 0 ? it.quantity : 1,
+          quantity: Number.isFinite(it.quantity) && it.quantity >= 0 ? it.quantity : 1,
           unitPriceCents: Number.isFinite(it.unitPriceCents) ? it.unitPriceCents : 0,
           taxRatePercent: normalizeTaxRatePercent(it.taxRatePercent, settings.taxRatePercent),
         })),
@@ -303,10 +303,10 @@ export default function NewQuotePage() {
                   <Input
                     type="number"
                     value={String(it.quantity)}
-                    min={1}
+                    min={0}
                     onChange={(e) => {
                       const v = Number(e.target.value)
-                      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v > 0 ? v : 1 } : x)))
+                      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v >= 0 ? v : 0 } : x)))
                     }}
                     className="h-9"
                   />

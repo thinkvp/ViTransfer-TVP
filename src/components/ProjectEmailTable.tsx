@@ -5,7 +5,7 @@ import { apiDelete, apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatFileSize, formatDateTime } from '@/lib/utils'
-import { ArrowDown, ArrowUp, Loader2, Paperclip, Trash2, Download, ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Paperclip, Trash2, Download, ChevronDown } from 'lucide-react'
 
 type SortKey = 'sentAt' | 'subject' | 'from' | 'attachments'
 
@@ -327,13 +327,11 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-3 py-2 border rounded-lg bg-card">
                 <div className="text-xs text-muted-foreground">Page {page} of {totalPages}</div>
-                <div className="flex items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                    Previous
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                    Next
-                  </Button>
+                <div className="flex items-center gap-1">
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
                 </div>
               </div>
             )}
@@ -401,13 +399,11 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-3 py-2 border-t bg-muted/10">
                 <div className="text-xs text-muted-foreground">Page {page} of {totalPages}</div>
-                <div className="flex items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                    Previous
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                    Next
-                  </Button>
+                <div className="flex items-center gap-1">
+                  <Button type="button" variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                  <Button type="button" variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                  <Button type="button" variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                  <Button type="button" variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
                 </div>
               </div>
             )}

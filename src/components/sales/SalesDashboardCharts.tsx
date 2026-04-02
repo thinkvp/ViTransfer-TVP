@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -33,7 +33,7 @@ import { quoteEffectiveStatus } from '@/lib/sales/status'
 // Types
 // ---------------------------------------------------------------------------
 
-export type PeriodKey = 'fy-to-date' | 'last-fy' | 'ytd' | 'last-12'
+export type PeriodKey = 'fy-to-date' | 'last-fy' | 'ytd' | 'last-12' | 'all-time'
 
 interface PeriodMonth {
   key: string   // YYYY-MM
@@ -44,11 +44,12 @@ interface PeriodRange {
   start: Date
   end: Date
   months: PeriodMonth[]
+  isAllTime?: boolean
 }
 
 interface ProjectChartRow {
   id: string
-  createdAt: string
+  startDate: string
   totalInvoicedCents: number
   clientId: string | null
   clientName: string | null
@@ -59,6 +60,10 @@ interface ProjectChartRow {
 // ---------------------------------------------------------------------------
 
 function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodRange {
+  if (key === 'all-time') {
+    return { start: new Date(0), end: new Date(9999, 0, 1), months: [], isAllTime: true }
+  }
+
   const fyStartM = Math.max(1, Math.min(12, fyStartMonth)) - 1 // 0-indexed month
   const currentYear = now.getFullYear()
   const currentFyStartYear =
@@ -110,6 +115,11 @@ const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: 'last-12', label: 'Last 12 months' },
 ]
 
+const PERIOD_OPTIONS_WITH_ALL_TIME: { value: PeriodKey; label: string }[] = [
+  ...PERIOD_OPTIONS,
+  { value: 'all-time', label: 'All time' },
+]
+
 // ---------------------------------------------------------------------------
 // Custom Tooltip components
 // ---------------------------------------------------------------------------
@@ -156,9 +166,11 @@ function ChartTooltip({ active, payload, label, formatValue }: CustomTooltipProp
 function PeriodSelect({
   value,
   onChange,
+  options = PERIOD_OPTIONS,
 }: {
   value: PeriodKey
   onChange: (v: PeriodKey) => void
+  options?: { value: PeriodKey; label: string }[]
 }) {
   return (
     <Select value={value} onValueChange={(v) => onChange(v as PeriodKey)}>
@@ -166,7 +178,7 @@ function PeriodSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {PERIOD_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="text-xs">
             {opt.label}
           </SelectItem>
@@ -462,7 +474,7 @@ function useProjectsChartData(
     }
 
     for (const p of projects) {
-      const ym = isoToYearMonth(p.createdAt)
+      const ym = isoToYearMonth(p.startDate)
       if (!countMap.has(ym)) continue
       countMap.set(ym, (countMap.get(ym) ?? 0) + 1)
       totalMap.set(ym, (totalMap.get(ym) ?? 0) + p.totalInvoicedCents)
@@ -502,7 +514,7 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
   const totalProjects = data.reduce((s, d) => s + d.count, 0)
   const totalRevCents = projects
     .filter((p) => {
-      const ym = isoToYearMonth(p.createdAt)
+      const ym = isoToYearMonth(p.startDate)
       return periodRange.months.some((m) => m.key === ym)
     })
     .reduce((s, p) => s + p.totalInvoicedCents, 0)
@@ -512,7 +524,7 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
   const hasData = data.some((d) => d.count > 0)
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden flex flex-col h-full">
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
         <div>
           <CardTitle className="text-base">Projects Overview</CardTitle>
@@ -523,17 +535,18 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
         </div>
         <PeriodSelect value={period} onChange={setPeriod} />
       </CardHeader>
-      <CardContent className="pb-4 pt-0">
+      <CardContent className="pb-4 pt-0 flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-[220px]">
         {loading ? (
-          <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
+          <div className="flex items-center justify-center flex-1 text-sm text-muted-foreground">
             Loading…
           </div>
         ) : !hasData ? (
-          <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
+          <div className="flex items-center justify-center flex-1 text-sm text-muted-foreground">
             No closed projects for this period
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap="30%">
               <defs>
                 <linearGradient id="projectBarGradient" x1="0" y1="0" x2="0" y2="1">
@@ -609,6 +622,7 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
             </ComposedChart>
           </ResponsiveContainer>
         )}
+        </div>
       </CardContent>
     </Card>
   )
@@ -635,8 +649,10 @@ function useClientsLeaderboard(
     const map = new Map<string, ClientLeaderboardRow>()
 
     for (const p of projects) {
-      const ym = isoToYearMonth(p.createdAt)
-      if (!periodMonthSet.has(ym)) continue
+      if (!period.isAllTime) {
+        const ym = isoToYearMonth(p.startDate)
+        if (!periodMonthSet.has(ym)) continue
+      }
       if (!p.clientId) continue
 
       const existing = map.get(p.clientId)
@@ -695,7 +711,7 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
             {rows.length} clients · {sym}{Math.round(grandTotal / 100).toLocaleString('en-AU')} total revenue
           </p>
         </div>
-        <PeriodSelect value={period} onChange={setPeriod} />
+        <PeriodSelect value={period} onChange={setPeriod} options={PERIOD_OPTIONS_WITH_ALL_TIME} />
       </CardHeader>
       <CardContent className="pb-4 pt-0">
         {loading ? (
@@ -704,7 +720,7 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
           </div>
         ) : rows.length === 0 ? (
           <div className="flex items-center justify-center h-[120px] text-sm text-muted-foreground">
-            No closed projects for this period
+            {period === 'all-time' ? 'No closed projects yet.' : 'No closed projects for this period.'}
           </div>
         ) : (
           <div className="overflow-y-auto max-h-[340px] space-y-2 pr-1">

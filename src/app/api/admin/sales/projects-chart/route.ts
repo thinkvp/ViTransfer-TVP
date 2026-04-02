@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     where: { status: 'CLOSED' },
     select: {
       id: true,
+      startDate: true,
       createdAt: true,
       clientId: true,
       client: {
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
 
     return {
       id: p.id,
-      createdAt: p.createdAt.toISOString(),
+      startDate: p.startDate ?? p.createdAt.toISOString().slice(0, 10),
       totalInvoicedCents,
       clientId: p.clientId ?? null,
       clientName: p.client?.name ?? null,

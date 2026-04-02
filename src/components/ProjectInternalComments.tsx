@@ -215,8 +215,9 @@ export function ProjectInternalComments(props: {
   currentUserId: string | null
   canMakeComments: boolean
   canDeleteAll: boolean
+  canDeleteOthers: boolean
 }) {
-  const { projectId, currentUserId, canMakeComments, canDeleteAll } = props
+  const { projectId, currentUserId, canMakeComments, canDeleteAll, canDeleteOthers } = props
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -414,7 +415,7 @@ export function ProjectInternalComments(props: {
                   <InternalCommentBubble
                     comment={comment}
                     currentUserId={currentUserId}
-                    canDeleteAny={canDeleteAll}
+                    canDeleteAny={canDeleteOthers}
                     showReplyAction={canMakeComments}
                     replies={hasReplies ? replies : undefined}
                     repliesExpanded={hasReplies ? repliesExpanded : undefined}

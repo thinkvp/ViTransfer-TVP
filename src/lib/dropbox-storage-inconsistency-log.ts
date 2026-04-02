@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db'
-import { DROPBOX_STORAGE_INCONSISTENCY_NOTIFICATION_TYPE } from '@/lib/dropbox-storage-inconsistency-notification'
+import { DROPBOX_STORAGE_INCONSISTENCY_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
 
 type IssueEntity = {
   entityType: string

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import {
 	isClearablePinnedNotificationDetails,
-} from '@/lib/dropbox-storage-inconsistency-notification'
+} from '@/lib/pinned-system-notifications'
 
 export const runtime = 'nodejs'
 

@@ -15,6 +15,7 @@ import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
+import { formatDate } from '@/lib/utils'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { ProjectFileUpload } from '@/components/ProjectFileUpload'
 import { ProjectFileList } from '@/components/ProjectFileList'
@@ -460,11 +461,7 @@ export default function ProjectPage() {
 
   const formatProjectDate = (date: string | Date) => {
     try {
-      const d = new Date(date)
-      const yyyy = d.getFullYear()
-      const mm = String(d.getMonth() + 1).padStart(2, '0')
-      const dd = String(d.getDate()).padStart(2, '0')
-      return `${yyyy}-${mm}-${dd}`
+      return formatDate(date)
     } catch {
       return ''
     }
@@ -893,6 +890,7 @@ export default function ProjectPage() {
               currentUserId={adminUser?.id || null}
               canMakeComments={canMakeProjectComments}
               canDeleteAll={adminUser?.appRoleIsSystemAdmin === true}
+              canDeleteOthers={adminUser?.appRoleIsSystemAdmin === true}
             />
 
             {sectionVisibility.users && canFullProjectControl && (

@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play, ArrowUpDown, Images, Cloud } from 'lucide-react'
+import { Video, Eye, Download, ArrowLeft, Mail, Users, KeyRound, Play, ArrowUpDown, Images, Cloud, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
@@ -973,25 +973,15 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                     </table>
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={activityPage <= 1}
-                      onClick={() => setActivityPage((page) => Math.max(1, page - 1))}
-                    >
-                      Previous
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground tabular-nums">
                       Page {activityPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={activityPage >= totalPages}
-                      onClick={() => setActivityPage((page) => Math.min(totalPages, page + 1))}
-                    >
-                      Next
-                    </Button>
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled={activityPage <= 1} onClick={() => { setActivityPage(1) }} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled={activityPage <= 1} onClick={() => setActivityPage((page) => Math.max(1, page - 1))} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled={activityPage >= totalPages} onClick={() => setActivityPage((page) => Math.min(totalPages, page + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled={activityPage >= totalPages} onClick={() => setActivityPage(totalPages)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+                    </div>
                   </div>
                 </>
               )}

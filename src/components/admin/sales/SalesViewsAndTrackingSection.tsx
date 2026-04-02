@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api-client'
 import { formatDateTime } from '@/lib/utils'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 
 const MAX_ENTRIES = 30
 const PAGE_SIZE = 10
@@ -176,25 +177,11 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                 {viewTotalPages > 1 && (
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <p className="text-xs text-muted-foreground tabular-nums">Page {viewsPage} of {viewTotalPages}</p>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setViewsPage((p) => Math.max(1, p - 1))}
-                        disabled={viewsPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setViewsPage((p) => Math.min(viewTotalPages, p + 1))}
-                        disabled={viewsPage === viewTotalPages}
-                      >
-                        Next
-                      </Button>
+                    <div className="flex items-center gap-1">
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewsPage(1)} disabled={viewsPage === 1} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewsPage((p) => Math.max(1, p - 1))} disabled={viewsPage === 1} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewsPage((p) => Math.min(viewTotalPages, p + 1))} disabled={viewsPage === viewTotalPages} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewsPage(viewTotalPages)} disabled={viewsPage === viewTotalPages} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
                     </div>
                   </div>
                 )}
@@ -234,25 +221,11 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                 {emailTotalPages > 1 && (
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <p className="text-xs text-muted-foreground tabular-nums">Page {emailsPage} of {emailTotalPages}</p>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEmailsPage((p) => Math.max(1, p - 1))}
-                        disabled={emailsPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEmailsPage((p) => Math.min(emailTotalPages, p + 1))}
-                        disabled={emailsPage === emailTotalPages}
-                      >
-                        Next
-                      </Button>
+                    <div className="flex items-center gap-1">
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEmailsPage(1)} disabled={emailsPage === 1} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEmailsPage((p) => Math.max(1, p - 1))} disabled={emailsPage === 1} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEmailsPage((p) => Math.min(emailTotalPages, p + 1))} disabled={emailsPage === emailTotalPages} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEmailsPage(emailTotalPages)} disabled={emailsPage === emailTotalPages} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
                     </div>
                   </div>
                 )}

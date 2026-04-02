@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db'
-import { ORPHAN_PROJECT_FILES_SCAN_NOTIFICATION_TYPE } from '@/lib/dropbox-storage-inconsistency-notification'
+import { ORPHAN_PROJECT_FILES_SCAN_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
 import { type ProjectStorageOrphanCleanupResult } from '@/lib/project-storage-orphan-cleanup'
 
 function formatBytes(bytes: number): string {

@@ -72,6 +72,7 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const query = url.searchParams.get('query')?.trim() || ''
   const includeRecipients = url.searchParams.get('includeRecipients') === '1'
+  const exportMode = url.searchParams.get('export') === '1'
   const activeFilter = parseActiveFilter(url.searchParams.get('active'))
 
   try {
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest) {
           : {}),
       },
       orderBy: { name: 'asc' },
-      take: query ? 10 : (includeRecipients ? 25 : 500),
+      take: query ? 10 : (includeRecipients && !exportMode ? 25 : 500),
       select: {
         id: true,
         name: true,

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
-import { Plus, ArrowUp, ArrowDown, ChevronRight, Filter, Table2 } from 'lucide-react'
+import { Plus, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Filter, Table2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { apiPatch } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
@@ -795,24 +795,50 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                 <p className="text-xs text-muted-foreground tabular-nums">
                   Page {tablePage} of {tableTotalPages}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setTablePage(1)}
                     disabled={tablePage === 1}
+                    aria-label="First page"
                   >
-                    Previous
+                    <ChevronsLeft className="h-4 w-4" />
                   </Button>
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    disabled={tablePage === 1}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
                     onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
                     disabled={tablePage === tableTotalPages}
+                    aria-label="Next page"
                   >
-                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setTablePage(tableTotalPages)}
+                    disabled={tablePage === tableTotalPages}
+                    aria-label="Last page"
+                  >
+                    <ChevronsRight className="h-4 w-4" />
                   </Button>
                 </div>
               </div>

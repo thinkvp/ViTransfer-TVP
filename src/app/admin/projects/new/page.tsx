@@ -267,7 +267,7 @@ export default function NewProjectPage() {
       const project = await apiPost('/api/projects', data)
       router.push(`/admin/projects/${project.id}`)
     } catch (error) {
-      alert('Failed to create project')
+      alert(error instanceof Error ? `Failed to create project: ${error.message}` : 'Failed to create project')
     } finally {
       setLoading(false)
     }

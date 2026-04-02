@@ -39,12 +39,12 @@ export async function GET(request: NextRequest) {
   const forbidden = requireMenuAccess(authResult, 'projects')
   if (forbidden) return forbidden
 
-  // Rate limiting: 100 requests per minute for listing projects
+  // Rate limiting: 100 requests per minute per user for listing projects
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
     maxRequests: 100,
     message: 'Too many requests. Please slow down.'
-  }, 'admin-projects-list')
+  }, 'admin-projects-list', authResult.id)
 
   if (rateLimitResult) {
     return rateLimitResult
@@ -193,12 +193,12 @@ export async function POST(request: NextRequest) {
 
   const admin = authResult
 
-  // Rate limiting: Max 20 projects per hour
+  // Rate limiting: Max 20 projects per hour per user
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 60 * 1000, // 1 hour
     maxRequests: 20,
     message: 'Too many projects created. Please try again later.'
-  }, 'create-project')
+  }, 'create-project', admin.id)
   if (rateLimitResult) return rateLimitResult
 
   try {

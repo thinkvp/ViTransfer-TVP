@@ -6,7 +6,7 @@ import { canDoAction, canSeeMenu } from '@/lib/rbac'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   PINNED_SYSTEM_NOTIFICATION_TYPES,
-} from '@/lib/dropbox-storage-inconsistency-notification'
+} from '@/lib/pinned-system-notifications'
 
 // Security/auth events (UNAUTHORIZED_OTP, FAILED_LOGIN, SUCCESSFUL_ADMIN_LOGIN,
 // FAILED_SHARE_PASSWORD, SHARE_ACCESS, GUEST_VIDEO_LINK_ACCESS, PASSWORD_RESET_* etc.)

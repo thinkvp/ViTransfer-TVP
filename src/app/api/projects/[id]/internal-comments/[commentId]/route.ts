@@ -30,8 +30,8 @@ async function assertProjectAccessOr404(projectId: string, auth: any) {
 }
 
 // DELETE /api/projects/[id]/internal-comments/[commentId]
-// - system admin: can delete any comment
-// - non-admin: can delete only their own comments
+// - system admins: can delete any comment
+// - others: can delete only their own comments
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; commentId: string }> }

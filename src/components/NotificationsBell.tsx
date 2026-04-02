@@ -12,7 +12,7 @@ import {
   isClearablePinnedNotificationDetails,
   isPinnedSystemNotificationDetails,
   isPinnedSystemNotificationType,
-} from '@/lib/dropbox-storage-inconsistency-notification'
+} from '@/lib/pinned-system-notifications'
 
 type NotificationRow = {
   id: string

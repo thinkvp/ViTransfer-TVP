@@ -497,7 +497,7 @@ export default function InvoiceDetailPage() {
           ...it,
           description: it.description ?? '',
           details: it.details?.trim() ? it.details : undefined,
-          quantity: Number.isFinite(it.quantity) && it.quantity > 0 ? it.quantity : 1,
+          quantity: Number.isFinite(it.quantity) && it.quantity >= 0 ? it.quantity : 1,
           unitPriceCents: Number.isFinite(it.unitPriceCents) ? it.unitPriceCents : 0,
           taxRatePercent: normalizeTaxRatePercent(it.taxRatePercent, settings.taxRatePercent),
         })),
@@ -632,7 +632,10 @@ export default function InvoiceDetailPage() {
                       version: invoice.version,
                       remindersEnabled: !enabled,
                     })
-                    setInvoice(next)
+                    // Preserve hasOpenedEmail — it's a derived field (from email tracking
+                    // records) not returned by PATCH. Without this, toggling reminders on
+                    // an "Opened" invoice would momentarily show "Sent".
+                    setInvoice({ ...next, hasOpenedEmail: invoice.hasOpenedEmail })
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : 'Failed to update invoice'
                     if (msg === 'Conflict') {
@@ -843,10 +846,10 @@ export default function InvoiceDetailPage() {
                     <Input
                       type="number"
                       value={String(it.quantity)}
-                      min={1}
+                      min={0}
                       onChange={(e) => {
                         const v = Number(e.target.value)
-                        setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v > 0 ? v : 1 } : x)))
+                        setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v >= 0 ? v : 0 } : x)))
                       }}
                       className="h-9"
                     />

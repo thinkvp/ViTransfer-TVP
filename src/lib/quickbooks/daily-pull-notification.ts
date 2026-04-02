@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db'
-import { QUICKBOOKS_DAILY_PULL_FAILURE_NOTIFICATION_TYPE } from '@/lib/dropbox-storage-inconsistency-notification'
+import { QUICKBOOKS_DAILY_PULL_FAILURE_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
 
 type QuickBooksDailyPullFailureNotificationInput = {
   attemptedAtIso: string
