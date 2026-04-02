@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { Prisma } from '@prisma/client'
 import { requireApiAdmin } from '@/lib/auth'
-import { canSeeMenu } from '@/lib/rbac'
+import { canDoAction, canSeeMenu } from '@/lib/rbac'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   PINNED_SYSTEM_NOTIFICATION_TYPES,
@@ -19,6 +19,8 @@ const SALES_TYPES = [
   'SALES_QUOTE_ACCEPTED',
   'SALES_INVOICE_VIEWED',
   'SALES_INVOICE_PAID',
+  'SALES_REMINDER_INVOICE_OVERDUE',
+  'SALES_REMINDER_QUOTE_EXPIRING',
 ]
 
 const SETTINGS_TYPES: string[] = []
@@ -28,6 +30,21 @@ const PROJECT_TYPES = [
   'CLIENT_COMMENT',
   'ADMIN_SHARE_COMMENT',
   'VIDEO_APPROVAL',
+  'INTERNAL_COMMENT',
+  'PROJECT_USER_ASSIGNED',
+]
+
+// Project notification types that are share-page-related.
+// Only delivered to internal users who have the 'accessSharePage' role permission.
+const SHARE_PAGE_GATED_TYPES = [
+  'CLIENT_COMMENT',
+  'ADMIN_SHARE_COMMENT',
+  'VIDEO_APPROVAL',
+]
+
+// Project notification types that are NOT share-page-related.
+// Delivered to any assigned project member regardless of share page permission.
+const PROJECT_INTERNAL_ONLY_TYPES = [
   'INTERNAL_COMMENT',
   'PROJECT_USER_ASSIGNED',
 ]
@@ -119,6 +136,8 @@ export async function GET(request: NextRequest) {
       // Project notifications are gated on project *assignment*, not menu visibility.
       // A user may be assigned to projects without having the Projects menu in their role,
       // and they should still receive notifications for those projects.
+      // Additionally, share-page-related notifications (CLIENT_COMMENT, ADMIN_SHARE_COMMENT,
+      // VIDEO_APPROVAL) are further gated on the 'accessSharePage' role permission.
       const assignedRows = await prisma.projectUser.findMany({
         where: { userId: authResult.id },
         select: { projectId: true },
@@ -126,8 +145,13 @@ export async function GET(request: NextRequest) {
       const assignedProjectIds = assignedRows.map((r) => r.projectId)
       const hasAssignedProjects = assignedProjectIds.length > 0
 
+      const hasSharePageAccess = permissions ? canDoAction(permissions, 'accessSharePage') : false
+
       const allowedTypes: string[] = []
-      if (hasAssignedProjects) allowedTypes.push(...PROJECT_TYPES)
+      if (hasAssignedProjects) {
+        allowedTypes.push(...PROJECT_INTERNAL_ONLY_TYPES)
+        if (hasSharePageAccess) allowedTypes.push(...SHARE_PAGE_GATED_TYPES)
+      }
       if (hasSalesAccess) allowedTypes.push(...SALES_TYPES)
       if (hasSettingsAccess) allowedTypes.push(...SETTINGS_TYPES)
 
@@ -152,10 +176,15 @@ export async function GET(request: NextRequest) {
         // Note: we intentionally exclude projectId: null here — project-type
         // events should always have a projectId; leaking null-projectId rows
         // to unassigned users would be incorrect.
+        // Share-page-gated types are only included when the user has accessSharePage.
+        const visibleProjectTypes = [
+          ...PROJECT_INTERNAL_ONLY_TYPES,
+          ...(hasSharePageAccess ? SHARE_PAGE_GATED_TYPES : []),
+        ]
         projectScopeOrClauses.push(
           {
             AND: [
-              { type: { in: PROJECT_TYPES } },
+              { type: { in: visibleProjectTypes } },
               { projectId: { in: assignedProjectIds } },
             ],
           }

@@ -42,6 +42,7 @@ function configureDomPurify() {
 type CommentWithReplies = Comment & {
   replies?: Comment[]
   files?: Array<{ id: string; fileName: string; fileSize: number }>
+  avatarUrl?: string | null
 }
 
 interface MessageBubbleProps {
@@ -71,6 +72,7 @@ interface MessageBubbleProps {
   // UI options
   showAuthorAvatar?: boolean
   showColorEdge?: boolean
+  avatarClassName?: string // Override avatar size/class
 }
 
 /**
@@ -113,6 +115,7 @@ export default function MessageBubble({
   onDownloadCommentFile,
   showAuthorAvatar = false,
   showColorEdge = true,
+  avatarClassName,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
 
@@ -166,7 +169,8 @@ export default function MessageBubble({
                     name={avatarName}
                     email={avatarEmail}
                     displayColor={displayColor || null}
-                    className="h-6 w-6 text-[10px] ring-2"
+                    avatarUrl={comment.avatarUrl}
+                    className={avatarClassName ?? 'h-6 w-6 text-[10px] ring-2'}
                   />
                 ) : null}
                 <div className="text-sm font-semibold text-foreground truncate">
@@ -284,7 +288,8 @@ export default function MessageBubble({
                                 name={replyAvatarName}
                                 email={replyAvatarEmail}
                                 displayColor={replyDisplayColor || null}
-                                className="h-5 w-5 text-[9px] ring-2"
+                                avatarUrl={(reply as any).avatarUrl}
+                                className={avatarClassName ? `${avatarClassName} text-[9px]` : 'h-5 w-5 text-[9px] ring-2'}
                               />
                             ) : null}
                             <span className="text-xs font-semibold text-foreground truncate">

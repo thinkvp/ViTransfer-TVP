@@ -113,6 +113,7 @@ export async function GET(request: NextRequest) {
             username: true,
             email: true,
             displayColor: true,
+            avatarPath: true,
           }
         },
         recipient: {
@@ -139,6 +140,7 @@ export async function GET(request: NextRequest) {
                 username: true,
                 email: true,
                 displayColor: true,
+                avatarPath: true,
               }
             },
             recipient: {
@@ -385,6 +387,7 @@ export async function POST(request: NextRequest) {
             username: true,
             email: true,
             displayColor: true,
+            avatarPath: true,
           }
         },
         recipient: {
@@ -402,6 +405,7 @@ export async function POST(request: NextRequest) {
                 username: true,
                 email: true,
                 displayColor: true,
+                avatarPath: true,
               }
             }
             ,

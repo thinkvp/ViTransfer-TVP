@@ -258,11 +258,11 @@ export default function NotificationsBell() {
       if (docType === 'INVOICE') return `/admin/sales/invoices/${encodeURIComponent(docId)}`
     }
 
-    if (n.type === 'SALES_QUOTE_VIEWED' || n.type === 'SALES_QUOTE_ACCEPTED') {
+    if (n.type === 'SALES_QUOTE_VIEWED' || n.type === 'SALES_QUOTE_ACCEPTED' || n.type === 'SALES_REMINDER_QUOTE_EXPIRING') {
       const quoteId = typeof n?.details?.salesQuoteId === 'string' ? n.details.salesQuoteId : null
       if (quoteId) return `/admin/sales/quotes/${encodeURIComponent(quoteId)}`
     }
-    if (n.type === 'SALES_INVOICE_VIEWED' || n.type === 'SALES_INVOICE_PAID') {
+    if (n.type === 'SALES_INVOICE_VIEWED' || n.type === 'SALES_INVOICE_PAID' || n.type === 'SALES_REMINDER_INVOICE_OVERDUE') {
       const invoiceId = typeof n?.details?.salesInvoiceId === 'string' ? n.details.salesInvoiceId : null
       if (invoiceId) return `/admin/sales/invoices/${encodeURIComponent(invoiceId)}`
     }

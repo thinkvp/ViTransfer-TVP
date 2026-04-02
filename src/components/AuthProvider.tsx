@@ -9,7 +9,11 @@ interface User {
   id: string
   email: string
   name: string | null
+  username?: string | null
+  phone?: string | null
+  avatarPath?: string | null
   role: string
+  appRoleName?: string | null
   isSystemAdmin?: boolean
   permissions?: any
 }

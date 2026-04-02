@@ -17,6 +17,8 @@ export interface PushNotificationPayload {
     | 'SALES_QUOTE_ACCEPTED'
     | 'SALES_INVOICE_VIEWED'
     | 'SALES_INVOICE_PAID'
+    | 'SALES_REMINDER_INVOICE_OVERDUE'
+    | 'SALES_REMINDER_QUOTE_EXPIRING'
     | 'PASSWORD_RESET_REQUESTED'
     | 'PASSWORD_RESET_SUCCESS'
   projectId?: string

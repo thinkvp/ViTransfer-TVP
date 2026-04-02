@@ -15,9 +15,11 @@ type ClientActivityRow = {
   videoId: string | null
   videoName: string | null
   versionLabel: string | null
+  albumId: string | null
+  albumName: string | null
   assetId: string | null
   assetName: string | null
-  activityType: 'VIEWING_SHARE_PAGE' | 'STREAMING_VIDEO' | 'DOWNLOADING_VIDEO' | 'DOWNLOADING_ASSET'
+  activityType: 'VIEWING_SHARE_PAGE' | 'VIEWING_ALBUM' | 'STREAMING_VIDEO' | 'DOWNLOADING_VIDEO' | 'DOWNLOADING_ASSET'
   accessMethod: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   email: string | null
   ipAddress: string | null
@@ -41,6 +43,8 @@ function getActivityLabel(activity: ClientActivityRow): string {
   switch (activity.activityType) {
     case 'VIEWING_SHARE_PAGE':
       return 'Viewing share page'
+    case 'VIEWING_ALBUM':
+      return 'Browsing album'
     case 'STREAMING_VIDEO':
       return 'Streaming video'
     case 'DOWNLOADING_VIDEO':
@@ -54,6 +58,7 @@ function getActivityLabel(activity: ClientActivityRow): string {
 
 function getPrimaryLabel(activity: ClientActivityRow): string {
   if (activity.activityType === 'DOWNLOADING_ASSET' && activity.assetName) return activity.assetName
+  if (activity.activityType === 'VIEWING_ALBUM' && activity.albumName) return activity.albumName
   if (activity.videoName) return activity.videoName
   return activity.projectTitle || 'Client activity'
 }

@@ -408,17 +408,17 @@ export default function VideoPlayer({
 
   const timelineCommentMarkers = useMemo(() => {
     if (disableCommentsUI) {
-      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }>
+      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
     }
 
     const duration = effectiveDurationSeconds
     if (!selectedVideo?.id || !duration || duration <= 0) {
-      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }>
+      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
     }
 
     const fps = (selectedVideo as any)?.fps || 24
 
-    const markers: Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null }> = []
+    const markers: Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }> = []
     // Only show markers for top-level comments.
     // Replies are nested and should not create their own timeline markers.
     for (const comment of commentsForTimeline || []) {
@@ -439,6 +439,7 @@ export default function VideoPlayer({
           displayColor: (comment as any).displayColor || null,
           authorName: (comment as any).authorName || null,
           authorEmail: (comment as any).authorEmail || null,
+          avatarUrl: (comment as any).avatarUrl || null,
         })
       } catch {
         // ignore invalid timecodes
@@ -1847,6 +1848,7 @@ export default function VideoPlayer({
                               name={avatarName}
                               email={m.authorEmail || null}
                               displayColor={avatarColor}
+                              avatarUrl={m.avatarUrl}
                               className="h-[30px] w-[30px] sm:h-[24px] sm:w-[24px] text-[10px] sm:text-[9px] ring-2"
                             />
 

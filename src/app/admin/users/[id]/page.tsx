@@ -19,6 +19,7 @@ import { formatDate } from '@/lib/utils'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { AvatarUploadCrop } from '@/components/AvatarUploadCrop'
 
 interface Role {
   id: string
@@ -45,6 +46,7 @@ export default function EditUserPage() {
     username: '',
     name: '',
     notes: '',
+    phone: '',
     displayColor: '#22C55E',
     appRoleId: 'role_admin',
     oldPassword: '',
@@ -56,11 +58,13 @@ export default function EditUserPage() {
   const [rolesLoading, setRolesLoading] = useState(true)
   const [fileRefresh, setFileRefresh] = useState(0)
   const [savedFormData, setSavedFormData] = useState(formData)
+  const [avatarPath, setAvatarPath] = useState<string | null>(null)
 
   const hasUnsavedChanges = formData.email !== savedFormData.email ||
     formData.username !== savedFormData.username ||
     formData.name !== savedFormData.name ||
     formData.notes !== savedFormData.notes ||
+    formData.phone !== savedFormData.phone ||
     formData.displayColor !== savedFormData.displayColor ||
     formData.appRoleId !== savedFormData.appRoleId ||
     formData.password !== '' ||
@@ -86,6 +90,7 @@ export default function EditUserPage() {
         username: data.user.username || '',
         name: data.user.name || '',
         notes: data.user.notes || '',
+        phone: data.user.phone || '',
         displayColor: data.user.displayColor || '#22C55E',
         appRoleId: data.user.appRoleId || 'role_admin',
         oldPassword: '',
@@ -94,6 +99,7 @@ export default function EditUserPage() {
       }
       setFormData(loaded)
       setSavedFormData(loaded)
+      setAvatarPath(data.user.avatarPath || null)
     } catch (err: any) {
       setError(err.message)
     }
@@ -273,6 +279,11 @@ export default function EditUserPage() {
     const canAdminResetPassword = !isEditingSelf && sessionUser?.isSystemAdmin === true
 
     // Validation
+    if (!formData.name) {
+      setError('Full name is required')
+      return
+    }
+
     if (formData.password && formData.password !== formData.confirmPassword) {
       setError('Passwords do not match')
       return
@@ -300,6 +311,7 @@ export default function EditUserPage() {
         username: formData.username || null,
         name: formData.name || null,
         notes: formData.notes.trim() ? formData.notes.trim() : null,
+        phone: formData.phone || null,
         displayColor: formData.displayColor || null,
         appRoleId: formData.appRoleId,
       }
@@ -343,6 +355,22 @@ export default function EditUserPage() {
         </div>
 
         <Card className="min-w-0 overflow-hidden">
+          <CardHeader>
+            <CardTitle>Profile Picture</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AvatarUploadCrop
+              userId={userId}
+              currentAvatarPath={avatarPath}
+              displayName={formData.name || formData.email}
+              displayColor={formData.displayColor || null}
+              size={96}
+              onAvatarChange={(newPath) => setAvatarPath(newPath)}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <CardTitle>User Details</CardTitle>
@@ -368,7 +396,18 @@ export default function EditUserPage() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 min-w-0">
-              {/* Row 1: Email | Full Name */}
+              {/* Row 1: Full Name | Email */}
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name *</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                />
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="email">Email *</Label>
                 <Input
@@ -380,18 +419,7 @@ export default function EditUserPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Optional"
-                />
-              </div>
-
-              {/* Row 2: Username | Display Colour */}
+              {/* Row 2: Username | Phone Number */}
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
                 <Input
@@ -401,6 +429,40 @@ export default function EditUserPage() {
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   placeholder="Optional"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+
+              {/* Row 3: Role | Display Colour */}
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select
+                  key={`${rolesLoading ? 'roles-loading' : 'roles-loaded'}:${formData.appRoleId}`}
+                  value={formData.appRoleId}
+                  onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
+                  disabled={rolesLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
               </div>
 
               <div className="space-y-2">
@@ -425,29 +487,6 @@ export default function EditUserPage() {
                 <p className="text-xs text-muted-foreground">
                   Used for this admin&apos;s comment highlight and timeline markers.
                 </p>
-              </div>
-
-              {/* Row 3: Role (single column) */}
-              <div className="space-y-2">
-                <Label>Role</Label>
-                <Select
-                  key={`${rolesLoading ? 'roles-loading' : 'roles-loaded'}:${formData.appRoleId}`}
-                  value={formData.appRoleId}
-                  onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
-                  disabled={rolesLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roles.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
               </div>
 
               <div className="space-y-2 md:col-span-2">

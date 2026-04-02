@@ -17,6 +17,8 @@ model User {
   password     String
   name         String?
   notes        String?
+  phone        String?  // Optional phone number
+  avatarPath   String?  // Storage path for profile picture (300x300 JPEG)
   displayColor String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   role         UserRole @default(ADMIN)
   active       Boolean  @default(true)
@@ -189,6 +191,7 @@ model Project {
   maxRevisions    Int     @default(3)
 
   status          ProjectStatus @default(NOT_STARTED)
+  startDate       DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   lastAccessedAt  DateTime?

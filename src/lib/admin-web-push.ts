@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/encryption'
 import type { PushNotificationPayload } from '@/lib/push-notifications'
 import { buildAdminWebPushNotification } from '@/lib/admin-web-push-templates'
-import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { canDoAction, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 
 type VapidKeys = { publicKey: string; privateKey: string }
 
@@ -182,15 +182,19 @@ async function sendToSubscription(sub: { endpoint: string; p256dh: string; auth:
 
 // Notification types scoped to project events (non-security)
 const PROJECT_PUSH_TYPES = ['CLIENT_COMMENT', 'ADMIN_SHARE_COMMENT', 'VIDEO_APPROVAL', 'INTERNAL_COMMENT']
-const SALES_PUSH_TYPES = ['SALES_QUOTE_VIEWED', 'SALES_QUOTE_ACCEPTED', 'SALES_INVOICE_VIEWED', 'SALES_INVOICE_PAID']
+const SALES_PUSH_TYPES = ['SALES_QUOTE_VIEWED', 'SALES_QUOTE_ACCEPTED', 'SALES_INVOICE_VIEWED', 'SALES_INVOICE_PAID', 'SALES_REMINDER_INVOICE_OVERDUE', 'SALES_REMINDER_QUOTE_EXPIRING']
+
+// Share-page-gated project types: only delivered to users with 'accessSharePage' in their role.
+const SHARE_PAGE_GATED_PUSH_TYPES = new Set(['CLIENT_COMMENT', 'ADMIN_SHARE_COMMENT', 'VIDEO_APPROVAL'])
 
 /**
  * Send a browser push notification to all eligible subscribers.
  *
  * Scoping rules:
- *   - Security events  → system admins only
- *   - Project events   → system admins + users with 'projects' menu access assigned to the project
- *   - Sales events     → system admins + users with 'sales' menu access
+ *   - Security events        → system admins only
+ *   - Project events         → system admins + users assigned to the project
+ *   - Share-page events      → above, and also requires 'accessSharePage' role permission
+ *   - Sales events           → system admins + users with 'sales' menu access
  *
  * The comment/event author (via __meta.authorUserId) is always excluded.
  */
@@ -245,9 +249,13 @@ export async function sendBrowserPushToEligibleUsers(payload: PushNotificationPa
     const permissions = normalizeRolePermissions(role?.permissions)
 
     if (isProjectType) {
-      if (!canSeeMenu(permissions, 'projects')) return false
-      // Must also be assigned to the specific project (if we know it).
+      // Project notifications are gated on assignment, not on menu visibility.
+      // A user may be assigned to a project without having the Projects menu in
+      // their role — they should still receive browser push for that project.
+      // Must be assigned to the specific project (if we know it).
       if (assignedProjectUserIds !== null && !assignedProjectUserIds.has(s.userId)) return false
+      // Share-page-related events additionally require the 'accessSharePage' role permission.
+      if (SHARE_PAGE_GATED_PUSH_TYPES.has(payload.type) && !canDoAction(permissions, 'accessSharePage')) return false
       return true
     }
 

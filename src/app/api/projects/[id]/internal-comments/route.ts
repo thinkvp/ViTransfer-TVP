@@ -56,6 +56,7 @@ function serializeComment(comment: any) {
       comment?.user?.displayColor ||
       comment?.displayColorSnapshot ||
       null,
+    avatarUrl: comment?.user?.avatarPath ? `/api/users/${comment.userId}/avatar` : null,
     replies: Array.isArray(comment.replies) ? comment.replies.map(serializeComment) : [],
   }
 }
@@ -83,13 +84,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const comments = await prisma.projectInternalComment.findMany({
     where: { projectId, parentId: null },
     include: {
-      user: { select: { id: true, name: true, email: true, displayColor: true } },
+      user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
       replies: {
         include: {
-          user: { select: { id: true, name: true, email: true, displayColor: true } },
+          user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
           replies: {
             include: {
-              user: { select: { id: true, name: true, email: true, displayColor: true } },
+              user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
             },
             orderBy: { createdAt: 'asc' },
           },
@@ -171,10 +172,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       parentId,
     },
     include: {
-      user: { select: { id: true, name: true, email: true, displayColor: true } },
+      user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
       replies: {
         include: {
-          user: { select: { id: true, name: true, email: true, displayColor: true } },
+          user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
         },
         orderBy: { createdAt: 'asc' },
       },

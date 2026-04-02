@@ -185,7 +185,8 @@ export const createProjectSchema = z.object({
   watermarkText: safeStringSchema(0, 100).optional()
   ,
   enableVideos: z.boolean().optional(),
-  enablePhotos: z.boolean().optional()
+  enablePhotos: z.boolean().optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 })
 
 export const updateProjectSchema = z.object({

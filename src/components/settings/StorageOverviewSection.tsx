@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 
 type StorageOverview = {
   totalBytes: number
@@ -206,9 +206,25 @@ export function StorageOverviewSection({
                 ) : null}
 
                 <div className="rounded-lg border border-border bg-background px-4 py-3">
-                  <div className="flex items-baseline justify-between gap-3">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="text-sm text-muted-foreground">Total tracked storage</div>
-                    <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-foreground flex-shrink-0"
+                        disabled={!onRecalculateProjectDataTotals || recalculateProjectDataTotalsLoading}
+                        title={recalculateProjectDataTotalsLoading ? 'Recalculating…' : 'Recalculate & refresh'}
+                        onClick={() => {
+                          onRecalculateProjectDataTotals?.()
+                          setHasLoaded(false)
+                        }}
+                      >
+                        <RefreshCw className={cn('w-3.5 h-3.5', recalculateProjectDataTotalsLoading && 'animate-spin')} />
+                      </Button>
+                      <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
+                    </div>
                   </div>
                   {capacityLabel && (
                     <div className="mt-1 flex items-baseline justify-between gap-3">
@@ -253,37 +269,6 @@ export function StorageOverviewSection({
                 </div>
               </>
             ) : null}
-          </div>
-
-          {/* Project Data totals */}
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <Label>Project Data totals</Label>
-                <p className="text-xs text-muted-foreground">
-                  Recalculate totals from the database and the project folder on disk (videos,
-                  photos, ZIP artifacts, previews, etc). Use this after upgrades or if totals look
-                  incorrect.
-                </p>
-                {recalculateProjectDataTotalsResult ? (
-                  <p className="text-xs text-muted-foreground">
-                    {recalculateProjectDataTotalsResult}
-                  </p>
-                ) : null}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-shrink-0"
-                disabled={!onRecalculateProjectDataTotals || recalculateProjectDataTotalsLoading}
-                onClick={() => {
-                  onRecalculateProjectDataTotals?.()
-                  setHasLoaded(false)
-                }}
-              >
-                {recalculateProjectDataTotalsLoading ? 'Queuing…' : 'Recalculate now'}
-              </Button>
-            </div>
           </div>
 
           {/* Auto-delete previews on close toggle */}

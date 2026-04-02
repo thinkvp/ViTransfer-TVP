@@ -31,6 +31,7 @@ type InternalComment = {
   updatedAt: string
   authorName: string
   displayColor: string | null
+  avatarUrl: string | null
   replies: InternalComment[]
 }
 
@@ -87,6 +88,7 @@ function InternalCommentBubble(props: {
               <InitialsAvatar
                 name={comment.authorName || 'Unknown'}
                 displayColor={comment.displayColor}
+                avatarUrl={comment.avatarUrl}
                 className="h-6 w-6 text-[10px]"
               />
               <div className="text-sm font-semibold text-foreground truncate">
@@ -167,6 +169,7 @@ function InternalCommentBubble(props: {
                           <InitialsAvatar
                             name={reply.authorName || 'Unknown'}
                             displayColor={reply.displayColor}
+                            avatarUrl={reply.avatarUrl}
                             className="h-5 w-5 text-[9px] ring-2"
                           />
                           <span className="text-xs font-semibold text-foreground truncate">
@@ -251,6 +254,7 @@ export function ProjectInternalComments(props: {
   }, [fetchComments])
 
   useEffect(() => {
+    if (topLevelComments.length === 0) return
     if (!shouldAutoScrollRef.current) return
     setTimeout(() => {
       const el = messagesContainerRef.current

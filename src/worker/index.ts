@@ -453,7 +453,7 @@ async function main() {
     }
   )
 
-  // Auto-start projects when a SHOOTING key date begins.
+  // Auto-start projects when Start Date is due or a SHOOTING key date begins.
   await notificationQueue.add(
     'auto-start-projects-on-shooting-key-date',
     {},

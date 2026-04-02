@@ -30,6 +30,7 @@ import {
   quoteEffectiveStatus as computeQuoteEffectiveStatus,
 } from '@/lib/sales/status'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
 
 type ClientResponse = {
   id: string
@@ -54,6 +55,7 @@ type ClientProjectRow = {
   id: string
   title: string
   status: string
+  startDate?: string | Date | null
   createdAt: string | Date
   updatedAt: string | Date
   lastActivityAt?: string | null
@@ -308,7 +310,11 @@ export default function ClientDetailPage() {
       if (projectsSortKey === 'videos') return dir * (getUniqueVideosCount(a) - getUniqueVideosCount(b))
       if (projectsSortKey === 'versions') return dir * (getVersionsCount(a) - getVersionsCount(b))
       if (projectsSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
-      if (projectsSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      if (projectsSortKey === 'createdAt') {
+        const aDate = getEffectiveStartDateYmd(a.startDate, a.createdAt) ?? ''
+        const bDate = getEffectiveStartDateYmd(b.startDate, b.createdAt) ?? ''
+        return dir * aDate.localeCompare(bDate)
+      }
       if (projectsSortKey === 'updatedAt') return dir * (new Date(a.lastAccessedAt ?? 0).getTime() - new Date(b.lastAccessedAt ?? 0).getTime())
       return 0
     })
@@ -613,10 +619,10 @@ export default function ClientDetailPage() {
                 </div>
 
                 <RecipientsEditor
-                  label="Client Recipients"
+                  label="Client Contacts"
                   value={recipients}
                   onChange={setRecipients}
-                  addButtonLabel="Add Recipient"
+                  addButtonLabel="Add Contact"
                   addButtonVariant="outline"
                   addButtonSize="default"
                   addButtonHideLabelOnMobile={true}
@@ -683,7 +689,7 @@ export default function ClientDetailPage() {
                               { key: 'videos', label: 'Videos', className: 'w-[90px] text-right hidden md:table-cell', mobile: false },
                               { key: 'versions', label: 'Versions', className: 'w-[95px] text-right hidden md:table-cell', mobile: false },
                               { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false },
-                              { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false },
+                              { key: 'createdAt', label: 'Start Date', className: 'w-[130px] hidden md:table-cell', mobile: false },
                               { key: 'updatedAt', label: 'Last Access', className: 'w-[130px] hidden md:table-cell', mobile: false },
                             ] as const
                           ).map((col) => (
@@ -762,7 +768,7 @@ export default function ClientDetailPage() {
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
                                 <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
-                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
+                                <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(getEffectiveStartDateYmd(project.startDate, project.createdAt) ?? project.createdAt)}</td>
                                 <td className="px-3 py-2 tabular-nums hidden md:table-cell">{project.lastAccessedAt ? formatProjectDate(project.lastAccessedAt) : '—'}</td>
                               </tr>
 
@@ -787,7 +793,7 @@ export default function ClientDetailPage() {
                                       </div>
                                       <div className="flex items-center justify-between gap-4 tabular-nums">
                                         <div className="text-left">
-                                          <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
+                                          <span className="text-muted-foreground">Start Date:</span> {formatProjectDate(getEffectiveStartDateYmd(project.startDate, project.createdAt) ?? project.createdAt)}
                                         </div>
                                         <div className="text-right">
                                           <span className="text-muted-foreground">Last Access:</span> {project.lastAccessedAt ? formatProjectDate(project.lastAccessedAt) : '—'}

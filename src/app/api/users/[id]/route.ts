@@ -20,6 +20,7 @@ type UserPatchBody = {
   username?: string | null
   name?: string | null
   notes?: string | null
+  phone?: string | null
   displayColor?: string | null
   password?: string
   oldPassword?: string
@@ -35,9 +36,6 @@ export async function GET(
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const forbiddenMenu = requireMenuAccess(authResult, 'users')
-  if (forbiddenMenu) return forbiddenMenu
-
   // Rate limiting: 60 requests per minute
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
@@ -51,6 +49,12 @@ export async function GET(
 
   try {
     const { id } = await params
+
+    // Users without the users-menu permission may only fetch their own profile
+    if (id !== authResult.id) {
+      const forbiddenMenu = requireMenuAccess(authResult, 'users')
+      if (forbiddenMenu) return forbiddenMenu
+    }
     const user = await prisma.user.findUnique({
       where: { id },
       select: {
@@ -59,6 +63,8 @@ export async function GET(
         username: true,
         name: true,
         notes: true,
+        phone: true,
+        avatarPath: true,
         displayColor: true,
         active: true,
         role: true,
@@ -114,7 +120,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = (await request.json()) as UserPatchBody
-    const { email, username, name, notes, displayColor, password, oldPassword, appRoleId, active } = body
+    const { email, username, name, notes, phone, displayColor, password, oldPassword, appRoleId, active } = body
 
     const targetUser = await prisma.user.findUnique({
       where: { id },
@@ -191,6 +197,10 @@ export async function PATCH(
 
     if (notes !== undefined) {
       updateData.notes = typeof notes === 'string' && notes.trim() ? notes.trim() : null
+    }
+
+    if (phone !== undefined) {
+      updateData.phone = typeof phone === 'string' && phone.trim() ? phone.trim() : null
     }
 
     if (displayColor !== undefined) {
@@ -343,6 +353,8 @@ export async function PATCH(
         username: true,
         name: true,
         notes: true,
+        phone: true,
+        avatarPath: true,
         displayColor: true,
         active: true,
         role: true,

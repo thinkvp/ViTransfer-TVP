@@ -2,18 +2,23 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
 import NotificationsBell from '@/components/NotificationsBell'
 import RunningJobsBell from '@/components/RunningJobsBell'
 import ClientActivityEye from '@/components/ClientActivityEye'
-import { useEffect, useRef, useState } from 'react'
-import { apiFetch } from '@/lib/api-client'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { apiFetch, apiPatch } from '@/lib/api-client'
 import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { AvatarUploadCrop } from '@/components/AvatarUploadCrop'
+import { PasswordRequirements } from '@/components/PasswordRequirements'
 
 const SALES_SUBMENU = [
   { href: '/admin/sales', label: 'Dashboard', icon: LayoutDashboard },
@@ -32,6 +37,75 @@ export default function AdminHeader() {
   const salesHoverRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const salesTriggerHoveredRef = useRef(false)
   const salesContentHoveredRef = useRef(false)
+
+  // Profile modal state
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [profileData, setProfileData] = useState<any>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState('')
+  const [profileSuccess, setProfileSuccess] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showOldPassword, setShowOldPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [savingPassword, setSavingPassword] = useState(false)
+
+  const fetchProfile = useCallback(async () => {
+    if (!user) return
+    setProfileLoading(true)
+    try {
+      const res = await apiFetch(`/api/users/${user.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setProfileData(data.user)
+      }
+    } finally {
+      setProfileLoading(false)
+    }
+  }, [user])
+
+  const handleOpenProfile = () => {
+    setProfileError('')
+    setProfileSuccess('')
+    setOldPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setShowProfileModal(true)
+    fetchProfile()
+  }
+
+  const handlePasswordSave = async () => {
+    if (!user) return
+    setProfileError('')
+    setProfileSuccess('')
+    if (!newPassword) {
+      setProfileError('Please enter a new password.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setProfileError('Passwords do not match.')
+      return
+    }
+    setSavingPassword(true)
+    try {
+      const body: any = { password: newPassword }
+      if (oldPassword) body.oldPassword = oldPassword
+      const res = await apiPatch(`/api/users/${user.id}`, body)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setProfileError(data.error || 'Failed to update password.')
+      } else {
+        setProfileSuccess('Password updated successfully.')
+        setOldPassword('')
+        setNewPassword('')
+        setConfirmPassword('')
+      }
+    } finally {
+      setSavingPassword(false)
+    }
+  }
 
   const clearSalesCloseTimer = () => {
     if (salesHoverRef.current) {
@@ -95,6 +169,7 @@ export default function AdminHeader() {
   }
 
   return (
+    <>
     <div className="relative z-50 isolate transform-gpu bg-card border-b border-border/60 shadow-elevation-sm">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-2">
         <div className="flex items-center justify-between gap-2">
@@ -293,10 +368,16 @@ export default function AdminHeader() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
-              <User className="w-4 h-4" />
-              <span className="max-w-[150px] lg:max-w-none truncate">{user.email}</span>
-            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleOpenProfile}
+              aria-label="My Profile"
+              title="My Profile"
+              className="p-2 w-9 sm:w-10"
+            >
+              <User className="h-4 w-4 sm:h-5 sm:w-5" />
+            </Button>
             <ThemeToggle buttonClassName="w-9 sm:w-10" iconClassName="h-4 w-4 sm:h-5 sm:w-5" />
             <Button
               variant="outline"
@@ -308,12 +389,144 @@ export default function AdminHeader() {
             >
               <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-            <ClientActivityEye />
+            {user.isSystemAdmin && <ClientActivityEye />}
             <RunningJobsBell />
             <NotificationsBell />
           </div>
         </div>
       </div>
     </div>
+
+    {/* Profile Modal */}
+    <Dialog open={showProfileModal} onOpenChange={setShowProfileModal}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>My Profile</DialogTitle>
+        </DialogHeader>
+
+        {/* Avatar */}
+        <div className="flex justify-center py-2">
+          {profileData !== null && (
+            <AvatarUploadCrop
+              userId={user.id}
+              currentAvatarPath={profileData?.avatarPath ?? null}
+              displayName={profileData?.name || user.email}
+              displayColor={profileData?.displayColor}
+            />
+          )}
+        </div>
+
+        {/* Read-only info */}
+        {profileLoading ? (
+          <p className="text-sm text-muted-foreground text-center py-2">Loading…</p>
+        ) : profileData ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Name</Label>
+                <p className="text-sm font-medium">{profileData.name || '—'}</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Username</Label>
+                <p className="text-sm font-medium">{profileData.username || '—'}</p>
+              </div>
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs text-muted-foreground">Email</Label>
+                <p className="text-sm font-medium">{profileData.email}</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Role</Label>
+                <p className="text-sm font-medium">{profileData.appRole?.name || profileData.role || '—'}</p>
+              </div>
+              {profileData.phone && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Phone</Label>
+                  <p className="text-sm font-medium">{profileData.phone}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Password change */}
+        <div className="border-t pt-4 mt-2 space-y-3">
+          <p className="text-sm font-medium">Change Password</p>
+          <div className="space-y-2">
+            <Label htmlFor="hdr-old-password" className="text-xs">Current Password</Label>
+            <div className="relative">
+              <Input
+                id="hdr-old-password"
+                type={showOldPassword ? 'text' : 'password'}
+                value={oldPassword}
+                onChange={e => setOldPassword(e.target.value)}
+                autoComplete="current-password"
+                className="pr-10"
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                onClick={() => setShowOldPassword(v => !v)}
+                tabIndex={-1}
+              >
+                {showOldPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="hdr-new-password" className="text-xs">New Password</Label>
+            <div className="relative">
+              <Input
+                id="hdr-new-password"
+                type={showNewPassword ? 'text' : 'password'}
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                className="pr-10"
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                onClick={() => setShowNewPassword(v => !v)}
+                tabIndex={-1}
+              >
+                {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            {newPassword && <PasswordRequirements password={newPassword} />}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="hdr-confirm-password" className="text-xs">Confirm New Password</Label>
+            <div className="relative">
+              <Input
+                id="hdr-confirm-password"
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                className="pr-10"
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                onClick={() => setShowConfirmPassword(v => !v)}
+                tabIndex={-1}
+              >
+                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          {profileError && <p className="text-sm text-destructive">{profileError}</p>}
+          {profileSuccess && <p className="text-sm text-green-600 dark:text-green-400">{profileSuccess}</p>}
+          <Button
+            onClick={handlePasswordSave}
+            disabled={savingPassword || !newPassword}
+            className="w-full"
+          >
+            {savingPassword ? 'Saving…' : 'Update Password'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

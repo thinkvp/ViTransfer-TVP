@@ -148,11 +148,11 @@ export default function NewClientPage() {
                 </div>
 
                 <RecipientsEditor
-                  label="Client Recipients"
+                  label="Client Contacts"
                   description="These recipients can be added to projects when creating a new project"
                   value={recipients}
                   onChange={setRecipients}
-                  addButtonLabel="Add Recipient"
+                  addButtonLabel="Add Contact"
                   addButtonVariant="outline"
                   addButtonSize="default"
                   addButtonHideLabelOnMobile={true}

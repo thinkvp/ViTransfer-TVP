@@ -771,6 +771,7 @@ export default function ProjectSettingsPage() {
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="e.g., Marketing video for Q4 campaign"
                     rows={3}
+                    autoResize
                   />
                   <p className="text-xs text-muted-foreground">
                     Optional description to help identify and organize this project
@@ -1521,7 +1522,7 @@ export default function ProjectSettingsPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="description-d">Project Description</Label>
-                      <Textarea id="description-d" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Marketing video for Q4 campaign" rows={3} />
+                      <Textarea id="description-d" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Marketing video for Q4 campaign" rows={3} autoResize />
                       <p className="text-xs text-muted-foreground">Optional description to help identify and organize this project</p>
                     </div>
 

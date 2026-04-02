@@ -16,6 +16,7 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { toLocalYmd } from '@/lib/project-start-date'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -55,6 +56,7 @@ export default function NewProjectPage() {
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
   const clientSearchRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(false)
+  const [startDate, setStartDate] = useState(() => toLocalYmd(new Date()) ?? '')
   const [authModeError, setAuthModeError] = useState<string | null>(null)
   const [passwordProtected, setPasswordProtected] = useState(true)
   const [sharePassword, setSharePassword] = useState('')
@@ -258,6 +260,7 @@ export default function NewProjectPage() {
       })),
       sharePassword: (authMode === 'PASSWORD' || authMode === 'BOTH') && passwordProtected ? sharePassword : '',
       authMode: passwordProtected ? authMode : 'NONE',
+      startDate: startDate || null,
     }
 
     try {
@@ -396,6 +399,18 @@ export default function NewProjectPage() {
                   name="description"
                   placeholder="e.g., Project details, deliverables, notes..."
                   rows={3}
+                  autoResize
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="startDate">Start Date</Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-[200px]"
                 />
               </div>
 

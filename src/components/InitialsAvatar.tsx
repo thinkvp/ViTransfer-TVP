@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { useState } from 'react'
 
 function getUserInitials(name?: string | null, email?: string | null): string {
   const cleanedName = String(name || '').trim()
@@ -49,14 +50,33 @@ export function InitialsAvatar(props: {
   name?: string | null
   email?: string | null
   displayColor?: string | null
+  avatarUrl?: string | null
   className?: string
   title?: string
 }) {
-  const { name, email, displayColor, className, title } = props
+  const { name, email, displayColor, avatarUrl, className, title } = props
+
+  const [imgError, setImgError] = useState(false)
 
   const initials = getUserInitials(name, email)
   const bg = typeof displayColor === 'string' && displayColor.trim() ? displayColor : '#64748b'
   const label = (title ?? String(name || email || '').trim()) || 'Recipient'
+
+  if (avatarUrl && !imgError) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={label}
+        title={label}
+        aria-label={label}
+        className={cn(
+          'h-7 w-7 rounded-full ring-2 ring-card shadow-sm object-cover flex-shrink-0',
+          className,
+        )}
+        onError={() => setImgError(true)}
+      />
+    )
+  }
 
   return (
     <div

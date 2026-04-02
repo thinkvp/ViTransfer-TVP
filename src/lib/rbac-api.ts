@@ -16,13 +16,15 @@ export function getUserPermissions(user: any): RolePermissions {
 }
 
 /**
- * Fire-and-forget permission-denied logging.
- * Called from synchronous RBAC gates when an optional request is provided.
+ * Fire-and-forget action-denied logging at INFO level.
+ * Menu access denials are not logged — they are expected RBAC enforcement, not
+ * security events. Only action denials (more specific, operation-level gates)
+ * are recorded, at INFO severity, for audit purposes.
  */
-function logDenied(user: any, resource: string, request?: NextRequest) {
+function logActionDenied(user: any, resource: string, request?: NextRequest) {
   logSecurityEvent({
     type: 'PERMISSION_DENIED',
-    severity: 'WARNING',
+    severity: 'INFO',
     ipAddress: request ? getClientIpAddress(request) : undefined,
     details: {
       userId: user?.id,
@@ -36,7 +38,7 @@ function logDenied(user: any, resource: string, request?: NextRequest) {
 export function requireMenuAccess(user: any, menu: MenuKey, request?: NextRequest): Response | null {
   const permissions = getUserPermissions(user)
   if (!canSeeMenu(permissions, menu)) {
-    logDenied(user, `menu:${menu}`, request)
+    // Menu access denial is expected RBAC behaviour — not logged as a security event.
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   return null
@@ -45,7 +47,7 @@ export function requireMenuAccess(user: any, menu: MenuKey, request?: NextReques
 export function requireActionAccess(user: any, action: ActionKey, request?: NextRequest): Response | null {
   const permissions = getUserPermissions(user)
   if (!canDoAction(permissions, action)) {
-    logDenied(user, `action:${action}`, request)
+    logActionDenied(user, `action:${action}`, request)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   return null
@@ -55,7 +57,7 @@ export function requireAnyActionAccess(user: any, actions: ActionKey[], request?
   const permissions = getUserPermissions(user)
   const allowed = actions.some((a) => canDoAction(permissions, a))
   if (!allowed) {
-    logDenied(user, `actions:${actions.join(',')}`, request)
+    logActionDenied(user, `actions:${actions.join(',')}`, request)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   return null

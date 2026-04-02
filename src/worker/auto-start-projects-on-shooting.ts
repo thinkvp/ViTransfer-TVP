@@ -17,30 +17,49 @@ function hhmmNowLocal(): string {
   return `${hh}:${mm}`
 }
 
+function endOfTodayLocal(): Date {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+}
+
 export async function processAutoStartProjectsOnShootingKeyDate(): Promise<{ startedCount: number }> {
   const today = isoDateTodayLocal()
   const nowTime = hhmmNowLocal()
+  const todayEnd = endOfTodayLocal()
 
-  // Promote projects when the SHOOTING key date has started.
-  // - allDay: any time on that date
-  // - timed: next check after startTime
-  // Uses server/container local time (see TZ env var) to match other key-date logic.
-  const due = await prisma.project.findMany({
-    where: {
-      status: ProjectStatus.NOT_STARTED,
-      keyDates: {
-        some: {
-          type: 'SHOOTING',
-          OR: [
-            { date: { lt: today } },
-            { date: today, allDay: true },
-            { date: today, allDay: false, startTime: { not: null, lte: nowTime } },
-          ],
+  // Two independent promotion triggers:
+  // 1. startDate is due (today or earlier)
+  // 2. SHOOTING key date has started
+  const [dueByStartDate, dueByShootingDate] = await Promise.all([
+    prisma.project.findMany({
+      where: {
+        status: ProjectStatus.NOT_STARTED,
+        startDate: { lte: todayEnd },
+      },
+      select: { id: true, status: true, title: true },
+    }),
+    prisma.project.findMany({
+      where: {
+        status: ProjectStatus.NOT_STARTED,
+        keyDates: {
+          some: {
+            type: 'SHOOTING',
+            OR: [
+              { date: { lt: today } },
+              { date: today, allDay: true },
+              { date: today, allDay: false, startTime: { not: null, lte: nowTime } },
+            ],
+          },
         },
       },
-    },
-    select: { id: true, status: true, title: true },
-  })
+      select: { id: true, status: true, title: true },
+    }),
+  ])
+
+  // Merge and deduplicate
+  const byId = new Map<string, { id: string; status: ProjectStatus; title: string }>()
+  for (const p of [...dueByStartDate, ...dueByShootingDate]) byId.set(p.id, p)
+  const due = Array.from(byId.values())
 
   if (due.length === 0) return { startedCount: 0 }
 
@@ -62,7 +81,7 @@ export async function processAutoStartProjectsOnShootingKeyDate(): Promise<{ sta
     }),
   ])
 
-  console.log(`[AUTO-START] Promoted ${ids.length} project(s) to IN_PROGRESS based on SHOOTING key dates`, {
+  console.log(`[AUTO-START] Promoted ${ids.length} project(s) to IN_PROGRESS based on Start Date / SHOOTING key dates`, {
     today,
     nowTime,
   })

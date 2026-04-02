@@ -34,6 +34,7 @@ export default function NewUserPage() {
     password: '',
     confirmPassword: '',
     name: '',
+    phone: '',
     displayColor: generateRandomHexDisplayColor(),
     appRoleId: 'role_admin',
   }))
@@ -120,8 +121,8 @@ export default function NewUserPage() {
     setError('')
 
     // Validation
-    if (!formData.email || !formData.password) {
-      setError('Email and password are required')
+    if (!formData.name || !formData.email || !formData.password) {
+      setError('Full name, email, and password are required')
       return
     }
 
@@ -141,6 +142,7 @@ export default function NewUserPage() {
         username: formData.username || null,
         password: formData.password,
         name: formData.name || null,
+        phone: formData.phone || null,
         displayColor: formData.displayColor || null,
         appRoleId: formData.appRoleId,
       })
@@ -174,7 +176,18 @@ export default function NewUserPage() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-              {/* Row 1: Email | Full Name */}
+              {/* Row 1: Full Name | Email */}
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name *</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                />
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="email">Email *</Label>
                 <Input
@@ -186,18 +199,7 @@ export default function NewUserPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Optional"
-                />
-              </div>
-
-              {/* Row 2: Username | Display Colour */}
+              {/* Row 2: Username | Phone Number */}
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
                 <Input
@@ -207,6 +209,40 @@ export default function NewUserPage() {
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   placeholder="Optional"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+
+              {/* Row 3: Role | Display Colour */}
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select
+                  key={rolesLoading ? 'roles-loading' : 'roles-loaded'}
+                  value={formData.appRoleId}
+                  onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
+                  disabled={rolesLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
               </div>
 
               <div className="space-y-2">
@@ -232,32 +268,6 @@ export default function NewUserPage() {
                   Used for this admin&apos;s comment highlight and timeline markers.
                 </p>
               </div>
-
-              {/* Row 3: Role (single column) */}
-              <div className="space-y-2">
-                <Label>Role</Label>
-                <Select
-                  key={rolesLoading ? 'roles-loading' : 'roles-loaded'}
-                  value={formData.appRoleId}
-                  onValueChange={(value) => setFormData({ ...formData, appRoleId: value })}
-                  disabled={rolesLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={rolesLoading ? 'Loading roles…' : 'Select a role'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roles.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Controls which admin areas and actions this user can access.</p>
-              </div>
-
-              {/* Empty cell to maintain grid alignment */}
-              <div className="hidden md:block" />
 
               {/* Row 4: Password | Confirm Password */}
               <div className="space-y-2">

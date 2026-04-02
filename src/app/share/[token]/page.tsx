@@ -848,17 +848,33 @@ export default function SharePage() {
   const handleVideoSelect = (videoName: string) => {
     if (!activeAlbumId && activeVideoName === videoName) return
     if (!confirmShareDraftNavigation()) return
+    const wasInAlbum = !!activeAlbumId
     setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
+    if (wasInAlbum && shareToken) {
+      void fetch(`/api/share/${token}/activity`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${shareToken}` },
+        body: JSON.stringify({ activityType: 'VIEWING_SHARE_PAGE' }),
+      }).catch(() => {})
+    }
   }
 
   const handleAlbumSelect = (albumId: string) => {
     if (activeAlbumId === albumId) return
     if (!confirmShareDraftNavigation()) return
+    const album = albums.find((a: any) => String(a.id) === String(albumId))
     setActiveVideoName('')
     setActiveVideosRaw([])
     setActiveAlbumId(albumId)
+    if (shareToken) {
+      void fetch(`/api/share/${token}/activity`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${shareToken}` },
+        body: JSON.stringify({ activityType: 'VIEWING_ALBUM', albumId, albumName: album?.name ?? null }),
+      }).catch(() => {})
+    }
   }
 
   useEffect(() => {
@@ -1997,6 +2013,7 @@ function ShareFeedbackGrid({
               allowCommentFileUpload={Boolean(project.allowClientUploadFiles)}
               hideInput={true}
               showThemeToggle={true}
+              largeAvatars={true}
               management={management as any}
             />
           </div>

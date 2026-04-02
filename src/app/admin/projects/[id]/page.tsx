@@ -4,15 +4,17 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import Link from 'next/link'
 import AdminVideoManager from '@/components/AdminVideoManager'
 import AdminAlbumManager from '@/components/AdminAlbumManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
-import { ArrowLeft, Settings, ArrowUpDown, FolderKanban, Video, Images } from 'lucide-react'
+import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, X } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { ProjectFileUpload } from '@/components/ProjectFileUpload'
 import { ProjectFileList } from '@/components/ProjectFileList'
@@ -58,6 +60,9 @@ export default function ProjectPage() {
   const [projectFilesRefresh, setProjectFilesRefresh] = useState(0)
   const [projectEmailsRefresh, setProjectEmailsRefresh] = useState(0)
   const [projectStorageRefresh, setProjectStorageRefresh] = useState(0)
+  const [isEditingStartDate, setIsEditingStartDate] = useState(false)
+  const [startDateValue, setStartDateValue] = useState('')
+  const [isSavingStartDate, setIsSavingStartDate] = useState(false)
 
   const [salesTick, setSalesTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
@@ -84,8 +89,8 @@ export default function ProjectPage() {
   const canAccessSharePage = canDoAction(permissions, 'accessSharePage')
   const canAccessExternalCommunication = canDoAction(permissions, 'projectExternalCommunication')
   const canAccessPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
+  const canFullProjectControl = canDoAction(permissions, 'projectsFullControl')
   const canDeleteInternalFiles = canDoAction(permissions, 'projectsFullControl')
-  const hasTrackedProjectData = Math.max(Number(project?.totalBytes || 0), Number(project?.diskBytes || 0), 0) > 0
 
   const bumpProjectStorageRefresh = useCallback(() => {
     setProjectStorageRefresh((v) => v + 1)
@@ -424,6 +429,11 @@ export default function ProjectPage() {
     fetchAdminUser()
   }, [])
 
+  const getProjectStartDateYmd = useCallback(
+    (p: any) => getEffectiveStartDateYmd(p?.startDate, p?.createdAt) ?? '',
+    []
+  )
+
   if (loading) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
@@ -444,6 +454,7 @@ export default function ProjectPage() {
     )
   }
 
+  const hasTrackedProjectData = Math.max(Number(project?.totalBytes || 0), Number(project?.diskBytes || 0), 0) > 0
   const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
@@ -456,6 +467,31 @@ export default function ProjectPage() {
       return `${yyyy}-${mm}-${dd}`
     } catch {
       return ''
+    }
+  }
+
+  const handleStartDateEdit = () => {
+    setStartDateValue(getProjectStartDateYmd(project))
+    setIsEditingStartDate(true)
+  }
+
+  const handleCancelStartDateEdit = () => {
+    setStartDateValue(getProjectStartDateYmd(project))
+    setIsEditingStartDate(false)
+  }
+
+  const handleSaveStartDate = async () => {
+    if (!project || isSavingStartDate) return
+    setIsSavingStartDate(true)
+    try {
+      const updated = await apiPatch(`/api/projects/${id}`, { startDate: startDateValue || null })
+      setProject((prev: any) => (prev ? { ...prev, ...updated } : updated))
+      setIsEditingStartDate(false)
+      await fetchProject()
+    } catch {
+      alert('Failed to update start date')
+    } finally {
+      setIsSavingStartDate(false)
     }
   }
 
@@ -549,8 +585,55 @@ export default function ProjectPage() {
                     </div>
 
                     <div className="text-sm flex-shrink-0 text-right">
-                      <p className="text-muted-foreground">Project Created</p>
-                      <p className="font-medium tabular-nums">{formatProjectDate(project.createdAt)}</p>
+                      <p className="text-muted-foreground">Start Date</p>
+                      {isEditingStartDate && canFullProjectControl ? (
+                        <div className="mt-1 flex items-center justify-end gap-2">
+                          <Input
+                            type="date"
+                            value={startDateValue}
+                            onChange={(e) => setStartDateValue(e.target.value)}
+                            className="h-8 w-[150px] tabular-nums"
+                            disabled={isSavingStartDate}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-success hover:text-success hover:bg-success-visible"
+                            onClick={() => void handleSaveStartDate()}
+                            disabled={isSavingStartDate}
+                            title="Save start date"
+                          >
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive-visible"
+                            onClick={handleCancelStartDateEdit}
+                            disabled={isSavingStartDate}
+                            title="Cancel"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-center justify-end gap-1">
+                          <p className="font-medium tabular-nums">
+                            {formatProjectDate(getProjectStartDateYmd(project) || project.createdAt)}
+                          </p>
+                          {canFullProjectControl && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible"
+                              onClick={handleStartDateEdit}
+                              title="Edit start date"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -569,7 +652,7 @@ export default function ProjectPage() {
                     />
                   )}
 
-                  {canDeleteInternalFiles && (
+                  {canFullProjectControl && (
                     <RecipientsEditor
                       label="Recipients"
                       description=""
@@ -710,8 +793,8 @@ export default function ProjectPage() {
                     maxConcurrent={3}
                     onUploadComplete={() => {
                       setProjectEmailsRefresh((v) => v + 1)
+                      setProjectFilesRefresh((v) => v + 1)
                       bumpProjectStorageRefresh()
-                      void fetchProject()
                     }}
                   />
                 ) : (
@@ -725,8 +808,8 @@ export default function ProjectPage() {
                   refreshTrigger={projectEmailsRefresh}
                   canDelete={canUploadFilesToProjectInternal}
                     onExternalFilesChanged={() => {
+                      setProjectFilesRefresh((v) => v + 1)
                       bumpProjectStorageRefresh()
-                      void fetchProject()
                     }}
                 />
               </div>
@@ -812,7 +895,7 @@ export default function ProjectPage() {
               canDeleteAll={adminUser?.appRoleIsSystemAdmin === true}
             />
 
-            {sectionVisibility.users && canDeleteInternalFiles && (
+            {sectionVisibility.users && canFullProjectControl && (
               <Card>
                 <CardContent className="pt-6 max-sm:pt-3">
                   <ProjectUsersEditor
@@ -845,7 +928,6 @@ export default function ProjectPage() {
                   onUploadComplete={() => {
                     setProjectFilesRefresh((v) => v + 1)
                     bumpProjectStorageRefresh()
-                    void fetchProject()
                   }}
                 />
               ) : (
@@ -858,10 +940,7 @@ export default function ProjectPage() {
                 projectId={project.id}
                 refreshTrigger={projectFilesRefresh}
                 canDelete={canDeleteInternalFiles}
-                onFilesChanged={() => {
-                  bumpProjectStorageRefresh()
-                  void fetchProject()
-                }}
+                onFilesChanged={bumpProjectStorageRefresh}
               />
               </div>
             )}
@@ -897,7 +976,7 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {sectionVisibility.projectData && canDeleteInternalFiles && hasTrackedProjectData && (
+            {sectionVisibility.projectData && canFullProjectControl && hasTrackedProjectData && (
               <ProjectStorageUsage projectId={project.id} refreshTrigger={projectStorageRefresh} />
             )}
           </div>

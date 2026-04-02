@@ -66,6 +66,7 @@ interface CommentSectionProps {
   showThemeToggle?: boolean
   showVideoNotes?: boolean
   showApproveButton?: boolean
+  largeAvatars?: boolean
 }
 
 type CommentManagement = ReturnType<typeof useCommentManagement>
@@ -186,6 +187,7 @@ export function CommentSectionView({
   showThemeToggle = false,
   showVideoNotes = true,
   showApproveButton = true,
+  largeAvatars = false,
   management,
 }: CommentSectionProps & { management: CommentManagement }) {
   const [isVideoFullscreen, setIsVideoFullscreen] = useState(false)
@@ -1794,6 +1796,7 @@ export function CommentSectionView({
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
                         showAuthorAvatar
                         showColorEdge={false}
+                        avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
                       />
                     ) : (
                       // Has replies - render extended bubble
@@ -1824,6 +1827,7 @@ export function CommentSectionView({
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
                         showAuthorAvatar
                         showColorEdge={false}
+                        avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
                       />
                     )}
                   </div>

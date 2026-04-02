@@ -16,12 +16,14 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
 
 type ProjectAssignedUser = {
   id: string
   email?: string | null
   name?: string | null
   displayColor?: string | null
+  avatarPath?: string | null
   receiveNotifications?: boolean
 }
 
@@ -35,6 +37,7 @@ interface Project {
     name: string
   } | null
   status: string
+  startDate?: string | Date | null
   createdAt: string | Date
   updatedAt: string | Date
   totalBytes?: number | null
@@ -326,7 +329,11 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
       if (tableSortKey === 'comments') return dir * ((a._count?.comments || 0) - (b._count?.comments || 0))
       if (tableSortKey === 'photos') return dir * (getPhotosCount(a) - getPhotosCount(b))
       if (tableSortKey === 'data') return dir * ((getProjectDataBytes(a) || 0) - (getProjectDataBytes(b) || 0))
-      if (tableSortKey === 'createdAt') return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      if (tableSortKey === 'createdAt') {
+        const aDate = getEffectiveStartDateYmd(a.startDate, a.createdAt) ?? ''
+        const bDate = getEffectiveStartDateYmd(b.startDate, b.createdAt) ?? ''
+        return dir * aDate.localeCompare(bDate)
+      }
       if (tableSortKey === 'updatedAt') return dir * (new Date(analyticsMap?.[a.id]?.lastAccessedAt ?? 0).getTime() - new Date(analyticsMap?.[b.id]?.lastAccessedAt ?? 0).getTime())
       return 0
     })
@@ -372,7 +379,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
       { key: 'comments', label: 'Comments', className: 'w-[110px] text-right hidden md:table-cell', mobile: false, toggleKey: 'comments' as const },
       { key: 'photos', label: 'Photos', className: 'w-[95px] text-right hidden md:table-cell', mobile: false, toggleKey: 'photos' as const },
       { key: 'data', label: 'Data', className: 'w-[110px] text-right hidden md:table-cell', mobile: false, toggleKey: 'data' as const },
-      { key: 'createdAt', label: 'Date Created', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'createdAt' as const },
+      { key: 'createdAt', label: 'Start Date', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'createdAt' as const },
       { key: 'updatedAt', label: 'Last Access', className: 'w-[130px] hidden md:table-cell', mobile: false, toggleKey: 'updatedAt' as const },
     ] as const
 
@@ -421,7 +428,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                     { key: 'comments', label: 'Comments' },
                     { key: 'photos', label: 'Photos' },
                     { key: 'data', label: 'Data' },
-                    { key: 'createdAt', label: 'Date Created' },
+                    { key: 'createdAt', label: 'Start Date' },
                     { key: 'updatedAt', label: 'Last Access' },
                   ] as const
                 ).map((col) => {
@@ -528,18 +535,18 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
             </CardContent>
           </Card>
         ) : (
-          <div className="rounded-xl border border-border/60 shadow-elevation-sm bg-card overflow-hidden">
+          <div className="rounded-md border border-border bg-card overflow-hidden">
             <div className="w-full overflow-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/30">
-                  <tr className="border-b border-border/60">
-                    <th scope="col" className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground w-8 md:hidden" aria-label="Expand" />
+                <thead className="bg-muted/40">
+                  <tr className="border-b border-border">
+                    <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-muted-foreground w-8 md:hidden" aria-label="Expand" />
                     {columnsConfig.visibleCols.map((col: any) => (
-                      <th key={col.key} scope="col" className={cn('px-4 py-3 text-left text-xs font-semibold text-muted-foreground', col.className)}>
+                      <th key={col.key} scope="col" className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground', col.className)}>
                         <button
                           type="button"
                           onClick={() => toggleTableSort(col.key)}
-                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                          className="inline-flex items-center gap-1 hover:text-foreground"
                           title="Sort"
                         >
                           <span>{col.label}</span>
@@ -613,7 +620,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                           <tr
                             key={project.id}
                             className={cn(
-                              'border-b border-border last:border-b-0 hover:bg-accent/40 transition-colors duration-150',
+                              'border-b border-border last:border-b-0 hover:bg-muted/40',
                               !isMobile && 'cursor-pointer'
                             )}
                             onClick={
@@ -646,7 +653,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               </button>
                             </td>
 
-                            <td className="px-4 py-3 font-medium">
+                            <td className="px-3 py-2 font-medium">
                               <button
                                 type="button"
                                 className="text-left hover:underline"
@@ -659,7 +666,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               </button>
                             </td>
 
-                            <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                            <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">
                               {project.clientId ? (
                                 <button
                                   type="button"
@@ -676,7 +683,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                               )}
                             </td>
 
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2">
                               <ProjectStatusPicker
                                 value={effectiveStatus}
                                 disabled={isUpdatingStatus || !canChangeProjectStatuses}
@@ -688,7 +695,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                             </td>
 
                             {visibleColumns.has('users') && (
-                              <td className="px-2 pr-1 py-3 hidden md:table-cell">
+                              <td className="px-2 pr-1 py-2 hidden md:table-cell">
                                 {Array.isArray(project.assignedUsers) && project.assignedUsers.length > 0 ? (
                                   <div className="flex items-center -space-x-1">
                                     {project.assignedUsers.slice(0, 6).map((u, idx) => {
@@ -698,6 +705,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                                           name={u?.name}
                                           email={u?.email}
                                           displayColor={u?.displayColor}
+                                          avatarUrl={u?.avatarPath ? `/api/users/${u.id}/avatar` : undefined}
                                         />
                                       )
                                     })}
@@ -718,25 +726,25 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                             )}
 
                             {visibleColumns.has('videos') && (
-                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{uniqueVideos}</td>
                             )}
                             {visibleColumns.has('versions') && (
-                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{versionsCount}</td>
                             )}
                             {visibleColumns.has('comments') && (
-                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{commentsCount}</td>
                             )}
                             {visibleColumns.has('photos') && (
-                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{photosCount}</td>
                             )}
                             {visibleColumns.has('data') && (
-                              <td className="px-4 py-3 text-right tabular-nums hidden md:table-cell">{dataLabel}</td>
+                              <td className="px-3 py-2 text-right tabular-nums hidden md:table-cell">{dataLabel}</td>
                             )}
                             {visibleColumns.has('createdAt') && (
-                              <td className="px-4 py-3 tabular-nums hidden md:table-cell">{formatProjectDate(project.createdAt)}</td>
+                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{formatProjectDate(getEffectiveStartDateYmd(project.startDate, project.createdAt) ?? project.createdAt)}</td>
                             )}
                             {visibleColumns.has('updatedAt') && (
-                              <td className="px-4 py-3 tabular-nums hidden md:table-cell">{analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}</td>
+                              <td className="px-3 py-2 tabular-nums hidden md:table-cell">{analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}</td>
                             )}
                           </tr>
 
@@ -764,7 +772,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                                   </div>
                                   <div className="flex items-center justify-between gap-4 tabular-nums">
                                     <div className="text-left">
-                                      <span className="text-muted-foreground">Date Created:</span> {formatProjectDate(project.createdAt)}
+                                      <span className="text-muted-foreground">Start Date:</span> {formatProjectDate(getEffectiveStartDateYmd(project.startDate, project.createdAt) ?? project.createdAt)}
                                     </div>
                                     <div className="text-right">
                                       <span className="text-muted-foreground">Last Access:</span> {analyticsMap?.[project.id]?.lastAccessedAt ? formatProjectDate(analyticsMap[project.id]!.lastAccessedAt as string) : '—'}

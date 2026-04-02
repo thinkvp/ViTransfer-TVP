@@ -88,6 +88,13 @@ export function sanitizeComment(
         ? (comment?.recipient?.displayColor || comment?.displayColorSnapshot || null)
         : (comment?.displayColorSnapshot || null)
 
+  // Avatar URL: expose for USER-type comments when the user has a profile picture.
+  // The /api/users/[id]/avatar endpoint is rate-limited but requires no auth, so it's
+  // safe to expose in any context (admin or share page).
+  if (authorType === 'USER' && comment?.userId && comment?.user?.avatarPath) {
+    sanitized.avatarUrl = `/api/users/${comment.userId}/avatar`
+  }
+
   // Attachments: safe metadata only (no storage paths)
   if (comment.files && Array.isArray(comment.files)) {
     sanitized.files = comment.files.map((file: any) => ({

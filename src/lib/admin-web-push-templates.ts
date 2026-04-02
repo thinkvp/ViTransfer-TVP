@@ -225,7 +225,9 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
     case 'SALES_QUOTE_VIEWED':
     case 'SALES_QUOTE_ACCEPTED':
     case 'SALES_INVOICE_VIEWED':
-    case 'SALES_INVOICE_PAID': {
+    case 'SALES_INVOICE_PAID':
+    case 'SALES_REMINDER_INVOICE_OVERDUE':
+    case 'SALES_REMINDER_QUOTE_EXPIRING': {
       const number = getDetail(payload.details, ['Number', 'Invoice', 'quoteNumber'])
       const client = getDetail(payload.details, ['Client', 'clientName'])
 
@@ -234,6 +236,8 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
         SALES_QUOTE_ACCEPTED: 'Quote accepted',
         SALES_INVOICE_VIEWED: 'Invoice viewed',
         SALES_INVOICE_PAID: 'Invoice paid',
+        SALES_REMINDER_INVOICE_OVERDUE: 'Invoice overdue reminder sent',
+        SALES_REMINDER_QUOTE_EXPIRING: 'Quote expiring reminder sent',
       }
 
       const title = titleMap[payload.type] || payload.title

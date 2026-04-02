@@ -18,6 +18,7 @@ import { sumLineItemsSubtotal, sumLineItemsTax } from '../lib/sales/money'
 import { calcStripeGrossUpCents } from '../lib/sales/stripe-fees'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '../lib/sales/db-mappers'
 import { formatDate } from '../lib/utils'
+import { sendPushNotification } from '../lib/push-notifications'
 
 const DEBUG_SALES_REMINDERS = process.env.DEBUG_SALES_REMINDERS === 'true'
 
@@ -609,6 +610,26 @@ export async function processSalesReminders() {
       } catch {
         // Best-effort. If we fail to mark it, the next run may resend.
       }
+
+      // Create in-app notification for admins/sales users.
+      try {
+        await sendPushNotification({
+          type: 'SALES_REMINDER_INVOICE_OVERDUE',
+          projectId: projectId || undefined,
+          projectName: project?.title || undefined,
+          title: 'Invoice overdue reminder sent',
+          message: `Overdue reminder sent for Invoice ${String(inv.invoiceNumber || '')}${client?.name ? ` to ${client.name}` : ''}`,
+          details: {
+            salesInvoiceId: String(inv.id),
+            salesDocType: 'INVOICE',
+            salesDocId: String(inv.id),
+            Number: String(inv.invoiceNumber || ''),
+            clientName: client?.name ?? undefined,
+          },
+        })
+      } catch {
+        // Best-effort. Reminder email already sent successfully.
+      }
     }
   }
 
@@ -779,6 +800,26 @@ export async function processSalesReminders() {
         })
       } catch {
         // Best-effort. If we fail to mark it, the next run may resend.
+      }
+
+      // Create in-app notification for admins/sales users.
+      try {
+        await sendPushNotification({
+          type: 'SALES_REMINDER_QUOTE_EXPIRING',
+          projectId: projectId || undefined,
+          projectName: project?.title || undefined,
+          title: 'Quote expiring reminder sent',
+          message: `Expiry reminder sent for Quote ${String(q.quoteNumber || '')}${client?.name ? ` to ${client.name}` : ''}`,
+          details: {
+            salesQuoteId: String(q.id),
+            salesDocType: 'QUOTE',
+            salesDocId: String(q.id),
+            Number: String(q.quoteNumber || ''),
+            clientName: client?.name ?? undefined,
+          },
+        })
+      } catch {
+        // Best-effort. Reminder email already sent successfully.
       }
 
     }

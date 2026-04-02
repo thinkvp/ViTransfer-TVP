@@ -97,6 +97,7 @@ export async function GET(
             username: true,
             email: true,
             displayColor: true,
+            avatarPath: true,
           }
         },
         recipient: {
@@ -121,6 +122,7 @@ export async function GET(
                 username: true,
                 email: true,
                 displayColor: true,
+                avatarPath: true,
               }
             },
             recipient: {

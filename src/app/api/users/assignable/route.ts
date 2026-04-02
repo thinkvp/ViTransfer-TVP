@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
         username: true,
         name: true,
         displayColor: true,
+        avatarPath: true,
         appRole: {
           select: {
             id: true,
@@ -79,6 +80,7 @@ export async function GET(request: NextRequest) {
         username: u.username,
         name: u.name,
         displayColor: u.displayColor,
+        avatarPath: u.avatarPath ?? null,
         appRole: role
           ? {
               id: role.id,

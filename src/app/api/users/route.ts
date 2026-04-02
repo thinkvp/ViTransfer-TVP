@@ -40,6 +40,8 @@ export async function GET(request: NextRequest) {
         email: true,
         username: true,
         name: true,
+        phone: true,
+        avatarPath: true,
         displayColor: true,
         active: true,
         role: true,
@@ -117,7 +119,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { email, username, password, name, appRoleId, displayColor } = body
+    const { email, username, password, name, phone, appRoleId, displayColor } = body
 
     // Validation
     if (!email || !password) {
@@ -201,6 +203,7 @@ export async function POST(request: NextRequest) {
         username: username || null,
         password: hashedPassword,
         name: name || null,
+        phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
         displayColor: normalizedDisplayColor,
         role: 'ADMIN',
         appRoleId: roleRecord.id,
@@ -210,6 +213,8 @@ export async function POST(request: NextRequest) {
         email: true,
         username: true,
         name: true,
+        phone: true,
+        avatarPath: true,
         displayColor: true,
         active: true,
         role: true,

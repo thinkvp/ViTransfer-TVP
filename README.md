@@ -211,11 +211,6 @@ Optional Dropbox integration to offload large file delivery from your server:
 - **Background Processing** — Uploads run as BullMQ background jobs with automatic retry (3 attempts, exponential backoff)
 - **Human-Readable Paths** — Files are stored in Dropbox under `clients/{Client Name}/projects/{Project Title}/...`, matching the same client-based folder structure used for local storage so files are easy to find in your Dropbox
 
-<p align="center">
-  <img src="docs/screenshots/Dropbox Download.png" alt="Dropbox Download Options" width="600">
-  <br><em>Download Options modal — clients choose between Dropbox or Local Server, with a fallback toggle if Dropbox is unavailable</em>
-</p>
-
 ### Export Feedback and Import in NLE
 - **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
 

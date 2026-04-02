@@ -9,6 +9,7 @@ import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/li
 import { getSafeguardLimits } from '@/lib/settings'
 import { getRawStoragePath } from '@/lib/storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
+import { parseProjectStartDateInput } from '@/lib/project-start-date'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -73,6 +74,7 @@ export async function GET(request: NextRequest) {
         slug: true,
         status: true,
         description: true,
+        startDate: true,
         createdAt: true,
         updatedAt: true,
         totalBytes: true,
@@ -102,8 +104,7 @@ export async function GET(request: NextRequest) {
                 id: true,
                 email: true,
                 name: true,
-                displayColor: true,
-              },
+                displayColor: true,                avatarPath: true,              },
             },
           },
         },
@@ -226,8 +227,9 @@ export async function POST(request: NextRequest) {
       maxRevisions,
       restrictCommentsToLatestVersion,
       allowClientDeleteComments,
-      isShareOnly
-    } = validation.data
+      isShareOnly,
+      startDate,
+    } = validation.data as typeof validation.data & { startDate?: string | null }
 
     const finalEnableVideos = enableVideos !== undefined ? Boolean(enableVideos) : true
     const finalEnablePhotos = enablePhotos !== undefined ? Boolean(enablePhotos) : false
@@ -468,6 +470,7 @@ export async function POST(request: NextRequest) {
           watermarkEnabled: settings?.defaultWatermarkEnabled ?? true,
           watermarkText: settings?.defaultWatermarkText || null,
           timelinePreviewsEnabled: settings?.defaultTimelinePreviewsEnabled ?? false,
+          startDate: startDate ? (parseProjectStartDateInput(startDate) ?? new Date()) : new Date(),
           createdById: admin.id,
         },
       })

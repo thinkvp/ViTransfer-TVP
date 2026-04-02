@@ -1105,6 +1105,7 @@ function AdminShareFeedbackGrid({
               allowCommentFileUpload={true}
               hideInput={true}
               showApproveButton={false}
+              largeAvatars={true}
               management={management as any}
             />
           </div>

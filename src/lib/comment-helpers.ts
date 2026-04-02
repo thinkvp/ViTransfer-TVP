@@ -400,6 +400,7 @@ export async function fetchProjectComments(projectId: string) {
           username: true,
           email: true,
           displayColor: true,
+          avatarPath: true,
         }
       },
       recipient: {
@@ -424,6 +425,7 @@ export async function fetchProjectComments(projectId: string) {
               username: true,
               email: true,
               displayColor: true,
+              avatarPath: true,
             }
           },
           recipient: {

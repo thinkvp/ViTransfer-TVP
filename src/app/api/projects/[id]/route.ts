@@ -23,6 +23,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import { isStartDateDue, parseProjectStartDateInput } from '@/lib/project-start-date'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -98,6 +99,7 @@ const updateProjectSchema = z.object({
   clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'WEEKLY']).optional(),
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   assignedUserIds: z.array(z.string().regex(/^c[a-z0-9]{24}$/)).max(200).optional(),
   assignedUsers: z
     .array(
@@ -155,6 +157,7 @@ export async function GET(
                   name: true,
                   email: true,
                   displayColor: true,
+                  avatarPath: true,
                   appRole: {
                     select: {
                       id: true,
@@ -334,6 +337,7 @@ export async function GET(
               name: user.name,
               email: user.email,
               displayColor: user.displayColor,
+              avatarPath: user.avatarPath ?? null,
               appRole: role
                 ? {
                     id: role.id,
@@ -427,6 +431,8 @@ export async function PATCH(
         clientId: true,
         companyName: true,
         storagePath: true,
+        startDate: true,
+        createdAt: true,
         client: { select: { name: true } },
       },
     })
@@ -874,6 +880,28 @@ export async function PATCH(
     }
     if (validatedBody.clientNotificationDay !== undefined) {
       updateData.clientNotificationDay = validatedBody.clientNotificationDay
+    }
+
+    // Handle startDate
+    if (validatedBody.startDate !== undefined) {
+      if (validatedBody.startDate === null) {
+        updateData.startDate = null
+      } else {
+        const parsed = parseProjectStartDateInput(validatedBody.startDate)
+        if (!parsed) {
+          return NextResponse.json({ error: 'Invalid start date format (expected YYYY-MM-DD)' }, { status: 400 })
+        }
+        updateData.startDate = parsed
+      }
+
+      // Auto-promote NOT_STARTED → IN_PROGRESS if start date is due and no explicit status change
+      if (validatedBody.status === undefined && currentProject.status === 'NOT_STARTED') {
+        const effectiveStart = updateData.startDate ?? currentProject.startDate
+        if (effectiveStart && isStartDateDue(effectiveStart, currentProject.createdAt)) {
+          updateData.status = 'IN_PROGRESS'
+          previousStatus = currentProject.status
+        }
+      }
     }
 
     const currentProjectStoragePath = currentProject.storagePath

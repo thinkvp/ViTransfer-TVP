@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { qboQuery, refreshQuickBooksAccessToken, getQuickBooksConfig, toQboDateTime } from '@/lib/quickbooks/qbo'
+import { generateRandomHexDisplayColor } from '@/lib/display-color'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -61,6 +62,7 @@ async function ensurePrimaryRecipient(clientId: string, email: string, name: str
         name: name?.trim() || null,
         isPrimary: !alreadyHasPrimary,
         receiveNotifications: true,
+        displayColor: generateRandomHexDisplayColor(),
       },
     })
     return

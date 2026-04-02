@@ -8,6 +8,7 @@ const CLIENT_ACTIVITY_THROTTLE_PREFIX = 'client-activity:throttle:'
 
 export type ClientActivityType =
   | 'VIEWING_SHARE_PAGE'
+  | 'VIEWING_ALBUM'
   | 'STREAMING_VIDEO'
   | 'DOWNLOADING_VIDEO'
   | 'DOWNLOADING_ASSET'
@@ -19,6 +20,8 @@ export type ClientActivityRecord = {
   videoId: string | null
   videoName: string | null
   versionLabel: string | null
+  albumId: string | null
+  albumName: string | null
   assetId: string | null
   assetName: string | null
   activityType: ClientActivityType
@@ -36,6 +39,8 @@ type RecordClientActivityInput = {
   videoId?: string | null
   videoName?: string | null
   versionLabel?: string | null
+  albumId?: string | null
+  albumName?: string | null
   assetId?: string | null
   assetName?: string | null
   activityType: ClientActivityType
@@ -95,13 +100,19 @@ export async function recordClientActivity(input: RecordClientActivityInput): Pr
     const nowIso = new Date(now).toISOString()
     const existing = parseClientActivity(await redis.get(sessionKey))
 
+    // When switching context, clear the fields that don't apply to the new activity type.
+    const isAlbumActivity = input.activityType === 'VIEWING_ALBUM'
+    const isVideoActivity = input.activityType === 'STREAMING_VIDEO' || input.activityType === 'DOWNLOADING_VIDEO' || input.activityType === 'VIEWING_SHARE_PAGE'
+
     const nextRecord: ClientActivityRecord = {
       sessionId: input.sessionId,
       projectId: input.projectId,
       projectTitle: input.projectTitle ?? existing?.projectTitle ?? null,
-      videoId: input.videoId ?? existing?.videoId ?? null,
-      videoName: input.videoName ?? existing?.videoName ?? null,
-      versionLabel: input.versionLabel ?? existing?.versionLabel ?? null,
+      videoId: isAlbumActivity ? null : (input.videoId ?? existing?.videoId ?? null),
+      videoName: isAlbumActivity ? null : (input.videoName ?? existing?.videoName ?? null),
+      versionLabel: isAlbumActivity ? null : (input.versionLabel ?? existing?.versionLabel ?? null),
+      albumId: isVideoActivity ? null : (input.albumId ?? existing?.albumId ?? null),
+      albumName: isVideoActivity ? null : (input.albumName ?? existing?.albumName ?? null),
       assetId: input.assetId ?? existing?.assetId ?? null,
       assetName: input.assetName ?? existing?.assetName ?? null,
       activityType: input.activityType,

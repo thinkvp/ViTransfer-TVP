@@ -5,6 +5,32 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-01
+
+### Added
+- **User profile pictures** — admin users can upload, crop, and remove a profile photo from the Edit User page; photos are stored server-side and served through a dedicated avatar endpoint with cache-busting; a canvas-based drag-to-reposition and zoom crop dialog makes it easy to frame the shot; a fallback initials circle using the user's display colour is shown whenever no photo is set
+- **Profile pictures shown throughout the app** — uploaded avatars now appear in the Project page assigned-users list (both the search dropdown and added-user cards), the Projects dashboard Users column, and comment bubbles on both the client and admin Share pages
+- **My Profile modal in the admin header** — the email+icon display in the top-right header is replaced with a User icon button that opens a profile modal; the modal shows the user's current avatar (with the ability to upload or remove it), read-only fields for Name, Username, Email, Role, and Phone, and a password-change form (current password, new password, confirm); no generate/copy buttons — just a clean inline change flow
+- **Self-service password change for all authenticated users** — any signed-in admin can now update their own password via the My Profile modal regardless of whether they have access to the Users settings page; the `/api/users/[id]` GET endpoint also allows users to fetch their own profile data without requiring the users menu permission
+- **Project Start Date** — projects now have an optional Start Date field separate from their creation date; users with Full Control can edit the start date inline on the project detail page; the New Project form includes a Start Date input that defaults to today; the Projects dashboard and Client detail project tables now display a sortable "Start Date" column (replaces the former "Date Created" column); project dropdown lists in Quotes and Invoices sort by start date then creation date; backed by a new database migration adding a nullable `startDate` DateTime column to the Project table
+- **Auto-promote projects when Start Date is due** — the worker job that previously auto-started projects only on a SHOOTING key date now also promotes projects from NOT_STARTED → IN_PROGRESS when their `startDate` is today or earlier; duplicates are deduplicated so a project with both triggers is only promoted once; saving a project's start date via the API also immediately promotes it if the new date is already due and no explicit status change was requested
+- **Sales reminder push notifications** — when the sales reminders worker sends an overdue-invoice or expiring-quote email notification, it now also creates an in-app push notification for users with Sales menu access; each notification includes the document number, client name, and amount; clicking a `SALES_REMINDER_INVOICE_OVERDUE` or `SALES_REMINDER_QUOTE_EXPIRING` entry in the notification bell navigates directly to the relevant invoice or quote detail page
+- **Share-page-gated notification delivery** — `CLIENT_COMMENT`, `ADMIN_SHARE_COMMENT`, and `VIDEO_APPROVAL` notifications are now only delivered (both in-app and via browser push) to users who have the `accessSharePage` permission in addition to being assigned to the project; `INTERNAL_COMMENT` and `PROJECT_USER_ASSIGNED` notifications remain accessible to any project-assigned user regardless of share-page access
+- **QuickBooks pull assigns display colours to new contacts immediately** — when the QB pull-customers job creates a new client recipient it now assigns a random display colour at creation time, so the colour is applied without requiring a manual save from the Edit Client page
+
+### Fixed
+- **Internal Comments scroll position defaults to bottom** — when the Internal Comments panel on the project page loads, the scroll container now correctly positions at the bottom so the most recent comments are immediately visible; previously the auto-scroll guard was being consumed on initial mount (when the comment list was still empty), which prevented the scroll from firing once the comments actually loaded
+- **Project Users — avatar preserved after adding a user** — the per-project detail API now includes `avatarPath` in the assigned-users select; previously the project re-fetch after adding a user stripped the avatar and reverted the display to an initials circle
+- **Profile photo upload 401 error resolved** — the avatar upload form now sends the JWT Bearer token with the request; previously it used a raw `fetch()` call without auth headers
+
+### Changed
+- **Add New User and Edit User field order** — the form grid is reorganised to Email | Username → Full Name | Phone Number → Role | Display Colour → Password | Confirm Password, grouping related fields together
+- **Client Contacts renamed from Client Recipients** — the "Client Recipients" heading on the Client detail and New Client pages is now "Client Contacts"; the "Add Recipient" button is now "Add Contact"
+- **Comment avatar size on Share pages increased slightly** — comment author avatars on both the client-facing and admin Share pages are 25 % larger than their default size (up from 24 px to 30 px); reply avatars scale proportionally
+- **`Textarea` component gains `autoResize` prop** — passing `autoResize` causes the textarea to automatically grow and shrink to fit its content (no scrollbar, `resize-none`); the project description field in both the New Project form and Project Settings now uses `autoResize` for a cleaner editing experience
+- **Admin landing page suppresses spurious PERMISSION_DENIED security events** — security settings are now only fetched during landing-page load if the signed-in user actually has the `security` menu permission; previously the unconditional fetch produced a PERMISSION_DENIED security event on every page load for users without security access
+- **RBAC enforcement distinguishes menu access denials from action access denials** — `requireMenuAccess` no longer writes a `PERMISSION_DENIED` security event when a user lacks menu access (this is expected, routine RBAC enforcement and was generating noise); `requireActionAccess` continues to log a PERMISSION_DENIED event at INFO severity so deliberate permission bypass attempts remain auditable
+
 ## [1.2.9] - 2026-03-30
 
 ### Added

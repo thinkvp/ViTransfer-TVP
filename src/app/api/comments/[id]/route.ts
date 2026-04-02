@@ -178,6 +178,7 @@ export async function PATCH(
             username: true,
             email: true,
             displayColor: true,
+            avatarPath: true,
           }
         },
         recipient: {
@@ -195,6 +196,7 @@ export async function PATCH(
                 username: true,
                 email: true,
                 displayColor: true,
+                avatarPath: true,
               }
             }
             ,
