@@ -710,7 +710,19 @@ export default function VideoPlayer({
     return q
   }, [selectedVideo])
 
-  const showQualitySelector = availableQualities.length > 1
+  // True when no preview resolutions are available but the original video stream is present.
+  // In this case the quality selector shows "Original" instead of Auto/480p/720p/1080p.
+  const hasOriginalOnly = useMemo(() => {
+    if (!selectedVideo) return false
+    const hasPreviews = !!(
+      (selectedVideo as any).streamUrl480p ||
+      (selectedVideo as any).streamUrl720p ||
+      (selectedVideo as any).streamUrl1080p
+    )
+    return !hasPreviews && !!(selectedVideo as any).streamUrlOriginal
+  }, [selectedVideo])
+
+  const showQualitySelector = availableQualities.length > 1 || hasOriginalOnly
 
   const qualityMenuOptions = useMemo(
     () => [...availableQualities].slice().reverse(),
@@ -726,9 +738,11 @@ export default function VideoPlayer({
   }, [selectedQuality, autoResolvedQuality, availableQualities])
 
   // Quality display label for the button
-  const qualityLabel = selectedQuality === 'auto'
-    ? `Auto (${autoResolvedQuality})`
-    : selectedQuality
+  const qualityLabel = hasOriginalOnly
+    ? 'Original'
+    : selectedQuality === 'auto'
+      ? `Auto (${autoResolvedQuality})`
+      : selectedQuality
 
   // Auto mode: adapt quality based on player size
   useEffect(() => {
@@ -864,11 +878,11 @@ export default function VideoPlayer({
         let url: string | undefined
 
         if (effectiveQuality === '1080p') {
-          url = (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl480p
+          url = (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrlOriginal
         } else if (effectiveQuality === '480p') {
-          url = (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p
+          url = (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrlOriginal
         } else {
-          url = (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl480p
+          url = (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrlOriginal
         }
 
         if (url) {
@@ -1934,14 +1948,14 @@ export default function VideoPlayer({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setShowQualityMenu((v) => !v)}
+                    onClick={hasOriginalOnly ? undefined : () => setShowQualityMenu((v) => !v)}
                     aria-label="Select quality"
                     className="text-xs px-2"
                   >
                     {qualityLabel}
                   </Button>
 
-                  {showQualityMenu && (
+                  {showQualityMenu && !hasOriginalOnly && (
                     <div
                       className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
                     >
@@ -2098,21 +2112,33 @@ export default function VideoPlayer({
                   </>
                 )}
 
-                {/* Mobile quality selector (cog icon) */}
+                {/* Mobile quality selector (cog icon, or "Original" label when no previews) */}
                 {showQualitySelector && (
                   <div ref={mobileQualityControlsRef} className="relative flex-shrink-0">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setShowQualityMenu((v) => !v)}
-                      aria-label="Select quality"
-                      className="h-8 w-8"
-                    >
-                      <Settings className="w-4 h-4" />
-                    </Button>
+                    {hasOriginalOnly ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label="Quality: Original"
+                        className="text-xs px-2 h-8"
+                      >
+                        Original
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setShowQualityMenu((v) => !v)}
+                        aria-label="Select quality"
+                        className="h-8 w-8"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </Button>
+                    )}
 
-                    {showQualityMenu && (
+                    {showQualityMenu && !hasOriginalOnly && (
                       <div
                         className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
                       >

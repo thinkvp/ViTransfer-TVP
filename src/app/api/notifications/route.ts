@@ -49,6 +49,16 @@ const PROJECT_INTERNAL_ONLY_TYPES = [
   'PROJECT_USER_ASSIGNED',
 ]
 
+// Kanban task comment notifications — visible to all admin users
+const KANBAN_TYPES = [
+  'TASK_COMMENT',
+]
+
+// Kanban task assignment notifications — scoped per-user via __meta.targetUserId
+const KANBAN_ASSIGNMENT_TYPES = [
+  'TASK_USER_ASSIGNED',
+]
+
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -123,6 +133,13 @@ export async function GET(request: NextRequest) {
           { details: { path: ['__meta', 'targetUserId'], equals: authResult.id } },
         ],
       },
+      // TASK_USER_ASSIGNED is always scoped to the target user only
+      {
+        OR: [
+          { type: { not: 'TASK_USER_ASSIGNED' } },
+          { details: { path: ['__meta', 'targetUserId'], equals: authResult.id } },
+        ],
+      },
     ]
 
     let typeFilter: any = undefined // undefined = no type restriction (system admin sees all)
@@ -154,6 +171,18 @@ export async function GET(request: NextRequest) {
       }
       if (hasSalesAccess) allowedTypes.push(...SALES_TYPES)
       if (hasSettingsAccess) allowedTypes.push(...SETTINGS_TYPES)
+      // Kanban task comment notifications are scoped to cards where the user is a
+      // member with receiveNotifications=true.
+      const memberCardRows = await prisma.kanbanCardMember.findMany({
+        where: { userId: authResult.id, receiveNotifications: true },
+        select: { cardId: true },
+      })
+      const memberCardIds = memberCardRows.map((r) => r.cardId)
+      if (memberCardIds.length > 0) {
+        allowedTypes.push(...KANBAN_TYPES)
+      }
+      // Kanban task assignment notifications are always available to any authenticated user
+      allowedTypes.push(...KANBAN_ASSIGNMENT_TYPES)
 
       if (allowedTypes.length === 0) {
         // User has no assigned projects and no sales access
@@ -198,6 +227,28 @@ export async function GET(request: NextRequest) {
       if (hasSettingsAccess) {
         projectScopeOrClauses.push({ type: { in: SETTINGS_TYPES } })
       }
+
+      // Kanban task comments: only show for cards the user is a member of with notifications enabled.
+      if (memberCardIds.length > 0) {
+        projectScopeOrClauses.push({
+          AND: [
+            { type: { in: KANBAN_TYPES } },
+            {
+              OR: memberCardIds.map((cardId) => ({
+                details: { path: ['__meta', 'cardId'], equals: cardId },
+              })),
+            },
+          ],
+        })
+      }
+
+      // Kanban task assignment notifications: scoped to the current user as target.
+      projectScopeOrClauses.push({
+        AND: [
+          { type: { in: KANBAN_ASSIGNMENT_TYPES } },
+          { details: { path: ['__meta', 'targetUserId'], equals: authResult.id } },
+        ],
+      })
 
       if (projectScopeOrClauses.length > 0) {
         andConditions.push({ OR: projectScopeOrClauses })

@@ -78,7 +78,39 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }],
   })
 
-  const response = NextResponse.json({ keyDates: rows, personalKeyDates: personalRows, today: isoDateTodayLocal() })
+  // Fetch kanban task due dates visible to this user
+  const taskDueDates = await prisma.kanbanCard.findMany({
+    where: {
+      dueDate: { not: null },
+      ...(isSystemAdmin
+        ? {}
+        : {
+            OR: [
+              { members: { some: { userId: authResult.id } } },
+              { project: { assignedUsers: { some: { userId: authResult.id } } } },
+            ],
+          }),
+    },
+    select: {
+      id: true,
+      title: true,
+      dueDate: true,
+      projectId: true,
+      project: { select: { title: true, companyName: true } },
+    },
+    orderBy: { dueDate: 'asc' },
+  })
+
+  const taskDueDateRows = taskDueDates.map((t) => ({
+    id: t.id,
+    title: t.title,
+    date: t.dueDate!.toISOString().slice(0, 10),
+    projectId: t.projectId,
+    projectTitle: t.project?.title ?? null,
+    projectCompanyName: t.project?.companyName ?? null,
+  }))
+
+  const response = NextResponse.json({ keyDates: rows, personalKeyDates: personalRows, taskDueDates: taskDueDateRows, today: isoDateTodayLocal() })
   response.headers.set('Cache-Control', 'no-store')
   response.headers.set('Pragma', 'no-cache')
   return response

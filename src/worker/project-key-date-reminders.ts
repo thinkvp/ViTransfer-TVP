@@ -10,6 +10,9 @@ type ReminderTargets = {
 export async function processProjectKeyDateReminders() {
   const now = new Date()
 
+  const keyDateSettings = await prisma.settings.findUnique({ where: { id: 'default' }, select: { adminEmailProjectKeyDates: true } })
+  if (keyDateSettings?.adminEmailProjectKeyDates === false) return
+
   const due = await prisma.projectKeyDate.findMany({
     where: {
       reminderAt: { not: null, lte: now },

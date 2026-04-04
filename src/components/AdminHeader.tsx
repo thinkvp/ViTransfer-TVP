@@ -436,7 +436,7 @@ export default function AdminHeader() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Role</Label>
-                <p className="text-sm font-medium">{profileData.appRole?.name || profileData.role || '—'}</p>
+                <p className="text-sm font-medium">{profileData.appRole?.name || '—'}</p>
               </div>
               {profileData.phone && (
                 <div className="space-y-1">

@@ -20,7 +20,6 @@ model User {
   phone        String?  // Optional phone number
   avatarPath   String?  // Storage path for profile picture (300x300 JPEG)
   displayColor String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
-  role         UserRole @default(ADMIN)
   active       Boolean  @default(true)
   appRoleId    String
   appRole      Role     @relation(fields: [appRoleId], references: [id])
@@ -48,6 +47,11 @@ model User {
   files                UserFile[]
 
   projectViewSettings UserProjectViewSettings[]
+
+  kanbanCardMemberships KanbanCardMember[]
+  kanbanCardsCreated     KanbanCard[] @relation("kanbanCreator")
+  kanbanCardComments     KanbanCardComment[]
+  kanbanCardHistory      KanbanCardHistory[]
 
   @@index([active])
 }
@@ -163,9 +167,7 @@ model UserFile {
   @@index([userId, category])
 }
 
-enum UserRole {
-  ADMIN
-}
+
 
 model Project {
   id              String  @id @default(cuid())
@@ -228,9 +230,9 @@ model Project {
 
   // Client notification settings (per-project)
   // Note: Approval emails are always IMMEDIATE regardless of this setting
-  clientNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, WEEKLY
-  clientNotificationTime     String? // "09:00" for daily, "Monday 09:00" for weekly
-  clientNotificationDay      Int? // 0-6 for weekly (0 = Sunday)
+  clientNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
+  clientNotificationTime     String? // "09:00" for daily
+  clientNotificationDay      Int? // unused, kept for migration safety
   lastClientNotificationSent DateTime?
 
   createdBy   User   @relation(fields: [createdById], references: [id])
@@ -266,6 +268,8 @@ model Project {
   salesInvoices SalesInvoice[]
 
   viewSettings UserProjectViewSettings[]
+
+  kanbanCards KanbanCard[]
 }
 
 enum ProjectKeyDateType {
@@ -642,6 +646,7 @@ model Video {
   updatedAt DateTime @updatedAt
 
   project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comments      Comment[]
   analytics     VideoAnalytics[]
   assets        VideoAsset[]
   emailEvents   ProjectEmailEvent[]
@@ -696,6 +701,7 @@ model Comment {
   id           String   @id @default(cuid())
   projectId    String
   videoId      String // All comments must be video-specific
+  video        Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
   videoVersion Int? // track which version this comment was for
   timecode     String // HH:MM:SS:FF format (e.g., "00:00:32:15" for 32 seconds 15 frames at given FPS)
   content      String
@@ -727,6 +733,7 @@ model Comment {
 
   @@index([projectId])
   @@index([videoId])
+  @@index([projectId, videoId])
   @@index([parentId])
   @@index([userId])
   @@index([recipientId])
@@ -761,9 +768,11 @@ model ProjectInternalComment {
 }
 
 model NotificationQueue {
-  id        String @id @default(cuid())
-  projectId String
-  type      String // CLIENT_COMMENT, ADMIN_REPLY
+  id        String  @id @default(cuid())
+  projectId String?
+  type      NotificationQueueType
+
+  kanbanCardId String?
 
   // Dual tracking for admin vs client notifications
   sentToClients Boolean   @default(false)
@@ -781,12 +790,14 @@ model NotificationQueue {
   data      Json // Stores: commentId, videoId, videoName, authorName, content, timestamp, isReply, etc.
   createdAt DateTime @default(now())
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kanbanCard KanbanCard? @relation(fields: [kanbanCardId], references: [id], onDelete: Cascade)
 
   @@index([projectId, sentToClients])
   @@index([projectId, sentToAdmins])
   @@index([sentToAdmins, createdAt])
   @@index([clientFailed, adminFailed])
+  @@index([kanbanCardId])
 }
 
 model Settings {
@@ -863,15 +874,34 @@ model Settings {
 
   // Internal comment notification tracking (uses admin notification schedule)
   lastInternalCommentNotificationSent DateTime?
+  // Task comment notification tracking (uses admin notification schedule)
+  lastTaskCommentNotificationSent     DateTime?
   autoCloseApprovedProjectsEnabled    Boolean   @default(false)
   autoCloseApprovedProjectsAfterDays  Int       @default(7) // 1-99 days
 
   // Admin notification settings (global)
   // Note: Approval emails and manual admin notifications are always IMMEDIATE regardless of this setting
-  adminNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, WEEKLY
-  adminNotificationTime     String? // "09:00" for daily, "Monday 09:00" for weekly
-  adminNotificationDay      Int? // 0-6 for weekly (0 = Sunday)
+  adminNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
+  adminNotificationTime     String? // "09:00" for daily
+  adminNotificationDay      Int? // unused, kept for migration safety
   lastAdminNotificationSent DateTime?
+
+  // Per-type admin email toggles (all enabled by default)
+  adminEmailProjectApproved  Boolean @default(true) // Admin notified when client approves all videos
+  adminEmailInternalComments Boolean @default(true) // Internal comment summaries on admin schedule
+  adminEmailTaskComments     Boolean @default(true) // Task comment summaries on admin schedule
+  adminEmailInvoicePaid      Boolean @default(true) // Auto-notify when Stripe payment received
+  adminEmailQuoteAccepted    Boolean @default(true) // Auto-notify when client accepts a quote
+  adminEmailProjectKeyDates  Boolean @default(true) // Project key date reminders
+  adminEmailUserKeyDates     Boolean @default(true) // Personal / user key date reminders
+
+  // Default client notification settings for newly created projects
+  defaultClientNotificationSchedule String  @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
+  defaultClientNotificationTime     String? // "09:00" for daily
+  defaultClientNotificationDay      Int?    // unused, kept for consistency
+
+  // Per-type client email toggles (global defaults, all enabled by default)
+  clientEmailProjectApproved Boolean @default(true) // Client notified when entire project is approved
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1017,6 +1047,13 @@ model QuickBooksPaymentAppliedInvoice {
   @@unique([paymentImportId, invoiceQboId])
   @@index([invoiceQboId])
   @@index([invoiceImportId])
+}
+
+enum NotificationQueueType {
+  CLIENT_COMMENT
+  ADMIN_REPLY
+  INTERNAL_COMMENT
+  TASK_COMMENT
 }
 
 enum CompanyLogoMode {
@@ -1382,13 +1419,121 @@ model SalesInvoiceStripePayment {
   @@index([stripePaymentIntentId])
 }
 
+// ===== Kanban Board =====
+
+model KanbanColumn {
+  id       String @id @default(cuid())
+  name     String
+  position Int
+  color    String? @db.VarChar(7) // Hex color (#RRGGBB)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cards KanbanCard[]
+
+  @@index([position])
+}
+
+model KanbanCard {
+  id          String  @id @default(cuid())
+  title       String  @db.VarChar(500)
+  description String? @db.Text
+  position    Int
+
+  columnId String
+  column   KanbanColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  members KanbanCardMember[]
+  comments KanbanCardComment[]
+  history  KanbanCardHistory[]
+  notifications NotificationQueue[]
+
+  createdById String
+  createdBy   User @relation("kanbanCreator", fields: [createdById], references: [id])
+
+  dueDate    DateTime?
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([columnId, position])
+  @@index([projectId])
+  @@index([dueDate])
+  @@index([archivedAt])
+}
+
+model KanbanCardMember {
+  cardId String
+  card   KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId String
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  receiveNotifications Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@id([cardId, userId])
+  @@index([userId])
+}
+
+model KanbanCardComment {
+  id     String @id @default(cuid())
+  cardId String
+  card   KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  authorNameSnapshot   String?
+  displayColorSnapshot String? @db.VarChar(7)
+
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parentId String?
+  parent   KanbanCardComment?  @relation("KanbanCardCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  KanbanCardComment[] @relation("KanbanCardCommentReplies")
+
+  @@index([cardId])
+  @@index([cardId, createdAt])
+  @@index([parentId])
+  @@index([userId])
+}
+
+model KanbanCardHistory {
+  id     String     @id @default(cuid())
+  cardId String
+  card   KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  actorId           String?
+  actor             User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorNameSnapshot String? // Preserved display name at time of event
+
+  // Action type: CREATED | MOVED | MEMBER_ADDED | MEMBER_REMOVED |
+  //   DUE_DATE_SET | DUE_DATE_REMOVED | PROJECT_LINKED | PROJECT_REMOVED |
+  //   TITLE_EDITED | DESCRIPTION_EDITED
+  action  String
+  payload Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([cardId, createdAt])
+  @@index([actorId])
+}
+
 model PushNotificationSettings {
   id String @id @default("default")
 
   enabled    Boolean @default(false)
   provider   String? // 'GOTIFY' or others
   webhookUrl String?
-  title      String? // Optional custom notification title prefix
+  title      String? // Deprecated – kept for backward compatibility
 
   // Event toggles
   notifyUnauthorizedOTP            Boolean @default(true)
@@ -1398,12 +1543,16 @@ model PushNotificationSettings {
   notifySuccessfulShareAccess      Boolean @default(true)
   notifyGuestVideoLinkAccess       Boolean @default(true)
   notifyClientComments             Boolean @default(true)
+  notifyInternalComments           Boolean @default(true)
+  notifyTaskComments               Boolean @default(true)
   notifyVideoApproval              Boolean @default(true)
+  notifyUserAssignments            Boolean @default(true)
 
   notifySalesQuoteViewed   Boolean @default(true)
   notifySalesQuoteAccepted Boolean @default(true)
   notifySalesInvoiceViewed Boolean @default(true)
   notifySalesInvoicePaid   Boolean @default(true)
+  notifySalesReminders     Boolean @default(true)
 
   // Password Reset Events
   notifyPasswordResetRequested Boolean @default(true)
@@ -1772,4 +1921,51 @@ model UserProjectViewSettings {
   @@unique([userId, projectId])
   @@index([userId])
   @@index([projectId])
+}
+
+/// Global library of reusable line items (independent of any preset)
+model SalesItem {
+  id             String            @id @default(cuid())
+  description    String            @db.VarChar(500)
+  details        String            @default("") @db.Text
+  quantity       Float
+  unitPriceCents Int
+  taxRatePercent Float
+  taxRateName    String?           @db.VarChar(200)
+  sortOrder      Int               @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  presets        SalesPresetItem[]
+
+  @@index([sortOrder])
+  @@index([createdAt])
+}
+
+/// Named preset — stores which SalesItems should be auto-checked
+model SalesPreset {
+  id        String            @id @default(cuid())
+  name      String            @unique @db.VarChar(200)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  items SalesPresetItem[]
+
+  @@index([name])
+}
+
+/// Join table: which SalesItems belong to a SalesPreset
+model SalesPresetItem {
+  id        String      @id @default(cuid())
+  presetId  String
+  itemId    String
+  sortOrder Int         @default(0)
+  createdAt DateTime    @default(now())
+
+  preset SalesPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  item   SalesItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([presetId, itemId])
+  @@index([presetId])
+  @@index([itemId])
 }

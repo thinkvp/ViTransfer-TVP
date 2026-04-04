@@ -42,6 +42,22 @@ interface EmailSettingsSectionProps {
   adminNotificationDay: number
   setAdminNotificationDay: (value: number) => void
 
+  // Admin system email toggles
+  adminEmailProjectApproved: boolean
+  setAdminEmailProjectApproved: (value: boolean) => void
+  adminEmailInternalComments: boolean
+  setAdminEmailInternalComments: (value: boolean) => void
+  adminEmailTaskComments: boolean
+  setAdminEmailTaskComments: (value: boolean) => void
+  adminEmailInvoicePaid: boolean
+  setAdminEmailInvoicePaid: (value: boolean) => void
+  adminEmailQuoteAccepted: boolean
+  setAdminEmailQuoteAccepted: (value: boolean) => void
+  adminEmailProjectKeyDates: boolean
+  setAdminEmailProjectKeyDates: (value: boolean) => void
+  adminEmailUserKeyDates: boolean
+  setAdminEmailUserKeyDates: (value: boolean) => void
+
   // Collapsible state
   show: boolean
   setShow: (value: boolean) => void
@@ -76,6 +92,20 @@ export function EmailSettingsSection({
   setAdminNotificationTime,
   adminNotificationDay,
   setAdminNotificationDay,
+  adminEmailProjectApproved,
+  setAdminEmailProjectApproved,
+  adminEmailInternalComments,
+  setAdminEmailInternalComments,
+  adminEmailTaskComments,
+  setAdminEmailTaskComments,
+  adminEmailInvoicePaid,
+  setAdminEmailInvoicePaid,
+  adminEmailQuoteAccepted,
+  setAdminEmailQuoteAccepted,
+  adminEmailProjectKeyDates,
+  setAdminEmailProjectKeyDates,
+  adminEmailUserKeyDates,
+  setAdminEmailUserKeyDates,
   show,
   setShow,
   hideCollapse,
@@ -301,6 +331,64 @@ export function EmailSettingsSection({
             label="Admin Notification Schedule"
             description="Configure when you receive summaries of client comments across all projects. Note: Approval emails are always sent immediately."
           />
+        </div>
+
+        <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+          <Label className="text-base">Admin System Emails</Label>
+          <p className="text-xs text-muted-foreground">
+            Toggle individual automated emails sent to internal users and admins. Disabling these stops them from being sent globally.
+          </p>
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailProjectApproved">Project approved by client</Label>
+                <p className="text-xs text-muted-foreground">Notify admins when a client approves all videos in a project.</p>
+              </div>
+              <Switch id="adminEmailProjectApproved" checked={adminEmailProjectApproved} onCheckedChange={setAdminEmailProjectApproved} />
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailInternalComments">Internal comment notifications</Label>
+                <p className="text-xs text-muted-foreground">Send batched summaries of internal (admin-only) comments on the admin schedule above.</p>
+              </div>
+              <Switch id="adminEmailInternalComments" checked={adminEmailInternalComments} onCheckedChange={setAdminEmailInternalComments} />
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailTaskComments">Task comment notifications</Label>
+                <p className="text-xs text-muted-foreground">Send batched summaries of Kanban task comments on the admin schedule above.</p>
+              </div>
+              <Switch id="adminEmailTaskComments" checked={adminEmailTaskComments} onCheckedChange={setAdminEmailTaskComments} />
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailInvoicePaid">Invoice paid</Label>
+                <p className="text-xs text-muted-foreground">Notify admins automatically when a Stripe payment is received.</p>
+              </div>
+              <Switch id="adminEmailInvoicePaid" checked={adminEmailInvoicePaid} onCheckedChange={setAdminEmailInvoicePaid} />
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailQuoteAccepted">Quote accepted by client</Label>
+                <p className="text-xs text-muted-foreground">Notify admins automatically when a client accepts a quote via the acceptance link.</p>
+              </div>
+              <Switch id="adminEmailQuoteAccepted" checked={adminEmailQuoteAccepted} onCheckedChange={setAdminEmailQuoteAccepted} />
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailProjectKeyDates">Project key date reminders</Label>
+                <p className="text-xs text-muted-foreground">Send reminder emails for project key dates and deadlines.</p>
+              </div>
+              <Switch id="adminEmailProjectKeyDates" checked={adminEmailProjectKeyDates} onCheckedChange={setAdminEmailProjectKeyDates} />
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5 flex-1">
+                <Label htmlFor="adminEmailUserKeyDates">Personal key date reminders</Label>
+                <p className="text-xs text-muted-foreground">Send reminder emails for personal / user key dates.</p>
+              </div>
+              <Switch id="adminEmailUserKeyDates" checked={adminEmailUserKeyDates} onCheckedChange={setAdminEmailUserKeyDates} />
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3 border p-4 rounded-lg bg-muted/30">

@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
@@ -64,11 +65,14 @@ export function InitialsAvatar(props: {
 
   if (avatarUrl && !imgError) {
     return (
-      <img
+      <Image
         src={avatarUrl}
         alt={label}
         title={label}
         aria-label={label}
+        width={28}
+        height={28}
+        unoptimized
         className={cn(
           'h-7 w-7 rounded-full ring-2 ring-card shadow-sm object-cover flex-shrink-0',
           className,

@@ -264,8 +264,12 @@ export async function handleCommentNotifications(params: {
     // non-author recipients on both sides are always notified.
     const adminSchedule = settings?.adminNotificationSchedule || 'IMMEDIATE'
     const clientSchedule = project.clientNotificationSchedule
-    const adminImmediate = adminSchedule === 'IMMEDIATE'
-    const clientImmediate = clientSchedule === 'IMMEDIATE'
+    const adminNone = adminSchedule === 'NONE'
+    const clientNone = clientSchedule === 'NONE'
+    const adminImmediate = !adminNone && adminSchedule === 'IMMEDIATE'
+    const clientImmediate = !clientNone && clientSchedule === 'IMMEDIATE'
+    const adminBatch = !adminNone && !adminImmediate
+    const clientBatch = !clientNone && !clientImmediate
 
     console.log(`[COMMENT-NOTIFICATION] Comment type: ${isAdminAuthored ? 'ADMIN' : 'CLIENT'}, Admin schedule: ${adminSchedule}, Client schedule: ${clientSchedule}`)
 
@@ -286,11 +290,10 @@ export async function handleCommentNotifications(params: {
       console.log('[COMMENT-NOTIFICATION] Admin path: sending immediately...')
       await sendImmediateNotification(context, 'admin')
     }
-    // Queue once if either side needs batched delivery.
-    // Pre-mark sides that were already sent immediately so workers don't re-process them.
-    if (!clientImmediate || !adminImmediate) {
+    // Queue once if either side needs batched delivery (NONE sides are pre-marked as sent).
+    if (adminBatch || clientBatch) {
       console.log(`[COMMENT-NOTIFICATION] Queuing for batched delivery (admin: ${adminSchedule}, client: ${clientSchedule})...`)
-      await queueNotification(context, { admins: adminImmediate, clients: clientImmediate })
+      await queueNotification(context, { admins: adminImmediate || adminNone, clients: clientImmediate || clientNone })
     }
 
     // Collaboration signal: share-visible admin comment (authored by an internal user).

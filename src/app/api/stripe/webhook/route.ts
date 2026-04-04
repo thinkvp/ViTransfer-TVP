@@ -218,7 +218,6 @@ export async function POST(request: NextRequest) {
                 user: {
                   select: {
                     email: true,
-                    role: true,
                     appRole: { select: { isSystemAdmin: true, permissions: true } },
                   },
                 },
@@ -229,7 +228,6 @@ export async function POST(request: NextRequest) {
         const globalAdmins = await prisma.user.findMany({
           select: {
             email: true,
-            role: true,
             appRole: { select: { isSystemAdmin: true, permissions: true } },
           },
         }).catch(() => [])
@@ -254,6 +252,10 @@ export async function POST(request: NextRequest) {
         if (adminEmails.length === 0) {
           console.warn('[STRIPE_WEBHOOK] No admin recipients for invoice paid email', { projectId, shareToken })
         } else {
+          const invoiceSettings = await prisma.settings.findUnique({ where: { id: 'default' }, select: { adminEmailInvoicePaid: true } })
+          if (invoiceSettings?.adminEmailInvoicePaid === false) {
+            console.log('[STRIPE_WEBHOOK] Skipped invoice paid email - adminEmailInvoicePaid is disabled')
+          } else {
           const result = await sendAdminInvoicePaidEmail({
             adminEmails,
             projectTitle,
@@ -270,6 +272,7 @@ export async function POST(request: NextRequest) {
 
           if (!result?.success) {
             console.error('[STRIPE_WEBHOOK] Invoice paid email send failed', { message: result?.message })
+          }
           }
         }
       } catch (e) {

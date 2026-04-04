@@ -16,7 +16,6 @@ export interface AuthUser {
   id: string
   email: string
   name: string | null
-  role: string
   active?: boolean
   appRoleId?: string
   appRoleName?: string
@@ -77,7 +76,7 @@ function signAdminAccess(user: AuthUser, sessionId: string): string {
   const payload: AdminAccessPayload = {
     userId: user.id,
     email: user.email,
-    role: user.role,
+    role: user.appRoleName ?? 'Admin',
     sessionId,
     type: 'admin_access',
   }
@@ -89,7 +88,7 @@ function signAdminRefresh(user: AuthUser, sessionId: string, rotationId: string)
   const payload: AdminRefreshPayload = {
     userId: user.id,
     email: user.email,
-    role: user.role,
+    role: user.appRoleName ?? 'Admin',
     sessionId,
     rotationId,
     type: 'admin_refresh',
@@ -225,7 +224,6 @@ export async function refreshAdminTokens(params: {
       id: true,
       email: true,
       name: true,
-      role: true,
       active: true,
       appRoleId: true,
       appRole: {
@@ -294,7 +292,6 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
         id: true,
         email: true,
         name: true,
-        role: true,
         active: true,
         appRoleId: true,
         appRole: {
@@ -323,7 +320,6 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
       active: user.active,
       appRoleId: user.appRoleId,
       appRoleName: user.appRole?.name ?? null,
@@ -348,7 +344,6 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
       id: true,
       email: true,
       name: true,
-      role: true,
       active: true,
       appRoleId: true,
       appRole: {
@@ -363,7 +358,7 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
   })
 
   if (user) {
-    await setDatabaseUserContext(user.id, user.role)
+    await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
   }
 
   if (!user) return null
@@ -372,7 +367,6 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
     active: user.active,
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,
@@ -396,7 +390,6 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       id: true,
       email: true,
       name: true,
-      role: true,
       active: true,
       appRoleId: true,
       appRole: {
@@ -411,7 +404,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   })
 
   if (user) {
-    await setDatabaseUserContext(user.id, user.role)
+    await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
   }
 
   if (!user) return null
@@ -420,7 +413,6 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
     active: user.active,
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,
@@ -456,7 +448,7 @@ export async function requireApiSystemAdmin(request: NextRequest): Promise<AuthU
       details: {
         userId: user.id,
         email: user.email,
-        role: user.appRoleName || user.role,
+        role: user.appRoleName || 'Admin',
         resource: 'systemAdmin',
       },
     }).catch(() => {})
@@ -535,7 +527,6 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
       id: true,
       email: true,
       name: true,
-      role: true,
       active: true,
       appRoleId: true,
       appRole: {
@@ -549,7 +540,7 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
     },
   })
   if (user) {
-    await setDatabaseUserContext(user.id, user.role)
+    await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
   }
 
   if (!user) return null
@@ -557,7 +548,6 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
     active: user.active,
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,

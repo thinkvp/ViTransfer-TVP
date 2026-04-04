@@ -371,8 +371,14 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
       select: {
         autoCloseApprovedProjectsEnabled: true,
         autoCloseApprovedProjectsAfterDays: true,
+        clientEmailProjectApproved: true,
+        adminEmailProjectApproved: true,
       },
     })
+
+    if (settings?.clientEmailProjectApproved === false) {
+      console.log('[IMMEDIATE→CLIENT] Skipped - clientEmailProjectApproved is disabled')
+    } else {
 
     let autoCloseInfo: { closeDate: Date; days: number } | null = null
     if (settings?.autoCloseApprovedProjectsEnabled) {
@@ -412,12 +418,18 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
     )
 
     await Promise.allSettled(emailPromises)
+    } // end clientEmailProjectApproved check
   } else if (recipients.length > 0 && !isComplete) {
     console.log(`[IMMEDIATE→CLIENT] Skipped - partial approval (${approvedVideos?.length || 0} videos), not sending to client`)
   }
 
   // Send to admins - notify them when client approves OR unapproves ANY video
-  if (internalEmails.length > 0) {
+  const globalSettings = await prisma.settings.findUnique({
+    where: { id: 'default' },
+    select: { adminEmailProjectApproved: true },
+  })
+
+  if (internalEmails.length > 0 && globalSettings?.adminEmailProjectApproved !== false) {
     const action = approved ? 'approval' : 'unapproval'
     console.log(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${internalEmails.length} internal user(s)`)
 

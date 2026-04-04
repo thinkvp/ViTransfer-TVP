@@ -12,11 +12,16 @@ export async function processInternalCommentNotifications() {
         adminNotificationSchedule: true,
         adminNotificationTime: true,
         adminNotificationDay: true,
+        adminEmailInternalComments: true,
         lastInternalCommentNotificationSent: true,
       },
     })
 
-    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE') {
+    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE' || settings.adminNotificationSchedule === 'NONE') {
+      return
+    }
+
+    if (settings.adminEmailInternalComments === false) {
       return
     }
 
@@ -73,6 +78,7 @@ export async function processInternalCommentNotifications() {
 
     for (const notification of pendingNotifications) {
       const projectId = notification.projectId
+      if (!projectId || !notification.project) continue
       if (!projectGroups[projectId]) {
         const origin = appDomain || ''
         projectGroups[projectId] = {

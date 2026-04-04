@@ -162,7 +162,7 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 ### Notifications
 - **Smart Email Notifications** — Scheduling options: immediate, hourly, daily, or weekly digests
 - **Project Update Digests** — Batched comment summaries to reduce email noise
-- **Push Notifications** — Optional Gotify integration and browser Web Push notifications for instant alerts
+- **Push Notifications** — Browser Web Push and optional Gotify/Ntfy webhook integration for instant alerts
 
 ### Admin Features
 - **Multi-User Support** — Multiple admin accounts with JWT authentication and optional WebAuthn passkey support

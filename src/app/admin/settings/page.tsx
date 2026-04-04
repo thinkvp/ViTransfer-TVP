@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Cloud, Video, FolderKanban, Wrench, Bell, Smartphone, Shield } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Cloud, Video, FolderKanban, Wrench, Bell, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CompanyBrandingSection } from '@/components/settings/CompanyBrandingSection'
 import { DomainConfigurationSection } from '@/components/settings/DomainConfigurationSection'
@@ -14,7 +14,6 @@ import { DeveloperToolsSection } from '@/components/settings/DeveloperToolsSecti
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
 import { CpuConfigurationSection } from '@/components/settings/CpuConfigurationSection'
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
-import { AdminBrowserPushSection } from '@/components/settings/AdminBrowserPushSection'
 import { DropboxStorageSection } from '@/components/settings/DropboxStorageSection'
 import { StorageOverviewSection } from '@/components/settings/StorageOverviewSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
@@ -63,6 +62,17 @@ interface Settings {
   adminNotificationSchedule: string | null
   adminNotificationTime: string | null
   adminNotificationDay: number | null
+  adminEmailProjectApproved: boolean | null
+  adminEmailInternalComments: boolean | null
+  adminEmailTaskComments: boolean | null
+  adminEmailInvoicePaid: boolean | null
+  adminEmailQuoteAccepted: boolean | null
+  adminEmailProjectKeyDates: boolean | null
+  adminEmailUserKeyDates: boolean | null
+  defaultClientNotificationSchedule: string | null
+  defaultClientNotificationTime: string | null
+  defaultClientNotificationDay: number | null
+  clientEmailProjectApproved: boolean | null
   excludeInternalIpsFromAnalytics?: boolean | null
   uploadChunkSizeMB?: number | null
   downloadChunkSizeMB?: number | null
@@ -116,11 +126,15 @@ interface PushNotificationSettings {
   notifySuccessfulShareAccess: boolean
   notifyGuestVideoLinkAccess: boolean
   notifyClientComments: boolean
+  notifyInternalComments: boolean
+  notifyTaskComments: boolean
   notifyVideoApproval: boolean
+  notifyUserAssignments: boolean
   notifySalesQuoteViewed: boolean
   notifySalesQuoteAccepted: boolean
   notifySalesInvoiceViewed: boolean
   notifySalesInvoicePaid: boolean
+  notifySalesReminders: boolean
   notifyPasswordResetRequested: boolean
   notifyPasswordResetSuccess: boolean
 }
@@ -135,8 +149,7 @@ const SETTING_SECTIONS = [
   { id: 'video-processing', label: 'Default Project Settings', icon: Video },
   { id: 'project-behavior', label: 'Project Behavior', icon: FolderKanban },
   { id: 'developer-tools', label: 'Developer Tools', icon: Wrench },
-  { id: 'gotify', label: 'Gotify Notifications', icon: Bell },
-  { id: 'browser-push', label: 'Browser Push (Admin)', icon: Smartphone },
+  { id: 'push-notifications', label: 'Push Notifications', icon: Bell },
   { id: 'security', label: 'Advanced Security', icon: Shield },
 ] as const
 
@@ -204,6 +217,19 @@ export default function GlobalSettingsPage() {
   const [adminNotificationSchedule, setAdminNotificationSchedule] = useState('HOURLY')
   const [adminNotificationTime, setAdminNotificationTime] = useState('09:00')
   const [adminNotificationDay, setAdminNotificationDay] = useState(1)
+  const [adminEmailProjectApproved, setAdminEmailProjectApproved] = useState(true)
+  const [adminEmailInternalComments, setAdminEmailInternalComments] = useState(true)
+  const [adminEmailTaskComments, setAdminEmailTaskComments] = useState(true)
+  const [adminEmailInvoicePaid, setAdminEmailInvoicePaid] = useState(true)
+  const [adminEmailQuoteAccepted, setAdminEmailQuoteAccepted] = useState(true)
+  const [adminEmailProjectKeyDates, setAdminEmailProjectKeyDates] = useState(true)
+  const [adminEmailUserKeyDates, setAdminEmailUserKeyDates] = useState(true)
+
+  // Form state for default client notification settings
+  const [defaultClientNotificationSchedule, setDefaultClientNotificationSchedule] = useState('HOURLY')
+  const [defaultClientNotificationTime, setDefaultClientNotificationTime] = useState('09:00')
+  const [defaultClientNotificationDay, setDefaultClientNotificationDay] = useState(1)
+  const [clientEmailProjectApproved, setClientEmailProjectApproved] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -253,8 +279,8 @@ export default function GlobalSettingsPage() {
   // Form state for push notifications
   const [pushNotificationSettings, setPushNotificationSettings] = useState<PushNotificationSettings | null>(null)
   const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushWebhookEnabled, setPushWebhookEnabled] = useState(false)
   const [pushWebhookUrl, setPushWebhookUrl] = useState('')
-  const [pushTitlePrefix, setPushTitlePrefix] = useState('')
   const [pushNotifyUnauthorizedOTP, setPushNotifyUnauthorizedOTP] = useState(true)
   const [pushNotifyFailedAdminLogin, setPushNotifyFailedAdminLogin] = useState(true)
   const [pushNotifySuccessfulAdminLogin, setPushNotifySuccessfulAdminLogin] = useState(true)
@@ -262,11 +288,15 @@ export default function GlobalSettingsPage() {
   const [pushNotifySuccessfulShareAccess, setPushNotifySuccessfulShareAccess] = useState(true)
   const [pushNotifyGuestVideoLinkAccess, setPushNotifyGuestVideoLinkAccess] = useState(true)
   const [pushNotifyClientComments, setPushNotifyClientComments] = useState(true)
+  const [pushNotifyInternalComments, setPushNotifyInternalComments] = useState(true)
+  const [pushNotifyTaskComments, setPushNotifyTaskComments] = useState(true)
   const [pushNotifyVideoApproval, setPushNotifyVideoApproval] = useState(true)
+  const [pushNotifyUserAssignments, setPushNotifyUserAssignments] = useState(true)
   const [pushNotifySalesQuoteViewed, setPushNotifySalesQuoteViewed] = useState(true)
   const [pushNotifySalesQuoteAccepted, setPushNotifySalesQuoteAccepted] = useState(true)
   const [pushNotifySalesInvoiceViewed, setPushNotifySalesInvoiceViewed] = useState(true)
   const [pushNotifySalesInvoicePaid, setPushNotifySalesInvoicePaid] = useState(true)
+  const [pushNotifySalesReminders, setPushNotifySalesReminders] = useState(true)
   const [pushNotifyPasswordResetRequested, setPushNotifyPasswordResetRequested] = useState(true)
   const [pushNotifyPasswordResetSuccess, setPushNotifyPasswordResetSuccess] = useState(true)
 
@@ -278,7 +308,6 @@ export default function GlobalSettingsPage() {
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
-  const [showBrowserPush, setShowBrowserPush] = useState(false)
   const [showDropboxStorage, setShowDropboxStorage] = useState(false)
   const [showStorageOverview, setShowStorageOverview] = useState(false)
   const [dropboxConfigured, setDropboxConfigured] = useState(false)
@@ -317,16 +346,22 @@ export default function GlobalSettingsPage() {
     autoApproveProject, autoDeletePreviewsOnClose, excludeInternalIpsFromAnalytics,
     uploadChunkSizeMB, downloadChunkSizeMB, autoCloseApprovedProjectsEnabled,
     autoCloseApprovedProjectsAfterDays, adminNotificationSchedule, adminNotificationTime,
-    adminNotificationDay, httpsEnabled, hotlinkProtection, ipRateLimit, sessionRateLimit,
+    adminNotificationDay, adminEmailProjectApproved, adminEmailInternalComments,
+    adminEmailTaskComments, adminEmailInvoicePaid, adminEmailQuoteAccepted,
+    adminEmailProjectKeyDates, adminEmailUserKeyDates,
+    defaultClientNotificationSchedule, defaultClientNotificationTime, defaultClientNotificationDay,
+    clientEmailProjectApproved, httpsEnabled, hotlinkProtection, ipRateLimit, sessionRateLimit,
     shareSessionRateLimit, shareTokenTtlSeconds, passwordAttempts, sessionTimeoutValue,
     sessionTimeoutUnit, trackAnalytics, trackSecurityLogs, viewSecurityEvents,
     maxInternalCommentsPerProject, maxCommentsPerVideoVersion, maxProjectRecipients,
-    maxProjectFilesPerProject, pushEnabled, pushWebhookUrl, pushTitlePrefix,
+    maxProjectFilesPerProject, pushEnabled, pushWebhookEnabled, pushWebhookUrl,
     pushNotifyUnauthorizedOTP, pushNotifyFailedAdminLogin, pushNotifySuccessfulAdminLogin,
     pushNotifyFailedSharePasswordAttempt, pushNotifySuccessfulShareAccess,
-    pushNotifyGuestVideoLinkAccess, pushNotifyClientComments, pushNotifyVideoApproval,
+    pushNotifyGuestVideoLinkAccess, pushNotifyClientComments, pushNotifyInternalComments,
+    pushNotifyTaskComments, pushNotifyVideoApproval, pushNotifyUserAssignments,
     pushNotifySalesQuoteViewed, pushNotifySalesQuoteAccepted, pushNotifySalesInvoiceViewed,
-    pushNotifySalesInvoicePaid, pushNotifyPasswordResetRequested, pushNotifyPasswordResetSuccess,
+    pushNotifySalesInvoicePaid, pushNotifySalesReminders,
+    pushNotifyPasswordResetRequested, pushNotifyPasswordResetSuccess,
     cpuFfmpegThreadsPerJob, cpuVideoWorkerConcurrency, cpuDynamicThreadAllocation,
   })
   const hasUnsavedChanges = dataLoaded && savedSnapshot !== '' && settingsSnapshot !== savedSnapshot
@@ -405,6 +440,17 @@ export default function GlobalSettingsPage() {
         setAdminNotificationSchedule(data.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(data.adminNotificationTime || '09:00')
         setAdminNotificationDay(data.adminNotificationDay ?? 1)
+        setAdminEmailProjectApproved(data.adminEmailProjectApproved ?? true)
+        setAdminEmailInternalComments(data.adminEmailInternalComments ?? true)
+        setAdminEmailTaskComments(data.adminEmailTaskComments ?? true)
+        setAdminEmailInvoicePaid(data.adminEmailInvoicePaid ?? true)
+        setAdminEmailQuoteAccepted(data.adminEmailQuoteAccepted ?? true)
+        setAdminEmailProjectKeyDates(data.adminEmailProjectKeyDates ?? true)
+        setAdminEmailUserKeyDates(data.adminEmailUserKeyDates ?? true)
+        setDefaultClientNotificationSchedule(data.defaultClientNotificationSchedule || 'HOURLY')
+        setDefaultClientNotificationTime(data.defaultClientNotificationTime || '09:00')
+        setDefaultClientNotificationDay(data.defaultClientNotificationDay ?? 1)
+        setClientEmailProjectApproved(data.clientEmailProjectApproved ?? true)
 
         // Load security settings
         const securityResponse = await apiFetch('/api/settings/security')
@@ -444,8 +490,8 @@ export default function GlobalSettingsPage() {
 
           // Set push notification form values
           setPushEnabled(pushData.enabled ?? false)
+          setPushWebhookEnabled(Boolean(pushData.provider && pushData.webhookUrl))
           setPushWebhookUrl(pushData.webhookUrl || '')
-          setPushTitlePrefix(pushData.title || '')
           setPushNotifyUnauthorizedOTP(pushData.notifyUnauthorizedOTP ?? true)
           setPushNotifyFailedAdminLogin(pushData.notifyFailedAdminLogin ?? true)
           setPushNotifySuccessfulAdminLogin(pushData.notifySuccessfulAdminLogin ?? true)
@@ -453,11 +499,15 @@ export default function GlobalSettingsPage() {
           setPushNotifySuccessfulShareAccess(pushData.notifySuccessfulShareAccess ?? true)
           setPushNotifyGuestVideoLinkAccess(pushData.notifyGuestVideoLinkAccess ?? true)
           setPushNotifyClientComments(pushData.notifyClientComments ?? true)
+          setPushNotifyInternalComments(pushData.notifyInternalComments ?? true)
+          setPushNotifyTaskComments(pushData.notifyTaskComments ?? true)
           setPushNotifyVideoApproval(pushData.notifyVideoApproval ?? true)
+          setPushNotifyUserAssignments(pushData.notifyUserAssignments ?? true)
           setPushNotifySalesQuoteViewed(pushData.notifySalesQuoteViewed ?? true)
           setPushNotifySalesQuoteAccepted(pushData.notifySalesQuoteAccepted ?? true)
           setPushNotifySalesInvoiceViewed(pushData.notifySalesInvoiceViewed ?? true)
           setPushNotifySalesInvoicePaid(pushData.notifySalesInvoicePaid ?? true)
+          setPushNotifySalesReminders(pushData.notifySalesReminders ?? true)
           setPushNotifyPasswordResetRequested(pushData.notifyPasswordResetRequested ?? true)
           setPushNotifyPasswordResetSuccess(pushData.notifyPasswordResetSuccess ?? true)
         }
@@ -719,8 +769,19 @@ export default function GlobalSettingsPage() {
           ? autoCloseApprovedProjectsAfterDays
           : parseInt(String(autoCloseApprovedProjectsAfterDays), 10) || 7,
         adminNotificationSchedule: adminNotificationSchedule,
-        adminNotificationTime: (adminNotificationSchedule === 'DAILY' || adminNotificationSchedule === 'WEEKLY') ? adminNotificationTime : null,
-        adminNotificationDay: adminNotificationSchedule === 'WEEKLY' ? adminNotificationDay : null,
+        adminNotificationTime: adminNotificationSchedule === 'DAILY' ? adminNotificationTime : null,
+        adminNotificationDay: null,
+        adminEmailProjectApproved,
+        adminEmailInternalComments,
+        adminEmailTaskComments,
+        adminEmailInvoicePaid,
+        adminEmailQuoteAccepted,
+        adminEmailProjectKeyDates,
+        adminEmailUserKeyDates,
+        defaultClientNotificationSchedule,
+        defaultClientNotificationTime: defaultClientNotificationSchedule === 'DAILY' ? defaultClientNotificationTime : null,
+        defaultClientNotificationDay: null,
+        clientEmailProjectApproved,
       }
 
       // Save global settings
@@ -750,9 +811,9 @@ export default function GlobalSettingsPage() {
       // Save push notification settings
       const pushUpdates = {
         enabled: pushEnabled,
-        provider: pushEnabled ? 'GOTIFY' : null,
-        webhookUrl: pushWebhookUrl || null,
-        title: pushTitlePrefix || null,
+        provider: pushWebhookEnabled ? 'GOTIFY' : null,
+        webhookUrl: pushWebhookEnabled ? (pushWebhookUrl || null) : null,
+        title: null,
         notifyUnauthorizedOTP: pushNotifyUnauthorizedOTP,
         notifyFailedAdminLogin: pushNotifyFailedAdminLogin,
         notifySuccessfulAdminLogin: pushNotifySuccessfulAdminLogin,
@@ -760,11 +821,15 @@ export default function GlobalSettingsPage() {
         notifySuccessfulShareAccess: pushNotifySuccessfulShareAccess,
         notifyGuestVideoLinkAccess: pushNotifyGuestVideoLinkAccess,
         notifyClientComments: pushNotifyClientComments,
+        notifyInternalComments: pushNotifyInternalComments,
+        notifyTaskComments: pushNotifyTaskComments,
         notifyVideoApproval: pushNotifyVideoApproval,
+        notifyUserAssignments: pushNotifyUserAssignments,
         notifySalesQuoteViewed: pushNotifySalesQuoteViewed,
         notifySalesQuoteAccepted: pushNotifySalesQuoteAccepted,
         notifySalesInvoiceViewed: pushNotifySalesInvoiceViewed,
         notifySalesInvoicePaid: pushNotifySalesInvoicePaid,
+        notifySalesReminders: pushNotifySalesReminders,
         notifyPasswordResetRequested: pushNotifyPasswordResetRequested,
         notifyPasswordResetSuccess: pushNotifyPasswordResetSuccess,
       }
@@ -841,6 +906,17 @@ export default function GlobalSettingsPage() {
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
         setAdminNotificationDay(refreshedData.adminNotificationDay ?? 1)
+        setAdminEmailProjectApproved(refreshedData.adminEmailProjectApproved ?? true)
+        setAdminEmailInternalComments(refreshedData.adminEmailInternalComments ?? true)
+        setAdminEmailTaskComments(refreshedData.adminEmailTaskComments ?? true)
+        setAdminEmailInvoicePaid(refreshedData.adminEmailInvoicePaid ?? true)
+        setAdminEmailQuoteAccepted(refreshedData.adminEmailQuoteAccepted ?? true)
+        setAdminEmailProjectKeyDates(refreshedData.adminEmailProjectKeyDates ?? true)
+        setAdminEmailUserKeyDates(refreshedData.adminEmailUserKeyDates ?? true)
+        setDefaultClientNotificationSchedule(refreshedData.defaultClientNotificationSchedule || 'HOURLY')
+        setDefaultClientNotificationTime(refreshedData.defaultClientNotificationTime || '09:00')
+        setDefaultClientNotificationDay(refreshedData.defaultClientNotificationDay ?? 1)
+        setClientEmailProjectApproved(refreshedData.clientEmailProjectApproved ?? true)
       }
 
       // Reload security settings data
@@ -1129,6 +1205,20 @@ export default function GlobalSettingsPage() {
             setAdminNotificationTime={setAdminNotificationTime}
             adminNotificationDay={adminNotificationDay}
             setAdminNotificationDay={setAdminNotificationDay}
+            adminEmailProjectApproved={adminEmailProjectApproved}
+            setAdminEmailProjectApproved={setAdminEmailProjectApproved}
+            adminEmailInternalComments={adminEmailInternalComments}
+            setAdminEmailInternalComments={setAdminEmailInternalComments}
+            adminEmailTaskComments={adminEmailTaskComments}
+            setAdminEmailTaskComments={setAdminEmailTaskComments}
+            adminEmailInvoicePaid={adminEmailInvoicePaid}
+            setAdminEmailInvoicePaid={setAdminEmailInvoicePaid}
+            adminEmailQuoteAccepted={adminEmailQuoteAccepted}
+            setAdminEmailQuoteAccepted={setAdminEmailQuoteAccepted}
+            adminEmailProjectKeyDates={adminEmailProjectKeyDates}
+            setAdminEmailProjectKeyDates={setAdminEmailProjectKeyDates}
+            adminEmailUserKeyDates={adminEmailUserKeyDates}
+            setAdminEmailUserKeyDates={setAdminEmailUserKeyDates}
             show={showEmailSettings}
             setShow={setShowEmailSettings}
           />
@@ -1184,6 +1274,14 @@ export default function GlobalSettingsPage() {
             setDefaultAllowAuthenticatedProjectSwitching={setDefaultAllowAuthenticatedProjectSwitching}
             defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
             setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
+            defaultClientNotificationSchedule={defaultClientNotificationSchedule}
+            setDefaultClientNotificationSchedule={setDefaultClientNotificationSchedule}
+            defaultClientNotificationTime={defaultClientNotificationTime}
+            setDefaultClientNotificationTime={setDefaultClientNotificationTime}
+            defaultClientNotificationDay={defaultClientNotificationDay}
+            setDefaultClientNotificationDay={setDefaultClientNotificationDay}
+            clientEmailProjectApproved={clientEmailProjectApproved}
+            setClientEmailProjectApproved={setClientEmailProjectApproved}
             show={showVideoProcessing}
             setShow={setShowVideoProcessing}
           />
@@ -1213,10 +1311,10 @@ export default function GlobalSettingsPage() {
           <PushNotificationsSection
             enabled={pushEnabled}
             setEnabled={setPushEnabled}
+            webhookEnabled={pushWebhookEnabled}
+            setWebhookEnabled={setPushWebhookEnabled}
             webhookUrl={pushWebhookUrl}
             setWebhookUrl={setPushWebhookUrl}
-            titlePrefix={pushTitlePrefix}
-            setTitlePrefix={setPushTitlePrefix}
             notifyUnauthorizedOTP={pushNotifyUnauthorizedOTP}
             setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
             notifyFailedAdminLogin={pushNotifyFailedAdminLogin}
@@ -1231,8 +1329,14 @@ export default function GlobalSettingsPage() {
             setNotifyGuestVideoLinkAccess={setPushNotifyGuestVideoLinkAccess}
             notifyClientComments={pushNotifyClientComments}
             setNotifyClientComments={setPushNotifyClientComments}
+            notifyInternalComments={pushNotifyInternalComments}
+            setNotifyInternalComments={setPushNotifyInternalComments}
+            notifyTaskComments={pushNotifyTaskComments}
+            setNotifyTaskComments={setPushNotifyTaskComments}
             notifyVideoApproval={pushNotifyVideoApproval}
             setNotifyVideoApproval={setPushNotifyVideoApproval}
+            notifyUserAssignments={pushNotifyUserAssignments}
+            setNotifyUserAssignments={setPushNotifyUserAssignments}
             notifySalesQuoteViewed={pushNotifySalesQuoteViewed}
             setNotifySalesQuoteViewed={setPushNotifySalesQuoteViewed}
             notifySalesQuoteAccepted={pushNotifySalesQuoteAccepted}
@@ -1241,6 +1345,8 @@ export default function GlobalSettingsPage() {
             setNotifySalesInvoiceViewed={setPushNotifySalesInvoiceViewed}
             notifySalesInvoicePaid={pushNotifySalesInvoicePaid}
             setNotifySalesInvoicePaid={setPushNotifySalesInvoicePaid}
+            notifySalesReminders={pushNotifySalesReminders}
+            setNotifySalesReminders={setPushNotifySalesReminders}
             notifyPasswordResetRequested={pushNotifyPasswordResetRequested}
             setNotifyPasswordResetRequested={setPushNotifyPasswordResetRequested}
             notifyPasswordResetSuccess={pushNotifyPasswordResetSuccess}
@@ -1248,8 +1354,6 @@ export default function GlobalSettingsPage() {
             show={showPushNotifications}
             setShow={setShowPushNotifications}
           />
-
-          <AdminBrowserPushSection show={showBrowserPush} setShow={setShowBrowserPush} />
 
           <SecuritySettingsSection
             showSecuritySettings={showSecuritySettings}
@@ -1466,6 +1570,20 @@ export default function GlobalSettingsPage() {
                 setAdminNotificationTime={setAdminNotificationTime}
                 adminNotificationDay={adminNotificationDay}
                 setAdminNotificationDay={setAdminNotificationDay}
+                adminEmailProjectApproved={adminEmailProjectApproved}
+                setAdminEmailProjectApproved={setAdminEmailProjectApproved}
+                adminEmailInternalComments={adminEmailInternalComments}
+                setAdminEmailInternalComments={setAdminEmailInternalComments}
+                adminEmailTaskComments={adminEmailTaskComments}
+                setAdminEmailTaskComments={setAdminEmailTaskComments}
+                adminEmailInvoicePaid={adminEmailInvoicePaid}
+                setAdminEmailInvoicePaid={setAdminEmailInvoicePaid}
+                adminEmailQuoteAccepted={adminEmailQuoteAccepted}
+                setAdminEmailQuoteAccepted={setAdminEmailQuoteAccepted}
+                adminEmailProjectKeyDates={adminEmailProjectKeyDates}
+                setAdminEmailProjectKeyDates={setAdminEmailProjectKeyDates}
+                adminEmailUserKeyDates={adminEmailUserKeyDates}
+                setAdminEmailUserKeyDates={setAdminEmailUserKeyDates}
                 show={true}
                 setShow={() => {}}
                 hideCollapse
@@ -1533,6 +1651,14 @@ export default function GlobalSettingsPage() {
                 setDefaultAllowAuthenticatedProjectSwitching={setDefaultAllowAuthenticatedProjectSwitching}
                 defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
                 setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
+                defaultClientNotificationSchedule={defaultClientNotificationSchedule}
+                setDefaultClientNotificationSchedule={setDefaultClientNotificationSchedule}
+                defaultClientNotificationTime={defaultClientNotificationTime}
+                setDefaultClientNotificationTime={setDefaultClientNotificationTime}
+                defaultClientNotificationDay={defaultClientNotificationDay}
+                setDefaultClientNotificationDay={setDefaultClientNotificationDay}
+                clientEmailProjectApproved={clientEmailProjectApproved}
+                setClientEmailProjectApproved={setClientEmailProjectApproved}
                 show={true}
                 setShow={() => {}}
                 hideCollapse
@@ -1567,14 +1693,14 @@ export default function GlobalSettingsPage() {
               />
             )}
 
-            {activeSection === 'gotify' && (
+            {activeSection === 'push-notifications' && (
               <PushNotificationsSection
                 enabled={pushEnabled}
                 setEnabled={setPushEnabled}
+                webhookEnabled={pushWebhookEnabled}
+                setWebhookEnabled={setPushWebhookEnabled}
                 webhookUrl={pushWebhookUrl}
                 setWebhookUrl={setPushWebhookUrl}
-                titlePrefix={pushTitlePrefix}
-                setTitlePrefix={setPushTitlePrefix}
                 notifyUnauthorizedOTP={pushNotifyUnauthorizedOTP}
                 setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
                 notifyFailedAdminLogin={pushNotifyFailedAdminLogin}
@@ -1589,8 +1715,14 @@ export default function GlobalSettingsPage() {
                 setNotifyGuestVideoLinkAccess={setPushNotifyGuestVideoLinkAccess}
                 notifyClientComments={pushNotifyClientComments}
                 setNotifyClientComments={setPushNotifyClientComments}
+                notifyInternalComments={pushNotifyInternalComments}
+                setNotifyInternalComments={setPushNotifyInternalComments}
+                notifyTaskComments={pushNotifyTaskComments}
+                setNotifyTaskComments={setPushNotifyTaskComments}
                 notifyVideoApproval={pushNotifyVideoApproval}
                 setNotifyVideoApproval={setPushNotifyVideoApproval}
+                notifyUserAssignments={pushNotifyUserAssignments}
+                setNotifyUserAssignments={setPushNotifyUserAssignments}
                 notifySalesQuoteViewed={pushNotifySalesQuoteViewed}
                 setNotifySalesQuoteViewed={setPushNotifySalesQuoteViewed}
                 notifySalesQuoteAccepted={pushNotifySalesQuoteAccepted}
@@ -1599,6 +1731,8 @@ export default function GlobalSettingsPage() {
                 setNotifySalesInvoiceViewed={setPushNotifySalesInvoiceViewed}
                 notifySalesInvoicePaid={pushNotifySalesInvoicePaid}
                 setNotifySalesInvoicePaid={setPushNotifySalesInvoicePaid}
+                notifySalesReminders={pushNotifySalesReminders}
+                setNotifySalesReminders={setPushNotifySalesReminders}
                 notifyPasswordResetRequested={pushNotifyPasswordResetRequested}
                 setNotifyPasswordResetRequested={setPushNotifyPasswordResetRequested}
                 notifyPasswordResetSuccess={pushNotifyPasswordResetSuccess}
@@ -1607,10 +1741,6 @@ export default function GlobalSettingsPage() {
                 setShow={() => {}}
                 hideCollapse
               />
-            )}
-
-            {activeSection === 'browser-push' && (
-              <AdminBrowserPushSection show={true} setShow={() => {}} hideCollapse />
             )}
 
             {activeSection === 'security' && (

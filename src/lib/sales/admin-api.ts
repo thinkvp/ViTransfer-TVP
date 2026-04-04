@@ -175,6 +175,57 @@ export type SalesRollupResponse = {
   }
 }
 
+export type SalesItem = {
+  id: string
+  description: string
+  details: string
+  quantity: number
+  unitPriceCents: number
+  taxRatePercent: number
+  taxRateName?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type SalesPreset = {
+  id: string
+  name: string
+  itemIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export async function listSalesItems(): Promise<SalesItem[]> {
+  const res = await apiJson<{ items: SalesItem[] }>('/api/admin/sales/items', { cache: 'no-store' })
+  return Array.isArray(res.items) ? res.items : []
+}
+
+export async function createSalesItem(
+  data: Omit<SalesItem, 'id' | 'sortOrder' | 'createdAt' | 'updatedAt'>
+): Promise<SalesItem> {
+  const res = await apiPost<{ ok: boolean; item: SalesItem }>('/api/admin/sales/items', data)
+  return res.item
+}
+
+export async function deleteSalesItem(id: string): Promise<void> {
+  await apiDelete(`/api/admin/sales/items/${encodeURIComponent(id)}`)
+}
+
+export async function listSalesPresets(): Promise<SalesPreset[]> {
+  const res = await apiJson<{ presets: SalesPreset[] }>('/api/admin/sales/presets', { cache: 'no-store' })
+  return Array.isArray(res.presets) ? res.presets : []
+}
+
+export async function saveSalesPreset(payload: { name: string; itemIds: string[] }): Promise<SalesPreset> {
+  const res = await apiPost<{ ok: boolean; preset: SalesPreset }>('/api/admin/sales/presets', payload)
+  return res.preset
+}
+
+export async function deleteSalesPreset(id: string): Promise<void> {
+  await apiDelete(`/api/admin/sales/presets/${encodeURIComponent(id)}`)
+}
+
 export async function fetchSalesRollup(input?: {
   clientId?: string
   projectId?: string

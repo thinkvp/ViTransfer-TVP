@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ScheduleSelector } from '@/components/ScheduleSelector'
 
 const RESOLUTION_OPTIONS = [
   { value: '480p', label: '480p (854×480 or 480×854 for vertical)' },
@@ -27,6 +28,19 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultAllowAuthenticatedProjectSwitching: (value: boolean) => void
   defaultMaxClientUploadAllocationMB: number | ''
   setDefaultMaxClientUploadAllocationMB: (value: number | '') => void
+
+  // Default client notification schedule for new projects
+  defaultClientNotificationSchedule: string
+  setDefaultClientNotificationSchedule: (value: string) => void
+  defaultClientNotificationTime: string
+  setDefaultClientNotificationTime: (value: string) => void
+  defaultClientNotificationDay: number
+  setDefaultClientNotificationDay: (value: number) => void
+
+  // Client system email toggles
+  clientEmailProjectApproved: boolean
+  setClientEmailProjectApproved: (value: boolean) => void
+
   show: boolean
   setShow: (value: boolean) => void
   hideCollapse?: boolean
@@ -49,6 +63,14 @@ export function VideoProcessingSettingsSection({
   setDefaultAllowAuthenticatedProjectSwitching,
   defaultMaxClientUploadAllocationMB,
   setDefaultMaxClientUploadAllocationMB,
+  defaultClientNotificationSchedule,
+  setDefaultClientNotificationSchedule,
+  defaultClientNotificationTime,
+  setDefaultClientNotificationTime,
+  defaultClientNotificationDay,
+  setDefaultClientNotificationDay,
+  clientEmailProjectApproved,
+  setClientEmailProjectApproved,
   show,
   setShow,
   hideCollapse,
@@ -219,6 +241,35 @@ export function VideoProcessingSettingsSection({
                 checked={defaultAllowAuthenticatedProjectSwitching}
                 onCheckedChange={setDefaultAllowAuthenticatedProjectSwitching}
               />
+            </div>
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <ScheduleSelector
+              schedule={defaultClientNotificationSchedule}
+              time={defaultClientNotificationTime}
+              day={defaultClientNotificationDay}
+              onScheduleChange={setDefaultClientNotificationSchedule}
+              onTimeChange={setDefaultClientNotificationTime}
+              onDayChange={setDefaultClientNotificationDay}
+              label="Default Client Notification Schedule"
+              description="Default schedule for client comment notifications on newly created projects. Can be overridden per project. Note: Approval emails are always sent immediately."
+            />
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <Label className="text-base">Client System Emails</Label>
+            <p className="text-xs text-muted-foreground">
+              Toggle automated emails sent to project clients globally. Disabling these stops them from being sent across all projects.
+            </p>
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5 flex-1">
+                  <Label htmlFor="clientEmailProjectApproved">Project approval confirmation</Label>
+                  <p className="text-xs text-muted-foreground">Notify clients automatically when their entire project is marked as approved.</p>
+                </div>
+                <Switch id="clientEmailProjectApproved" checked={clientEmailProjectApproved} onCheckedChange={setClientEmailProjectApproved} />
+              </div>
             </div>
           </div>
         </CardContent>

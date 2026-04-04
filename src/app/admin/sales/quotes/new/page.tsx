@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { GripVertical, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
 import { createSalesQuote, fetchSalesSettings, fetchTaxRates } from '@/lib/sales/admin-api'
+import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
 import type { ClientOption, ProjectOption, SalesLineItem, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
@@ -94,6 +95,31 @@ export default function NewQuotePage() {
   const [terms, setTerms] = useState<string>('')
   const [items, setItems] = useState<SalesLineItem[]>(() => [newLineItem(10)])
   const [taxRates, setTaxRates] = useState<SalesTaxRate[]>([])
+  const dragEnabledRef = useRef(false)
+  const dragIndexRef = useRef<number | null>(null)
+  const dragOverIndexRef = useRef<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [showPresetsModal, setShowPresetsModal] = useState(false)
+
+  // Read prefill data placed by the duplicate button on the edit page
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('sales_quote_prefill')
+      if (!raw) return
+      sessionStorage.removeItem('sales_quote_prefill')
+      const prefill = JSON.parse(raw) as { notes?: string; terms?: string; items?: SalesLineItem[] }
+      if (prefill.notes !== undefined) setNotes(prefill.notes)
+      if (prefill.terms !== undefined) setTerms(prefill.terms)
+      if (Array.isArray(prefill.items) && prefill.items.length > 0) {
+        setItems(prefill.items.map((it) => ({
+          ...it,
+          id: globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`,
+        })))
+      }
+    } catch {
+      // ignore parse/storage errors
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -269,8 +295,54 @@ export default function NewQuotePage() {
 
       <Card>
         <CardContent className="space-y-3 pt-6">
-          {items.map((it) => (
-            <div key={it.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3">
+          {items.map((it, idx) => (
+            <div
+              key={it.id}
+              draggable
+              onDragStart={(e) => {
+                if (!dragEnabledRef.current) { e.preventDefault(); return }
+                dragIndexRef.current = idx
+                e.dataTransfer.effectAllowed = 'move'
+              }}
+              onDragEnd={() => {
+                dragEnabledRef.current = false
+                dragIndexRef.current = null
+                dragOverIndexRef.current = null
+                setDragOverIndex(null)
+              }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                dragOverIndexRef.current = idx
+                setDragOverIndex(idx)
+              }}
+              onDragLeave={() => {
+                if (dragOverIndexRef.current === idx) setDragOverIndex(null)
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                const from = dragIndexRef.current
+                const to = dragOverIndexRef.current
+                if (from !== null && to !== null && from !== to) {
+                  setItems((prev) => {
+                    const next = [...prev]
+                    const [moved] = next.splice(from, 1)
+                    next.splice(to, 0, moved)
+                    return next
+                  })
+                }
+                dragIndexRef.current = null
+                dragOverIndexRef.current = null
+                setDragOverIndex(null)
+              }}
+              className={`grid grid-cols-1 md:grid-cols-[auto_minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3${dragOverIndex === idx && dragIndexRef.current !== idx ? ' ring-2 ring-primary/50' : ''}`}
+            >
+              <div
+                className="hidden md:flex items-center self-stretch cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
+                onMouseDown={() => { dragEnabledRef.current = true }}
+                onMouseUp={() => { dragEnabledRef.current = false }}
+              >
+                <GripVertical className="w-4 h-4" />
+              </div>
               <div className="space-y-1">
                 <Label>Item</Label>
                 <Input
@@ -382,9 +454,14 @@ export default function NewQuotePage() {
           ))}
 
           <div className="flex justify-between items-center gap-2 flex-wrap">
-            <Button variant="outline" onClick={() => { const pr = taxRates.find((r) => r.isDefault); setItems((prev) => [...prev, newLineItem(settings.taxRatePercent, pr?.name)]) }}>
-              Add line
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" onClick={() => setShowPresetsModal(true)}>
+                Add items
+              </Button>
+              <Button variant="outline" onClick={() => { const pr = taxRates.find((r) => r.isDefault); setItems((prev) => [...prev, newLineItem(settings.taxRatePercent, pr?.name)]) }}>
+                Add line
+              </Button>
+            </div>
             <div className="text-sm">
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Subtotal</span>
@@ -427,6 +504,19 @@ export default function NewQuotePage() {
           {creating ? 'Creating…' : 'Create quote'}
         </Button>
       </div>
+
+      <SalesLineItemPresetsModal
+        open={showPresetsModal}
+        onOpenChange={setShowPresetsModal}
+        taxRates={taxRates}
+        defaultTaxRatePercent={settings.taxRatePercent}
+        currencySymbol={getCurrencySymbol(settings.currencyCode)}
+        onImport={(newItems) => setItems((prev) => {
+          // Remove unchanged default empty item slots before appending
+          const meaningful = prev.filter((it) => it.description.trim() !== '' || it.unitPriceCents !== 0)
+          return [...meaningful, ...newItems]
+        })}
+      />
     </div>
   )
 }

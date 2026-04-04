@@ -176,6 +176,17 @@ export async function PATCH(request: NextRequest) {
       adminNotificationSchedule,
       adminNotificationTime,
       adminNotificationDay,
+      adminEmailProjectApproved,
+      adminEmailInternalComments,
+      adminEmailTaskComments,
+      adminEmailInvoicePaid,
+      adminEmailQuoteAccepted,
+      adminEmailProjectKeyDates,
+      adminEmailUserKeyDates,
+      defaultClientNotificationSchedule,
+      defaultClientNotificationTime,
+      defaultClientNotificationDay,
+      clientEmailProjectApproved,
       emailCustomFooterText,
       accentColor,
       accentTextMode,
@@ -331,10 +342,21 @@ export async function PATCH(request: NextRequest) {
 
     // SECURITY: Validate notification schedule
     if (adminNotificationSchedule !== undefined) {
-      const validSchedules = ['IMMEDIATE', 'HOURLY', 'DAILY', 'WEEKLY']
+      const validSchedules = ['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']
       if (!validSchedules.includes(adminNotificationSchedule)) {
         return NextResponse.json(
-          { error: 'Invalid notification schedule. Must be IMMEDIATE, HOURLY, DAILY, or WEEKLY.' },
+          { error: 'Invalid notification schedule. Must be IMMEDIATE, HOURLY, DAILY, or NONE.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // SECURITY: Validate defaultClientNotificationSchedule
+    if (defaultClientNotificationSchedule !== undefined) {
+      const validSchedules = ['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']
+      if (!validSchedules.includes(defaultClientNotificationSchedule)) {
+        return NextResponse.json(
+          { error: 'Invalid defaultClientNotificationSchedule. Must be IMMEDIATE, HOURLY, DAILY, or NONE.' },
           { status: 400 }
         )
       }
@@ -503,6 +525,17 @@ export async function PATCH(request: NextRequest) {
       adminNotificationSchedule,
       adminNotificationTime,
       adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
+      adminEmailProjectApproved: typeof adminEmailProjectApproved === 'boolean' ? adminEmailProjectApproved : undefined,
+      adminEmailInternalComments: typeof adminEmailInternalComments === 'boolean' ? adminEmailInternalComments : undefined,
+      adminEmailTaskComments: typeof adminEmailTaskComments === 'boolean' ? adminEmailTaskComments : undefined,
+      adminEmailInvoicePaid: typeof adminEmailInvoicePaid === 'boolean' ? adminEmailInvoicePaid : undefined,
+      adminEmailQuoteAccepted: typeof adminEmailQuoteAccepted === 'boolean' ? adminEmailQuoteAccepted : undefined,
+      adminEmailProjectKeyDates: typeof adminEmailProjectKeyDates === 'boolean' ? adminEmailProjectKeyDates : undefined,
+      adminEmailUserKeyDates: typeof adminEmailUserKeyDates === 'boolean' ? adminEmailUserKeyDates : undefined,
+      defaultClientNotificationSchedule,
+      defaultClientNotificationTime,
+      defaultClientNotificationDay: defaultClientNotificationDay !== undefined ? defaultClientNotificationDay : null,
+      clientEmailProjectApproved: typeof clientEmailProjectApproved === 'boolean' ? clientEmailProjectApproved : undefined,
       emailCustomFooterText,
       accentColor: typeof accentColor === 'string' ? (accentColor.trim() || null) : accentColor,
       accentTextMode: accentTextMode === 'LIGHT' || accentTextMode === 'DARK' ? accentTextMode : undefined,

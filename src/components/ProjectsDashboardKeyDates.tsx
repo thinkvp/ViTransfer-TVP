@@ -56,11 +56,21 @@ type KeyDatesResponse = {
   today: string // YYYY-MM-DD
   keyDates: ProjectKeyDateRow[]
   personalKeyDates?: PersonalKeyDateRow[]
+  taskDueDates?: TaskDueDateRow[]
 }
 
 type ProjectReminderOptions = {
   users: Array<{ id: string; name: string; email: string }>
   recipients: Array<{ id: string; name: string; email: string }>
+}
+
+type TaskDueDateRow = {
+  id: string
+  title: string
+  date: string // YYYY-MM-DD
+  projectId: string | null
+  projectTitle: string | null
+  projectCompanyName: string | null
 }
 
 type SalesCalendarItemRow = {
@@ -75,10 +85,21 @@ type SalesCalendarItemRow = {
   projectTitle: string | null
 }
 
+type TaskCalendarItem = {
+  kind: 'task'
+  id: string
+  title: string
+  date: string
+  projectId: string | null
+  projectTitle: string | null
+  projectCompanyName: string | null
+}
+
 type CalendarItem =
   | ({ kind: 'project' } & ProjectKeyDateRow)
   | ({ kind: 'personal' } & PersonalKeyDateRow)
   | SalesCalendarItemRow
+  | TaskCalendarItem
 
 type UpcomingItem = ({ kind: 'project' } & ProjectKeyDateRow) | ({ kind: 'personal' } & PersonalKeyDateRow)
 
@@ -126,6 +147,11 @@ function typeColorClasses(type: string): { pill: string; dot: string } {
         pill: 'bg-emerald-500 text-white',
         dot: 'bg-emerald-500',
       }
+    case 'TASK':
+      return {
+        pill: 'bg-cyan-500 text-white',
+        dot: 'bg-cyan-500',
+      }
     default:
       return {
         pill: 'bg-foreground/40 text-white',
@@ -159,7 +185,13 @@ function ymForDateLocal(date: Date): string {
   return `${y}-${m}`
 }
 
-export default function ProjectsDashboardKeyDates() {
+export default function ProjectsDashboardKeyDates({
+  onTaskClick,
+  refreshKey,
+}: {
+  onTaskClick?: (taskId: string) => void
+  refreshKey?: number
+} = {}) {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -329,7 +361,7 @@ export default function ProjectsDashboardKeyDates() {
 
   useEffect(() => {
     loadKeyDates()
-  }, [loadKeyDates])
+  }, [loadKeyDates, refreshKey])
 
   // Refetch when tab regains focus so stale data (e.g. renamed clients) is refreshed
   useEffect(() => {
@@ -492,6 +524,12 @@ export default function ProjectsDashboardKeyDates() {
       map.set(k.date, list)
     }
 
+    for (const t of data?.taskDueDates || []) {
+      const list = map.get(t.date) || []
+      list.push({ ...t, kind: 'task' })
+      map.set(t.date, list)
+    }
+
     if (canSeeSales) {
       const prevMK = ymForDateLocal(addMonths(monthCursor, -1))
       const nextMK = ymForDateLocal(addMonths(monthCursor, 1))
@@ -519,7 +557,7 @@ export default function ProjectsDashboardKeyDates() {
     }
 
     return map
-  }, [canSeeSales, data?.keyDates, data?.personalKeyDates, monthCursor, monthKey, salesByMonth])
+  }, [canSeeSales, data?.keyDates, data?.personalKeyDates, data?.taskDueDates, monthCursor, monthKey, salesByMonth])
 
   const openPersonalDialog = async () => {
     setPersonalError(null)
@@ -862,7 +900,7 @@ export default function ProjectsDashboardKeyDates() {
   )
 
   return (
-    <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div className="min-w-0">
@@ -1111,6 +1149,25 @@ export default function ProjectsDashboardKeyDates() {
                               )
                             }
 
+                            if (k.kind === 'task') {
+                              const colors = typeColorClasses('TASK')
+                              const titleBits = [
+                                `Task: ${k.title}`,
+                                k.projectTitle ? `Project: ${k.projectTitle}` : null,
+                              ].filter(Boolean)
+                              return (
+                                <button
+                                  key={`task:${k.id}`}
+                                  type="button"
+                                  className={`flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white min-w-0 max-w-full w-full ${colors.dot} hover:opacity-90`}
+                                  title={titleBits.join(' | ')}
+                                  onClick={() => onTaskClick?.(k.id)}
+                                >
+                                  <span className="truncate">{k.title}</span>
+                                </button>
+                              )
+                            }
+
                             return (
                               <button
                                 key={k.id}
@@ -1151,6 +1208,10 @@ export default function ProjectsDashboardKeyDates() {
                     <span>Sales</span>
                   </div>
                 ) : null}
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${typeColorClasses('TASK').dot}`} />
+                  <span>Task</span>
+                </div>
                 <div className="flex items-center gap-1.5">
                   <span className="inline-block w-2.5 h-2.5 rounded-full bg-foreground/40" />
                   <span>Personal</span>

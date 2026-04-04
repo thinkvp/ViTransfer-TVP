@@ -250,6 +250,42 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
       return { title, body: body || payload.message, url }
     }
 
+    case 'TASK_COMMENT': {
+      const author = getDetail(payload.details, ['Author', 'authorName'])
+      const comment = getDetail(payload.details, ['Comment', 'comment'])
+      const cardTitle = getDetail(payload.details, ['Task', 'Card', 'cardTitle'])
+
+      const title = 'New task comment'
+      const body = joinParts([
+        cardTitle ? `Task: ${cardTitle}` : null,
+        author ? `By: ${author}` : null,
+        comment ? `"${excerpt(comment, 140)}"` : null,
+      ])
+      return { title, body: body || payload.message, url }
+    }
+
+    case 'PROJECT_USER_ASSIGNED': {
+      const assignedBy = getDetail(payload.details, ['Assigned By', 'assignedBy'])
+      const title = 'Assigned to project'
+      const body = joinParts([
+        projectTitle ? `Project: ${projectTitle}` : null,
+        assignedBy ? `By: ${assignedBy}` : null,
+      ])
+      return { title, body: body || payload.message, url }
+    }
+
+    case 'TASK_USER_ASSIGNED': {
+      const cardTitle = getDetail(payload.details, ['Task', 'Card', 'cardTitle'])
+      const assignedBy = getDetail(payload.details, ['Assigned By', 'assignedBy'])
+      const title = 'Assigned to task'
+      const body = joinParts([
+        cardTitle ? `Task: ${cardTitle}` : null,
+        projectTitle ? `Project: ${projectTitle}` : null,
+        assignedBy ? `By: ${assignedBy}` : null,
+      ])
+      return { title, body: body || payload.message, url }
+    }
+
     default: {
       // Fallback to the caller-provided copy.
       const title = asNonEmptyString(payload.title) || 'ViTransfer'

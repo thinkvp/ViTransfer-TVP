@@ -10,6 +10,7 @@ import { getSafeguardLimits } from '@/lib/settings'
 import { getRawStoragePath } from '@/lib/storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { parseProjectStartDateInput } from '@/lib/project-start-date'
+import { sendPushNotification } from '@/lib/push-notifications'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -433,6 +434,8 @@ export async function POST(request: NextRequest) {
         defaultAllowClientUploadFiles: true,
         defaultAllowAuthenticatedProjectSwitching: true,
         defaultMaxClientUploadAllocationMB: true,
+        defaultClientNotificationSchedule: true,
+        defaultClientNotificationTime: true,
       },
     })
 
@@ -470,6 +473,8 @@ export async function POST(request: NextRequest) {
           watermarkEnabled: settings?.defaultWatermarkEnabled ?? true,
           watermarkText: settings?.defaultWatermarkText || null,
           timelinePreviewsEnabled: settings?.defaultTimelinePreviewsEnabled ?? false,
+          clientNotificationSchedule: settings?.defaultClientNotificationSchedule || 'HOURLY',
+          clientNotificationTime: settings?.defaultClientNotificationTime || null,
           startDate: startDate ? (parseProjectStartDateInput(startDate) ?? new Date()) : new Date(),
           createdById: admin.id,
         },
@@ -540,6 +545,41 @@ export async function POST(request: NextRequest) {
 
       return newProject
     })
+
+    // Notify newly assigned users (in-app PROJECT_USER_ASSIGNED notification)
+    const usersToNotifyOnCreate = validatedAssignments.filter((a) => a.userId !== admin.id)
+    if (usersToNotifyOnCreate.length > 0) {
+      try {
+        const userRows = await prisma.user.findMany({
+          where: { id: { in: usersToNotifyOnCreate.map((a) => a.userId) } },
+          select: { id: true, appRole: { select: { isSystemAdmin: true } } },
+        })
+        const filteredUsers = userRows.filter((u) => u.appRole?.isSystemAdmin !== true)
+        if (filteredUsers.length > 0) {
+          await Promise.allSettled(
+            filteredUsers.map(async (u) => {
+              await sendPushNotification({
+                type: 'PROJECT_USER_ASSIGNED',
+                title: 'Project Assignment',
+                message: `You have been added to Project: "${project.title}"`,
+                projectId: project.id,
+                projectName: project.title,
+                details: {
+                  __controls: { pinned: true, clearable: true, manualClearRequired: true },
+                  __meta: {
+                    targetUserId: u.id,
+                    authorUserId: admin.id,
+                    projectTitle: project.title,
+                  },
+                },
+              }).catch(() => {})
+            })
+          )
+        }
+      } catch (err) {
+        console.error('[PROJECT CREATE] Failed to create assignment notification:', err)
+      }
+    }
 
     const response = NextResponse.json({
       ...project,

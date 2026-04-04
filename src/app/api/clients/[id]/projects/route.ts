@@ -70,6 +70,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const projectIds = projects.map(p => p.id)
 
+    const photoCountByProjectId = new Map<string, number>()
+
+    if (projectIds.length > 0) {
+      const albumRows = await prisma.album.findMany({
+        where: { projectId: { in: projectIds } },
+        select: {
+          projectId: true,
+          _count: { select: { photos: true } },
+        },
+      })
+      for (const row of albumRows) {
+        const prev = photoCountByProjectId.get(row.projectId) ?? 0
+        photoCountByProjectId.set(row.projectId, prev + (row._count?.photos ?? 0))
+      }
+    }
+
     const toIsoOrNull = (dt: unknown): string | null => {
       if (dt instanceof Date) return dt.toISOString()
       if (typeof dt === 'string' && dt.length > 0) return dt
@@ -144,7 +160,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
       const lastAccessedAt = toIsoOrNull(project.lastAccessedAt) || maxDirectAccessByPid[project.id] || null
 
-      return { ...project, lastActivityAt, lastAccessedAt }
+      return { ...project, lastActivityAt, lastAccessedAt, photoCount: photoCountByProjectId.get(project.id) ?? 0 }
     })
 
     const response = NextResponse.json({ projects: projectsWithActivity })

@@ -24,8 +24,8 @@ export async function processAdminNotifications() {
       }
     })
 
-    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE') {
-      console.log('[ADMIN] Admin schedule is IMMEDIATE - notifications sent in real-time')
+    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE' || settings.adminNotificationSchedule === 'NONE') {
+      console.log('[ADMIN] Admin schedule is IMMEDIATE or NONE - no batched notifications')
       return
     }
 
@@ -112,6 +112,7 @@ export async function processAdminNotifications() {
     const projectGroups: Record<string, any> = {}
     for (const notification of validNotifications) {
       const projectId = notification.projectId
+      if (!projectId || !notification.project) continue
       if (!projectGroups[projectId]) {
         projectGroups[projectId] = {
           projectTitle: notification.project.title,

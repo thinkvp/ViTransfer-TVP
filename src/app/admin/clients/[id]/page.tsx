@@ -856,10 +856,10 @@ export default function ClientDetailPage() {
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Quote</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Issue date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Amount</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Project</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Status</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Amount</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-full">Project</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -926,10 +926,10 @@ export default function ClientDetailPage() {
                       <thead className="bg-muted/40">
                         <tr className="border-b border-border">
                           <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Invoice</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Issue date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Amount</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[200px]">Project</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[130px]">Status</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Issue date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Amount</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-full">Project</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-[140px]">Status</th>
                         </tr>
                       </thead>
                       <tbody>

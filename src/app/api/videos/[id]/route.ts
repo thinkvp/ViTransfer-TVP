@@ -988,19 +988,10 @@ export async function DELETE(
       // Continue with database deletion even if storage deletion fails
     }
 
-    // Delete associated comments (and cascading replies/files) before deleting the video.
-    // Note: Comment.videoId is not a FK to Video, so DB-level cascade cannot apply.
-    await prisma.$transaction([
-      prisma.comment.deleteMany({
-        where: {
-          projectId,
-          videoId: id,
-        },
-      }),
-      prisma.video.delete({
-        where: { id },
-      }),
-    ])
+    // Delete the video (associated comments cascade via FK on Comment.videoId)
+    await prisma.video.delete({
+      where: { id },
+    })
 
     // Update the stored project data total
     await recalculateAndStoreProjectTotalBytes(projectId)

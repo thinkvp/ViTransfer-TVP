@@ -67,7 +67,6 @@ export async function GET(
         avatarPath: true,
         displayColor: true,
         active: true,
-        role: true,
         appRoleId: true,
         appRole: {
           select: {
@@ -357,7 +356,6 @@ export async function PATCH(
         avatarPath: true,
         displayColor: true,
         active: true,
-        role: true,
         appRoleId: true,
         appRole: {
           select: {

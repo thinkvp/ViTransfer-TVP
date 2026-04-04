@@ -24,6 +24,7 @@ import { sanitizeComment } from '@/lib/comment-sanitization'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { isStartDateDue, parseProjectStartDateInput } from '@/lib/project-start-date'
+import { sendPushNotification } from '@/lib/push-notifications'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -96,7 +97,7 @@ const updateProjectSchema = z.object({
   guestLatestOnly: z.boolean().optional(),
   enableVideos: z.boolean().optional(),
   enablePhotos: z.boolean().optional(),
-  clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'WEEKLY']).optional(),
+  clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']).optional(),
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
@@ -1207,9 +1208,12 @@ export async function PATCH(
 
     // Notify newly assigned users (in-app PROJECT_USER_ASSIGNED notification)
     if (assignedUsersToSet !== null && previousAssignedUserIds !== null) {
+      const newAssignedUserIdSet = new Set(assignedUsersToSet.map((u) => u.userId))
       const newlyAddedUserIds = assignedUsersToSet
         .filter((u) => !previousAssignedUserIds.has(u.userId) && u.userId !== admin.id)
         .map((u) => u.userId)
+
+      const removedFromProjectIds = [...previousAssignedUserIds].filter((uid) => !newAssignedUserIdSet.has(uid))
 
       if (newlyAddedUserIds.length > 0) {
         try {
@@ -1221,32 +1225,45 @@ export async function PATCH(
           const filteredUsers = usersToNotify.filter((u) => u.appRole?.isSystemAdmin !== true)
           if (filteredUsers.length > 0) {
             await Promise.allSettled(
-              filteredUsers.map((u) =>
-                prisma.pushNotificationLog.create({
-                  data: {
-                    type: 'PROJECT_USER_ASSIGNED',
-                    projectId: project.id,
-                    success: true,
-                    statusCode: null,
-                    message: null,
-                    details: {
-                      __payload: {
-                        title: 'Project Assignment',
-                        message: `You have been added to "${project.title}"`,
-                      },
-                      __meta: {
-                        targetUserId: u.id,
-                        authorUserId: admin.id,
-                      },
+              filteredUsers.map(async (u) => {
+                await sendPushNotification({
+                  type: 'PROJECT_USER_ASSIGNED',
+                  title: 'Project Assignment',
+                  message: `You have been added to Project: "${project.title}"`,
+                  projectId: project.id,
+                  projectName: project.title,
+                  details: {
+                    __controls: { pinned: true, clearable: true, manualClearRequired: true },
+                    __meta: {
+                      targetUserId: u.id,
+                      authorUserId: admin.id,
+                      projectTitle: project.title,
                     },
                   },
-                })
-              )
+                }).catch(() => {})
+              })
             )
           }
         } catch (err) {
           console.error('[PROJECT UPDATE] Failed to create assignment notification:', err)
         }
+      }
+
+      // Auto-clear pending PROJECT_USER_ASSIGNED notifications for removed users
+      if (removedFromProjectIds.length > 0) {
+        await Promise.allSettled(
+          removedFromProjectIds.map((uid) =>
+            prisma.pushNotificationLog.deleteMany({
+              where: {
+                type: 'PROJECT_USER_ASSIGNED',
+                projectId: project.id,
+                AND: [
+                  { details: { path: ['__meta', 'targetUserId'], equals: uid } },
+                ],
+              },
+            })
+          )
+        ).catch(() => {})
       }
     }
 
@@ -1271,6 +1288,40 @@ export async function PATCH(
           changedById: admin.id,
         },
       })
+
+      // Clear PROJECT_USER_ASSIGNED notifications for users who can no longer see the new status.
+      // A user is "blinded" when their role's projectVisibility doesn't include the new status.
+      try {
+        const assignedUsers = await prisma.projectUser.findMany({
+          where: { projectId: project.id },
+          select: {
+            userId: true,
+            user: { select: { appRole: { select: { permissions: true, isSystemAdmin: true } } } },
+          },
+        })
+        const blindedUserIds = assignedUsers
+          .filter((pu) => {
+            if (pu.user?.appRole?.isSystemAdmin) return false
+            const perms = normalizeRolePermissions(pu.user?.appRole?.permissions)
+            return !perms.projectVisibility.statuses.includes(validatedBody.status as any)
+          })
+          .map((pu) => pu.userId)
+        if (blindedUserIds.length > 0) {
+          await Promise.allSettled(
+            blindedUserIds.map((uid) =>
+              prisma.pushNotificationLog.deleteMany({
+                where: {
+                  type: 'PROJECT_USER_ASSIGNED',
+                  projectId: project.id,
+                  AND: [{ details: { path: ['__meta', 'targetUserId'], equals: uid } }],
+                },
+              })
+            )
+          )
+        }
+      } catch (err) {
+        console.error('[PROJECT UPDATE] Error clearing notifications for status-blinded users:', err)
+      }
     }
 
     // NOTE: Project status changes no longer move storage folders.

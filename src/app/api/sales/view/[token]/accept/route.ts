@@ -193,6 +193,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             : null
 
           if (adminEmails.length > 0) {
+            const quoteSettings = await prisma.settings.findUnique({ where: { id: 'default' }, select: { adminEmailQuoteAccepted: true } })
+            if (quoteSettings?.adminEmailQuoteAccepted !== false) {
             await sendAdminQuoteAcceptedEmail({
               adminEmails,
               quoteNumber: quoteNumber || null,
@@ -202,6 +204,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               publicQuoteUrl,
               adminQuoteUrl,
             })
+            }
           }
         } catch {
           // best-effort

@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -48,11 +49,12 @@ function AvatarPreview({
 
   if (src && !imgError) {
     return (
-      <img
+      <Image
         src={src}
         alt={name || 'Avatar'}
         width={size}
         height={size}
+        unoptimized
         className={cn('rounded-full object-cover', className)}
         style={{ width: size, height: size }}
         onError={() => setImgError(true)}
@@ -342,6 +344,13 @@ export function AvatarUploadCrop({
                 accept="image/jpeg,image/jpg,image/png"
                 className="hidden"
                 onChange={handleFileChange}
+                autoComplete="off"
+                tabIndex={-1}
+                aria-hidden="true"
+                data-lpignore="true"
+                data-1p-ignore
+                data-bwignore="true"
+                data-form-type="other"
               />
               <Button
                 type="button"

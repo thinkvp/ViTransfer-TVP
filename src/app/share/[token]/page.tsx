@@ -709,26 +709,30 @@ export default function SharePage() {
           let streamToken720p = ''
           let streamToken1080p = ''
           let downloadToken = null
+          let originalStreamToken = ''
 
           if (video.approved) {
-            // Approval unlocks original download, but playback should stay on preview streams.
-            const [originalToken, token480, token720, token1080] = await Promise.all([
+            // Approval unlocks original download, but playback should use preview streams.
+            // Only request tokens for resolutions that have an actual preview file so that
+            // the VideoPlayer's quality selector reflects what is genuinely available.
+            const [origToken, token480, token720, token1080] = await Promise.all([
               fetchVideoToken(video.id, 'original'),
-              fetchVideoToken(video.id, '480p'),
-              fetchVideoToken(video.id, '720p'),
-              fetchVideoToken(video.id, '1080p'),
+              video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
+              video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
+              video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
             ])
-            downloadToken = originalToken || null
-
-            // Prefer preview streams; fall back to original only if previews are unavailable.
-            streamToken480p = token480 || originalToken
-            streamToken720p = token720 || originalToken
-            streamToken1080p = token1080 || originalToken
+            downloadToken = origToken || null
+            originalStreamToken = origToken || ''
+            // Do NOT fall back to origToken here; streamUrlOriginal covers the no-preview case.
+            streamToken480p = token480
+            streamToken720p = token720
+            streamToken1080p = token1080
           } else {
+            // Unapproved: only previews are accessible.
             const [token480, token720, token1080] = await Promise.all([
-              fetchVideoToken(video.id, '480p'),
-              fetchVideoToken(video.id, '720p'),
-              fetchVideoToken(video.id, '1080p'),
+              video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
+              video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
+              video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
             ])
             streamToken480p = token480
             streamToken720p = token720
@@ -759,6 +763,7 @@ export default function SharePage() {
             streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
+            streamUrlOriginal: originalStreamToken ? `/api/content/${originalStreamToken}` : '',
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
             timelineVttUrl,

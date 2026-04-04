@@ -2,7 +2,7 @@
 
 import { Label } from './ui/label'
 import { Input } from './ui/input'
-import { Zap, Clock, Calendar, CalendarDays, Check } from 'lucide-react'
+import { Zap, Clock, Calendar, BellOff, Check } from 'lucide-react'
 
 interface ScheduleSelectorProps {
   schedule: string
@@ -35,21 +35,11 @@ const scheduleOptions = [
     icon: Calendar
   },
   {
-    value: 'WEEKLY',
-    title: 'Weekly',
-    description: 'Once per week on your chosen day. Approvals are always sent immediately.',
-    icon: CalendarDays
+    value: 'NONE',
+    title: 'None',
+    description: 'Do not send comment notification emails.',
+    icon: BellOff
   }
-]
-
-const daysOfWeek = [
-  { value: 0, label: 'Sunday' },
-  { value: 1, label: 'Monday' },
-  { value: 2, label: 'Tuesday' },
-  { value: 3, label: 'Wednesday' },
-  { value: 4, label: 'Thursday' },
-  { value: 5, label: 'Friday' },
-  { value: 6, label: 'Saturday' }
 ]
 
 export function ScheduleSelector({
@@ -144,66 +134,6 @@ export function ScheduleSelector({
         </div>
       )}
 
-      {/* Weekly Day and Time Picker */}
-      {schedule === 'WEEKLY' && (
-        <div className="space-y-4 pt-2">
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Send day</Label>
-            <div className="grid grid-cols-7 gap-2">
-              {daysOfWeek.map((d) => (
-                <button
-                  key={d.value}
-                  type="button"
-                  onClick={() => onDayChange(d.value)}
-                  className={`
-                    px-2 py-2 rounded-md text-xs font-medium transition-all
-                    ${day === d.value
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                    }
-                  `}
-                >
-                  {d.label.slice(0, 3)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="time" className="text-sm font-medium">Send time</Label>
-            <Input
-              type="text"
-              id="time"
-              value={time}
-              onChange={(e) => {
-                const value = e.target.value
-                if (value === '' || /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
-                  onTimeChange(value)
-                } else if (/^([0-1]?[0-9]|2[0-3]):?[0-5]?[0-9]?$/.test(value)) {
-                  onTimeChange(value)
-                }
-              }}
-              onBlur={(e) => {
-                const value = e.target.value
-                if (value && !value.includes(':')) {
-                  if (value.length === 1 || value.length === 2) {
-                    onTimeChange(value.padStart(2, '0') + ':00')
-                  }
-                } else if (value && value.split(':')[1]?.length === 1) {
-                  const [h, m] = value.split(':')
-                  onTimeChange(h.padStart(2, '0') + ':' + m + '0')
-                }
-              }}
-              placeholder="16:00"
-              maxLength={5}
-              className="font-mono text-base"
-            />
-            <p className="text-xs text-muted-foreground">
-              24-hour format (e.g., 09:00, 16:00, 18:30)
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

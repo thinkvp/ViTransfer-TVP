@@ -246,6 +246,10 @@ export default function NotificationsBell() {
     }
   }
 
+  function resolveCardId(n: NotificationRow): string | null {
+    return typeof n?.details?.__meta?.cardId === 'string' ? n.details.__meta.cardId : null
+  }
+
   function resolveHref(n: NotificationRow): string | null {
     const explicit = typeof n?.details?.__link?.href === 'string' ? String(n.details.__link.href) : ''
     if (explicit.startsWith('/')) return explicit
@@ -472,7 +476,8 @@ export default function NotificationsBell() {
                   // This avoids the common "title + sentence saying the same thing" duplication.
                   const title = payloadMessage || payloadTitle || n.type
                   const href = resolveHref(n)
-                  const clickable = Boolean(href)
+                  const cardId = resolveCardId(n)
+                  const clickable = Boolean(href) || Boolean(cardId)
                   const pinned = isPinnedNotification(n)
                   const clearable = canClearNotification(n)
                   const content = (
@@ -503,9 +508,9 @@ export default function NotificationsBell() {
                   )
 
                   return (
-                    <div key={n.id} className="px-4 sm:px-5 py-3">
+                    <div key={n.id} className={clearable ? 'pl-3 sm:pl-4 pr-4 sm:pr-5 py-3 bg-amber-50/60 dark:bg-amber-950/20 border-l-[3px] border-l-amber-400 dark:border-l-amber-500' : 'px-4 sm:px-5 py-3'}>
                       {clearable ? (
-                        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-border">
+                        <div className="flex items-center justify-between gap-2 mb-2">
                           <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-500">
                             <Pin className="w-3 h-3 flex-shrink-0" />
                             <span>System Notification</span>
@@ -531,9 +536,16 @@ export default function NotificationsBell() {
                             type="button"
                             className="flex-1 text-left hover:bg-accent/30 rounded-md px-0 py-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() => {
-                              if (!href) return
                               setOpen(false)
-                              router.push(href)
+                              if (cardId) {
+                                if (typeof window !== 'undefined' && (window as any).__kanbanOpenCard) {
+                                  ;(window as any).__kanbanOpenCard(cardId)
+                                } else {
+                                  router.push(`/admin/projects?openTask=${encodeURIComponent(cardId)}`)
+                                }
+                              } else if (href) {
+                                router.push(href)
+                              }
                             }}
                           >
                             {content}

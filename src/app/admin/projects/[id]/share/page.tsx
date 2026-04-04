@@ -115,13 +115,17 @@ export default function AdminSharePage() {
 
         try {
           const [response480p, response720p, response1080p, responseOriginal] = await Promise.all([
-            (video.preview480Path || video.preview720Path || video.preview1080Path || video.originalStoragePath)
+            // Only request a preview token for a resolution that actually has a preview file.
+            // The content route does its own fallback when serving, but the player uses the
+            // presence of streamUrl480p/720p/1080p to decide which quality options to offer;
+            // we must not populate them with the original-video token when no preview exists.
+            video.preview480Path
               ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=480p&sessionId=${sessionId}`)
               : Promise.resolve(null),
-            (video.preview720Path || video.preview1080Path || video.preview480Path || video.originalStoragePath)
+            video.preview720Path
               ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=720p&sessionId=${sessionId}`)
               : Promise.resolve(null),
-            (video.preview1080Path || video.preview720Path || video.preview480Path || video.originalStoragePath)
+            video.preview1080Path
               ? apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=1080p&sessionId=${sessionId}`)
               : Promise.resolve(null),
             video.originalStoragePath
@@ -133,6 +137,7 @@ export default function AdminSharePage() {
           let streamToken720p = ''
           let streamToken1080p = ''
           let downloadToken = null
+          let originalStreamToken = ''
 
           if (response480p?.ok) {
             const data480p = await response480p.json()
@@ -152,9 +157,9 @@ export default function AdminSharePage() {
           if (responseOriginal?.ok) {
             const dataOriginal = await responseOriginal.json()
             downloadToken = dataOriginal.token
-            streamToken480p = streamToken480p || dataOriginal.token
-            streamToken720p = streamToken720p || dataOriginal.token
-            streamToken1080p = streamToken1080p || dataOriginal.token
+            originalStreamToken = dataOriginal.token || ''
+            // Do NOT fall back preview stream tokens to the original here.
+            // streamUrlOriginal in the tokenized object handles the "no previews" case.
           }
 
           let thumbnailUrl = null
@@ -188,6 +193,7 @@ export default function AdminSharePage() {
             streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
+            streamUrlOriginal: originalStreamToken ? `/api/content/${originalStreamToken}` : '',
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
             timelineVttUrl,

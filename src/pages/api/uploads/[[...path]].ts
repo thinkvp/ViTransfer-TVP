@@ -336,13 +336,29 @@ async function handleVideoUploadFinish(
 
   console.log(`[UPLOAD] Video ${videoId} upload complete, status updated to QUEUED`)
 
+  // If the project is CLOSED and auto-delete previews on close is enabled, skip preview
+  // generation entirely — there is no point transcoding previews that would be immediately
+  // deleted if the project were to stay closed.  A thumbnail-only job is still queued so
+  // the video has a poster image and enters READY status normally.
+  const [projectRecord, globalSettings] = await Promise.all([
+    prisma.project.findUnique({ where: { id: video.projectId }, select: { status: true } }),
+    prisma.settings.findUnique({ where: { id: 'default' }, select: { autoDeletePreviewsOnClose: true } }),
+  ])
+
+  const skipPreviews = projectRecord?.status === 'CLOSED' && !!globalSettings?.autoDeletePreviewsOnClose
+
   await videoQueue.add('process-video', {
     videoId: video.id,
     originalStoragePath: video.originalStoragePath,
     projectId: video.projectId,
+    ...(skipPreviews ? { thumbnailOnly: true } : {}),
   })
 
-  console.log(`[UPLOAD] Video ${videoId} queued for worker processing`)
+  if (skipPreviews) {
+    console.log(`[UPLOAD] Video ${videoId} is in a closed project with auto-delete previews enabled; queued for thumbnail-only processing`)
+  } else {
+    console.log(`[UPLOAD] Video ${videoId} queued for worker processing`)
+  }
 
   // Enqueue background Dropbox upload (runs in parallel with video processing)
   if (isDropbox) {

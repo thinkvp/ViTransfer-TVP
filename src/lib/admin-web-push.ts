@@ -184,6 +184,12 @@ async function sendToSubscription(sub: { endpoint: string; p256dh: string; auth:
 const PROJECT_PUSH_TYPES = ['CLIENT_COMMENT', 'ADMIN_SHARE_COMMENT', 'VIDEO_APPROVAL', 'INTERNAL_COMMENT']
 const SALES_PUSH_TYPES = ['SALES_QUOTE_VIEWED', 'SALES_QUOTE_ACCEPTED', 'SALES_INVOICE_VIEWED', 'SALES_INVOICE_PAID', 'SALES_REMINDER_INVOICE_OVERDUE', 'SALES_REMINDER_QUOTE_EXPIRING']
 
+// Kanban task comment push — scoped to card members with receiveNotifications=true
+const KANBAN_PUSH_TYPES = ['TASK_COMMENT']
+
+// User assignment push — scoped to the target user only for browser push
+const USER_ASSIGNMENT_PUSH_TYPES = ['TASK_USER_ASSIGNED', 'PROJECT_USER_ASSIGNED']
+
 // Share-page-gated project types: only delivered to users with 'accessSharePage' in their role.
 const SHARE_PAGE_GATED_PUSH_TYPES = new Set(['CLIENT_COMMENT', 'ADMIN_SHARE_COMMENT', 'VIDEO_APPROVAL'])
 
@@ -208,6 +214,15 @@ export async function sendBrowserPushToEligibleUsers(payload: PushNotificationPa
   const projectId = payload.projectId ?? null
   const isProjectType = PROJECT_PUSH_TYPES.includes(payload.type)
   const isSalesType = SALES_PUSH_TYPES.includes(payload.type)
+  const isKanbanType = KANBAN_PUSH_TYPES.includes(payload.type)
+  const isUserAssignmentType = USER_ASSIGNMENT_PUSH_TYPES.includes(payload.type)
+
+  // For user-assignment push, deliver only to the specific targetUserId.
+  let assignmentTargetUserId: string | null = null
+  if (isUserAssignmentType) {
+    assignmentTargetUserId = (payload.details as any)?.__meta?.targetUserId ?? null
+    if (!assignmentTargetUserId) return
+  }
 
   // For project-scoped events, pre-fetch the assigned user IDs so we avoid
   // sending to users who don't have access to that specific project.
@@ -218,6 +233,18 @@ export async function sendBrowserPushToEligibleUsers(payload: PushNotificationPa
       select: { userId: true },
     })
     assignedProjectUserIds = new Set(rows.map((r) => r.userId))
+  }
+
+  // For kanban task comment events, find card members who have receiveNotifications=true.
+  let kanbanMemberUserIds: Set<string> | null = null
+  if (isKanbanType && payload.kanbanCardId) {
+    const members = await prisma.kanbanCardMember.findMany({
+      where: { cardId: payload.kanbanCardId, receiveNotifications: true },
+      select: { userId: true },
+    })
+    kanbanMemberUserIds = new Set(members.map((m) => m.userId))
+    // If no one has notifications enabled, skip sending entirely.
+    if (kanbanMemberUserIds.size === 0) return
   }
 
   const subs = await prisma.webPushSubscription.findMany({
@@ -242,7 +269,18 @@ export async function sendBrowserPushToEligibleUsers(payload: PushNotificationPa
     const role = (s as any).user?.appRole
     const isSystemAdmin = role?.isSystemAdmin === true
 
-    // System admins receive all notification types.
+    // User assignment notifications: deliver only to the specific target user.
+    if (isUserAssignmentType) {
+      return s.userId === assignmentTargetUserId
+    }
+
+    // Kanban task comments: only deliver to card members with receiveNotifications=true.
+    // This applies to all users including system admins — membership is the gate, not role.
+    if (isKanbanType) {
+      return kanbanMemberUserIds !== null && kanbanMemberUserIds.has(s.userId)
+    }
+
+    // System admins receive all other notification types.
     if (isSystemAdmin) return true
 
     // Non-system-admin: check menu-level entitlements.

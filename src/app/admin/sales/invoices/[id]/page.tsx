@@ -1,9 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
-import { Check, Download, Eye, Mail, Pencil, Trash2, X } from 'lucide-react'
+import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Copy, Download, Eye, GripVertical, Mail, Pencil, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -41,6 +41,8 @@ import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { formatDate } from '@/lib/utils'
+import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -59,8 +61,17 @@ function newLineItem(defaultTaxRatePercent: number, defaultTaxRateName?: string)
   }
 }
 
+function getTodayYmdLocal(): string {
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 export default function InvoiceDetailPage() {
   const params = useParams()
+  const router = useRouter()
   const id = useMemo(() => {
     const raw = (params as any)?.id as string | string[] | undefined
     if (typeof raw === 'string') return raw
@@ -133,6 +144,11 @@ export default function InvoiceDetailPage() {
   const [items, setItems] = useState<SalesLineItem[]>([])
   const [taxRates, setTaxRates] = useState<SalesTaxRate[]>([])
   const [payments, setPayments] = useState<SalesPayment[]>([])
+  const dragEnabledRef = useRef(false)
+  const dragIndexRef = useRef<number | null>(null)
+  const dragOverIndexRef = useRef<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [showPresetsModal, setShowPresetsModal] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -306,6 +322,17 @@ export default function InvoiceDetailPage() {
     setSendOpen(true)
   }
 
+  const onDuplicate = () => {
+    if (!invoice) return
+    const prefill = { notes, terms, items }
+    try {
+      sessionStorage.setItem('sales_invoice_prefill', JSON.stringify(prefill))
+    } catch {
+      // ignore storage errors
+    }
+    router.push('/admin/sales/invoices/new')
+  }
+
   useEffect(() => {
     const run = async () => {
       const c = await fetchClientOptions()
@@ -415,7 +442,7 @@ export default function InvoiceDetailPage() {
 
   const paidOnDisplay = useMemo((): string | null => {
     if (!paidOnYmd) return null
-    return paidOnYmd.replaceAll('-', '/')
+    return formatDate(paidOnYmd)
   }, [paidOnYmd])
 
   const effectiveStatus = useMemo((): InvoiceStatus => {
@@ -460,7 +487,7 @@ export default function InvoiceDetailPage() {
     }
 
     const details = entries
-      .map((e) => `${formatMoney(e.amountCents, getCurrencySymbol(settings.currencyCode))} on ${e.ymd.replaceAll('-', '/')}`)
+      .map((e) => `${formatMoney(e.amountCents, getCurrencySymbol(settings.currencyCode))} on ${formatDate(e.ymd)}`)
       .join(', ')
 
     return `Paid: ${details}`
@@ -651,13 +678,22 @@ export default function InvoiceDetailPage() {
           ) : null}
           <Button
             variant="outline"
+            onClick={onDuplicate}
+            aria-label="Duplicate invoice"
+            title="Duplicate invoice"
+            className="w-10 px-0"
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => void onViewPublic()}
             aria-label="View Invoice"
             title="View Invoice"
             className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Eye className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">View Invoice</span>
+            <span className="hidden sm:inline">View</span>
           </Button>
           <Button
             variant="outline"
@@ -667,7 +703,7 @@ export default function InvoiceDetailPage() {
             className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Mail className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Send Email</span>
+            <span className="hidden sm:inline">Email</span>
           </Button>
           <Button
             variant="outline"
@@ -677,7 +713,7 @@ export default function InvoiceDetailPage() {
             className="w-10 px-0 sm:w-auto sm:px-4"
           >
             <Download className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Download PDF</span>
+            <span className="hidden sm:inline">Download</span>
           </Button>
           <Button
             variant="destructive"
@@ -813,8 +849,54 @@ export default function InvoiceDetailPage() {
           {items.length === 0 ? (
             <div className="text-sm text-muted-foreground">No items yet.</div>
           ) : (
-            items.map((it) => (
-              <div key={it.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3">
+            items.map((it, idx) => (
+              <div
+                key={it.id}
+                draggable
+                onDragStart={(e) => {
+                  if (!dragEnabledRef.current) { e.preventDefault(); return }
+                  dragIndexRef.current = idx
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragEnd={() => {
+                  dragEnabledRef.current = false
+                  dragIndexRef.current = null
+                  dragOverIndexRef.current = null
+                  setDragOverIndex(null)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  dragOverIndexRef.current = idx
+                  setDragOverIndex(idx)
+                }}
+                onDragLeave={() => {
+                  if (dragOverIndexRef.current === idx) setDragOverIndex(null)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const from = dragIndexRef.current
+                  const to = dragOverIndexRef.current
+                  if (from !== null && to !== null && from !== to) {
+                    setItems((prev) => {
+                      const next = [...prev]
+                      const [moved] = next.splice(from, 1)
+                      next.splice(to, 0, moved)
+                      return next
+                    })
+                  }
+                  dragIndexRef.current = null
+                  dragOverIndexRef.current = null
+                  setDragOverIndex(null)
+                }}
+                className={`grid grid-cols-1 md:grid-cols-[auto_minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3${dragOverIndex === idx && dragIndexRef.current !== idx ? ' ring-2 ring-primary/50' : ''}`}
+              >
+                <div
+                  className="hidden md:flex items-center self-stretch cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
+                  onMouseDown={() => { dragEnabledRef.current = true }}
+                  onMouseUp={() => { dragEnabledRef.current = false }}
+                >
+                  <GripVertical className="w-4 h-4" />
+                </div>
                 <div className="space-y-1">
                   <Label>Item</Label>
                   <Input
@@ -926,9 +1008,14 @@ export default function InvoiceDetailPage() {
           )}
 
           <div className="flex justify-between items-center gap-2 flex-wrap">
-            <Button variant="outline" onClick={() => { const pr = taxRates.find((r) => r.isDefault); setItems((prev) => [...prev, newLineItem(settings.taxRatePercent, pr?.name)]) }}>
-              Add line
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" onClick={() => setShowPresetsModal(true)}>
+                Add items
+              </Button>
+              <Button variant="outline" onClick={() => { const pr = taxRates.find((r) => r.isDefault); setItems((prev) => [...prev, newLineItem(settings.taxRatePercent, pr?.name)]) }}>
+                Add line
+              </Button>
+            </div>
             <div className="text-sm">
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Subtotal</span>
@@ -985,6 +1072,15 @@ export default function InvoiceDetailPage() {
             }
           })()
         }}
+      />
+
+      <SalesLineItemPresetsModal
+        open={showPresetsModal}
+        onOpenChange={setShowPresetsModal}
+        taxRates={taxRates}
+        defaultTaxRatePercent={settings.taxRatePercent}
+        currencySymbol={getCurrencySymbol(settings.currencyCode)}
+        onImport={(newItems) => setItems((prev) => [...prev, ...newItems])}
       />
 
     </div>

@@ -455,8 +455,8 @@ export default function ProjectSettingsPage() {
         guestMode,
         guestLatestOnly,
         clientNotificationSchedule,
-        clientNotificationTime: (clientNotificationSchedule === 'DAILY' || clientNotificationSchedule === 'WEEKLY') ? clientNotificationTime : null,
-        clientNotificationDay: clientNotificationSchedule === 'WEEKLY' ? clientNotificationDay : null,
+        clientNotificationTime: clientNotificationSchedule === 'DAILY' ? clientNotificationTime : null,
+        clientNotificationDay: null,
       }
 
       // Changing preview content itself needs a full reprocess; resolution list changes alone do not.

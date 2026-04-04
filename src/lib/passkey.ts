@@ -382,7 +382,6 @@ export async function verifyPasskeyAuthentication(
             id: true,
             email: true,
             name: true,
-            role: true,
             active: true,
             appRoleId: true,
             appRole: {
@@ -464,7 +463,7 @@ export async function verifyPasskeyAuthentication(
       details: {
         userId: credential.user.id,
         email: credential.user.email,
-        role: credential.user.appRole?.name ?? credential.user.role,
+        role: credential.user.appRole?.name ?? 'Admin',
         credentialId: credential.id,
         deviceType: credential.deviceType,
       },
@@ -476,7 +475,6 @@ export async function verifyPasskeyAuthentication(
         id: credential.user.id,
         email: credential.user.email,
         name: credential.user.name,
-        role: credential.user.role,
         active: credential.user.active,
         appRoleId: credential.user.appRoleId,
         appRoleName: credential.user.appRole?.name ?? null,

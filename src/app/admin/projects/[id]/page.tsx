@@ -26,6 +26,7 @@ import { ProjectStorageUsage } from '@/components/ProjectStorageUsage'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ProjectInternalComments } from '@/components/ProjectInternalComments'
 import { ProjectKeyDates } from '@/components/ProjectKeyDates'
+import { ProjectTasks } from '@/components/ProjectTasks'
 import { ProjectSectionVisibilityToggle, useProjectSectionVisibility } from '@/components/ProjectSectionVisibilityToggle'
 import { centsToDollars, formatMoney, sumLineItemsTotal } from '@/lib/sales/money'
 import type { InvoiceStatus, QuoteStatus, SalesInvoice, SalesQuote } from '@/lib/sales/types'
@@ -775,6 +776,8 @@ export default function ProjectPage() {
                 </CardContent>
               </Card>
             )}
+
+            <ProjectTasks projectId={project.id} />
 
             {sectionVisibility.keyDates && (
               <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />

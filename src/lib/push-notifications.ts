@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { sendBrowserPushToEligibleUsers } from '@/lib/admin-web-push'
+import { buildAdminWebPushNotification } from '@/lib/admin-web-push-templates'
 
 export interface PushNotificationPayload {
   type:
@@ -13,6 +14,9 @@ export interface PushNotificationPayload {
     | 'ADMIN_SHARE_COMMENT'
     | 'VIDEO_APPROVAL'
     | 'INTERNAL_COMMENT'
+    | 'TASK_COMMENT'
+    | 'TASK_USER_ASSIGNED'
+    | 'PROJECT_USER_ASSIGNED'
     | 'SALES_QUOTE_VIEWED'
     | 'SALES_QUOTE_ACCEPTED'
     | 'SALES_INVOICE_VIEWED'
@@ -23,13 +27,15 @@ export interface PushNotificationPayload {
     | 'PASSWORD_RESET_SUCCESS'
   projectId?: string
   projectName?: string
+  kanbanCardId?: string
   title: string
   message: string
   details?: Record<string, any>
 }
 
 /**
- * Send a push notification via the configured service (Gotify, etc.)
+ * Send a push notification via all configured channels (Browser Push, Gotify/Ntfy).
+ * The master toggle and per-event toggles apply to ALL channels.
  */
 export async function sendPushNotification(payload: PushNotificationPayload): Promise<{ success: boolean; statusCode?: number; message?: string }> {
   try {
@@ -47,17 +53,28 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       },
     }
 
-    // Always attempt browser Web Push for system admins (best-effort).
-    // This is intentionally independent of Gotify configuration.
-    sendBrowserPushToEligibleUsers(payload).catch((err: any) => {
-      const code = typeof err?.code === 'string' ? err.code : ''
-      // Common when DB hasn't been migrated yet.
-      if (code === 'P2021' || code === 'P2022') {
-        console.warn('[WEB_PUSH] Web push tables/columns missing; run Prisma migrations.')
-        return
-      }
-      console.warn('[WEB_PUSH] Failed to send browser push:', err?.message ?? err)
-    })
+    // Check master toggle — when disabled, still log for the notification bell but skip all push delivery.
+    if (!settings?.enabled) {
+      await prisma.pushNotificationLog.create({
+        data: {
+          type: payload.type,
+          projectId: payload.projectId,
+          success: true,
+          statusCode: null,
+          message: 'Push delivery skipped (notifications disabled)',
+          details: {
+            ...baseDetails,
+            __delivery: {
+              attempted: false,
+              provider: settings?.provider ?? null,
+              enabled: false,
+              webhookConfigured: Boolean(settings?.webhookUrl),
+            },
+          },
+        },
+      })
+      return { success: true, message: 'Push delivery skipped (notifications disabled)' }
+    }
 
     // Check if this event type is enabled
     type ToggleKey =
@@ -68,11 +85,15 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       | 'notifySuccessfulShareAccess'
       | 'notifyGuestVideoLinkAccess'
       | 'notifyClientComments'
+      | 'notifyInternalComments'
+      | 'notifyTaskComments'
       | 'notifyVideoApproval'
+      | 'notifyUserAssignments'
       | 'notifySalesQuoteViewed'
       | 'notifySalesQuoteAccepted'
       | 'notifySalesInvoiceViewed'
       | 'notifySalesInvoicePaid'
+      | 'notifySalesReminders'
       | 'notifyPasswordResetRequested'
       | 'notifyPasswordResetSuccess'
 
@@ -84,52 +105,81 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'SHARE_ACCESS': 'notifySuccessfulShareAccess',
       'GUEST_VIDEO_LINK_ACCESS': 'notifyGuestVideoLinkAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
-      // Treat share-visible admin comments as part of the "comments" category.
       'ADMIN_SHARE_COMMENT': 'notifyClientComments',
-      // Internal comments are part of the admin comments category.
-      'INTERNAL_COMMENT': 'notifyClientComments',
+      'INTERNAL_COMMENT': 'notifyInternalComments',
+      'TASK_COMMENT': 'notifyTaskComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',
+      'PROJECT_USER_ASSIGNED': 'notifyUserAssignments',
+      'TASK_USER_ASSIGNED': 'notifyUserAssignments',
       'SALES_QUOTE_VIEWED': 'notifySalesQuoteViewed',
       'SALES_QUOTE_ACCEPTED': 'notifySalesQuoteAccepted',
       'SALES_INVOICE_VIEWED': 'notifySalesInvoiceViewed',
       'SALES_INVOICE_PAID': 'notifySalesInvoicePaid',
+      'SALES_REMINDER_INVOICE_OVERDUE': 'notifySalesReminders',
+      'SALES_REMINDER_QUOTE_EXPIRING': 'notifySalesReminders',
       'PASSWORD_RESET_REQUESTED': 'notifyPasswordResetRequested',
       'PASSWORD_RESET_SUCCESS': 'notifyPasswordResetSuccess',
     }
 
     const toggleKey = eventToggleMap[payload.type]
-    if (settings && toggleKey && !settings[toggleKey]) {
-      return { success: false, message: 'This notification type is disabled' }
-    }
-
-    // If not enabled or not configured, skip Gotify/webhook provider.
-    if (!settings?.enabled || !settings.webhookUrl || !settings.provider) {
-      // IMPORTANT: The admin UI notification bell is backed by PushNotificationLog.
-      // Disabling Gotify/webhook delivery should not disable in-app notification visibility.
+    if (settings && toggleKey && !(settings as any)[toggleKey]) {
+      // Still log for the bell, but skip all push delivery.
       await prisma.pushNotificationLog.create({
         data: {
           type: payload.type,
           projectId: payload.projectId,
           success: true,
           statusCode: null,
-          message: 'Push delivery skipped (provider disabled or not configured)',
+          message: `Push delivery skipped (${payload.type} notifications disabled)`,
           details: {
             ...baseDetails,
             __delivery: {
               attempted: false,
-              provider: settings?.provider ?? null,
-              enabled: Boolean(settings?.enabled),
-              webhookConfigured: Boolean(settings?.webhookUrl),
+              provider: settings.provider ?? null,
+              enabled: true,
+              eventDisabled: true,
             },
           },
         },
       })
-
-      return { success: true, message: 'Push delivery skipped (provider disabled or not configured)' }
+      return { success: false, message: 'This notification type is disabled' }
     }
 
-    // Build notification based on provider
-    const result = await sendToProvider(settings.provider, settings.webhookUrl, payload, settings.title)
+    // Send browser push (best-effort, fire-and-forget).
+    sendBrowserPushToEligibleUsers(payload).catch((err: any) => {
+      const code = typeof err?.code === 'string' ? err.code : ''
+      if (code === 'P2021' || code === 'P2022') {
+        console.warn('[WEB_PUSH] Web push tables/columns missing; run Prisma migrations.')
+        return
+      }
+      console.warn('[WEB_PUSH] Failed to send browser push:', err?.message ?? err)
+    })
+
+    // If Gotify/Ntfy webhook is not configured, just log for the bell.
+    if (!settings.webhookUrl || !settings.provider) {
+      await prisma.pushNotificationLog.create({
+        data: {
+          type: payload.type,
+          projectId: payload.projectId,
+          success: true,
+          statusCode: null,
+          message: 'Webhook delivery skipped (no provider configured)',
+          details: {
+            ...baseDetails,
+            __delivery: {
+              attempted: false,
+              provider: settings.provider ?? null,
+              enabled: true,
+              webhookConfigured: false,
+            },
+          },
+        },
+      })
+      return { success: true, message: 'Webhook delivery skipped (no provider configured)' }
+    }
+
+    // Send to webhook provider (Gotify/Ntfy)
+    const result = await sendToWebhook(settings.webhookUrl, payload)
 
     // Log the notification attempt
     await prisma.pushNotificationLog.create({
@@ -162,47 +212,16 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
 }
 
 /**
- * Send notification to the configured provider
+ * Send notification to a webhook endpoint (Gotify or Ntfy).
+ * Uses the same templates as Browser Push for consistent formatting.
  */
-async function sendToProvider(
-  provider: string,
+async function sendToWebhook(
   webhookUrl: string,
   payload: PushNotificationPayload,
-  titlePrefix?: string | null
-): Promise<{ success: boolean; statusCode?: number; message?: string }> {
-  if (provider === 'GOTIFY') {
-    return sendToGotify(webhookUrl, payload, titlePrefix)
-  }
-
-  return { success: false, message: `Unknown provider: ${provider}` }
-}
-
-/**
- * Send notification to Gotify
- * See: https://gotify.net/api-docs
- */
-async function sendToGotify(
-  webhookUrl: string,
-  payload: PushNotificationPayload,
-  titlePrefix?: string | null
 ): Promise<{ success: boolean; statusCode?: number; message?: string }> {
   try {
-    // Format the title with optional prefix
-    let title = payload.title
-    if (titlePrefix) {
-      title = `[${titlePrefix}] ${title}`
-    }
-
-    // Build the message with details (skip internal __ keys)
-    let message = payload.message
-    if (payload.details && Object.keys(payload.details).length > 0) {
-      const detailLines = Object.entries(payload.details)
-        .filter(([key]) => !key.startsWith('__'))
-        .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
-      if (detailLines.length > 0) {
-        message += '\n\n' + detailLines.join('\n')
-      }
-    }
+    // Use the same template as Browser Push for consistent notification content.
+    const formatted = buildAdminWebPushNotification(payload)
 
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -210,8 +229,8 @@ async function sendToGotify(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        title,
-        message,
+        title: formatted.title,
+        message: formatted.body,
         priority: getPriorityForType(payload.type),
       }),
     })
@@ -221,7 +240,7 @@ async function sendToGotify(
       return {
         success: false,
         statusCode: response.status,
-        message: `Gotify API returned ${response.status}: ${errorText}`,
+        message: `Webhook returned ${response.status}: ${errorText}`,
       }
     }
 
@@ -229,14 +248,14 @@ async function sendToGotify(
   } catch (error) {
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'Failed to send to Gotify',
+      message: error instanceof Error ? error.message : 'Failed to send to webhook',
     }
   }
 }
 
 /**
- * Get Gotify priority based on notification type
- * Priority: higher number = more important
+ * Get priority based on notification type (used by Gotify/Ntfy webhook).
+ * Priority: higher number = more important.
  */
 function getPriorityForType(type: string): number {
   switch (type) {

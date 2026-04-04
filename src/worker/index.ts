@@ -19,6 +19,7 @@ import { processAlbumZipDropboxUpload } from './album-zip-dropbox-upload-process
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processInternalCommentNotifications } from './internal-comment-notifications'
+import { processTaskCommentNotifications } from './task-comment-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { cleanupStaleTrackedDownloads } from '@/lib/download-tracking'
 import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
@@ -33,6 +34,7 @@ import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 import { runDropboxStorageConsistencyScanAndSyncNotification } from '@/lib/dropbox-storage-consistency'
 import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
+import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -44,7 +46,7 @@ async function hasRetriableNotificationFailures(): Promise<boolean> {
     where: {
       OR: [
         {
-          type: { in: ['CLIENT_COMMENT', 'INTERNAL_COMMENT'] },
+          type: { in: ['CLIENT_COMMENT', 'INTERNAL_COMMENT', 'TASK_COMMENT'] },
           sentToAdmins: false,
           adminFailed: false,
           adminAttempts: { lt: 3 },
@@ -390,6 +392,7 @@ async function main() {
       if (job.name === 'auto-start-projects-on-shooting-key-date') return true
       if (job.name === 'dropbox-storage-consistency-scan') return true
       if (job.name === 'orphan-project-files-scan') return true
+      if (job.name === 'notification-log-cleanup') return true
       return false
     })
 
@@ -552,6 +555,20 @@ async function main() {
     }
   )
 
+  // Notification log cleanup — purge PushNotificationLog entries older than 45 days (daily @ 02:30)
+  await notificationQueue.add(
+    'notification-log-cleanup',
+    {},
+    {
+      repeat: {
+        pattern: '30 2 * * *',
+      },
+      jobId: 'notification-log-cleanup',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Add repeatable daily job to pull QuickBooks data (if enabled)
   // Note: Schedule is configurable via Sales > Settings > QuickBooks.
   // Runs at the configured HH:MM server/container time (see TZ env var).
@@ -695,6 +712,24 @@ async function main() {
         return
       }
 
+      if (job.name === 'notification-log-cleanup') {
+        try {
+          const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000)
+          const result = await prisma.pushNotificationLog.deleteMany({
+            where: {
+              sentAt: { lt: cutoff },
+              type: { notIn: PINNED_SYSTEM_NOTIFICATION_TYPES as unknown as string[] },
+            },
+          })
+          if (result.count > 0) {
+            console.log(`[NOTIF-CLEANUP] Deleted ${result.count} notification log entries older than 45 days`)
+          }
+        } catch (e) {
+          console.error('[NOTIF-CLEANUP] Notification log cleanup failed:', e instanceof Error ? e.message : e)
+        }
+        return
+      }
+
       if (job.name === 'project-key-date-reminders') {
         await processProjectKeyDateReminders()
         return
@@ -717,7 +752,7 @@ async function main() {
         return
       }
 
-      const [pendingAdminCommentSummaries, pendingClientSummaries, pendingInternalCommentSummaries] =
+      const [pendingAdminCommentSummaries, pendingClientSummaries, pendingInternalCommentSummaries, pendingTaskCommentSummaries] =
         await Promise.all([
           prisma.notificationQueue.count({
             where: {
@@ -743,16 +778,25 @@ async function main() {
               adminAttempts: { lt: 3 },
             },
           }),
+          prisma.notificationQueue.count({
+            where: {
+              type: 'TASK_COMMENT',
+              sentToAdmins: false,
+              adminFailed: false,
+              adminAttempts: { lt: 3 },
+            },
+          }),
         ])
 
       console.log(
-        `Running scheduled notification check... (adminComment=${pendingAdminCommentSummaries}, client=${pendingClientSummaries}, internalComment=${pendingInternalCommentSummaries})`
+        `Running scheduled notification check... (adminComment=${pendingAdminCommentSummaries}, client=${pendingClientSummaries}, internalComment=${pendingInternalCommentSummaries}, taskComment=${pendingTaskCommentSummaries})`
       )
 
       await Promise.all([
         processAdminNotifications(),
         processClientNotifications(),
         processInternalCommentNotifications(),
+        processTaskCommentNotifications(),
       ])
 
       console.log('Notification check completed')

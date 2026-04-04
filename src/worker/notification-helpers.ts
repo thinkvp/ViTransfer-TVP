@@ -12,8 +12,6 @@ export function getPeriodString(schedule: string): string {
       return 'in the last hour'
     case 'DAILY':
       return 'today'
-    case 'WEEKLY':
-      return 'this week'
     default:
       return 'recently'
   }
@@ -53,23 +51,6 @@ export function shouldSendNow(
           dailyTarget.setDate(dailyTarget.getDate() - 1)
         }
         return dailyTarget
-
-      case 'WEEKLY':
-        if (!time || day === null) return null
-        const [weeklyHour, weeklyMin] = time.split(':').map(Number)
-        // Target is the most recent occurrence of the chosen day+time.
-        const weeklyTarget = new Date(now)
-        weeklyTarget.setHours(weeklyHour, weeklyMin, 0, 0)
-
-        const daysBack = (now.getDay() - day + 7) % 7
-        weeklyTarget.setDate(weeklyTarget.getDate() - daysBack)
-
-        // If it's the correct weekday but the time hasn't occurred yet, use last week.
-        if (weeklyTarget > now) {
-          weeklyTarget.setDate(weeklyTarget.getDate() - 7)
-        }
-
-        return weeklyTarget
 
       default:
         return null

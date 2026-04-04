@@ -44,7 +44,6 @@ export async function GET(request: NextRequest) {
         avatarPath: true,
         displayColor: true,
         active: true,
-        role: true,
         appRoleId: true,
         appRole: {
           select: {
@@ -205,7 +204,6 @@ export async function POST(request: NextRequest) {
         name: name || null,
         phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
         displayColor: normalizedDisplayColor,
-        role: 'ADMIN',
         appRoleId: roleRecord.id,
       },
       select: {
@@ -217,7 +215,6 @@ export async function POST(request: NextRequest) {
         avatarPath: true,
         displayColor: true,
         active: true,
-        role: true,
         appRoleId: true,
         appRole: {
           select: {

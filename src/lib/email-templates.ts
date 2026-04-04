@@ -385,3 +385,81 @@ export function generateProjectInviteInternalUsersEmail(data: ProjectInviteInter
     `,
   }).trim()
 }
+// ---------- Task Comment Summary Email ----------
+
+export interface TaskCommentSummaryTask {
+  cardTitle: string
+  dashboardUrl: string
+  comments: Array<{ authorName: string; authorEmail?: string | null; content: string }>
+}
+
+export interface TaskCommentSummaryEmailData {
+  companyName: string
+  recipientName?: string
+  period: string
+  companyLogoUrl?: string
+  mainCompanyDomain?: string | null
+  accentColor?: string
+  accentTextMode?: string
+  emailHeaderColor?: string
+  emailHeaderTextMode?: string
+  tasks: TaskCommentSummaryTask[]
+}
+
+export function generateTaskCommentSummaryEmail(data: TaskCommentSummaryEmailData): string {
+  const rawGreeting = data.recipientName ? data.recipientName : 'there'
+  const greeting = firstWordName(rawGreeting) || rawGreeting
+  const total = data.tasks.reduce((sum, t) => sum + t.comments.length, 0)
+  const taskCount = data.tasks.length
+
+  const tasksHtml = data.tasks.map((task) => {
+    const items = task.comments.map((c, index) => `
+      <div style="padding:10px 0;${index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''}">
+        <div style="margin-bottom:4px;">
+          <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(c.authorName)}</span>
+          ${c.authorEmail ? `<span style="font-size:12px; color:#6b7280; margin-left:6px;">${escapeHtml(c.authorEmail)}</span>` : ''}
+        </div>
+        <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(c.content || '')}</div>
+      </div>
+    `).join('')
+
+    return `
+      <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">
+        <div style="font-size:15px; font-weight:800; color:#111827; margin-bottom:8px;">Task: ${escapeHtml(task.cardTitle)}</div>
+        ${items}
+        <div style="margin-top:12px; text-align:center;">
+          <a href="${escapeHtml(task.dashboardUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 14, padding: '10px 22px', borderRadiusPx: 999, accent: data.accentColor, accentTextMode: data.accentTextMode })}">
+            Open Task Board<span style="font-size:16px;">→</span>
+          </a>
+        </div>
+      </div>
+    `
+  }).join('')
+
+  const dashboardUrl = data.tasks[0]?.dashboardUrl || '#'
+
+  return renderEmailShell({
+    companyName: data.companyName,
+    companyLogoUrl: data.companyLogoUrl,
+    headerGradient: data.emailHeaderColor || EMAIL_THEME.headerBackground,
+    headerTextColor: (data.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
+    title: 'Task Comments Summary',
+    subtitle: `${total} ${total === 1 ? 'comment' : 'comments'} across ${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} ${data.period}`,
+    mainCompanyDomain: data.mainCompanyDomain,
+    footerNote: data.companyName,
+    bodyContent: `
+      <p style="margin:0 0 20px; font-size:16px;">
+        Hi <strong>${escapeHtml(greeting)}</strong>,
+      </p>
+      <p style="margin:0 0 24px; font-size:15px;">
+        Here are the latest task comments:
+      </p>
+      ${tasksHtml}
+      <div style="text-align:center; margin:32px 0;">
+        <a href="${escapeHtml(dashboardUrl)}" style="${emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: data.accentColor, accentTextMode: data.accentTextMode })}">
+          Open Task Board
+        </a>
+      </div>
+    `,
+  }).trim()
+}

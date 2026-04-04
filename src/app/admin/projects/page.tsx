@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Download, Eye, FolderKanban, Image as ImageIcon, Layers, Plus, Video } from 'lucide-react'
@@ -10,6 +11,7 @@ import { apiFetch } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import KanbanBoard from '@/components/KanbanBoard'
 
 type Project = {
   id: string
@@ -59,9 +61,42 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [filteredProjects, setFilteredProjects] = useState<Project[] | null>(null)
   const [analyticsByProjectId, setAnalyticsByProjectId] = useState<Record<string, AnalyticsProject>>({})
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0)
 
   const permissions = normalizeRolePermissions(user?.permissions)
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
+
+  const handleBoardChanged = useCallback(() => {
+    setCalendarRefreshKey((k) => k + 1)
+  }, [])
+
+  const handleTaskClick = useCallback((taskId: string) => {
+    // Use the window function exposed by KanbanBoard
+    if (typeof window !== 'undefined' && (window as any).__kanbanOpenCard) {
+      ;(window as any).__kanbanOpenCard(taskId)
+    }
+  }, [])
+
+  // Handle openTask query param (from project detail page task click)
+  const searchParams = useSearchParams()
+  const openTaskHandled = useRef(false)
+  useEffect(() => {
+    const taskId = searchParams?.get('openTask')
+    if (taskId && !openTaskHandled.current) {
+      openTaskHandled.current = true
+      // Wait for KanbanBoard to mount and register __kanbanOpenCard
+      const tryOpen = () => {
+        if (typeof window !== 'undefined' && (window as any).__kanbanOpenCard) {
+          ;(window as any).__kanbanOpenCard(taskId)
+          // Clean the URL
+          window.history.replaceState({}, '', '/admin/projects')
+        } else {
+          setTimeout(tryOpen, 200)
+        }
+      }
+      setTimeout(tryOpen, 300)
+    }
+  }, [searchParams])
 
   const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20'
   const metricIconClassName = 'w-5 h-5 text-primary'
@@ -183,7 +218,8 @@ export default function AdminPage() {
             )}
           </div>
 
-          <Card className="mb-4">
+          <div className="space-y-4">
+          <Card>
             <CardContent className="p-3 sm:p-4">
               <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
                 <div className="flex items-center gap-2">
@@ -249,9 +285,12 @@ export default function AdminPage() {
             </CardContent>
           </Card>
 
-          <ProjectsDashboardKeyDates />
+          <KanbanBoard projects={[]} onBoardChanged={handleBoardChanged} />
+
+          <ProjectsDashboardKeyDates onTaskClick={handleTaskClick} refreshKey={calendarRefreshKey} />
 
           <div className="text-muted-foreground">No projects found.</div>
+          </div>
         </div>
       </div>
     )
@@ -278,74 +317,82 @@ export default function AdminPage() {
           )}
         </div>
 
-        <Card className="mb-4">
-          <CardContent className="p-3 sm:p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <FolderKanban className={metricIconClassName} />
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="p-3 sm:p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <FolderKanban className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Projects</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalProjects.toLocaleString()}</p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Projects</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalProjects.toLocaleString()}</p>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <Video className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Videos</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalVideos.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <Layers className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Versions</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalVersions.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <ImageIcon className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Photos</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalPhotos.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <Eye className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Visits</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalVisits.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={metricIconWrapperClassName}>
+                    <Download className={metricIconClassName} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Downloads</p>
+                    <p className="text-base font-semibold tabular-nums truncate">{overview.totalDownloads.toLocaleString()}</p>
+                  </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Video className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Videos</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalVideos.toLocaleString()}</p>
-                </div>
-              </div>
+          <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} analyticsMap={analyticsByProjectId} />
 
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Layers className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Versions</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalVersions.toLocaleString()}</p>
-                </div>
-              </div>
+          <KanbanBoard
+            projects={(projects || []).map((p) => ({ id: p.id, title: p.title }))}
+            onBoardChanged={handleBoardChanged}
+          />
 
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <ImageIcon className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Photos</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalPhotos.toLocaleString()}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Eye className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Visits</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalVisits.toLocaleString()}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Download className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Downloads</p>
-                  <p className="text-base font-semibold tabular-nums truncate">{overview.totalDownloads.toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} analyticsMap={analyticsByProjectId} />
-        <ProjectsDashboardKeyDates />
+          <ProjectsDashboardKeyDates onTaskClick={handleTaskClick} refreshKey={calendarRefreshKey} />
+        </div>
       </div>
     </div>
   )

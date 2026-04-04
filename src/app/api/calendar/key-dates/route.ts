@@ -164,6 +164,30 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }],
   })
 
+  // Fetch kanban task due dates visible to this user
+  const taskRows = await prisma.kanbanCard.findMany({
+    where: {
+      dueDate: { not: null, gte: new Date(today), lte: new Date(end) },
+      ...(isSystemAdmin
+        ? {}
+        : {
+            OR: [
+              { members: { some: { userId: user.id } } },
+              { project: { assignedUsers: { some: { userId: user.id } } } },
+            ],
+          }),
+    },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      dueDate: true,
+      updatedAt: true,
+      project: { select: { title: true, companyName: true } },
+    },
+    orderBy: { dueDate: 'asc' },
+  })
+
   const now = new Date()
   const dtstamp = formatDtstampUtc(now)
   const tz = getCalendarTimeZone()
@@ -242,6 +266,28 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    calLines.push('END:VEVENT')
+  }
+
+  for (const t of taskRows) {
+    if (!t.dueDate) continue
+    const taskDate = t.dueDate.toISOString().slice(0, 10)
+    const projectLabel = t.project?.companyName || t.project?.title
+    const summary = projectLabel ? `Task: ${t.title} (${projectLabel})` : `Task: ${t.title}`
+
+    calLines.push('BEGIN:VEVENT')
+    calLines.push(icsProperty('UID', `${t.id}@vitransfer-task`))
+    calLines.push(icsProperty('DTSTAMP', dtstamp))
+    calLines.push(icsProperty('LAST-MODIFIED', formatDtstampUtc(t.updatedAt)))
+    const summaryProp = icsTextProperty('SUMMARY', summary)
+    if (summaryProp) calLines.push(summaryProp)
+    const desc = icsTextProperty('DESCRIPTION', t.description)
+    if (desc) calLines.push(desc)
+
+    const start = ymdToCompact(taskDate)
+    const endExclusive = ymdToCompact(nextDayYmdUtc(taskDate))
+    calLines.push(icsProperty('DTSTART;VALUE=DATE', start))
+    calLines.push(icsProperty('DTEND;VALUE=DATE', endExclusive))
     calLines.push('END:VEVENT')
   }
 

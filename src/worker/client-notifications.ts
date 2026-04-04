@@ -65,8 +65,8 @@ export async function processClientNotifications() {
       const pending = project.notificationQueue.length
       console.log(`[CLIENT] "${project.title}": ${project.clientNotificationSchedule} at ${project.clientNotificationTime || 'N/A'} (${pending} pending)`)
 
-      if (project.clientNotificationSchedule === 'IMMEDIATE') {
-        console.log('[CLIENT]   Skip - IMMEDIATE notifications sent instantly')
+      if (project.clientNotificationSchedule === 'IMMEDIATE' || project.clientNotificationSchedule === 'NONE') {
+        console.log('[CLIENT]   Skip - IMMEDIATE or NONE, not a batch schedule')
         continue
       }
 

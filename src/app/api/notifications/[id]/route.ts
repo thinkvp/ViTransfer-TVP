@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import {
 	isClearablePinnedNotificationDetails,
 } from '@/lib/pinned-system-notifications'
@@ -12,18 +12,19 @@ const noStoreHeaders = {
 	Pragma: 'no-cache',
 } as const
 
+// Notification types that any authenticated user can clear if they are the target.
+const USER_CLEARABLE_TYPES = ['TASK_USER_ASSIGNED', 'PROJECT_USER_ASSIGNED']
+
 export async function DELETE(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const authResult = await requireApiAdmin(request)
+	const authResult = await requireApiUser(request)
 	if (authResult instanceof Response) {
 		return authResult
 	}
 
-	if (authResult.appRoleIsSystemAdmin !== true) {
-		return NextResponse.json({ error: 'Forbidden' }, { status: 403, headers: noStoreHeaders })
-	}
+	const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
 
 	try {
 		const { id } = await params
@@ -34,6 +35,7 @@ export async function DELETE(
 			},
 			select: {
 				id: true,
+				type: true,
 				details: true,
 			},
 		})
@@ -47,6 +49,16 @@ export async function DELETE(
 				{ error: 'Notification cannot be cleared manually' },
 				{ status: 400, headers: noStoreHeaders }
 			)
+		}
+
+		// System admins can clear any clearable pinned notification.
+		// Non-admins can only clear their own user-targeted assignment notifications.
+		if (!isSystemAdmin) {
+			const isUserClearable = USER_CLEARABLE_TYPES.includes(notification.type ?? '')
+			const targetUserId = (notification.details as any)?.__meta?.targetUserId
+			if (!isUserClearable || targetUserId !== authResult.id) {
+				return NextResponse.json({ error: 'Forbidden' }, { status: 403, headers: noStoreHeaders })
+			}
 		}
 
 		await prisma.pushNotificationLog.delete({
