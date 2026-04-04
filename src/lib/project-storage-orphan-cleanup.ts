@@ -195,7 +195,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   const exactFilePaths = new Set<string>()
   const protectedDirectoryPrefixes = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums, clientFiles, userFiles, settings] = await Promise.all([
+  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums, clientFiles, userFiles, users, settings] = await Promise.all([
     prisma.video.findMany({
       select: {
         projectId: true,
@@ -232,6 +232,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     }),
     prisma.clientFile.findMany({ select: { storagePath: true } }),
     prisma.userFile.findMany({ select: { storagePath: true } }),
+    prisma.user.findMany({ select: { avatarPath: true } }),
     prisma.settings.findUnique({
       where: { id: 'default' },
       select: {
@@ -265,6 +266,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const attachment of projectEmailAttachments) addResolvedFilePath(exactFilePaths, attachment.storagePath)
   for (const clientFile of clientFiles) addResolvedFilePath(exactFilePaths, clientFile.storagePath)
   for (const userFile of userFiles) addResolvedFilePath(exactFilePaths, userFile.storagePath)
+  for (const user of users) addResolvedFilePath(exactFilePaths, user.avatarPath)
 
   addResolvedFilePath(exactFilePaths, settings?.companyLogoPath)
   addResolvedFilePath(exactFilePaths, settings?.darkLogoPath)
