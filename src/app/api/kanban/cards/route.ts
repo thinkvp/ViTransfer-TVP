@@ -12,6 +12,7 @@ const createCardSchema = z.object({
   description: z.string().max(5000).optional().nullable(),
   columnId: z.string().min(1),
   projectId: z.string().optional().nullable(),
+  clientId: z.string().optional().nullable(),
   memberIds: z.array(z.string()).optional(),
   dueDate: z.string().datetime().optional().nullable(),
 })
@@ -26,6 +27,9 @@ const cardInclude = {
   },
   project: {
     select: { id: true, title: true },
+  },
+  client: {
+    select: { id: true, name: true },
   },
   createdBy: {
     select: { id: true, name: true, email: true },
@@ -60,6 +64,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Validate client exists if provided
+  if (parsed.data.clientId) {
+    const client = await prisma.client.findUnique({ where: { id: parsed.data.clientId } })
+    if (!client) {
+      return NextResponse.json({ error: 'Client not found' }, { status: 404 })
+    }
+  }
+
   // Get next position in the column
   const maxPos = await prisma.kanbanCard.aggregate({
     where: { columnId: parsed.data.columnId },
@@ -75,6 +87,7 @@ export async function POST(request: NextRequest) {
       description: parsed.data.description ?? null,
       columnId: parsed.data.columnId,
       projectId: parsed.data.projectId ?? null,
+      clientId: parsed.data.clientId ?? null,
       createdById: authResult.id,
       dueDate: parsed.data.dueDate ? new Date(parsed.data.dueDate) : null,
       position: nextPosition,

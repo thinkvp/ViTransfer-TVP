@@ -379,16 +379,6 @@ export default function AdminHeader() {
               <User className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
             <ThemeToggle buttonClassName="w-9 sm:w-10" iconClassName="h-4 w-4 sm:h-5 sm:w-5" />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={logout}
-              aria-label="Sign Out"
-              title="Sign Out"
-              className="p-2 w-9 sm:w-10"
-            >
-              <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
-            </Button>
             {user.isSystemAdmin && <ClientActivityEye />}
             <RunningJobsBell />
             <NotificationsBell />
@@ -437,6 +427,16 @@ export default function AdminHeader() {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Role</Label>
                 <p className="text-sm font-medium">{profileData.appRole?.name || '—'}</p>
+              </div>
+              <div className="col-span-2 pt-1">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => { setShowProfileModal(false); logout() }}
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Sign Out
+                </Button>
               </div>
               {profileData.phone && (
                 <div className="space-y-1">

@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CalendarDays, MessageSquare } from 'lucide-react'
+import { CalendarDays, MessageSquare, Plus } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDate } from '@/lib/utils'
 import { CardDialog, type KanbanCardData, type KanbanColumnData, type KanbanUser } from '@/components/KanbanBoard'
@@ -38,14 +39,27 @@ type TaskCard = {
   _count: { comments: number }
 }
 
-export function ProjectTasks({ projectId }: { projectId: string }) {
+export function ProjectTasks({
+  projectId,
+  clientId,
+  clientName,
+  canEdit,
+}: {
+  projectId: string
+  clientId?: string | null
+  clientName?: string | null
+  canEdit?: boolean
+}) {
   const [tasks, setTasks] = useState<TaskCard[]>([])
   const [loading, setLoading] = useState(true)
   const [editingTask, setEditingTask] = useState<KanbanCardData | null>(null)
+  const [isAddingTask, setIsAddingTask] = useState(false)
   const [boardColumns, setBoardColumns] = useState<KanbanColumnData[]>([])
   const [boardUsers, setBoardUsers] = useState<KanbanUser[]>([])
   const [boardProjects, setBoardProjects] = useState<Array<{ id: string; title: string }>>([])
   const boardLoadedRef = useRef(false)
+  const boardColumnsRef = useRef<KanbanColumnData[]>([])
+  const boardProjectsRef = useRef<Array<{ id: string; title: string }>>([])
 
   const loadTasks = useCallback(async () => {
     try {
@@ -76,7 +90,9 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
       ])
       if (colRes.ok) {
         const data = await colRes.json()
-        setBoardColumns(data.columns || [])
+        const cols = data.columns || []
+        boardColumnsRef.current = cols
+        setBoardColumns(cols)
       }
       if (userRes.ok) {
         const data = await userRes.json()
@@ -92,7 +108,9 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
       if (projRes.ok) {
         const data = await projRes.json()
         const list = (data.projects || data || []) as any[]
-        setBoardProjects(list.map((p: any) => ({ id: p.id, title: p.title })))
+        const projs = list.map((p: any) => ({ id: p.id, title: p.title }))
+        boardProjectsRef.current = projs
+        setBoardProjects(projs)
       }
     } catch {
       // Non-critical
@@ -108,12 +126,14 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
       position: task.position,
       columnId: task.columnId,
       projectId: task.projectId,
+      clientId: null,
       members: task.members.map((m) => ({
         userId: m.userId,
         receiveNotifications: m.receiveNotifications !== false,
         user: m.user,
       })),
       project: task.project,
+      client: null,
       createdBy: task.createdBy ?? { id: '', name: null, email: '' },
       dueDate: task.dueDate,
       archivedAt: task.archivedAt,
@@ -126,19 +146,56 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
 
   const handleSaveTask = useCallback(async (data: any) => {
     if (!editingTask) return
-    const res = await apiFetch(`/api/kanban/cards/${editingTask.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!res.ok) throw new Error('Failed to save task')
+    if (!editingTask.id) {
+      // New task — POST to create
+      const res = await apiFetch('/api/kanban/cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      if (!res.ok) throw new Error('Failed to create task')
+    } else {
+      // Existing task — PATCH to update
+      const res = await apiFetch(`/api/kanban/cards/${editingTask.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      if (!res.ok) throw new Error('Failed to save task')
+    }
     setEditingTask(null)
+    setIsAddingTask(false)
     boardLoadedRef.current = false
     await loadTasks()
   }, [editingTask, loadTasks])
 
+  const handleAddTask = useCallback(async () => {
+    await loadBoardData()
+    const firstColumn = boardColumnsRef.current[0]
+    if (!firstColumn) return
+    const newCard: KanbanCardData = {
+      id: '',
+      title: '',
+      description: null,
+      position: 0,
+      columnId: firstColumn.id,
+      projectId,
+      clientId: clientId ?? null,
+      members: [],
+      project: boardProjectsRef.current.find((p) => p.id === projectId) ?? null,
+      client: clientId && clientName ? { id: clientId, name: clientName } : null,
+      createdBy: { id: '', name: null, email: '' },
+      dueDate: null,
+      archivedAt: null,
+      _count: { comments: 0 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    setIsAddingTask(true)
+    setEditingTask(newCard)
+  }, [loadBoardData, projectId, clientId, clientName])
+
   if (loading) return null
-  if (tasks.length === 0) return null
 
   const MAX_AVATARS = 4
 
@@ -146,18 +203,42 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
     <>
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="text-base font-medium">Tasks</div>
-            <span className="text-sm text-muted-foreground">({tasks.length})</span>
+          <div className="flex items-start justify-between gap-3 sm:items-center mb-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="text-base font-medium">Tasks</div>
+              {tasks.length > 0 && (
+                <span className="text-sm text-muted-foreground">({tasks.length})</span>
+              )}
+            </div>
+            {canEdit && (
+              <div className="flex justify-end shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleAddTask()}
+                  disabled={isAddingTask}
+                  aria-label="Add Task"
+                >
+                  <Plus className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Add Task</span>
+                </Button>
+              </div>
+            )}
           </div>
 
-          {/* Desktop header */}
-          <div className="hidden md:grid md:grid-cols-[minmax(0,6fr)_1.5fr_1.5fr_1.5fr] gap-2 px-2 pb-1 text-xs font-medium text-muted-foreground">
-            <span>Title / Status</span>
-            <span className="text-center">Comments</span>
-            <span>Due Date</span>
-            <span>Users</span>
-          </div>
+          {tasks.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-4 text-center border border-dashed rounded-lg">
+              No tasks added yet.
+            </div>
+          ) : (
+            <>
+              {/* Desktop header */}
+              <div className="hidden md:grid md:grid-cols-[minmax(0,6fr)_1.5fr_1.5fr_1.5fr] gap-2 px-2 pb-1 text-xs font-medium text-muted-foreground">
+                <span>Title / Status</span>
+                <span className="text-center">Comments</span>
+                <span>Due Date</span>
+                <span>Users</span>
+              </div>
 
           <div className="space-y-1 mt-1">
             {tasks.map((task) => {
@@ -297,6 +378,8 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
               )
             })}
           </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -308,7 +391,7 @@ export function ProjectTasks({ projectId }: { projectId: string }) {
           users={boardUsers}
           projects={boardProjects}
           onSave={handleSaveTask}
-          onClose={() => setEditingTask(null)}
+          onClose={() => { setEditingTask(null); setIsAddingTask(false) }}
           isAdmin={true}
         />
       )}

@@ -72,6 +72,8 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 
 ### Sales & CRM Integration
 
+Planning note: the staged roadmap for expanding Sales into a broader Finance area is documented in [docs/finance-roadmap.md](docs/finance-roadmap.md).
+
 <p align="center">
   <img src="docs/screenshots/Sales Dashboard.jpg" alt="Sales Dashboard" width="800">
   <br><em>Sales dashboard with invoice tracking and QuickBooks integration</em>

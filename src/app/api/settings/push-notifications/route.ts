@@ -23,9 +23,6 @@ export async function GET(request: NextRequest) {
       create: {
         id: 'default',
         enabled: false,
-        provider: null,
-        webhookUrl: null,
-        title: null,
         notifyUnauthorizedOTP: true,
         notifyFailedAdminLogin: true,
         notifySuccessfulAdminLogin: true,
@@ -105,17 +102,10 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json()
 
-    const provider = typeof body?.provider === 'string' && body.provider.trim() ? body.provider.trim() : null
-    const webhookUrl = typeof body?.webhookUrl === 'string' && body.webhookUrl.trim() ? body.webhookUrl.trim() : null
-    const title = typeof body?.title === 'string' && body.title.trim() ? body.title.trim() : null
-
     const settings = await prisma.pushNotificationSettings.upsert({
       where: { id: 'default' },
       update: {
         enabled: body.enabled ?? false,
-        provider,
-        webhookUrl,
-        title,
         notifyUnauthorizedOTP: body.notifyUnauthorizedOTP ?? true,
         notifyFailedAdminLogin: body.notifyFailedAdminLogin ?? true,
         notifySuccessfulAdminLogin: body.notifySuccessfulAdminLogin ?? true,
@@ -138,9 +128,6 @@ export async function PATCH(request: NextRequest) {
       create: {
         id: 'default',
         enabled: body.enabled ?? false,
-        provider,
-        webhookUrl,
-        title,
         notifyUnauthorizedOTP: body.notifyUnauthorizedOTP ?? true,
         notifyFailedAdminLogin: body.notifyFailedAdminLogin ?? true,
         notifySuccessfulAdminLogin: body.notifySuccessfulAdminLogin ?? true,

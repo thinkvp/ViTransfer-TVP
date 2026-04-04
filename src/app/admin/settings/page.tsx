@@ -113,32 +113,6 @@ interface BlockedDomain {
   createdAt: string
 }
 
-interface PushNotificationSettings {
-  id: string
-  enabled: boolean
-  provider: string | null
-  webhookUrl: string | null
-  title: string | null
-  notifyUnauthorizedOTP: boolean
-  notifyFailedAdminLogin: boolean
-  notifySuccessfulAdminLogin: boolean
-  notifyFailedSharePasswordAttempt: boolean
-  notifySuccessfulShareAccess: boolean
-  notifyGuestVideoLinkAccess: boolean
-  notifyClientComments: boolean
-  notifyInternalComments: boolean
-  notifyTaskComments: boolean
-  notifyVideoApproval: boolean
-  notifyUserAssignments: boolean
-  notifySalesQuoteViewed: boolean
-  notifySalesQuoteAccepted: boolean
-  notifySalesInvoiceViewed: boolean
-  notifySalesInvoicePaid: boolean
-  notifySalesReminders: boolean
-  notifyPasswordResetRequested: boolean
-  notifyPasswordResetSuccess: boolean
-}
-
 const SETTING_SECTIONS = [
   { id: 'company-branding', label: 'Company Branding', icon: Palette },
   { id: 'domain', label: 'Domain Configuration', icon: Globe },
@@ -277,10 +251,7 @@ export default function GlobalSettingsPage() {
   const [blocklistsLoading, setBlocklistsLoading] = useState(false)
 
   // Form state for push notifications
-  const [pushNotificationSettings, setPushNotificationSettings] = useState<PushNotificationSettings | null>(null)
   const [pushEnabled, setPushEnabled] = useState(false)
-  const [pushWebhookEnabled, setPushWebhookEnabled] = useState(false)
-  const [pushWebhookUrl, setPushWebhookUrl] = useState('')
   const [pushNotifyUnauthorizedOTP, setPushNotifyUnauthorizedOTP] = useState(true)
   const [pushNotifyFailedAdminLogin, setPushNotifyFailedAdminLogin] = useState(true)
   const [pushNotifySuccessfulAdminLogin, setPushNotifySuccessfulAdminLogin] = useState(true)
@@ -354,7 +325,7 @@ export default function GlobalSettingsPage() {
     shareSessionRateLimit, shareTokenTtlSeconds, passwordAttempts, sessionTimeoutValue,
     sessionTimeoutUnit, trackAnalytics, trackSecurityLogs, viewSecurityEvents,
     maxInternalCommentsPerProject, maxCommentsPerVideoVersion, maxProjectRecipients,
-    maxProjectFilesPerProject, pushEnabled, pushWebhookEnabled, pushWebhookUrl,
+    maxProjectFilesPerProject, pushEnabled,
     pushNotifyUnauthorizedOTP, pushNotifyFailedAdminLogin, pushNotifySuccessfulAdminLogin,
     pushNotifyFailedSharePasswordAttempt, pushNotifySuccessfulShareAccess,
     pushNotifyGuestVideoLinkAccess, pushNotifyClientComments, pushNotifyInternalComments,
@@ -486,12 +457,9 @@ export default function GlobalSettingsPage() {
           setError(pushErr.error || 'Failed to load push notification settings')
         } else {
           const pushData = await pushResponse.json()
-          setPushNotificationSettings(pushData)
 
           // Set push notification form values
           setPushEnabled(pushData.enabled ?? false)
-          setPushWebhookEnabled(Boolean(pushData.provider && pushData.webhookUrl))
-          setPushWebhookUrl(pushData.webhookUrl || '')
           setPushNotifyUnauthorizedOTP(pushData.notifyUnauthorizedOTP ?? true)
           setPushNotifyFailedAdminLogin(pushData.notifyFailedAdminLogin ?? true)
           setPushNotifySuccessfulAdminLogin(pushData.notifySuccessfulAdminLogin ?? true)
@@ -811,9 +779,6 @@ export default function GlobalSettingsPage() {
       // Save push notification settings
       const pushUpdates = {
         enabled: pushEnabled,
-        provider: pushWebhookEnabled ? 'GOTIFY' : null,
-        webhookUrl: pushWebhookEnabled ? (pushWebhookUrl || null) : null,
-        title: null,
         notifyUnauthorizedOTP: pushNotifyUnauthorizedOTP,
         notifyFailedAdminLogin: pushNotifyFailedAdminLogin,
         notifySuccessfulAdminLogin: pushNotifySuccessfulAdminLogin,
@@ -1311,10 +1276,6 @@ export default function GlobalSettingsPage() {
           <PushNotificationsSection
             enabled={pushEnabled}
             setEnabled={setPushEnabled}
-            webhookEnabled={pushWebhookEnabled}
-            setWebhookEnabled={setPushWebhookEnabled}
-            webhookUrl={pushWebhookUrl}
-            setWebhookUrl={setPushWebhookUrl}
             notifyUnauthorizedOTP={pushNotifyUnauthorizedOTP}
             setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
             notifyFailedAdminLogin={pushNotifyFailedAdminLogin}
@@ -1697,10 +1658,6 @@ export default function GlobalSettingsPage() {
               <PushNotificationsSection
                 enabled={pushEnabled}
                 setEnabled={setPushEnabled}
-                webhookEnabled={pushWebhookEnabled}
-                setWebhookEnabled={setPushWebhookEnabled}
-                webhookUrl={pushWebhookUrl}
-                setWebhookUrl={setPushWebhookUrl}
                 notifyUnauthorizedOTP={pushNotifyUnauthorizedOTP}
                 setNotifyUnauthorizedOTP={setPushNotifyUnauthorizedOTP}
                 notifyFailedAdminLogin={pushNotifyFailedAdminLogin}

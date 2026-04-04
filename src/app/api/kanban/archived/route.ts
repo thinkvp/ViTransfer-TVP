@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
       project: {
         select: { id: true, title: true },
       },
+      client: {
+        select: { id: true, name: true },
+      },
       createdBy: {
         select: { id: true, name: true, email: true },
       },

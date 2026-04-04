@@ -14,6 +14,7 @@ const updateCardSchema = z.object({
   columnId: z.string().optional(),
   position: z.number().int().min(0).optional(),
   projectId: z.string().optional().nullable(),
+  clientId: z.string().optional().nullable(),
   memberIds: z.array(z.string()).optional(),
   dueDate: z.string().datetime().optional().nullable(),
 })
@@ -28,6 +29,9 @@ const cardInclude = {
   },
   project: {
     select: { id: true, title: true },
+  },
+  client: {
+    select: { id: true, name: true },
   },
   createdBy: {
     select: { id: true, name: true, email: true },
@@ -179,6 +183,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       ...(parsed.data.columnId !== undefined ? { columnId: parsed.data.columnId } : {}),
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
       ...(parsed.data.projectId !== undefined ? { projectId: parsed.data.projectId } : {}),
+      ...(parsed.data.clientId !== undefined ? { clientId: parsed.data.clientId } : {}),
       ...(parsed.data.dueDate !== undefined
         ? { dueDate: parsed.data.dueDate ? new Date(parsed.data.dueDate) : null }
         : {}),
@@ -194,6 +199,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     parsed.data.description === undefined &&
     parsed.data.columnId === undefined &&
     parsed.data.projectId === undefined &&
+    parsed.data.clientId === undefined &&
     parsed.data.dueDate === undefined &&
     parsed.data.memberIds === undefined
 

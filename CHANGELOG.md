@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-04-04
+
+### Added
+- **Client association on Kanban tasks** — each task now has an optional "Client (Optional)" field in the Add and Edit Task modals; the field uses the same client typeahead search as quotes and invoices; selecting a client dynamically narrows the "Project (Optional)" dropdown to projects belonging to that client only; the client name is shown on task board cards beneath the description; a new `clientId` column is added to the `KanbanCard` table with a foreign-key relation to `Client`
+- **Archive view Client column** — the archived tasks view gains a "Client" column between the title and Comments columns; the divider line below the archive header is removed and the Title/Status and Client columns share equal width
+- **Tasks section on Project pages visible by default and in Show/Hide Sections toggle** — the Tasks panel on each project detail page is now included in the "Show/Hide Sections" dropdown; in defaults to visible (`tasks: true`); existing saved section-visibility settings are merged with the new default so upgrading users see the section automatically; the `tasks` key is validated server-side on save
+- **"Add Task" button on Project pages** — a `+ Add Task` button (matching the style of the Key Dates "+ Add Date" button) appears in the Tasks panel header for users with change-project-settings permission; clicking it opens the full Add Task dialog with Client and Project pre-filled from the current project, so tasks can be created directly from the project page without navigating to the Kanban board
+
+### Changed
+- **"Link to Project" renamed to "Project (Optional)"** — the project picker in the Add/Edit Task modal is renamed and is now disabled until a client is selected first; when no client is selected the placeholder reads "Select a client first"; clearing the client also clears the selected project
+- **Gotify/Ntfy webhook notifications removed** — the Gotify or Ntfy delivery channel is removed from Push Notifications; all webhook-related settings (Enable Gotify or Ntfy toggle, Webhook URL field) are removed from the Push Notifications settings card; push delivery now relies solely on Browser Push (PWA) and the in-app notification bell; the now-unused `provider`, `webhookUrl`, and deprecated `title` columns are dropped from `PushNotificationSettings`
+
 ## [1.3.3] - 2026-04-04
 
 ### Added

@@ -1,7 +1,6 @@
 'use client'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
@@ -10,10 +9,6 @@ import { AdminBrowserPushSection } from './AdminBrowserPushSection'
 interface PushNotificationsSectionProps {
   enabled: boolean
   setEnabled: (value: boolean) => void
-  webhookEnabled: boolean
-  setWebhookEnabled: (value: boolean) => void
-  webhookUrl: string
-  setWebhookUrl: (value: string) => void
   notifyUnauthorizedOTP: boolean
   setNotifyUnauthorizedOTP: (value: boolean) => void
   notifyFailedAdminLogin: boolean
@@ -58,10 +53,6 @@ interface PushNotificationsSectionProps {
 export function PushNotificationsSection({
   enabled,
   setEnabled,
-  webhookEnabled,
-  setWebhookEnabled,
-  webhookUrl,
-  setWebhookUrl,
   notifyUnauthorizedOTP,
   setNotifyUnauthorizedOTP,
   notifyFailedAdminLogin,
@@ -112,7 +103,7 @@ export function PushNotificationsSection({
           <div>
             <CardTitle>Push Notifications</CardTitle>
             <CardDescription>
-              Configure push notifications via Browser Push, Gotify, or Ntfy
+              Configure browser push notifications and in-app notification bell
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
@@ -131,7 +122,7 @@ export function PushNotificationsSection({
               <div className="space-y-0.5">
                 <Label htmlFor="enablePushNotifications">Enable Push Notifications</Label>
                 <p className="text-xs text-muted-foreground">
-                  Send real-time push notifications for important events via browser push, Gotify, or Ntfy
+                  Send real-time push notifications for important events via browser push and the in-app notification bell
                 </p>
               </div>
               <Switch
@@ -144,40 +135,6 @@ export function PushNotificationsSection({
 
           {enabled && (
             <>
-              {/* Gotify / Ntfy sub-section */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="enableWebhookNotifications">Enable Gotify or Ntfy Notifications</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Deliver notifications to a self-hosted Gotify or Ntfy instance via webhook
-                    </p>
-                  </div>
-                  <Switch
-                    id="enableWebhookNotifications"
-                    checked={webhookEnabled}
-                    onCheckedChange={setWebhookEnabled}
-                  />
-                </div>
-
-                {webhookEnabled && (
-                  <div className="pt-3 border-t mt-3">
-                    <Label htmlFor="webhookUrl">Webhook URL</Label>
-                    <Input
-                      id="webhookUrl"
-                      type="url"
-                      value={webhookUrl}
-                      onChange={(e) => setWebhookUrl(e.target.value)}
-                      placeholder="https://gotify.example.com/message?token=TOKEN  or  https://ntfy.example.com/topic"
-                      className="font-mono text-sm mt-1.5"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1.5">
-                      For Gotify: include the app token in the URL. For Ntfy: use the full topic URL.
-                    </p>
-                  </div>
-                )}
-              </div>
-
               {/* Browser Push (Admin) sub-section */}
               <AdminBrowserPushSection show={true} setShow={() => {}} embedded />
 
@@ -185,7 +142,7 @@ export function PushNotificationsSection({
               <div className="space-y-3 border-2 border-border p-4 rounded-lg bg-accent/5">
                 <h4 className="font-semibold text-sm">Enable Notifications For:</h4>
                 <p className="text-xs text-muted-foreground">
-                  These toggles apply to all push channels (Browser Push, Gotify, and Ntfy).
+                  These toggles apply to browser push and the in-app notification bell.
                 </p>
                 <div className="space-y-3">
                   {/* Security Events */}

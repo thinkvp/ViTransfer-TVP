@@ -145,7 +145,6 @@ if ([ "$1" = "npm" ] && [ "$2" = "start" ]) || \
     echo ""
     echo "[DB]  Running Prisma migrations..."
 
-
     # Run migrations automatically
     # - On first run: Creates all tables from scratch (initial_schema migration)
     # - On updates: Applies only new migrations (e.g., when upgrading to v1.1, v1.2, etc.)

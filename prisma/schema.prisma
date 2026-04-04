@@ -87,6 +87,7 @@ model Client {
   salesQuotes   SalesQuote[]
   salesInvoices SalesInvoice[]
   salesPayments SalesPayment[]
+  kanbanCards   KanbanCard[]
 
   @@index([deletedAt])
   @@index([active])
@@ -1447,6 +1448,9 @@ model KanbanCard {
   projectId String?
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
+  clientId String?
+  client   Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
   members KanbanCardMember[]
   comments KanbanCardComment[]
   history  KanbanCardHistory[]
@@ -1463,6 +1467,7 @@ model KanbanCard {
 
   @@index([columnId, position])
   @@index([projectId])
+  @@index([clientId])
   @@index([dueDate])
   @@index([archivedAt])
 }
@@ -1530,10 +1535,7 @@ model KanbanCardHistory {
 model PushNotificationSettings {
   id String @id @default("default")
 
-  enabled    Boolean @default(false)
-  provider   String? // 'GOTIFY' or others
-  webhookUrl String?
-  title      String? // Deprecated – kept for backward compatibility
+  enabled Boolean @default(false)
 
   // Event toggles
   notifyUnauthorizedOTP            Boolean @default(true)

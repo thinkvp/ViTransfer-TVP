@@ -777,7 +777,14 @@ export default function ProjectPage() {
               </Card>
             )}
 
-            <ProjectTasks projectId={project.id} />
+            {sectionVisibility.tasks && (
+              <ProjectTasks
+                projectId={project.id}
+                clientId={project.clientId ?? null}
+                clientName={projectClientName}
+                canEdit={canChangeProjectSettings}
+              />
+            )}
 
             {sectionVisibility.keyDates && (
               <ProjectKeyDates projectId={project.id} canEdit={canChangeProjectSettings} initialEditKeyDateId={editKeyDateId} />

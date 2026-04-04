@@ -20,6 +20,7 @@ export type SectionVisibility = {
   users: boolean
   projectFiles: boolean
   projectData: boolean
+  tasks: boolean
 }
 
 const DEFAULT_VISIBILITY: SectionVisibility = {
@@ -29,6 +30,7 @@ const DEFAULT_VISIBILITY: SectionVisibility = {
   users: true,
   projectFiles: true,
   projectData: true,
+  tasks: true,
 }
 
 interface ProjectSectionVisibilityToggleProps {
@@ -84,6 +86,7 @@ export function ProjectSectionVisibilityToggle({
   const sections = [
     { key: 'sales' as const, label: 'Sales (Quotes & Invoices)' },
     { key: 'keyDates' as const, label: 'Key Dates' },
+    { key: 'tasks' as const, label: 'Tasks' },
     { key: 'externalCommunication' as const, label: 'External Communication' },
     { key: 'users' as const, label: 'Users' },
     { key: 'projectFiles' as const, label: 'Project Files' },
@@ -162,7 +165,7 @@ export function useProjectSectionVisibility(projectId: string) {
         }>(`/api/user/project-view-settings?projectId=${projectId}`)
 
         if (response?.visibleSections) {
-          setVisibility(response.visibleSections)
+          setVisibility({ ...DEFAULT_VISIBILITY, ...response.visibleSections })
         }
       } catch (error) {
         console.error('Error fetching section visibility:', error)

@@ -9,6 +9,7 @@ type SectionVisibility = {
   users: boolean
   projectFiles: boolean
   projectData: boolean
+  tasks: boolean
 }
 
 const DEFAULT_VISIBILITY: SectionVisibility = {
@@ -18,6 +19,7 @@ const DEFAULT_VISIBILITY: SectionVisibility = {
   users: true,
   projectFiles: true,
   projectData: true,
+  tasks: true,
 }
 
 export async function GET(request: NextRequest) {
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate the structure
-    const requiredKeys = ['sales', 'keyDates', 'externalCommunication', 'users', 'projectFiles', 'projectData']
+    const requiredKeys = ['sales', 'keyDates', 'externalCommunication', 'users', 'projectFiles', 'projectData', 'tasks']
     for (const key of requiredKeys) {
       if (typeof visibleSections[key] !== 'boolean') {
         return NextResponse.json({ error: `Invalid value for ${key}` }, { status: 400 })

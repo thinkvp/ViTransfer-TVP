@@ -51,6 +51,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDate, formatDateTime } from '@/lib/utils'
+import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 
 // ---------- Types ----------
 
@@ -67,6 +68,11 @@ export type KanbanProject = {
   title: string
 }
 
+export type KanbanClient = {
+  id: string
+  name: string
+}
+
 export type KanbanMember = {
   userId: string
   receiveNotifications?: boolean
@@ -80,8 +86,10 @@ export type KanbanCardData = {
   position: number
   columnId: string
   projectId: string | null
+  clientId: string | null
   members: KanbanMember[]
   project: KanbanProject | null
+  client: KanbanClient | null
   createdBy: { id: string; name: string | null; email: string }
   dueDate: string | null
   archivedAt?: string | null
@@ -291,6 +299,7 @@ export default function KanbanBoard({
       title?: string
       description?: string | null
       projectId?: string | null
+      clientId?: string | null
       memberIds?: string[]
       dueDate?: string | null
     }
@@ -433,7 +442,7 @@ export default function KanbanBoard({
         <CardContent className="p-4">
           <div className="flex items-center gap-2 mb-3">
             <KanbanSquare className="w-5 h-5" />
-            <h2 className="text-lg font-semibold">Task Board</h2>
+            <h2 className="text-base font-semibold">Task Board</h2>
           </div>
           <p className="text-sm text-muted-foreground">Loading tasks...</p>
         </CardContent>
@@ -452,7 +461,7 @@ export default function KanbanBoard({
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <KanbanSquare className="w-5 h-5" />
-              <h2 className="text-lg font-semibold">Task Board</h2>
+              <h2 className="text-base font-semibold">Task Board</h2>
             </div>
             {isAdmin && (
               <div className="flex items-center gap-1.5">
@@ -474,9 +483,9 @@ export default function KanbanBoard({
                 >
                   {columnsLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setShowAddColumn(true)}>
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Add Column
+                <Button variant="outline" size="icon" onClick={() => setShowAddColumn(true)} aria-label="Add column" title="Add column" className="sm:w-auto sm:h-auto sm:px-3 sm:py-1.5">
+                  <Plus className="w-4 h-4" />
+                  <span className="hidden sm:inline sm:ml-1 text-sm">Add Column</span>
                 </Button>
               </div>
             )}
@@ -821,6 +830,10 @@ function KanbanCardView({
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{card.description}</p>
           )}
 
+          {card.client && (
+            <p className="text-xs text-muted-foreground mt-1 font-medium">{card.client.name}</p>
+          )}
+
           {/* Metadata row */}
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             {card.project && (
@@ -1044,11 +1057,39 @@ export function CardDialog({
   })
   const [projectId, setProjectId] = useState(initial?.projectId || '')
   const [editingProject, setEditingProject] = useState(!initial?.projectId)
+  const [clientId, setClientId] = useState(initial?.clientId || '')
+  const [editingClient, setEditingClient] = useState(!initial?.clientId)
+  const [clientOptions, setClientOptions] = useState<Array<{ value: string; label: string }>>([])
+  const [loadingClients, setLoadingClients] = useState(false)
+  const [filteredProjectOptions, setFilteredProjectOptions] = useState<Array<{ value: string; label: string }>>([])
+  const [loadingProjects, setLoadingProjects] = useState(false)
   const [selectedColumnId, setSelectedColumnId] = useState(columnId)
   const [dueDate, setDueDate] = useState(
     initial?.dueDate ? new Date(initial.dueDate).toISOString().slice(0, 10) : ''
   )
   const [saving, setSaving] = useState(false)
+
+  // Load clients on mount
+  useEffect(() => {
+    setLoadingClients(true)
+    fetchClientOptions()
+      .then((list) => setClientOptions(list.map((c) => ({ value: c.id, label: c.name }))))
+      .catch(() => {})
+      .finally(() => setLoadingClients(false))
+  }, [])
+
+  // Load projects filtered by client when clientId changes
+  useEffect(() => {
+    if (!clientId) {
+      setFilteredProjectOptions([])
+      return
+    }
+    setLoadingProjects(true)
+    fetchProjectOptionsForClient(clientId)
+      .then((list) => setFilteredProjectOptions(list.map((p) => ({ value: p.id, label: p.title }))))
+      .catch(() => setFilteredProjectOptions([]))
+      .finally(() => setLoadingProjects(false))
+  }, [clientId])
 
   // Track unsaved changes
   const hasUnsavedChanges = useMemo(() => {
@@ -1056,15 +1097,17 @@ export function CardDialog({
     const initDescription = initial?.description || ''
     const initMemberIds = initial?.members?.map((m) => m.userId) || []
     const initProjectId = initial?.projectId || ''
+    const initClientId = initial?.clientId || ''
     const initDueDate = initial?.dueDate ? new Date(initial.dueDate).toISOString().slice(0, 10) : ''
     if (title !== initTitle) return true
     if (description !== initDescription) return true
     if (JSON.stringify([...memberIds].sort()) !== JSON.stringify([...initMemberIds].sort())) return true
     if (projectId !== initProjectId) return true
+    if (clientId !== initClientId) return true
     if (selectedColumnId !== columnId) return true
     if (dueDate !== initDueDate) return true
     return false
-  }, [title, description, memberIds, projectId, selectedColumnId, dueDate, initial, columnId])
+  }, [title, description, memberIds, projectId, clientId, selectedColumnId, dueDate, initial, columnId])
 
   const guardedClose = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -1072,8 +1115,6 @@ export function CardDialog({
     }
     onClose()
   }, [hasUnsavedChanges, onClose])
-
-  const projectOptions = projects.map((p) => ({ value: p.id, label: p.title }))
 
   // Column options for the status pill
   const columnOptions = columns.map((c) => ({
@@ -1122,6 +1163,7 @@ export function CardDialog({
         description: description.trim() || null,
         memberIds,
         projectId: projectId || null,
+        clientId: clientId || null,
         dueDate: dueDate ? new Date(dueDate + 'T00:00:00Z').toISOString() : null,
       }
       if (!initial) {
@@ -1244,7 +1286,57 @@ export function CardDialog({
               {/* Project */}
               <div>
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-sm font-medium">Link to Project</label>
+                  <label className="text-sm font-medium">Client (Optional)</label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    title={editingClient ? 'Stop editing' : 'Edit client'}
+                    onClick={() => setEditingClient((v) => !v)}
+                  >
+                    {editingClient ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                  </Button>
+                </div>
+                <div className="mt-1">
+                  {editingClient ? (
+                    <TypeaheadSelect
+                      value={clientId}
+                      onValueChange={(v) => {
+                        setClientId(v)
+                        setProjectId('')
+                        setEditingClient(false)
+                        if (v) setEditingProject(true)
+                      }}
+                      options={clientOptions}
+                      placeholder={loadingClients ? 'Loading…' : 'Search clients...'}
+                      allowNone
+                      noneLabel="(none)"
+                    />
+                  ) : clientId ? (
+                    <button
+                      type="button"
+                      onClick={() => { onClose(); router.push(`/admin/clients/${encodeURIComponent(clientId)}`) }}
+                      className="h-9 rounded-md border border-border bg-muted px-3 flex items-center hover:underline text-left w-full"
+                      title="Open client"
+                    >
+                      <span className="text-sm truncate">{clientOptions.find((c) => c.value === clientId)?.label ?? clientId}</span>
+                    </button>
+                  ) : (
+                    <div
+                      className="h-9 rounded-md border border-border bg-muted px-3 flex items-center text-sm text-muted-foreground cursor-pointer hover:bg-accent"
+                      onClick={() => setEditingClient(true)}
+                    >
+                      None
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Project */}
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium">Project (Optional)</label>
                   <Button
                     type="button"
                     variant="ghost"
@@ -1252,6 +1344,7 @@ export function CardDialog({
                     className="h-7 w-7 p-0"
                     title={editingProject ? 'Stop editing' : 'Edit project'}
                     onClick={() => setEditingProject((v) => !v)}
+                    disabled={!clientId}
                   >
                     {editingProject ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
                   </Button>
@@ -1261,8 +1354,9 @@ export function CardDialog({
                     <TypeaheadSelect
                       value={projectId}
                       onValueChange={(v) => { setProjectId(v); if (v) setEditingProject(false) }}
-                      options={projectOptions}
-                      placeholder="Search projects..."
+                      options={filteredProjectOptions}
+                      placeholder={!clientId ? 'Select a client first' : loadingProjects ? 'Loading…' : 'Search projects...'}
+                      disabled={!clientId}
                       allowNone
                       noneLabel="(none)"
                     />
@@ -1273,14 +1367,14 @@ export function CardDialog({
                       className="h-9 rounded-md border border-border bg-muted px-3 flex items-center hover:underline text-left w-full"
                       title="Open project"
                     >
-                      <span className="text-sm truncate">{projectOptions.find((p) => p.value === projectId)?.label ?? projectId}</span>
+                      <span className="text-sm truncate">{filteredProjectOptions.find((p) => p.value === projectId)?.label ?? projects.find((p) => p.id === projectId)?.title ?? projectId}</span>
                     </button>
                   ) : (
                     <div
                       className="h-9 rounded-md border border-border bg-muted px-3 flex items-center text-sm text-muted-foreground cursor-pointer hover:bg-accent"
-                      onClick={() => setEditingProject(true)}
+                      onClick={() => clientId ? setEditingProject(true) : undefined}
                     >
-                      None
+                      {!clientId ? 'Select a client first' : 'None'}
                     </div>
                   )}
                 </div>
@@ -1866,6 +1960,7 @@ type ArchivedCard = {
   members: KanbanMember[]
   column: { id: string; name: string; color: string | null; position: number }
   project: KanbanProject | null
+  client: KanbanClient | null
   _count: { comments: number }
 }
 
@@ -1917,8 +2012,10 @@ function ArchivedView({
     position: 0,
     columnId: card.column.id,
     projectId: card.project?.id ?? null,
+    clientId: card.client?.id ?? null,
     members: card.members,
     project: card.project,
+    client: card.client,
     createdBy: { id: '', name: null, email: '' },
     dueDate: card.dueDate,
     archivedAt: card.archivedAt,
@@ -1943,8 +2040,9 @@ function ArchivedView({
   return (
     <div className="space-y-1">
       {/* Header row */}
-      <div className="hidden md:grid md:grid-cols-[minmax(0,1fr)_120px_120px_120px_88px] gap-2 px-2 pb-1 border-b text-xs font-medium text-muted-foreground">
+      <div className="hidden md:grid md:grid-cols-[1fr_1fr_120px_120px_120px_88px] gap-2 px-2 pb-1 text-xs font-medium text-muted-foreground">
         <span>Title / Status</span>
+        <span>Client</span>
         <span className="text-center">Comments</span>
         <span>Due Date</span>
         <span>Users</span>
@@ -1952,11 +2050,10 @@ function ArchivedView({
       </div>
       {visibleCards.map((card) => {
         const dueDate = card.dueDate ? new Date(card.dueDate) : null
-        const isOverdue = dueDate ? dueDate < new Date() : false
         return (
           <div
             key={card.id}
-            className="md:grid md:grid-cols-[minmax(0,1fr)_120px_120px_120px_88px] gap-2 items-center rounded-md border bg-background p-2.5 hover:bg-muted/30 transition-colors"
+            className="md:grid md:grid-cols-[1fr_1fr_120px_120px_120px_88px] gap-2 items-center rounded-md border bg-background p-2.5 hover:bg-muted/30 transition-colors"
           >
             {/* Title + status */}
             <div className="min-w-0">
@@ -1971,6 +2068,15 @@ function ArchivedView({
               </div>
               {card.description && (
                 <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{card.description}</p>
+              )}
+            </div>
+
+            {/* Client */}
+            <div className="hidden md:block min-w-0">
+              {card.client ? (
+                <span className="text-xs text-muted-foreground truncate block">{card.client.name}</span>
+              ) : (
+                <span className="text-xs text-muted-foreground/40">—</span>
               )}
             </div>
 
@@ -1990,9 +2096,7 @@ function ArchivedView({
             <div className="hidden md:block">
               {dueDate ? (
                 <span
-                  className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                    isOverdue ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'
-                  }`}
+                  className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-muted text-muted-foreground"
                 >
                   <CalendarDays className="w-2.5 h-2.5" />
                   {formatDate(card.dueDate!)}
