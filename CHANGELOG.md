@@ -5,6 +5,30 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-04-06
+
+> **⚠ Upgrade note — migration squash:** The 67+ individual Prisma migrations accumulated since v0.1 have been collapsed into a single baseline snapshot (`20260405000000_baseline`). **Fresh installs are unaffected.** If you are upgrading an existing instance, the baseline migration will appear as "pending" to Prisma even though your database already has all the tables — running `migrate deploy` without preparation would fail. Before pulling this release and running `docker compose up -d --build`, mark the baseline as already applied against your running database:
+> ```bash
+> # 1. Build the new image first (does not start the container)
+> docker compose build
+> # 2. Mark the baseline migration as already applied (no SQL runs — Prisma just records it)
+> docker compose run --rm --no-deps app npx prisma migrate resolve --applied "20260405000000_baseline"
+> # 3. Start normally — only the 3 new accounting migrations will be applied
+> docker compose up -d
+> ```
+> **Why the squash was necessary:** Over 5+ months of development the migration folder had grown to 67+ files, many with timestamp collisions and implicit ordering dependencies. This caused unreliable first-run installs and made Prisma's migration history difficult to audit. The squash replaces all prior migrations with a single authoritative schema snapshot and resets the history cleanly.
+
+### Added
+- **Accounting module** — a new Accounting section is available from the admin header navigation (sub-menu: Dashboard, Bank Accounts, Expenses, Chart of Accounts, BAS / GST, Reports); the module introduces Chart of Accounts management, bank account and transaction import, expense tracking with receipt upload, and transaction posting/matching workflows; three new database migrations introduce the accounting schema (`add_accounting_module`, `add_accounting_settings`, `make_expense_supplier_optional`)
+- **Delete / unpost entries from the Chart of Accounts ledger** — each row in a COA account ledger page now has a trash-icon button that opens a confirmation dialog; for expense entries the dialog reads "Delete expense?" and permanently removes the expense record, its receipt file, and the link to any associated bank transaction (returning that transaction to Pending); for bank-transaction entries the dialog reads "Unpost bank transaction?" and reverses the posting — the transaction is reset to Unmatched/Pending status, its account category, tax code, match type, memo, and attachment are cleared, any linked expense record is deleted, and if the transaction was matched to an invoice payment the payment is deleted and the invoice status is recomputed
+
+### Fixed
+- **Avatar endpoint rate limit raised to prevent false lockouts** — `GET /api/users/[id]/avatar` had a limit of 120 requests per minute; pages that render many users simultaneously (Kanban board, project member lists, etc.) fire one avatar request per visible user, making the old limit trivially easy to hit during normal navigation; the limit is raised to 600 requests per minute and `force-dynamic` is removed so that browser and CDN cache headers can reduce repeat requests over a session
+- **Project storage panel now shows "Other files" as a separate row** — unaccounted on-disk bytes (`diskOtherBytes`) were previously surfaced only as inline text ("On disk • X other") in the Source tooltip row; they are now displayed as a dedicated "Other files" row in the storage breakdown alongside Videos, Photos, ZIP files, and Project Files, making the total more transparent and consistent; additionally a `else if` bug in the storage calculation prevented `timelinePreviewVttPath` from being counted when a video also had a `timelinePreviewSpritesPath` — both paths are now always included in the preview storage total
+- **Receipt and attachment downloads now work** — browser-native `<a href download>` links do not include the `Authorization` header that the API requires; all three download points (receipt icon in the Expenses list, receipt link in the Expense detail view, and attachment link in the Bank Accounts matched-transaction panel) now use `apiFetch` with an authenticated fetch followed by a temporary blob URL, matching the pattern used elsewhere in the app
+- **"No open invoices found" after manually deleting a payment** — the payment DELETE route removed the `SalesPayment` record but never called `recomputeInvoiceStoredStatus`, leaving the invoice's stored status as `PAID` even after the payment was gone; the route now reads the `invoiceId` before deletion and recomputes the invoice status afterward so the invoice correctly returns to `OPEN` / `SENT` / `OVERDUE` and appears in the invoice-matching dialog in Bank Accounts
+- **TypeScript errors in expense-create and transaction-post routes** — the local Prisma client was generated before `supplierName` was made optional (`String?`) in the schema, typing the field as a non-nullable `string`; the client has been regenerated and the two call sites updated to pass `undefined` instead of `null` when no supplier name is provided
+
 ## [1.3.4] - 2026-04-04
 
 ### Added

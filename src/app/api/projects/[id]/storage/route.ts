@@ -329,7 +329,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             }
             if (video.timelinePreviewSpritesPath) {
               previewPaths.push(video.timelinePreviewSpritesPath)
-            } else if (video.timelinePreviewVttPath) {
+            }
+            if (video.timelinePreviewVttPath) {
               previewPaths.push(video.timelinePreviewVttPath)
             }
 

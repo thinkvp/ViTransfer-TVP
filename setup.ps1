@@ -11,7 +11,7 @@ Write-Host ""
 
 # Check if .env already exists
 if (Test-Path .env) {
-    Write-Host "⚠️  WARNING: .env file already exists!" -ForegroundColor Yellow
+    Write-Host "WARNING: .env file already exists!" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Overwriting will replace ALL secrets and credentials." -ForegroundColor Yellow
     Write-Host "This could lock you out if your database is already initialized." -ForegroundColor Yellow
@@ -29,7 +29,7 @@ if (Test-Path .env) {
 
 # Check if .env.example exists
 if (!(Test-Path .env.example)) {
-    Write-Host "❌ ERROR: .env.example file not found!" -ForegroundColor Red
+    Write-Host "ERROR: .env.example file not found!" -ForegroundColor Red
     Write-Host "Please run this script from the ViTransfer-TVP root directory." -ForegroundColor Red
     exit 1
 }
@@ -59,7 +59,7 @@ $JWT_SECRET = Get-RandomBase64 -Length 64
 $JWT_REFRESH_SECRET = Get-RandomBase64 -Length 64
 $SHARE_TOKEN_SECRET = Get-RandomBase64 -Length 64
 
-Write-Host "✓ Secrets generated" -ForegroundColor Green
+Write-Host "Secrets generated" -ForegroundColor Green
 Write-Host ""
 
 # Prompt for admin credentials
@@ -75,7 +75,7 @@ do {
     if ($ADMIN_EMAIL -match $emailRegex) {
         $validEmail = $true
     } else {
-        Write-Host "❌ Invalid email format. Please try again." -ForegroundColor Red
+        Write-Host "Invalid email format. Please try again." -ForegroundColor Red
         $validEmail = $false
     }
 } while (-not $validEmail)
@@ -96,11 +96,11 @@ do {
         if ($ADMIN_PASSWORD_Plain -eq $ADMIN_PASSWORD_CONFIRM_Plain) {
             $validPassword = $true
         } else {
-            Write-Host "❌ Passwords do not match. Please try again." -ForegroundColor Red
+            Write-Host "Passwords do not match. Please try again." -ForegroundColor Red
             $validPassword = $false
         }
     } else {
-        Write-Host "❌ Password must be at least 8 characters long." -ForegroundColor Red
+        Write-Host "Password must be at least 8 characters long." -ForegroundColor Red
         $validPassword = $false
     }
 } while (-not $validPassword)
@@ -131,7 +131,7 @@ do {
     if ([int]::TryParse($APP_PORT, [ref]$portNum) -and $portNum -ge 1 -and $portNum -le 65535) {
         $validPort = $true
     } else {
-        Write-Host "❌ Invalid port. Must be a number between 1 and 65535." -ForegroundColor Red
+        Write-Host "Invalid port. Must be a number between 1 and 65535." -ForegroundColor Red
         $validPort = $false
     }
 } while (-not $validPort)
@@ -147,7 +147,7 @@ do {
     if ($TZ -match "^[A-Za-z]+(/[A-Za-z_]+)?$" -or $TZ -eq "UTC") {
         $validTz = $true
     } else {
-        Write-Host "❌ Invalid timezone format. Use format like 'America/New_York' or 'UTC'." -ForegroundColor Red
+        Write-Host "Invalid timezone format. Use format like 'America/New_York' or 'UTC'." -ForegroundColor Red
         Write-Host "   See: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" -ForegroundColor Yellow
         $validTz = $false
     }
@@ -163,7 +163,7 @@ do {
     if ($HTTPS_ENABLED -eq "true" -or $HTTPS_ENABLED -eq "false") {
         $validHttps = $true
     } else {
-        Write-Host "❌ Invalid value. Must be exactly 'true' or 'false'." -ForegroundColor Red
+        Write-Host "Invalid value. Must be exactly 'true' or 'false'." -ForegroundColor Red
         $validHttps = $false
     }
 } while (-not $validHttps)
@@ -201,21 +201,21 @@ $envContent | Set-Content .env -NoNewline
 $generatedEnv = Get-Content .env -Raw
 if ($generatedEnv -match "<<REPLACE_WITH") {
     Write-Host "" 
-    Write-Host "❌ Setup failed: one or more placeholders remain in .env" -ForegroundColor Red
+    Write-Host "ERROR: Setup failed: one or more placeholders remain in .env" -ForegroundColor Red
     Write-Host "   Please re-run the script or edit .env manually." -ForegroundColor Yellow
     exit 1
 }
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Green
-Write-Host "  ✓ Setup Complete!" -ForegroundColor Green
+Write-Host "  Setup Complete!" -ForegroundColor Green
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Your .env file has been created with:"
-Write-Host "  • 6 secure random secrets"
-Write-Host "  • Admin account: $ADMIN_EMAIL"
-Write-Host "  • Application port: $APP_PORT"
-Write-Host "  • Timezone: $TZ"
+Write-Host "  - 6 secure random secrets"
+Write-Host "  - Admin account: $ADMIN_EMAIL"
+Write-Host "  - Application port: $APP_PORT"
+Write-Host "  - Timezone: $TZ"
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Review .env file and adjust any settings"

@@ -53,6 +53,9 @@ model User {
   kanbanCardComments     KanbanCardComment[]
   kanbanCardHistory      KanbanCardHistory[]
 
+  expenses Expense[]
+  journalEntries JournalEntry[]
+
   @@index([active])
 }
 
@@ -1377,6 +1380,8 @@ model SalesPayment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  bankTransaction BankTransaction? // Back-relation: BankTransaction.invoicePaymentId
+
   @@index([paymentDate])
   @@index([clientId])
   @@index([invoiceId])
@@ -1970,4 +1975,299 @@ model SalesPresetItem {
   @@unique([presetId, itemId])
   @@index([presetId])
   @@index([itemId])
+}
+
+// ===== Accounting Module =====
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  COGS
+  EXPENSE
+}
+
+enum AccountTaxCode {
+  GST         // Taxable supply / creditable acquisition at 10%
+  GST_FREE    // GST-free supply / acquisition
+  BAS_EXCLUDED // Outside scope of GST (wages, super, loan repayments)
+  INPUT_TAXED  // Input-taxed supply (financial services, residential rent)
+}
+
+enum ExpenseStatus {
+  DRAFT
+  APPROVED
+  RECONCILED
+}
+
+enum BankTransactionStatus {
+  UNMATCHED
+  MATCHED
+  EXCLUDED
+}
+
+enum BankTransactionMatchType {
+  INVOICE_PAYMENT
+  EXPENSE
+  MANUAL
+  SPLIT
+}
+
+enum BasPeriodStatus {
+  DRAFT
+  REVIEWED
+  LODGED
+}
+
+/// Chart of Accounts — the master list of account codes used across expenses, reports, and BAS.
+model Account {
+  id          String          @id @default(cuid())
+  code        String          @unique @db.VarChar(20)  // e.g. "6-1000"
+  name        String          @db.VarChar(200)
+  type        AccountType
+  subType     String?         @db.VarChar(100)         // e.g. "Motor Vehicle", "Office Supplies"
+  taxCode     AccountTaxCode  @default(GST)
+  description String?         @db.Text
+  isActive    Boolean         @default(true)
+  isSystem    Boolean         @default(false)           // System (seed) accounts cannot be deleted
+
+  parentId    String?
+  parent      Account?        @relation("AccountChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Account[]       @relation("AccountChildren")
+
+  sortOrder   Int             @default(0)
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  expenses         Expense[]
+  bankTransactions  BankTransaction[] @relation("BankTransactionAccount")
+  journalEntries    JournalEntry[]
+  splitLines        SplitLine[]
+
+  @@index([type])
+  @@index([type, isActive])
+  @@index([parentId])
+  @@index([sortOrder])
+  @@index([code])
+}
+
+/// Manual journal entries — for non-bank, non-expense transactions (depreciation, adjustments, etc.)
+model JournalEntry {
+  id          String   @id @default(cuid())
+  date        String                                   // YYYY-MM-DD
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  description String   @db.Text
+  amountCents Int                                      // Positive = debit to account, Negative = credit from account
+  taxCode     AccountTaxCode @default(BAS_EXCLUDED)
+  reference   String?  @db.VarChar(500)
+  notes       String?  @db.Text
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  enteredByName String? @db.VarChar(200)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([date])
+}
+
+/// Split lines — when a bank transaction is split across multiple accounts.
+model SplitLine {
+  id              String   @id @default(cuid())
+  bankTransactionId String
+  bankTransaction BankTransaction @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  description     String   @db.Text
+  amountCents     Int                                  // Signed: negative = expense/debit, positive = income/credit
+  taxCode         AccountTaxCode @default(GST)
+
+  createdAt       DateTime @default(now())
+
+  @@index([bankTransactionId])
+  @@index([accountId])
+}
+
+/// Business expenses — entered manually or linked to imported bank transactions.
+model Expense {
+  id           String          @id @default(cuid())
+
+  date         String                                   // YYYY-MM-DD
+  supplierName String?         @db.VarChar(300)
+  description  String          @db.Text
+
+  accountId    String
+  account      Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  taxCode      AccountTaxCode  @default(GST)
+
+  // All amounts in cents
+  amountExGst  Int
+  gstAmount    Int
+  amountIncGst Int
+
+  receiptPath         String?                           // Storage path for uploaded receipt image
+  receiptOriginalName String?  @db.VarChar(500)
+
+  status       ExpenseStatus   @default(DRAFT)
+
+  // Linked bank transaction (set when reconciled against an import)
+  bankTransactionId String?     @unique
+  bankTransaction   BankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: SetNull)
+
+  // Which admin user entered this expense
+  userId       String?
+  user         User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  enteredByName String?        @db.VarChar(200)         // Snapshot of name at entry time
+
+  notes        String?         @db.Text
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([date])
+  @@index([accountId])
+  @@index([status])
+  @@index([userId])
+  @@index([bankTransactionId])
+}
+
+/// A configured bank account (BSB + account number) used for transaction imports.
+model BankAccount {
+  id            String   @id @default(cuid())
+  name          String   @db.VarChar(200)              // e.g. "Business Cheque Account"
+  bankName      String?  @db.VarChar(200)
+  bsb           String?  @db.VarChar(10)
+  accountNumber String?  @db.VarChar(30)               // last 4 digits shown in UI
+  currency      String   @default("AUD") @db.VarChar(5)
+  openingBalance     Int  @default(0)                   // cents
+  openingBalanceDate String? // YYYY-MM-DD
+  isActive      Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  importBatches BankImportBatch[]
+  transactions  BankTransaction[]
+
+  @@index([isActive])
+}
+
+/// A CSV import batch — one batch per file upload.
+model BankImportBatch {
+  id            String   @id @default(cuid())
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  fileName      String   @db.VarChar(500)
+  importedAt    DateTime @default(now())
+  rowCount      Int      @default(0)
+  matchedCount  Int      @default(0)
+  skippedCount  Int      @default(0)                    // deduplicated rows skipped
+
+  importedById  String?
+  importedByName String? @db.VarChar(200)
+
+  createdAt DateTime @default(now())
+
+  transactions  BankTransaction[]
+
+  @@index([bankAccountId])
+  @@index([importedAt])
+}
+
+/// An individual bank transaction row imported from CSV.
+model BankTransaction {
+  id            String   @id @default(cuid())
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  importBatchId String?
+  importBatch   BankImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+
+  date          String                                   // YYYY-MM-DD
+  description   String   @db.Text
+  reference     String?  @db.VarChar(500)
+  amountCents   Int                                      // Negative = debit (money out), Positive = credit (money in)
+  rawCsv        Json?                                    // Original CSV row as key/value object
+
+  status        BankTransactionStatus    @default(UNMATCHED)
+  matchType     BankTransactionMatchType?
+
+  // Link to an invoice payment (matched to invoice)
+  invoicePaymentId String? @unique
+  invoicePayment   SalesPayment? @relation(fields: [invoicePaymentId], references: [id], onDelete: SetNull)
+
+  // Link to an expense (matched to expense)
+  expense       Expense?                                 // Back-relation: Expense.bankTransactionId
+
+  // Set when transaction is posted
+  memo                  String?  @db.Text
+  transactionType       String?  @db.VarChar(50)        // Expense | Transfer | Deposit | ReceivePayment
+  taxCode               AccountTaxCode?
+  accountId             String?
+  account               Account? @relation("BankTransactionAccount", fields: [accountId], references: [id], onDelete: SetNull)
+  attachmentPath        String?
+  attachmentOriginalName String? @db.VarChar(500)
+
+  // Split lines (when transaction is split across multiple accounts)
+  splitLines    SplitLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bankAccountId])
+  @@index([date])
+  @@index([status])
+  @@index([importBatchId])
+  @@index([bankAccountId, date])
+  @@index([invoicePaymentId])
+  @@index([accountId])
+}
+
+/// A quarterly BAS period — tracks lodgement status; figures are calculated dynamically.
+model BasPeriod {
+  id            String          @id @default(cuid())
+  label         String          @db.VarChar(100)        // e.g. "Q3 FY2026"
+  startDate     String                                   // YYYY-MM-DD
+  endDate       String                                   // YYYY-MM-DD
+  quarter       Int                                      // 1–4
+  financialYear String          @db.VarChar(20)          // e.g. "FY2026"
+  status        BasPeriodStatus @default(DRAFT)
+  basis         String          @default("CASH")         // CASH or ACCRUAL
+  lodgedAt      DateTime?
+  notes         String?         @db.Text
+
+  // Overrides for manual BAS label adjustments (e.g. G2 export sales)
+  g2Override    Int?                                     // cents
+  g3Override    Int?                                     // cents
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([financialYear, quarter])
+  @@index([startDate])
+  @@index([status])
+}
+
+/// Tax rate configuration — populates the GST dropdown when posting transactions.
+model TaxRate {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(100)              // e.g. "GST (10%)"
+  code        String   @db.VarChar(20)               // matches AccountTaxCode: GST | GST_FREE | BAS_EXCLUDED | INPUT_TAXED
+  rate        Float    @default(0)                    // 0.10 = 10%
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  notes       String?  @db.Text
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([sortOrder])
 }

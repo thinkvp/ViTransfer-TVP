@@ -461,6 +461,10 @@ export default function InvoiceDetailPage() {
   }, [dueDate, invoice?.dueDate, invoice?.hasOpenedEmail, invoice?.sentAt, nowIso, paidCents, status, totalCents])
 
   const invoiceStatusDisplay = useMemo((): string => {
+    if (effectiveStatus === 'PARTIALLY_PAID') {
+      const curr = getCurrencySymbol(settings.currencyCode)
+      return `Partially Paid: ${formatMoney(paidCents, curr)} paid, ${formatMoney(balanceCents, curr)} remaining`
+    }
     if (effectiveStatus !== 'PAID') return invoiceStatusLabel(effectiveStatus)
 
     const entries: Array<{ ymd: string; amountCents: number }> = []
@@ -491,7 +495,7 @@ export default function InvoiceDetailPage() {
       .join(', ')
 
     return `Paid: ${details}`
-  }, [countablePayments, effectiveStatus, paidCents, paidOnDisplay, settings.currencyCode, stripePayments])
+  }, [balanceCents, countablePayments, effectiveStatus, paidCents, paidOnDisplay, settings.currencyCode, stripePayments])
 
   const clientNameById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients])
   const projectTitleById = useMemo(

@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -28,6 +28,15 @@ const SALES_SUBMENU = [
   { href: '/admin/sales/settings', label: 'Settings', icon: Settings },
 ]
 
+const ACCOUNTING_SUBMENU = [
+  { href: '/admin/accounting', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/admin/accounting/bank-accounts', label: 'Bank Accounts', icon: Landmark },
+  { href: '/admin/accounting/expenses', label: 'Expenses', icon: Receipt },
+  { href: '/admin/accounting/chart-of-accounts', label: 'Chart of Accounts', icon: ListOrdered },
+  { href: '/admin/accounting/bas', label: 'BAS / GST', icon: FileText },
+  { href: '/admin/accounting/reports', label: 'Reports', icon: BarChart2 },
+]
+
 export default function AdminHeader() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
@@ -37,6 +46,12 @@ export default function AdminHeader() {
   const salesHoverRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const salesTriggerHoveredRef = useRef(false)
   const salesContentHoveredRef = useRef(false)
+
+  const [accountingDropdownOpen, setAccountingDropdownOpen] = useState(false)
+  const [mobileAccountingExpanded, setMobileAccountingExpanded] = useState(false)
+  const accountingHoverRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const accountingTriggerHoveredRef = useRef(false)
+  const accountingContentHoveredRef = useRef(false)
 
   // Profile modal state
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -128,6 +143,27 @@ export default function AdminHeader() {
     }, 120)
   }
 
+  const clearAccountingCloseTimer = () => {
+    if (accountingHoverRef.current) {
+      clearTimeout(accountingHoverRef.current)
+      accountingHoverRef.current = null
+    }
+  }
+
+  const openAccountingDropdown = () => {
+    clearAccountingCloseTimer()
+    setAccountingDropdownOpen(true)
+  }
+
+  const scheduleAccountingDropdownClose = () => {
+    clearAccountingCloseTimer()
+    accountingHoverRef.current = setTimeout(() => {
+      if (!accountingTriggerHoveredRef.current && !accountingContentHoveredRef.current) {
+        setAccountingDropdownOpen(false)
+      }
+    }, 120)
+  }
+
   // Fetch security settings to check if security dashboard should be shown
   useEffect(() => {
     async function fetchSecuritySettings() {
@@ -146,6 +182,7 @@ export default function AdminHeader() {
 
     return () => {
       clearSalesCloseTimer()
+      clearAccountingCloseTimer()
     }
   }, [])
 
@@ -159,6 +196,7 @@ export default function AdminHeader() {
     canSeeMenu(permissions, 'projects') ? { href: '/admin/projects', label: 'Projects', icon: FolderKanban } : null,
     canSeeMenu(permissions, 'clients') ? { href: '/admin/clients', label: 'Clients', icon: Building2 } : null,
     canSeeMenu(permissions, 'sales') ? { href: '/admin/sales', label: 'Sales', icon: DollarSign } : null,
+    canSeeMenu(permissions, 'accounting') ? { href: '/admin/accounting', label: 'Accounting', icon: BookOpen } : null,
     canSeeMenu(permissions, 'settings') ? { href: '/admin/settings', label: 'Settings', icon: Settings } : null,
     canSeeMenu(permissions, 'users') ? { href: '/admin/users', label: 'Users', icon: Users } : null,
   ].filter(Boolean) as Array<{ href: string; label: string; icon: any }>
@@ -194,6 +232,7 @@ export default function AdminHeader() {
                     const Icon = link.icon
                     const isActive = pathname === link.href || (link.href !== '/admin/projects' && pathname?.startsWith(link.href))
                     const isSales = link.href === '/admin/sales'
+                    const isAccounting = link.href === '/admin/accounting'
 
                     if (isSales) {
                       return (
@@ -212,6 +251,40 @@ export default function AdminHeader() {
                           {mobileSalesExpanded && SALES_SUBMENU.map((sub) => {
                             const SubIcon = sub.icon
                             const subActive = pathname === sub.href || (sub.href !== '/admin/sales' && pathname?.startsWith(sub.href))
+                            return (
+                              <DropdownMenuItem
+                                key={sub.href}
+                                asChild
+                                className={cn('cursor-pointer gap-2 pl-8', subActive && 'bg-accent text-accent-foreground')}
+                              >
+                                <Link href={sub.href} className="flex items-center gap-2">
+                                  <SubIcon className="w-3.5 h-3.5" />
+                                  <span>{sub.label}</span>
+                                </Link>
+                              </DropdownMenuItem>
+                            )
+                          })}
+                        </div>
+                      )
+                    }
+
+                    if (isAccounting) {
+                      return (
+                        <div key={link.href}>
+                          <DropdownMenuItem
+                            className={cn('cursor-pointer gap-2', isActive && 'bg-accent text-accent-foreground')}
+                            onSelect={(e) => {
+                              e.preventDefault()
+                              setMobileAccountingExpanded((v) => !v)
+                            }}
+                          >
+                            {Icon && <Icon className="w-4 h-4" />}
+                            <span className="flex-1">Accounting</span>
+                            {mobileAccountingExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                          </DropdownMenuItem>
+                          {mobileAccountingExpanded && ACCOUNTING_SUBMENU.map((sub) => {
+                            const SubIcon = sub.icon
+                            const subActive = pathname === sub.href || (sub.href !== '/admin/accounting' && pathname?.startsWith(sub.href))
                             return (
                               <DropdownMenuItem
                                 key={sub.href}
@@ -255,6 +328,98 @@ export default function AdminHeader() {
                 const Icon = link.icon
                 const isActive = pathname === link.href || (link.href !== '/admin/projects' && pathname?.startsWith(link.href))
                 const isSales = link.href === '/admin/sales'
+                const isAccounting = link.href === '/admin/accounting'
+
+                if (isAccounting) {
+                  return (
+                    <DropdownMenu
+                      key={link.href}
+                      modal={false}
+                      open={accountingDropdownOpen}
+                      onOpenChange={(open) => {
+                        if (open) {
+                          openAccountingDropdown()
+                          return
+                        }
+                        if (accountingTriggerHoveredRef.current || accountingContentHoveredRef.current) {
+                          return
+                        }
+                        setAccountingDropdownOpen(false)
+                      }}
+                    >
+                      <div
+                        onMouseEnter={() => {
+                          accountingTriggerHoveredRef.current = true
+                          openAccountingDropdown()
+                        }}
+                        onMouseLeave={() => {
+                          accountingTriggerHoveredRef.current = false
+                          scheduleAccountingDropdownClose()
+                        }}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className={`flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap ${
+                              isActive
+                                ? 'bg-primary text-primary-foreground shadow-elevation'
+                                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                            }`}
+                            aria-label="Accounting menu"
+                          >
+                            {Icon && <Icon className="w-4 h-4" />}
+                            <span className="hidden sm:inline">Accounting</span>
+                            <ChevronDown className="w-3 h-3 hidden sm:block" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="start"
+                          side="bottom"
+                          sideOffset={8}
+                          className="min-w-[200px]"
+                          onPointerEnter={() => {
+                            accountingContentHoveredRef.current = true
+                            clearAccountingCloseTimer()
+                          }}
+                          onPointerLeave={() => {
+                            accountingContentHoveredRef.current = false
+                            scheduleAccountingDropdownClose()
+                          }}
+                          onEscapeKeyDown={() => {
+                            accountingTriggerHoveredRef.current = false
+                            accountingContentHoveredRef.current = false
+                            clearAccountingCloseTimer()
+                            setAccountingDropdownOpen(false)
+                          }}
+                          onInteractOutside={() => {
+                            accountingTriggerHoveredRef.current = false
+                            accountingContentHoveredRef.current = false
+                            clearAccountingCloseTimer()
+                            setAccountingDropdownOpen(false)
+                          }}
+                          onCloseAutoFocus={(e) => e.preventDefault()}
+                        >
+                          {ACCOUNTING_SUBMENU.map((sub) => {
+                            const SubIcon = sub.icon
+                            const subActive = pathname === sub.href || (sub.href !== '/admin/accounting' && pathname?.startsWith(sub.href))
+                            return (
+                              <DropdownMenuItem
+                                key={sub.href}
+                                asChild
+                                className={cn('cursor-pointer gap-2.5', subActive && 'bg-accent text-accent-foreground font-medium')}
+                              >
+                                <Link href={sub.href} className="flex items-center gap-2.5">
+                                  <SubIcon className="w-4 h-4 flex-shrink-0" />
+                                  <span>{sub.label}</span>
+                                </Link>
+                              </DropdownMenuItem>
+                            )
+                          })}
+                        </DropdownMenuContent>
+                      </div>
+                    </DropdownMenu>
+                  )
+                }
 
                 if (isSales) {
                   return (

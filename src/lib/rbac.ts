@@ -1,6 +1,6 @@
 import type { ProjectStatus } from '@/lib/project-status'
 
-export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'settings' | 'users' | 'security' | 'analytics'
+export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'accounting' | 'settings' | 'users' | 'security' | 'analytics'
 
 export type ActionKey =
   | 'projectsPhotoVideoUploads'
@@ -39,7 +39,7 @@ export interface RolePermissions {
   actions: Record<ActionKey, boolean>
 }
 
-const ALL_MENUS: MenuKey[] = ['projects', 'sharePage', 'clients', 'sales', 'settings', 'users', 'security', 'analytics']
+const ALL_MENUS: MenuKey[] = ['projects', 'sharePage', 'clients', 'sales', 'accounting', 'settings', 'users', 'security', 'analytics']
 const ALL_ACTIONS: ActionKey[] = [
   'projectsPhotoVideoUploads',
   'projectsFullControl',
@@ -80,6 +80,7 @@ const FALLBACK_ACTIONS_BY_MENU: Record<MenuKey, ActionKey[]> = {
   sharePage: [],
   clients: ['manageClients', 'manageClientFiles'],
   sales: [],
+  accounting: [],
   settings: ['changeSettings', 'sendTestEmail'],
   users: ['manageUsers', 'manageRoles'],
   security: ['viewSecurityEvents', 'manageSecurityEvents', 'viewSecurityBlocklists', 'manageSecurityBlocklists', 'viewSecurityRateLimits', 'manageSecurityRateLimits'],

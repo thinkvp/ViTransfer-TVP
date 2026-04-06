@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BadgeCheck, Check, Copy, Download, Eye, GripVertical, Loader2, Mail, Pencil, Trash2, X } from 'lucide-react'
+import { BadgeCheck, Check, Copy, DollarSign, Download, Eye, GripVertical, Loader2, Mail, Pencil, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -442,6 +442,46 @@ export default function QuoteDetailPage() {
     router.push('/admin/sales/quotes/new')
   }
 
+  const [converting, setConverting] = useState(false)
+  const onConvertToInvoice = async () => {
+    if (!quote || !clientId || converting) return
+    setConverting(true)
+    try {
+      const today = new Date()
+      const issueDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      const res = await apiFetch('/api/admin/sales/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          projectId: projectId || undefined,
+          issueDate,
+          notes,
+          terms,
+          items: items.map(it => ({
+            description: it.description,
+            details: it.details || undefined,
+            quantity: it.quantity,
+            unitPriceCents: it.unitPriceCents,
+            taxRatePercent: it.taxRatePercent,
+            taxRateName: it.taxRateName,
+          })),
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        alert(d.error || 'Failed to create invoice')
+        return
+      }
+      const d = await res.json()
+      router.push(`/admin/sales/invoices/${d.invoice?.id ?? d.id}`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to convert to invoice')
+    } finally {
+      setConverting(false)
+    }
+  }
+
   if (!loaded) {
     return <div className="flex items-center justify-center py-10 text-muted-foreground">Loading…</div>
   }
@@ -528,6 +568,16 @@ export default function QuoteDetailPage() {
             className="w-10 px-0"
           >
             <Copy className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void onConvertToInvoice()}
+            disabled={converting || !clientId}
+            aria-label="Convert to Invoice"
+            title="Convert to Invoice"
+            className="w-10 px-0"
+          >
+            {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
           </Button>
           <Button
             variant="outline"

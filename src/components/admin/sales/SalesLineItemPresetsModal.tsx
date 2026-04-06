@@ -22,7 +22,7 @@ import {
 import type { SalesItem, SalesPreset } from '@/lib/sales/admin-api'
 import type { SalesLineItem, SalesTaxRate } from '@/lib/sales/types'
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Types
 
 type AddForm = {
   description: string
@@ -33,7 +33,7 @@ type AddForm = {
   taxRateName?: string
 }
 
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Helpers
 
 function itemToLineItem(it: SalesItem): SalesLineItem {
   return {
@@ -56,7 +56,7 @@ function formatUnitPrice(cents: number, currencySymbol: string): string {
   return `${cents < 0 ? '-' : ''}${currencySymbol}${dollars}`
 }
 
-// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Component
 
 interface SalesLineItemPresetsModalProps {
   open: boolean
@@ -75,16 +75,16 @@ export function SalesLineItemPresetsModal({
   currencySymbol,
   onImport,
 }: SalesLineItemPresetsModalProps) {
-  // â”€â”€ Library & presets â”€â”€
+  // Library & presets
   const [items, setItems] = useState<SalesItem[]>([])
   const [presets, setPresets] = useState<SalesPreset[]>([])
   const [loading, setLoading] = useState(false)
 
-  // â”€â”€ Selection â”€â”€
+  // Selection
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const [selectedPresetId, setSelectedPresetId] = useState<string>('')
 
-  // â”€â”€ Add item form â”€â”€
+  // Add item form
   const [showAddForm, setShowAddForm] = useState(false)
   const [addForm, setAddForm] = useState<AddForm>({
     description: '',
@@ -97,16 +97,16 @@ export function SalesLineItemPresetsModal({
   const [addingItem, setAddingItem] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
 
-  // â”€â”€ Save preset â”€â”€
+  // Save preset
   const [showSaveName, setShowSaveName] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  // â”€â”€ Delete preset / item â”€â”€
+  // Delete preset / item
   const [deleting, setDeleting] = useState(false)
 
-  // â”€â”€ Load library + presets on open â”€â”€
+  // Load library + presets on open
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -123,7 +123,7 @@ export function SalesLineItemPresetsModal({
     return () => { cancelled = true }
   }, [open])
 
-  // â”€â”€ Reset selection state on close (keep items/presets cached) â”€â”€
+  // Reset selection state on close (keep items/presets cached)
   useEffect(() => {
     if (!open) {
       setCheckedIds(new Set())
@@ -136,7 +136,7 @@ export function SalesLineItemPresetsModal({
     }
   }, [open])
 
-  // â”€â”€ Sync default tax rate to add form when taxRates load â”€â”€
+  // Sync default tax rate to add form when taxRates load
   useEffect(() => {
     const def = taxRates.find((r) => r.isDefault)
     setAddForm((prev) => ({
@@ -146,7 +146,7 @@ export function SalesLineItemPresetsModal({
     }))
   }, [taxRates, defaultTaxRatePercent])
 
-  // â”€â”€ Select preset â†’ tick its items â”€â”€
+  // Select preset -> tick its items
   function handleSelectPreset(id: string) {
     setSelectedPresetId(id)
     if (!id) {
@@ -159,7 +159,7 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // â”€â”€ Toggle individual checkbox â”€â”€
+  // Toggle individual checkbox
   function toggleCheck(id: string) {
     setCheckedIds((prev) => {
       const next = new Set(prev)
@@ -177,7 +177,7 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // â”€â”€ Add item form helpers â”€â”€
+  // Add item form helpers
   function resetAddForm() {
     const def = taxRates.find((r) => r.isDefault)
     setAddForm({
@@ -224,7 +224,7 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // â”€â”€ Delete library item permanently â”€â”€
+  // Delete library item permanently
   async function handleDeleteItem(id: string) {
     const item = items.find((it) => it.id === id)
     if (!item) return
@@ -242,7 +242,7 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // â”€â”€ Save preset â”€â”€
+  // Save preset
   async function handleSavePreset() {
     const name = saveName.trim()
     if (!name) {
@@ -271,7 +271,7 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // â”€â”€ Delete preset (items remain in library) â”€â”€
+  // Delete preset (items remain in library)
   async function handleDeletePreset() {
     if (!selectedPresetId) return
     const preset = presets.find((p) => p.id === selectedPresetId)
@@ -290,7 +290,7 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // â”€â”€ Import â”€â”€
+  // Import
   function handleImport() {
     const toImport = items
       .filter((it) => checkedIds.has(it.id))
@@ -300,7 +300,7 @@ export function SalesLineItemPresetsModal({
     onOpenChange(false)
   }
 
-  // â”€â”€ Derived â”€â”€
+  // Derived
   const allChecked = items.length > 0 && checkedIds.size === items.length
   const selectedPreset = presets.find((p) => p.id === selectedPresetId)
 
@@ -313,7 +313,7 @@ export function SalesLineItemPresetsModal({
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
 
-          {/* â”€â”€ Preset selector row â”€â”€ */}
+          {/* Preset selector row */}
           <div className="flex items-center gap-3 flex-wrap">
             <Label className="shrink-0 text-sm font-medium">Preset:</Label>
             <div className="flex-1 min-w-[180px] max-w-xs">
@@ -321,10 +321,10 @@ export function SalesLineItemPresetsModal({
                 <SelectTrigger className="h-9">
                   {loading ? (
                     <span className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Loadingâ€¦
+                      <Loader2 className="w-3 h-3 animate-spin" /> Loading...
                     </span>
                   ) : (
-                    <SelectValue placeholder="Select a presetâ€¦" />
+                    <SelectValue placeholder="Select a preset..." />
                   )}
                 </SelectTrigger>
                 <SelectContent>
@@ -364,7 +364,7 @@ export function SalesLineItemPresetsModal({
             </Button>
           </div>
 
-          {/* â”€â”€ Save preset name form â”€â”€ */}
+          {/* Save preset name form */}
           {showSaveName && (
             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
               <div className="space-y-1">
@@ -391,7 +391,7 @@ export function SalesLineItemPresetsModal({
             </div>
           )}
 
-          {/* â”€â”€ Add item button + form â”€â”€ */}
+          {/* Add item button + form */}
           <div>
             {!showAddForm && (
               <Button
@@ -451,7 +451,7 @@ export function SalesLineItemPresetsModal({
                     <Textarea
                       value={addForm.details}
                       onChange={(e) => setAddForm((prev) => ({ ...prev, details: e.target.value }))}
-                      placeholder="Optional paragraph descriptionâ€¦"
+                      placeholder="Optional paragraph description..."
                       className="min-h-[70px] text-sm"
                     />
                   </div>
@@ -470,10 +470,10 @@ export function SalesLineItemPresetsModal({
             )}
           </div>
 
-          {/* â”€â”€ Items table â”€â”€ */}
+          {/* Items table */}
           {loading ? (
             <div className="flex items-center justify-center py-10 text-muted-foreground gap-2 text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading libraryâ€¦
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading library...
             </div>
           ) : items.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-border">
@@ -563,7 +563,7 @@ export function SalesLineItemPresetsModal({
           )}
         </div>
 
-        {/* â”€â”€ Footer â”€â”€ */}
+        {/* Footer */}
         <div className="border-t border-border px-6 py-4 flex items-center justify-between gap-3 shrink-0 bg-background">
           <p className="text-sm text-muted-foreground">
             {checkedIds.size > 0
