@@ -8,7 +8,6 @@ import { createReadStream, statSync } from 'fs'
 import sharp from 'sharp'
 
 export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 const AVATAR_SIZE = 300 // px — output is always 300×300 JPEG
 
@@ -21,7 +20,7 @@ export async function GET(
 ) {
   const rateLimitResult = await rateLimit(
     request,
-    { windowMs: 60 * 1000, maxRequests: 120, message: 'Too many requests.' },
+    { windowMs: 60 * 1000, maxRequests: 600, message: 'Too many requests.' },
     'user-avatar-get',
   )
   if (rateLimitResult) return rateLimitResult
