@@ -183,6 +183,22 @@ export type SalesItem = {
   unitPriceCents: number
   taxRatePercent: number
   taxRateName?: string | null
+  labelId?: string | null
+  labelName?: string | null
+  labelColor?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type SalesLabel = {
+  id: string
+  name: string
+  color?: string | null
+  accountId?: string | null
+  accountName?: string | null
+  accountCode?: string | null
+  isActive: boolean
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -208,6 +224,14 @@ export async function createSalesItem(
   return res.item
 }
 
+export async function updateSalesItem(
+  id: string,
+  data: Partial<Omit<SalesItem, 'id' | 'sortOrder' | 'createdAt' | 'updatedAt'>>
+): Promise<SalesItem> {
+  const res = await apiPatch<{ ok: boolean; item: SalesItem }>(`/api/admin/sales/items/${encodeURIComponent(id)}`, data)
+  return res.item
+}
+
 export async function deleteSalesItem(id: string): Promise<void> {
   await apiDelete(`/api/admin/sales/items/${encodeURIComponent(id)}`)
 }
@@ -224,6 +248,30 @@ export async function saveSalesPreset(payload: { name: string; itemIds: string[]
 
 export async function deleteSalesPreset(id: string): Promise<void> {
   await apiDelete(`/api/admin/sales/presets/${encodeURIComponent(id)}`)
+}
+
+export async function listSalesLabels(): Promise<SalesLabel[]> {
+  const res = await apiJson<{ labels: SalesLabel[] }>('/api/admin/sales/labels', { cache: 'no-store' })
+  return Array.isArray(res.labels) ? res.labels : []
+}
+
+export async function createSalesLabel(
+  data: Pick<SalesLabel, 'name' | 'color' | 'accountId' | 'isActive' | 'sortOrder'>
+): Promise<SalesLabel> {
+  const res = await apiPost<{ ok: boolean; label: SalesLabel }>('/api/admin/sales/labels', data)
+  return res.label
+}
+
+export async function updateSalesLabel(
+  id: string,
+  data: Partial<Pick<SalesLabel, 'name' | 'color' | 'accountId' | 'isActive' | 'sortOrder'>>
+): Promise<SalesLabel> {
+  const res = await apiPatch<{ ok: boolean; label: SalesLabel }>(`/api/admin/sales/labels/${encodeURIComponent(id)}`, data)
+  return res.label
+}
+
+export async function deleteSalesLabel(id: string): Promise<void> {
+  await apiDelete(`/api/admin/sales/labels/${encodeURIComponent(id)}`)
 }
 
 export async function fetchSalesRollup(input?: {

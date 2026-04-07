@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { basPeriodFromDb } from '@/lib/accounting/db-mappers'
+import { getAccountingReportingBasis } from '@/lib/accounting/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,7 +15,6 @@ const createSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   quarter: z.number().int().min(1).max(4),
   financialYear: z.string().trim().min(1).max(20),
-  basis: z.enum(['CASH', 'ACCRUAL']).default('CASH'),
   notes: z.string().trim().max(5000).optional().nullable(),
 })
 
@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
   }
 
   const d = parsed.data
+  const reportingBasis = await getAccountingReportingBasis()
 
   if (d.startDate >= d.endDate) {
     return NextResponse.json({ error: 'startDate must be before endDate' }, { status: 400 })
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
       endDate: d.endDate,
       quarter: d.quarter,
       financialYear: d.financialYear,
-      basis: d.basis,
+      basis: reportingBasis,
       notes: d.notes ?? null,
     },
   })

@@ -19,6 +19,7 @@ import { parseDateOnlyLocal, quoteEffectiveStatus } from '@/lib/sales/status'
 import { formatDate } from '@/lib/utils'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { SalesDashboardCharts } from '@/components/sales/SalesDashboardCharts'
+import { getInvoiceDashboardAmountCents, getPaymentDashboardAmountCents, getSalesDashboardReportingBasis, salesDashboardIncludesGst } from '@/lib/sales/dashboard-reporting'
 
 export default function SalesDashboardPage() {
   const [tick, setTick] = useState(0)
@@ -75,7 +76,7 @@ export default function SalesDashboardPage() {
             invoicesLimit: 2000,
             quotesLimit: 2000,
             paymentsLimit: 5000,
-            stripePaymentsLimit: 200,
+            stripePaymentsLimit: 5000,
           }),
           apiFetch('/api/sales/quickbooks/settings', { method: 'GET' })
             .then(async (res) => {
@@ -161,6 +162,8 @@ export default function SalesDashboardPage() {
 
   const salesOverview = useMemo(() => {
     const now = nowIso ? new Date(nowIso) : new Date()
+    const dashboardBasis = getSalesDashboardReportingBasis(settings)
+    const includeGst = salesDashboardIncludesGst(settings)
     
     // Get fiscal year start month from settings (1-12), default to 7 (July)
     const fyStartMonth = settings.fiscalYearStartMonth ?? 7
@@ -182,6 +185,8 @@ export default function SalesDashboardPage() {
     const invoices = rollup?.invoices ?? []
     const invoiceRollupById = rollup?.invoiceRollupById ?? {}
     const payments = rollup?.payments ?? []
+    const invoiceById = Object.fromEntries(invoices.map((invoice) => [invoice.id, invoice]))
+    const dashboardModeLabel = `${dashboardBasis === 'CASH' ? 'Cash' : 'Accrual'} ${includeGst ? 'inc GST' : 'ex GST'}`
 
     const overdueBalanceCents = invoices.reduce((acc, inv) => {
       const r = invoiceRollupById[inv.id]
@@ -197,26 +202,32 @@ export default function SalesDashboardPage() {
       if (p.excludeFromInvoiceBalance) return acc
       const d = parseDateOnlyLocal(p.paymentDate)
       if (!d || (d as Date).getTime() < recentPaymentsThresholdMs) return acc
-      return acc + Math.max(0, Math.trunc(p.amountCents))
+      return acc + getPaymentDashboardAmountCents(p, p.invoiceId ? invoiceById[p.invoiceId] : null, settings.taxRatePercent, includeGst)
     }, 0)
 
-    const totalSalesCents = invoices.reduce((acc, inv) => {
-      const issueDate = parseDateOnlyLocal(inv.issueDate)
-      if (!issueDate) return acc
-      const issuedAt = (issueDate as Date).getTime()
-      if (issuedAt < fyStart.getTime() || issuedAt > fyEnd.getTime()) return acc
-      const r = invoiceRollupById[inv.id]
-      const total = Number.isFinite(Number(r?.totalCents))
-        ? Number(r!.totalCents)
-        : sumLineItemsSubtotal(inv.items) + sumLineItemsTax(inv.items, settings.taxRatePercent)
-      return acc + Math.max(0, Math.trunc(total))
-    }, 0)
+    const totalSalesCents = dashboardBasis === 'CASH'
+      ? payments.reduce((acc, payment) => {
+          if (payment.excludeFromInvoiceBalance) return acc
+          const paymentDate = parseDateOnlyLocal(payment.paymentDate)
+          if (!paymentDate) return acc
+          const paidAt = (paymentDate as Date).getTime()
+          if (paidAt < fyStart.getTime() || paidAt > fyEnd.getTime()) return acc
+          return acc + getPaymentDashboardAmountCents(payment, payment.invoiceId ? invoiceById[payment.invoiceId] : null, settings.taxRatePercent, includeGst)
+        }, 0)
+      : invoices.reduce((acc, inv) => {
+          const issueDate = parseDateOnlyLocal(inv.issueDate)
+          if (!issueDate) return acc
+          const issuedAt = (issueDate as Date).getTime()
+          if (issuedAt < fyStart.getTime() || issuedAt > fyEnd.getTime()) return acc
+          return acc + getInvoiceDashboardAmountCents(inv, settings.taxRatePercent, includeGst, invoiceRollupById[inv.id])
+        }, 0)
 
     return {
       overdueBalanceCents,
       recentPaymentsTotalCents,
       totalSalesCents,
       financialYearLabel,
+      dashboardModeLabel,
     }
   }, [nowIso, rollup, settings])
 
@@ -326,6 +337,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Paid &lt;30 days</p>
+                <p className="text-[10px] text-muted-foreground">{salesOverview.dashboardModeLabel}</p>
                 <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.recentPaymentsTotalCents, getCurrencySymbol(settings.currencyCode))}</p>
               </div>
             </div>
@@ -336,6 +348,7 @@ export default function SalesDashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Sales FY{salesOverview.financialYearLabel}</p>
+                <p className="text-[10px] text-muted-foreground">{salesOverview.dashboardModeLabel}</p>
                 <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.totalSalesCents, getCurrencySymbol(settings.currencyCode))}</p>
               </div>
             </div>

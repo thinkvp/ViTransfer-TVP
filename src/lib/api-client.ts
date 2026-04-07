@@ -105,7 +105,7 @@ export async function apiDelete<T = any>(
 function withAuthHeader(init?: RequestInit): RequestInit {
   const token = getAccessToken()
   const headers = new Headers(init?.headers || {})
-  if (token) {
+  if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`)
   }
   return { ...init, headers }

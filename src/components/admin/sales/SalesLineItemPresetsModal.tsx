@@ -8,18 +8,20 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Tag, Trash2 } from 'lucide-react'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
+import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
 import { dollarsToCents } from '@/lib/sales/money'
 import {
   createSalesItem,
   deleteSalesItem,
   deleteSalesPreset,
   listSalesItems,
+  listSalesLabels,
   listSalesPresets,
   saveSalesPreset,
 } from '@/lib/sales/admin-api'
-import type { SalesItem, SalesPreset } from '@/lib/sales/admin-api'
+import type { SalesItem, SalesLabel, SalesPreset } from '@/lib/sales/admin-api'
 import type { SalesLineItem, SalesTaxRate } from '@/lib/sales/types'
 
 // Types
@@ -31,7 +33,10 @@ type AddForm = {
   unitPrice: string
   taxRatePercent: number
   taxRateName?: string
+  labelId?: string
 }
+
+const NO_LABEL_VALUE = '__NO_LABEL__'
 
 // Helpers
 
@@ -44,6 +49,9 @@ function itemToLineItem(it: SalesItem): SalesLineItem {
     unitPriceCents: it.unitPriceCents,
     taxRatePercent: it.taxRatePercent,
     taxRateName: it.taxRateName ?? undefined,
+    labelId: it.labelId ?? null,
+    labelName: it.labelName ?? null,
+    labelColor: it.labelColor ?? null,
   }
 }
 
@@ -78,6 +86,7 @@ export function SalesLineItemPresetsModal({
   // Library & presets
   const [items, setItems] = useState<SalesItem[]>([])
   const [presets, setPresets] = useState<SalesPreset[]>([])
+  const [labels, setLabels] = useState<SalesLabel[]>([])
   const [loading, setLoading] = useState(false)
 
   // Selection
@@ -93,6 +102,7 @@ export function SalesLineItemPresetsModal({
     unitPrice: '',
     taxRatePercent: defaultTaxRatePercent,
     taxRateName: taxRates.find((r) => r.isDefault)?.name,
+    labelId: '',
   })
   const [addingItem, setAddingItem] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
@@ -111,11 +121,12 @@ export function SalesLineItemPresetsModal({
     if (!open) return
     let cancelled = false
     setLoading(true)
-    Promise.all([listSalesItems(), listSalesPresets()])
-      .then(([itemList, presetList]) => {
+    Promise.all([listSalesItems(), listSalesPresets(), listSalesLabels()])
+      .then(([itemList, presetList, labelList]) => {
         if (!cancelled) {
           setItems(itemList)
           setPresets(presetList)
+          setLabels(labelList)
         }
       })
       .catch(() => {/* errors handled silently; lists stay empty */})
@@ -187,6 +198,7 @@ export function SalesLineItemPresetsModal({
       unitPrice: '',
       taxRatePercent: defaultTaxRatePercent,
       taxRateName: def?.name,
+      labelId: '',
     })
     setAddError(null)
   }
@@ -208,6 +220,7 @@ export function SalesLineItemPresetsModal({
         unitPriceCents,
         taxRatePercent: addForm.taxRatePercent,
         taxRateName: addForm.taxRateName ?? null,
+        labelId: addForm.labelId || null,
       })
       setItems((prev) => [...prev, created])
       setCheckedIds((prev) => {
@@ -438,12 +451,27 @@ export function SalesLineItemPresetsModal({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Tax</Label>
+                    <div className="flex h-4 items-center">
+                      <Label className="text-xs">Tax</Label>
+                    </div>
                     <TaxRateSelect
                       value={addForm.taxRatePercent}
                       onChange={(rate, name) => setAddForm((prev) => ({ ...prev, taxRatePercent: rate, taxRateName: name }))}
                       taxRates={taxRates}
                       className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex h-4 items-center">
+                      <Label className="flex items-center gap-1 text-xs">
+                        <Tag className="w-3 h-3" /> Label
+                      </Label>
+                    </div>
+                    <SearchableLabelSelect
+                      value={addForm.labelId || null}
+                      labels={labels}
+                      onChange={(labelId) => setAddForm((prev) => ({ ...prev, labelId: labelId ?? '' }))}
+                      triggerClassName="h-9 text-sm"
                     />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
@@ -514,8 +542,13 @@ export function SalesLineItemPresetsModal({
                             aria-label={`Select ${it.description}`}
                           />
                         </td>
-                        <td className="px-3 py-2.5 align-middle font-medium max-w-[220px] truncate">
-                          {it.description}
+                        <td className="px-3 py-2.5 align-middle font-medium max-w-[220px]">
+                          <span className="flex items-center gap-1.5 truncate">
+                            {it.labelColor && (
+                              <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: it.labelColor }} />
+                            )}
+                            <span className="truncate">{it.description}</span>
+                          </span>
                         </td>
                         <td className="px-3 py-2.5 align-middle text-right tabular-nums">
                           {it.quantity}

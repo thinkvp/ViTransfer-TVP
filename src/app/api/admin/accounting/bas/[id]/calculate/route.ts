@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'BAS period not found' }, { status: 404 })
   }
 
-  const { calculation, issues } = await calculateBas(
+  const { calculation, issues, records } = await calculateBas(
     period.startDate,
     period.endDate,
     period.basis as 'CASH' | 'ACCRUAL',
@@ -41,6 +41,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     period: basPeriodFromDb(period),
     calculation,
     issues,
+    records,
   })
   res.headers.set('Cache-Control', 'no-store')
   return res

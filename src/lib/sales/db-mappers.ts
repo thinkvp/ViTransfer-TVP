@@ -73,6 +73,8 @@ export type DbSalesSettings = {
   phone: string
   email: string
   website: string
+  dashboardReportingBasis?: string
+  dashboardAmountsIncludeGst?: boolean
   taxRatePercent: number
   defaultQuoteValidDays: number
   defaultInvoiceDueDays: number
@@ -162,11 +164,14 @@ export function salesSettingsFromDb(row: DbSalesSettings): SalesSettings {
     invoiceLabel: (row as any).invoiceLabel ?? 'INVOICE',
     taxLabel: (row as any).taxLabel ?? '',
     taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
+    dashboardReportingBasis: (row as any).dashboardReportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL',
+    dashboardAmountsIncludeGst: typeof (row as any).dashboardAmountsIncludeGst === 'boolean' ? (row as any).dashboardAmountsIncludeGst : true,
     taxRatePercent: Number(row.taxRatePercent ?? 10),
     defaultQuoteValidDays: Number(row.defaultQuoteValidDays ?? 14),
     defaultInvoiceDueDays: Number(row.defaultInvoiceDueDays ?? 7),
     defaultTerms: row.defaultTerms ?? 'Payment due within 7 days unless otherwise agreed.',
     paymentDetails: row.paymentDetails ?? '',
+    defaultIncomeAccountId: (row as any).defaultIncomeAccountId ?? null,
     updatedAt: iso(row.updatedAt),
   }
 }

@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-04-07
+
+### Fixed
+- **Video quality options not loading on client share page** — the share API route was returning `undefined` for `preview480Path`, `preview720Path`, and `preview1080Path` instead of boolean availability flags; the player therefore could not detect which quality levels were available and failed to load; the route now returns the correct boolean values so quality selection works as expected
+- **Archived task list not refreshing after deleting an archived task** — deleting a card from the archived view did not re-fetch the archived list; a `key` prop driven by a counter (`archivedViewKey`) is now incremented after each delete, forcing the archived panel to remount and reload its data
+
 ## [1.3.6] - 2026-04-07
 
 ### Added

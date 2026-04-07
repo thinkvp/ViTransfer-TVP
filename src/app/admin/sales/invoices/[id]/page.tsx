@@ -3,12 +3,13 @@
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, Download, Eye, GripVertical, Mail, Pencil, Trash2, X } from 'lucide-react'
+import { Check, Copy, Download, Eye, GripVertical, Mail, Pencil, Tag, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
 import {
@@ -17,10 +18,11 @@ import {
   fetchSalesRollup,
   fetchSalesSettings,
   fetchTaxRates,
+  listSalesLabels,
   listSalesPayments,
   patchSalesInvoice,
 } from '@/lib/sales/admin-api'
-import type { SalesInvoiceWithVersion, SalesRollupResponse } from '@/lib/sales/admin-api'
+import type { SalesInvoiceWithVersion, SalesLabel, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { ClientOption, InvoiceStatus, ProjectOption, SalesLineItem, SalesPayment, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { invoiceStatusBadgeClass, invoiceStatusLabel } from '@/lib/sales/badge'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
@@ -43,11 +45,14 @@ import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/s
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { formatDate } from '@/lib/utils'
 import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
+import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
   return Number.isFinite(n) && n >= 0 ? n : defaultRate
 }
+
+const NO_LABEL_VALUE = '__NO_LABEL__'
 
 function newLineItem(defaultTaxRatePercent: number, defaultTaxRateName?: string): SalesLineItem {
   return {
@@ -149,6 +154,7 @@ export default function InvoiceDetailPage() {
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
+  const [labels, setLabels] = useState<SalesLabel[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -392,6 +398,10 @@ export default function InvoiceDetailPage() {
     }
     void run()
   }, [allProjects, clientId, projectId])
+
+  useEffect(() => {
+    listSalesLabels().then(setLabels).catch(() => {})
+  }, [])
 
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
@@ -955,57 +965,93 @@ export default function InvoiceDetailPage() {
                 </div>
 
                 {docTaxEnabled && (
-                <div className="space-y-1">
-                  <Label>Tax</Label>
-                  <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                    <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,320px)] md:items-end">
+                    <div className="space-y-1">
+                      <Label>Tax</Label>
                       <TaxRateSelect
                         value={it.taxRatePercent}
                         onChange={(rate, name) => setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, taxRatePercent: normalizeTaxRatePercent(rate, settings.taxRatePercent), taxRateName: name } : x)))}
                         taxRates={taxRates}
                         className="h-9"
                       />
-                      <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                        {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                    </div>
+
+                    <div className="space-y-1 md:justify-self-end md:w-full">
+                      <Label className="md:text-right">Amount</Label>
+                      <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                        <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
+                          {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 w-9 p-0"
+                          aria-label="Remove line"
+                          title="Remove"
+                          onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
+                          disabled={items.length <= 1}
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
                       </div>
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0"
-                      aria-label="Remove line"
-                      title="Remove"
-                      onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
-                      disabled={items.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4 text-destructive" />
-                    </Button>
+                    <div className="md:col-start-2 md:w-full space-y-1">
+                      <span className="flex items-center gap-1 text-muted-foreground text-xs">
+                        <Tag className="w-3 h-3" />
+                        Label
+                      </span>
+                      <SearchableLabelSelect
+                        value={it.labelId ?? null}
+                        labels={labels}
+                        onChange={(labelId, label) => {
+                          setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, labelId, labelName: label?.name ?? null, labelColor: label?.color ?? null } : x)))
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
                 )}
 
                 {!docTaxEnabled && (
-                <div className="space-y-1">
-                  <Label>Amount</Label>
-                  <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                    <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
-                      {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,320px)] md:items-end">
+                    <div />
+
+                    <div className="space-y-1 md:justify-self-end md:w-full">
+                      <Label className="md:text-right">Amount</Label>
+                      <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                        <div className="h-9 rounded-md border border-border bg-muted px-3 flex items-center justify-end text-sm">
+                          {formatMoney(calcLineSubtotalCents(it), getCurrencySymbol(settings.currencyCode))}
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 w-9 p-0"
+                          aria-label="Remove line"
+                          title="Remove"
+                          onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
+                          disabled={items.length <= 1}
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0"
-                      aria-label="Remove line"
-                      title="Remove"
-                      onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
-                      disabled={items.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4 text-destructive" />
-                    </Button>
+                    <div className="md:col-start-2 md:w-full space-y-1">
+                      <span className="flex items-center gap-1 text-muted-foreground text-xs">
+                        <Tag className="w-3 h-3" />
+                        Label
+                      </span>
+                      <SearchableLabelSelect
+                        value={it.labelId ?? null}
+                        labels={labels}
+                        onChange={(labelId, label) => {
+                          setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, labelId, labelName: label?.name ?? null, labelColor: label?.color ?? null } : x)))
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
                 )}
               </div>
             ))

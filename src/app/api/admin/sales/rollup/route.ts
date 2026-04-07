@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 const MAX_INVOICES = 2000
 const MAX_QUOTES = 2000
 const MAX_PAYMENTS = 5000
-const MAX_STRIPE_PAYMENTS = 500
+const MAX_STRIPE_PAYMENTS = 5000
 
 function clampInt(raw: string | null, def: number, min: number, max: number): number {
   const n = raw ? Number(raw) : NaN

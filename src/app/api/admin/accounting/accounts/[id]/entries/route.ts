@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { accountFromDb, expenseFromDb, bankTransactionFromDb, journalEntryFromDb } from '@/lib/accounting/db-mappers'
+import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-allocation'
 import { deleteFile } from '@/lib/storage'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (from) dateFilter.gte = from
   if (to) dateFilter.lte = to
 
-  const [expenses, bankTransactions, journalEntries, splitLines] = await Promise.all([
+  const [expenses, bankTransactions, journalEntries, splitLines, salesInvoiceEntries] = await Promise.all([
     prisma.expense.findMany({
       where: { accountId: account.id, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
       include: { account: true },
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       where: {
         accountId: account.id,
         status: 'MATCHED',
+        matchType: { not: 'INVOICE_PAYMENT' },
         ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
       },
       include: { account: true, bankAccount: true, expense: { include: { account: true } } },
@@ -73,18 +75,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
       orderBy: { bankTransaction: { date: 'desc' } },
     }),
+    listSalesInvoiceIncomeEntries({ from, to, accountId: account.id }),
   ])
 
   type Entry =
     | { kind: 'expense'; date: string; entry: ReturnType<typeof expenseFromDb> }
     | { kind: 'bankTransaction'; date: string; entry: ReturnType<typeof bankTransactionFromDb> }
     | { kind: 'journal'; date: string; entry: ReturnType<typeof journalEntryFromDb> }
+    | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null } }
     | { kind: 'split'; date: string; entry: { id: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
 
   const combined: Entry[] = [
     ...expenses.map(e => ({ kind: 'expense' as const, date: e.date as string, entry: expenseFromDb(e) })),
     ...bankTransactions.map(t => ({ kind: 'bankTransaction' as const, date: t.date as string, entry: bankTransactionFromDb(t) })),
     ...journalEntries.map(j => ({ kind: 'journal' as const, date: j.date as string, entry: journalEntryFromDb(j) })),
+    ...salesInvoiceEntries.map(entry => ({
+      kind: 'salesInvoice' as const,
+      date: entry.issueDate,
+      entry: {
+        id: entry.allocationId,
+        invoiceId: entry.invoiceId,
+        invoiceNumber: entry.invoiceNumber,
+        description: entry.itemDescription,
+        amountCents: entry.amountCents,
+        clientName: entry.clientName,
+        labelName: entry.labelName,
+      },
+    })),
     ...splitLines.map(s => ({
       kind: 'split' as const,
       date: (s.bankTransaction?.date ?? '') as string,

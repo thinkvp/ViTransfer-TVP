@@ -5,26 +5,33 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi, fetchTaxRates, saveTaxRatesBulk } from '@/lib/sales/admin-api'
+import { fetchSalesSettings, saveSalesSettings as saveSalesSettingsApi, fetchTaxRates, saveTaxRatesBulk, listSalesLabels, createSalesLabel, updateSalesLabel, deleteSalesLabel } from '@/lib/sales/admin-api'
 import type { SalesTaxRate } from '@/lib/sales/types'
+import type { SalesLabel } from '@/lib/sales/admin-api'
 import { apiFetch } from '@/lib/api-client'
 import { formatDateTime, cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Bell, Building2, CreditCard, Link2, Pencil, Plus, ReceiptText, Save, Star, Trash2 } from 'lucide-react'
+import { BarChart3, Bell, Building2, CreditCard, Link2, Pencil, Plus, ReceiptText, Save, Star, Tag, Trash2 } from 'lucide-react'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 const SALES_SECTIONS = [
   { id: 'sales-details', label: 'Sales Details', icon: Building2 },
+  { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'tax', label: 'Tax', icon: ReceiptText },
+  { id: 'labels', label: 'Labels', icon: Tag },
   { id: 'sales-notifications', label: 'Sales Notifications', icon: Bell },
   { id: 'stripe-checkout', label: 'Stripe Checkout', icon: CreditCard },
   { id: 'quickbooks', label: 'Quickbooks Integration', icon: Link2 },
 ] as const
 
 type SalesSection = typeof SALES_SECTIONS[number]['id']
+
+const DEFAULT_INCOME_ACCOUNT_VALUE = '__DEFAULT_INCOME_ACCOUNT__'
+const NO_LABEL_ACCOUNT_VALUE = '__NO_LABEL_ACCOUNT__'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
@@ -68,6 +75,8 @@ export default function SalesSettingsPage() {
   const [defaultInvoiceDueDays, setDefaultInvoiceDueDays] = useState('7')
   const [defaultTerms, setDefaultTerms] = useState('')
   const [paymentDetails, setPaymentDetails] = useState('')
+  const [dashboardReportingBasis, setDashboardReportingBasis] = useState<'CASH' | 'ACCRUAL'>('ACCRUAL')
+  const [dashboardAmountsIncludeGst, setDashboardAmountsIncludeGst] = useState(true)
 
   // Tax rate add/edit modal
   const [taxRateModalOpen, setTaxRateModalOpen] = useState(false)
@@ -101,13 +110,27 @@ export default function SalesSettingsPage() {
   const [quoteExpiryRemindersEnabled, setQuoteExpiryRemindersEnabled] = useState(false)
   const [quoteExpiryBusinessDaysBeforeValidUntil, setQuoteExpiryBusinessDaysBeforeValidUntil] = useState('3')
 
+  // Labels state
+  const [labels, setLabels] = useState<SalesLabel[]>([])
+  const [labelsLoaded, setLabelsLoaded] = useState(false)
+  const [incomeAccounts, setIncomeAccounts] = useState<Array<{ id: string; code: string; name: string }>>([])  
+  const [defaultIncomeAccountId, setDefaultIncomeAccountId] = useState<string>('')
+  const [labelModalOpen, setLabelModalOpen] = useState(false)
+  const [labelModalSaving, setLabelModalSaving] = useState(false)
+  const [editingLabel, setEditingLabel] = useState<SalesLabel | null>(null)
+  const [labelFormName, setLabelFormName] = useState('')
+  const [labelFormColor, setLabelFormColor] = useState('#6366F1')
+  const [labelFormAccountId, setLabelFormAccountId] = useState<string>('')
+  const [labelFormError, setLabelFormError] = useState<string | null>(null)
+
   // Unsaved changes tracking
   const [savedSnapshot, setSavedSnapshot] = useState('')
   const settingsSnapshot = JSON.stringify({
     businessName, address, abn, phone, email, website,
     businessRegistrationLabel, currencyCode, fiscalYearStartMonth,
     quoteLabel, invoiceLabel, taxLabel, taxEnabled, taxRatePercent,
-    defaultQuoteValidDays, defaultInvoiceDueDays, defaultTerms, paymentDetails,
+    dashboardReportingBasis, dashboardAmountsIncludeGst,
+    defaultQuoteValidDays, defaultInvoiceDueDays, defaultTerms, paymentDetails, defaultIncomeAccountId,
     stripeEnabled, stripeLabel, stripeFeePercent, stripeFeeFixed,
     stripePublishableKey, stripeSecretKey, stripeDashboardPaymentDescription, stripeCurrencies,
     qbDailyPullEnabled, qbDailyPullTime, qbLookbackDays,
@@ -144,10 +167,13 @@ export default function SalesSettingsPage() {
         setTaxLabel(s.taxLabel || '')
         setTaxEnabled(typeof s.taxEnabled === 'boolean' ? s.taxEnabled : true)
         setTaxRatePercent(String(s.taxRatePercent))
+        setDashboardReportingBasis(s.dashboardReportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL')
+        setDashboardAmountsIncludeGst(s.dashboardAmountsIncludeGst !== false)
         setDefaultQuoteValidDays(String(s.defaultQuoteValidDays ?? 14))
         setDefaultInvoiceDueDays(String(s.defaultInvoiceDueDays ?? 7))
         setDefaultTerms(s.defaultTerms)
         setPaymentDetails(s.paymentDetails)
+        setDefaultIncomeAccountId(s.defaultIncomeAccountId ?? '')
 
         // Load tax rates
         try {
@@ -302,6 +328,28 @@ export default function SalesSettingsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [lbls, accountRes] = await Promise.all([
+          listSalesLabels(),
+          apiFetch('/api/admin/accounting/accounts?type=INCOME&activeOnly=true'),
+        ])
+        if (cancelled) return
+        setLabels(lbls)
+        const accJson = await accountRes.json().catch(() => null)
+        const accs = Array.isArray(accJson?.accounts) ? accJson.accounts : []
+        setIncomeAccounts(accs.map((a: any) => ({ id: a.id, code: a.code ?? '', name: a.name ?? '' })))
+      } catch {
+        // ignore; labels section will still render empty
+      } finally {
+        if (!cancelled) setLabelsLoaded(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   const runQuickBooksAction = async (label: string, url: string, method: 'GET' | 'POST') => {
     setQbBusy(true)
     setQbSaved(false)
@@ -360,6 +408,37 @@ export default function SalesSettingsPage() {
       setQbManualStatus(`${label} failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setQbBusy(false)
+    }
+  }
+
+  async function handleSaveLabel() {
+    const name = labelFormName.trim()
+    if (!name) return
+    setLabelModalSaving(true)
+    setLabelFormError(null)
+    try {
+      if (editingLabel) {
+        const updated = await updateSalesLabel(editingLabel.id, {
+          name,
+          color: labelFormColor || null,
+          accountId: labelFormAccountId || null,
+        })
+        setLabels((prev) => prev.map((x) => (x.id === editingLabel.id ? updated : x)))
+      } else {
+        const created = await createSalesLabel({
+          name,
+          color: labelFormColor || null,
+          accountId: labelFormAccountId || null,
+          isActive: true,
+          sortOrder: labels.length,
+        })
+        setLabels((prev) => [...prev, created])
+      }
+      setLabelModalOpen(false)
+    } catch (e) {
+      setLabelFormError(e instanceof Error ? e.message : 'Failed to save label')
+    } finally {
+      setLabelModalSaving(false)
     }
   }
 
@@ -467,10 +546,13 @@ export default function SalesSettingsPage() {
         taxLabel: taxLabel.trim(),
         taxEnabled,
         taxRatePercent: Number.isFinite(parsedTax) ? parsedTax : 0,
+        dashboardReportingBasis,
+        dashboardAmountsIncludeGst,
         defaultQuoteValidDays: Number.isFinite(parsedQuoteDays) ? parsedQuoteDays : 14,
         defaultInvoiceDueDays: Number.isFinite(parsedInvoiceDays) ? parsedInvoiceDays : 7,
         defaultTerms,
         paymentDetails,
+        defaultIncomeAccountId: defaultIncomeAccountId || null,
         updatedAt: new Date().toISOString(),
       })
 
@@ -566,9 +648,12 @@ export default function SalesSettingsPage() {
             taxLabel: taxLabel.trim(),
             taxEnabled,
             taxRatePercent: Number.isFinite(parsedTax) ? parsedTax : 0,
+            dashboardReportingBasis,
+            dashboardAmountsIncludeGst,
             defaultQuoteValidDays: Number.isFinite(parsedQuoteDays) ? parsedQuoteDays : 14,
             defaultInvoiceDueDays: Number.isFinite(parsedInvoiceDays) ? parsedInvoiceDays : 7,
             defaultTerms, paymentDetails,
+            defaultIncomeAccountId: defaultIncomeAccountId || null,
             updatedAt: new Date().toISOString(),
           })
         })(),
@@ -826,6 +911,41 @@ export default function SalesSettingsPage() {
       </Card>
           </div>
 
+          <div className={cn(activeSection !== 'dashboard' && 'lg:hidden')}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Sales Dashboard</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Reporting basis</Label>
+              <Select value={dashboardReportingBasis} onValueChange={(value) => setDashboardReportingBasis(value as 'CASH' | 'ACCRUAL')}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ACCRUAL">Accrual (invoice issue date)</SelectItem>
+                  <SelectItem value="CASH">Cash (payment date)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Applies to the FY sales KPI and Sales Overview chart.</p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+                <div>
+                  <Label>Include GST in dashboard totals</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Turn this off to show ex-GST amounts across dashboard sales totals.</p>
+                </div>
+                <Switch checked={dashboardAmountsIncludeGst} onCheckedChange={setDashboardAmountsIncludeGst} />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+          </div>
+
           <div className={cn(activeSection !== 'tax' && 'lg:hidden')}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
@@ -969,6 +1089,202 @@ export default function SalesSettingsPage() {
           </CardContent>
         )}
       </Card>
+          </div>
+
+          <div className={cn(activeSection !== 'labels' && 'lg:hidden')}>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle className="text-base">Labels</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Labels can be applied to line items on quotes and invoices to categorise them. Optionally link each label to an income account for reporting.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setEditingLabel(null)
+              setLabelFormName('')
+              setLabelFormColor('#6366F1')
+              setLabelFormAccountId('')
+              setLabelFormError(null)
+              setLabelModalOpen(true)
+            }}
+          >
+            <Plus className="w-4 h-4 mr-1" />
+            New Label
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-6 pb-6 border-b border-border space-y-2">
+            <Label className="text-sm font-medium">Default Sales Income Account</Label>
+            <p className="text-xs text-muted-foreground">Line items with no label, or labels without a linked account, will be reported under this account. If left blank they appear as &ldquo;Sales Revenue&rdquo;.</p>
+            <Select
+              value={defaultIncomeAccountId}
+              onValueChange={(value) => setDefaultIncomeAccountId(value === DEFAULT_INCOME_ACCOUNT_VALUE ? '' : value)}
+            >
+              <SelectTrigger className="h-9 max-w-sm">
+                <SelectValue placeholder="— Sales Revenue (default) —" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_INCOME_ACCOUNT_VALUE}>— Sales Revenue (default) —</SelectItem>
+                {incomeAccounts.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.code} – {a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Saved with the main &ldquo;Save changes&rdquo; button above.</p>
+          </div>
+          {!labelsLoaded ? (
+            <div className="text-sm text-muted-foreground">Loading labels…</div>
+          ) : labels.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No labels yet. Click &ldquo;New Label&rdquo; to add one.</p>
+          ) : (
+            <div className="border border-border rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40">
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-8"></th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Name</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Account</th>
+                    <th className="px-3 py-2 w-20"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {labels.map((lbl) => (
+                    <tr key={lbl.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                      <td className="px-3 py-2">
+                        <span
+                          className="inline-block w-4 h-4 rounded-sm flex-shrink-0"
+                          style={{ backgroundColor: lbl.color ?? '#6366F1' }}
+                        />
+                      </td>
+                      <td className="px-3 py-2 font-medium">{lbl.name}</td>
+                      <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
+                        {lbl.accountCode ? `${lbl.accountCode} – ${lbl.accountName}` : <span className="italic">No account</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => {
+                              setEditingLabel(lbl)
+                              setLabelFormName(lbl.name)
+                              setLabelFormColor(lbl.color ?? '#6366F1')
+                              setLabelFormAccountId(lbl.accountId ?? '')
+                              setLabelFormError(null)
+                              setLabelModalOpen(true)
+                            }}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={async () => {
+                              if (!confirm(`Delete label "${lbl.name}"? It will be removed from any library items that use it. Labels already captured on quotes/invoices will retain their name snapshot.`)) return
+                              try {
+                                await deleteSalesLabel(lbl.id)
+                                setLabels((prev) => prev.filter((x) => x.id !== lbl.id))
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : 'Failed to delete label')
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Label add/edit modal */}
+      <Dialog open={labelModalOpen} onOpenChange={(open) => { if (!labelModalSaving) setLabelModalOpen(open) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingLabel ? 'Edit Label' : 'New Label'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <Label>Name</Label>
+              <Input
+                value={labelFormName}
+                onChange={(e) => { setLabelFormName(e.target.value); setLabelFormError(null) }}
+                placeholder="e.g. Consultation, Licensing, Travel"
+                className="h-9"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveLabel() }}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Color</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={labelFormColor}
+                  onChange={(e) => setLabelFormColor(e.target.value)}
+                  className="h-9 w-14 rounded-md border border-border cursor-pointer p-0.5"
+                  title="Pick a color"
+                />
+                <span className="text-sm text-muted-foreground font-mono">{labelFormColor.toUpperCase()}</span>
+                <div className="flex gap-1.5 flex-wrap">
+                  {['#6366F1','#10B981','#F59E0B','#EF4444','#3B82F6','#8B5CF6','#EC4899','#14B8A6'].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${labelFormColor.toUpperCase() === c.toUpperCase() ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }}
+                      onClick={() => setLabelFormColor(c)}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Income Account <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Select
+                value={labelFormAccountId}
+                onValueChange={(value) => setLabelFormAccountId(value === NO_LABEL_ACCOUNT_VALUE ? '' : value)}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="— No account linked —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_LABEL_ACCOUNT_VALUE}>— No account linked —</SelectItem>
+                  {incomeAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.code} – {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Links this label to a Chart of Accounts income account for reporting.</p>
+            </div>
+
+            {labelFormError && <p className="text-sm text-destructive">{labelFormError}</p>}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={() => setLabelModalOpen(false)} disabled={labelModalSaving}>Cancel</Button>
+              <Button onClick={() => void handleSaveLabel()} disabled={labelModalSaving || !labelFormName.trim()}>
+                {labelModalSaving ? 'Saving…' : editingLabel ? 'Save changes' : 'Create label'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
           </div>
 
           <div className={cn(activeSection !== 'sales-notifications' && 'lg:hidden')}>

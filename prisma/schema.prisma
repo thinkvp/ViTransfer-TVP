@@ -1196,12 +1196,17 @@ model SalesSettings {
   invoiceLabel String @default("INVOICE")
   taxLabel     String @default("")
   taxEnabled   Boolean @default(true)
+  dashboardReportingBasis String  @default("ACCRUAL")
+  dashboardAmountsIncludeGst Boolean @default(true)
 
   taxRatePercent        Float  @default(10)
   defaultQuoteValidDays Int    @default(14)
   defaultInvoiceDueDays Int    @default(7)
   defaultTerms          String @default("Payment due within 7 days unless otherwise agreed.")
   paymentDetails        String @default("")
+
+  defaultIncomeAccountId String?
+  defaultIncomeAccount   Account? @relation("SalesSettingsDefaultIncome", fields: [defaultIncomeAccountId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1939,6 +1944,8 @@ model SalesItem {
   unitPriceCents Int
   taxRatePercent Float
   taxRateName    String?           @db.VarChar(200)
+  labelId        String?
+  label          SalesLabel?       @relation(fields: [labelId], references: [id], onDelete: SetNull)
   sortOrder      Int               @default(0)
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
@@ -1947,6 +1954,7 @@ model SalesItem {
 
   @@index([sortOrder])
   @@index([createdAt])
+  @@index([labelId])
 }
 
 /// Named preset — stores which SalesItems should be auto-checked
@@ -1975,6 +1983,24 @@ model SalesPresetItem {
   @@unique([presetId, itemId])
   @@index([presetId])
   @@index([itemId])
+}
+
+/// Named labels for categorising line items — optionally mapped to a Chart of Accounts INCOME account
+model SalesLabel {
+  id          String   @id @default(cuid())
+  name        String   @unique @db.VarChar(200)
+  color       String?  @db.VarChar(7)   // Hex color e.g. "#3B82F6"
+  accountId   String?                   // Optional link to Account (INCOME type)
+  account     Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  salesItems  SalesItem[]
+
+  @@index([sortOrder])
+  @@index([isActive])
 }
 
 // ===== Accounting Module =====
@@ -2045,6 +2071,8 @@ model Account {
   bankTransactions  BankTransaction[] @relation("BankTransactionAccount")
   journalEntries    JournalEntry[]
   splitLines        SplitLine[]
+  salesLabels       SalesLabel[]
+  salesSettingsDefault SalesSettings[] @relation("SalesSettingsDefaultIncome")
 
   @@index([type])
   @@index([type, isActive])
@@ -2246,12 +2274,25 @@ model BasPeriod {
   g2Override    Int?                                     // cents
   g3Override    Int?                                     // cents
 
+  // Snapshot of calculation at lodge time (JSON)
+  calculationJson Json?
+  recordsJson     Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([financialYear, quarter])
   @@index([startDate])
   @@index([status])
+}
+
+model AccountingSettings {
+  id String @id @default("default")
+
+  reportingBasis String @default("ACCRUAL")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// Tax rate configuration — populates the GST dropdown when posting transactions.

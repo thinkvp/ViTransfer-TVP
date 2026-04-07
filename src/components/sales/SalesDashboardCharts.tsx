@@ -28,6 +28,7 @@ import type { SalesSettings } from '@/lib/sales/types'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { quoteEffectiveStatus } from '@/lib/sales/status'
+import { getInvoiceDashboardAmountCents, getPaymentDashboardAmountCents, getSalesDashboardReportingBasis, salesDashboardIncludesGst } from '@/lib/sales/dashboard-reporting'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,32 +196,52 @@ function PeriodSelect({
 function useSalesChartData(
   rollup: SalesRollupResponse | null,
   period: PeriodRange,
-  taxRatePercent: number,
+  settings: SalesSettings,
 ) {
   return useMemo(() => {
     const monthMap = new Map<string, number>()
     for (const m of period.months) monthMap.set(m.key, 0)
 
     const invoices = rollup?.invoices ?? []
+    const payments = rollup?.payments ?? []
     const rollupById = rollup?.invoiceRollupById ?? {}
+    const invoiceById = Object.fromEntries(invoices.map((invoice) => [invoice.id, invoice]))
+    const reportingBasis = getSalesDashboardReportingBasis(settings)
+    const includeGst = salesDashboardIncludesGst(settings)
+    const startMs = period.start.getTime()
+    const endMs = period.end.getTime()
 
-    for (const inv of invoices) {
-      const ym = isoToYearMonth(inv.issueDate)
-      if (!monthMap.has(ym)) continue
+    if (reportingBasis === 'CASH') {
+      for (const payment of payments) {
+        if (payment.excludeFromInvoiceBalance) continue
 
-      const r = rollupById[inv.id]
-      const totalCents = r?.totalCents != null
-        ? Number(r.totalCents)
-        : sumLineItemsSubtotal(inv.items) + sumLineItemsTax(inv.items, taxRatePercent)
+        const paidAt = new Date(`${payment.paymentDate}T00:00:00`).getTime()
+        if (Number.isNaN(paidAt) || paidAt < startMs || paidAt > endMs) continue
 
-      monthMap.set(ym, (monthMap.get(ym) ?? 0) + Math.max(0, Math.trunc(totalCents)))
+        const ym = isoToYearMonth(payment.paymentDate)
+        if (!monthMap.has(ym)) continue
+
+        const amountCents = getPaymentDashboardAmountCents(payment, payment.invoiceId ? invoiceById[payment.invoiceId] : null, settings.taxRatePercent, includeGst)
+        monthMap.set(ym, (monthMap.get(ym) ?? 0) + amountCents)
+      }
+    } else {
+      for (const inv of invoices) {
+        const issuedAt = new Date(`${inv.issueDate}T00:00:00`).getTime()
+        if (Number.isNaN(issuedAt) || issuedAt < startMs || issuedAt > endMs) continue
+
+        const ym = isoToYearMonth(inv.issueDate)
+        if (!monthMap.has(ym)) continue
+
+        const amountCents = getInvoiceDashboardAmountCents(inv, settings.taxRatePercent, includeGst, rollupById[inv.id])
+        monthMap.set(ym, (monthMap.get(ym) ?? 0) + amountCents)
+      }
     }
 
     return period.months.map((m) => ({
       label: m.label,
       revenue: Math.round((monthMap.get(m.key) ?? 0) / 100),
     }))
-  }, [rollup, period, taxRatePercent])
+  }, [rollup, period, settings])
 }
 
 interface SalesOverviewChartProps {
@@ -236,8 +257,10 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
     () => computePeriod(period, settings.fiscalYearStartMonth ?? 7, now),
     [period, settings.fiscalYearStartMonth, now],
   )
-  const data = useSalesChartData(rollup, periodRange, settings.taxRatePercent)
+  const data = useSalesChartData(rollup, periodRange, settings)
   const sym = getCurrencySymbol(settings.currencyCode)
+  const reportingBasis = getSalesDashboardReportingBasis(settings)
+  const includeGst = salesDashboardIncludesGst(settings)
 
   const total = data.reduce((s, d) => s + d.revenue, 0)
   const hasData = data.some((d) => d.revenue > 0)
@@ -269,13 +292,14 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
             {avgPerMonth > 0 && ` · avg ${sym}${avgPerMonth.toLocaleString('en-AU')} / mo`}
             {projected !== null && ` · Projected: ${sym}${projected.toLocaleString('en-AU')}`}
           </p>
+          <p className="text-xs text-muted-foreground mt-0.5">{reportingBasis === 'CASH' ? 'Cash basis' : 'Accrual basis'} · {includeGst ? 'Including GST' : 'Excluding GST'}</p>
         </div>
         <PeriodSelect value={period} onChange={setPeriod} />
       </CardHeader>
       <CardContent className="pb-4 pt-0">
         {!hasData ? (
           <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
-            No invoice data for this period
+            {reportingBasis === 'CASH' ? 'No payment data for this period' : 'No invoice data for this period'}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
@@ -312,7 +336,7 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
               />
               <Bar
                 dataKey="revenue"
-                name="Revenue"
+                name="Sales"
                 fill="url(#salesBarGradient)"
                 radius={[5, 5, 0, 0]}
               />

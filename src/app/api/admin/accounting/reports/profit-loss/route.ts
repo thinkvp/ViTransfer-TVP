@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { buildProfitLossReport } from '@/lib/accounting/reports'
+import { getAccountingReportingBasis } from '@/lib/accounting/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const from = searchParams.get('from')
   const to = searchParams.get('to')
-  const basis = searchParams.get('basis') === 'ACCRUAL' ? 'ACCRUAL' : 'CASH'
+  const requestedBasis = searchParams.get('basis')
 
   if (!from || !to) {
     return NextResponse.json({ error: 'from and to query params are required (YYYY-MM-DD)' }, { status: 400 })
@@ -35,6 +36,10 @@ export async function GET(request: NextRequest) {
   if (from > to) {
     return NextResponse.json({ error: 'from must be before or equal to to' }, { status: 400 })
   }
+
+  const basis = requestedBasis === 'ACCRUAL' || requestedBasis === 'CASH'
+    ? requestedBasis
+    : await getAccountingReportingBasis()
 
   const report = await buildProfitLossReport(from, to, basis)
 

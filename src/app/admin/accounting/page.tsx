@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api-client'
 import { AlertTriangle, TrendingUp, TrendingDown, Landmark, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { AccountingSettings } from '@/lib/accounting/types'
 
 function fmtAud(cents: number) {
   const abs = (Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -27,6 +28,7 @@ interface DashboardStats {
   draftExpenseCount: number
   bankAccounts: { id: string; name: string; openingBalance: number }[]
   pl: { totalIncomeCents: number; totalExpenseCents: number; netProfitCents: number } | null
+  reportingBasis: 'CASH' | 'ACCRUAL'
 }
 
 export default function AccountingDashboardPage() {
@@ -41,17 +43,21 @@ export default function AccountingDashboardPage() {
         apiFetch('/api/admin/accounting/transactions?status=UNMATCHED&pageSize=1'),
         apiFetch('/api/admin/accounting/expenses?status=DRAFT&pageSize=1'),
         apiFetch('/api/admin/accounting/bank-accounts'),
-        apiFetch(`/api/admin/accounting/reports/profit-loss?from=${fy.from}&to=${fy.to}&basis=ACCRUAL`),
+        apiFetch('/api/admin/accounting/settings'),
       ])
       const txnData = txnRes.ok ? await txnRes.json() : null
       const expData = expRes.ok ? await expRes.json() : null
       const bankData = bankRes.ok ? await bankRes.json() : null
-      const plData = plRes.ok ? await plRes.json() : null
+      const settingsData: AccountingSettings | null = plRes.ok ? await plRes.json() : null
+      const reportingBasis = settingsData?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL'
+      const reportRes = await apiFetch(`/api/admin/accounting/reports/profit-loss?from=${fy.from}&to=${fy.to}&basis=${reportingBasis}`)
+      const plData = reportRes.ok ? await reportRes.json() : null
 
       setStats({
         unmatchedCount: txnData?.total ?? 0,
         draftExpenseCount: expData?.pagination?.total ?? expData?.total ?? 0,
         bankAccounts: (bankData?.bankAccounts ?? []).slice(0, 6),
+        reportingBasis,
         pl: plData?.report
           ? {
               totalIncomeCents: plData.report.totalIncomeCents ?? 0,
@@ -113,7 +119,7 @@ export default function AccountingDashboardPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">{fmtAud(stats.pl.totalIncomeCents)}</p>
-                <p className="text-xs text-muted-foreground mt-1">total revenue</p>
+                <p className="text-xs text-muted-foreground mt-1">{stats.reportingBasis === 'CASH' ? 'cash basis, ex GST' : 'accrual basis, ex GST'}</p>
               </CardContent>
             </Card>
 

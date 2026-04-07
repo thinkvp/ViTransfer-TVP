@@ -19,6 +19,12 @@ export type SalesLineItem = {
   taxRatePercent: number
   /** Display name of the tax rate, e.g. "GST". Stored per-item for historical accuracy. */
   taxRateName?: string
+  /** ID of the SalesLabel applied to this line item (internal use only; not shown on public docs). */
+  labelId?: string | null
+  /** Denormalised label name snapshot (preserved if label is later renamed/deleted). */
+  labelName?: string | null
+  /** Denormalised label color snapshot e.g. "#3B82F6". */
+  labelColor?: string | null
 }
 
 export type SalesQuote = {
@@ -96,11 +102,14 @@ export type SalesSettings = {
   invoiceLabel: string
   taxLabel: string
   taxEnabled: boolean
+  dashboardReportingBasis?: 'CASH' | 'ACCRUAL'
+  dashboardAmountsIncludeGst?: boolean
   taxRatePercent: number
   defaultQuoteValidDays: number
   defaultInvoiceDueDays: number
   defaultTerms: string
   paymentDetails: string
+  defaultIncomeAccountId?: string | null
   updatedAt: string
 }
 

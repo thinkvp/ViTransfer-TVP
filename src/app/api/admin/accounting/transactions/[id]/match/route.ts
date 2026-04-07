@@ -72,6 +72,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       )
     }
     updateData.invoicePaymentId = data.invoicePaymentId
+    updateData.transactionType = 'ReceivePayment'
+    updateData.accountId = null
+    updateData.taxCode = null
   } else if (data.matchType === 'EXPENSE') {
     const expense = await prisma.expense.findUnique({ where: { id: data.expenseId } })
     if (!expense) {

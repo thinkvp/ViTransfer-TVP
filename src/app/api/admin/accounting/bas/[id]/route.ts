@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { basPeriodFromDb } from '@/lib/accounting/db-mappers'
+import { calculateBas } from '@/lib/accounting/gst'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,7 +13,6 @@ const updateSchema = z.object({
   label: z.string().trim().min(1).max(100).optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  basis: z.enum(['CASH', 'ACCRUAL']).optional(),
   status: z.enum(['DRAFT', 'REVIEWED', 'LODGED']).optional(),
   g2Override: z.number().min(0).optional().nullable(),
   g3Override: z.number().min(0).optional().nullable(),
@@ -77,18 +77,33 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Period must be in REVIEWED status before lodging' }, { status: 400 })
   }
 
+  // Snapshot calculation at lodge time
+  let snapshotData: { calculationJson?: import('@prisma/client').Prisma.InputJsonValue; recordsJson?: import('@prisma/client').Prisma.InputJsonValue } = {}
+  if (data.status === 'LODGED') {
+    const { calculation, records } = await calculateBas(
+      existing.startDate,
+      existing.endDate,
+      existing.basis as 'CASH' | 'ACCRUAL',
+      data.g2Override !== undefined ? data.g2Override : existing.g2Override,
+      data.g3Override !== undefined ? data.g3Override : existing.g3Override,
+    )
+    snapshotData = {
+      calculationJson: calculation as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      recordsJson: records as unknown as import('@prisma/client').Prisma.InputJsonValue,
+    }
+  }
+
   const updated = await prisma.basPeriod.update({
     where: { id },
     data: {
       ...(data.label !== undefined ? { label: data.label } : {}),
       ...(data.startDate !== undefined ? { startDate: data.startDate } : {}),
       ...(data.endDate !== undefined ? { endDate: data.endDate } : {}),
-      ...(data.basis !== undefined ? { basis: data.basis } : {}),
       ...(data.status !== undefined ? { status: data.status } : {}),
       ...(data.g2Override !== undefined ? { g2Override: data.g2Override !== null ? Math.round(data.g2Override * 100) : null } : {}),
       ...(data.g3Override !== undefined ? { g3Override: data.g3Override !== null ? Math.round(data.g3Override * 100) : null } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
-      ...(data.status === 'LODGED' ? { lodgedAt: new Date() } : {}),
+      ...(data.status === 'LODGED' ? { lodgedAt: new Date(), ...snapshotData } : {}),
     },
   })
 

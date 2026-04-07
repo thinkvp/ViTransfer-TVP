@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-allocation'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,24 +28,25 @@ export async function GET(request: NextRequest) {
   if (to) dateFilter.lte = to
   const hasDateFilter = from || to
 
-  // Sum expenses by accountId (all expense records)
-  const expenseGroups = await prisma.expense.groupBy({
-    by: ['accountId'],
-    where: hasDateFilter ? { date: dateFilter } : {},
-    _sum: { amountIncGst: true },
-  })
-
-  // Sum bank transactions by accountId (MATCHED, non-Expense — Expense type already counted via Expense.amountIncGst)
-  const txnGroups = await prisma.bankTransaction.groupBy({
-    by: ['accountId'],
-    where: {
-      status: 'MATCHED',
-      transactionType: { not: 'Expense' },
-      accountId: { not: null },
-      ...(hasDateFilter ? { date: dateFilter } : {}),
-    },
-    _sum: { amountCents: true },
-  })
+  const [expenseGroups, txnGroups, salesIncomeEntries] = await Promise.all([
+    prisma.expense.groupBy({
+      by: ['accountId'],
+      where: hasDateFilter ? { date: dateFilter } : {},
+      _sum: { amountIncGst: true },
+    }),
+    prisma.bankTransaction.groupBy({
+      by: ['accountId'],
+      where: {
+        status: 'MATCHED',
+        matchType: { not: 'INVOICE_PAYMENT' },
+        transactionType: { not: 'Expense' },
+        accountId: { not: null },
+        ...(hasDateFilter ? { date: dateFilter } : {}),
+      },
+      _sum: { amountCents: true },
+    }),
+    listSalesInvoiceIncomeEntries({ from, to }),
+  ])
 
   const balances: Record<string, number> = {}
 
@@ -59,6 +61,10 @@ export async function GET(request: NextRequest) {
       // amountCents is negative for debits, positive for credits — store signed so UI can format correctly
       balances[g.accountId] = (balances[g.accountId] ?? 0) + (g._sum.amountCents ?? 0)
     }
+  }
+
+  for (const entry of salesIncomeEntries) {
+    balances[entry.accountId] = (balances[entry.accountId] ?? 0) + entry.amountCents
   }
 
   const res = NextResponse.json({ balances })

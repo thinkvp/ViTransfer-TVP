@@ -22,11 +22,14 @@ const settingsSchema = z.object({
   invoiceLabel: z.string().trim().max(100).default('INVOICE'),
   taxLabel: z.string().trim().max(100).default(''),
   taxEnabled: z.boolean().default(true),
+  dashboardReportingBasis: z.enum(['CASH', 'ACCRUAL']).default('ACCRUAL'),
+  dashboardAmountsIncludeGst: z.boolean().default(true),
   taxRatePercent: z.number().finite().min(0).max(100),
   defaultQuoteValidDays: z.number().int().min(0).max(3650),
   defaultInvoiceDueDays: z.number().int().min(0).max(3650),
   defaultTerms: z.string().trim().max(10000),
   paymentDetails: z.string().trim().max(10000),
+  defaultIncomeAccountId: z.string().trim().min(1).max(100).nullable().optional(),
 })
 
 function defaultSalesSettings() {
@@ -45,11 +48,14 @@ function defaultSalesSettings() {
     invoiceLabel: 'INVOICE',
     taxLabel: '',
     taxEnabled: true,
+    dashboardReportingBasis: 'ACCRUAL',
+    dashboardAmountsIncludeGst: true,
     taxRatePercent: 10,
     defaultQuoteValidDays: 14,
     defaultInvoiceDueDays: 7,
     defaultTerms: 'Payment due within 7 days unless otherwise agreed.',
     paymentDetails: '',
+    defaultIncomeAccountId: null,
   }
 }
 

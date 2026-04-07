@@ -155,6 +155,8 @@ export function basPeriodFromDb(row: any): BasPeriod {
     notes: row.notes ?? null,
     g2Override: row.g2Override != null ? Number(row.g2Override) : null,
     g3Override: row.g3Override != null ? Number(row.g3Override) : null,
+    calculationJson: row.calculationJson ?? null,
+    recordsJson: row.recordsJson ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
   }

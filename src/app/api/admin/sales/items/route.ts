@@ -14,6 +14,7 @@ const createItemSchema = z.object({
   unitPriceCents: z.number().int().finite(),
   taxRatePercent: z.number().finite().min(0).max(100),
   taxRateName: z.string().max(200).optional().nullable(),
+  labelId: z.string().trim().min(1).max(100).optional().nullable(),
 })
 
 function mapItem(row: any) {
@@ -25,6 +26,9 @@ function mapItem(row: any) {
     unitPriceCents: Number(row.unitPriceCents),
     taxRatePercent: Number(row.taxRatePercent),
     taxRateName: row.taxRateName ?? undefined,
+    labelId: row.labelId ?? null,
+    labelName: row.label?.name ?? null,
+    labelColor: row.label?.color ?? null,
     sortOrder: Number(row.sortOrder ?? 0),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
@@ -45,6 +49,7 @@ export async function GET(request: NextRequest) {
 
   const rows = await prisma.salesItem.findMany({
     orderBy: [{ createdAt: 'asc' }],
+    include: { label: { select: { name: true, color: true } } },
   })
 
   const res = NextResponse.json({ items: rows.map(mapItem) })
@@ -77,7 +82,9 @@ export async function POST(request: NextRequest) {
       unitPriceCents: parsed.data.unitPriceCents,
       taxRatePercent: parsed.data.taxRatePercent,
       taxRateName: parsed.data.taxRateName ?? null,
+      labelId: parsed.data.labelId ?? null,
     },
+    include: { label: { select: { name: true, color: true } } },
   })
 
   return NextResponse.json({ ok: true, item: mapItem(item) }, { status: 201 })

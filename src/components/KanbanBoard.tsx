@@ -179,6 +179,7 @@ export default function KanbanBoard({
 
   // Archive
   const [showArchived, setShowArchived] = useState(false)
+  const [archivedViewKey, setArchivedViewKey] = useState(0)
 
   // ---------- Data loading ----------
 
@@ -320,6 +321,9 @@ export default function KanbanBoard({
     const res = await apiFetch(`/api/kanban/cards/${id}`, { method: 'DELETE' })
     if (res.ok) {
       setDeleteCard(null)
+      if (showArchived) {
+        setArchivedViewKey((current) => current + 1)
+      }
       await loadKanban()
       notifyBoardChanged()
     }
@@ -493,6 +497,7 @@ export default function KanbanBoard({
 
           {showArchived ? (
             <ArchivedView
+              key={archivedViewKey}
               onUnarchive={async (id) => {
                 const res = await apiFetch(`/api/kanban/cards/${id}/archive`, { method: 'DELETE' })
                 if (res.ok) {

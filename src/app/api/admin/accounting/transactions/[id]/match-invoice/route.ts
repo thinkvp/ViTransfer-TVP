@@ -48,13 +48,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: `Invoice status is ${invoice.status} — only open invoices can be matched` }, { status: 409 })
   }
 
-  // Find the first active INCOME-type account to link as the revenue account
-  const incomeAccount = await prisma.account.findFirst({
-    where: { type: 'INCOME', isActive: true },
-    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-    select: { id: true },
-  })
-
   const updated = await prisma.$transaction(async (tx) => {
     // Create a payment record for the full bank transaction amount
     const payment = await tx.salesPayment.create({
@@ -80,7 +73,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         matchType: 'INVOICE_PAYMENT',
         invoicePaymentId: payment.id,
         transactionType: 'ReceivePayment',
-        accountId: incomeAccount?.id ?? null,
+        accountId: null,
+        taxCode: null,
       },
       include: {
         bankAccount: { select: { id: true, name: true } },

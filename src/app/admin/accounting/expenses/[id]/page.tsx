@@ -94,18 +94,31 @@ export default function ExpenseFormPage() {
     setError('')
     setSaving(true)
     try {
-      const amountCents = Math.round(parseFloat(form.amountIncGst) * 100)
-      if (isNaN(amountCents) || amountCents <= 0) { setError('Enter a valid amount'); return }
-      if (!form.accountId) { setError('Select an account'); return }
-      const body = {
-        date: form.date,
-        supplierName: form.supplierName.trim() || null,
-        description: form.description.trim(),
-        accountId: form.accountId,
-        taxCode: form.taxCode,
-        amountIncGst: amountCents,
-        notes: form.notes.trim() || null,
+      if (!form.description.trim()) { setError('Enter a description'); return }
+
+      let body: Record<string, unknown>
+      if (isFinancialLocked) {
+        // Reconciled: only non-financial fields can change
+        body = {
+          description: form.description.trim(),
+          supplierName: form.supplierName.trim() || null,
+          notes: form.notes.trim() || null,
+        }
+      } else {
+        const parsedAmount = parseFloat(form.amountIncGst)
+        if (isNaN(parsedAmount) || parsedAmount <= 0) { setError('Enter a valid amount'); return }
+        if (!form.accountId) { setError('Select an account'); return }
+        body = {
+          date: form.date,
+          supplierName: form.supplierName.trim() || null,
+          description: form.description.trim(),
+          accountId: form.accountId,
+          taxCode: form.taxCode,
+          amountIncGst: parsedAmount,
+          notes: form.notes.trim() || null,
+        }
       }
+
       const url = expenseId ? `/api/admin/accounting/expenses/${expenseId}` : '/api/admin/accounting/expenses'
       const method = expenseId ? 'PUT' : 'POST'
       const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -191,7 +204,9 @@ export default function ExpenseFormPage() {
     }
   }
 
-  const isReadonly = expense?.status === 'RECONCILED'
+  // Financial fields (amount, date, account, taxCode) are locked once reconciled.
+  // Non-financial fields (supplier, description, notes, receipt) remain editable.
+  const isFinancialLocked = expense?.status === 'RECONCILED'
 
   if (loading) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
 
@@ -228,23 +243,23 @@ export default function ExpenseFormPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="exp-date">Date *</Label>
-              <Input id="exp-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} disabled={isReadonly} />
+              <Input id="exp-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} disabled={isFinancialLocked} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="exp-supplier">Supplier</Label>
-              <Input id="exp-supplier" value={form.supplierName} onChange={e => setForm(f => ({ ...f, supplierName: e.target.value }))} placeholder="Supplier name (optional)" disabled={isReadonly} />
+              <Input id="exp-supplier" value={form.supplierName} onChange={e => setForm(f => ({ ...f, supplierName: e.target.value }))} placeholder="Supplier name (optional)" />
             </div>
           </div>
 
           <div className="space-y-1">
             <Label htmlFor="exp-desc">Description *</Label>
-            <Input id="exp-desc" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description of expense" disabled={isReadonly} />
+            <Input id="exp-desc" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description of expense" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="exp-account">Account *</Label>
-              <Select value={form.accountId} onValueChange={v => setForm(f => ({ ...f, accountId: v }))} disabled={isReadonly}>
+              <Select value={form.accountId} onValueChange={v => setForm(f => ({ ...f, accountId: v }))} disabled={isFinancialLocked}>
                 <SelectTrigger id="exp-account"><SelectValue placeholder="Select account" /></SelectTrigger>
                 <SelectContent>
                   {accounts.map(a => (
@@ -255,7 +270,7 @@ export default function ExpenseFormPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="exp-taxcode">Tax Code</Label>
-              <Select value={form.taxCode} onValueChange={v => setForm(f => ({ ...f, taxCode: v as AccountTaxCode }))} disabled={isReadonly}>
+              <Select value={form.taxCode} onValueChange={v => setForm(f => ({ ...f, taxCode: v as AccountTaxCode }))} disabled={isFinancialLocked}>
                 <SelectTrigger id="exp-taxcode"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(TAX_CODE_LABELS) as [AccountTaxCode, string][]).map(([k, v]) => (
@@ -269,7 +284,7 @@ export default function ExpenseFormPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="exp-amount">Amount inc. GST ($) *</Label>
-              <Input id="exp-amount" type="number" step="0.01" min="0" value={form.amountIncGst} onChange={e => setForm(f => ({ ...f, amountIncGst: e.target.value }))} placeholder="0.00" disabled={isReadonly} />
+              <Input id="exp-amount" type="number" step="0.01" min="0" value={form.amountIncGst} onChange={e => setForm(f => ({ ...f, amountIncGst: e.target.value }))} placeholder="0.00" disabled={isFinancialLocked} />
             </div>
             {!isNew && expense && (
               <div className="space-y-1 pt-6 text-sm text-muted-foreground">
@@ -281,7 +296,7 @@ export default function ExpenseFormPage() {
 
           <div className="space-y-1">
             <Label htmlFor="exp-notes">Notes</Label>
-            <Textarea id="exp-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" rows={2} disabled={isReadonly} />
+            <Textarea id="exp-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" rows={2} />
           </div>
 
           {/* Receipt */}
@@ -297,13 +312,11 @@ export default function ExpenseFormPage() {
                 >
                   {expense.receiptOriginalName ?? 'Download receipt'}
                 </button>
-                {!isReadonly && (
-                  <Button variant="ghost" size="sm" className="h-7 text-destructive" onClick={handleDeleteReceipt}>
-                    <Trash2 className="w-3.5 h-3.5 mr-1" />Remove
-                  </Button>
-                )}
+                <Button variant="ghost" size="sm" className="h-7 text-destructive" onClick={handleDeleteReceipt}>
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />Remove
+                </Button>
               </div>
-            ) : !isReadonly ? (
+            ) : (
               <div>
                 <input
                   ref={fileInputRef}
@@ -317,22 +330,24 @@ export default function ExpenseFormPage() {
                   {receiptFile ? receiptFile.name : 'Upload receipt'}
                 </Button>
               </div>
-            ) : null}
+            )}
           </div>
+
+          {isFinancialLocked && (
+            <p className="text-xs text-muted-foreground">Financial fields are locked for reconciled expenses. You can still update supplier, description, notes, and receipt.</p>
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          {!isReadonly && (
-            <div className="flex gap-2 pt-2">
-              <Button
-                onClick={handleSave}
-                disabled={saving || uploadingReceipt || !form.description.trim() || !form.amountIncGst}
-              >
-                {saving || uploadingReceipt ? 'Saving…' : (isNew ? 'Create Expense' : 'Save Changes')}
-              </Button>
-              <Button variant="outline" onClick={() => router.push('/admin/accounting/expenses')}>Cancel</Button>
-            </div>
-          )}
+          <div className="flex gap-2 pt-2">
+            <Button
+              onClick={handleSave}
+              disabled={saving || uploadingReceipt || !form.description.trim() || (!isFinancialLocked && !form.amountIncGst)}
+            >
+              {saving || uploadingReceipt ? 'Saving…' : (isNew ? 'Create Expense' : 'Save Changes')}
+            </Button>
+            <Button variant="outline" onClick={() => router.push('/admin/accounting/expenses')}>Cancel</Button>
+          </div>
         </CardContent>
       </Card>
 

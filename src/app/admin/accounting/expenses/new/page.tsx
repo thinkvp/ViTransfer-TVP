@@ -45,8 +45,8 @@ export default function NewExpensePage() {
     setError('')
     setSaving(true)
     try {
-      const amountCents = Math.round(parseFloat(form.amountIncGst) * 100)
-      if (isNaN(amountCents) || amountCents <= 0) { setError('Enter a valid amount'); setSaving(false); return }
+      const parsedAmount = parseFloat(form.amountIncGst)
+      if (isNaN(parsedAmount) || parsedAmount <= 0) { setError('Enter a valid amount'); setSaving(false); return }
       if (!form.accountId) { setError('Select an account'); setSaving(false); return }
       const body = {
         date: form.date,
@@ -54,7 +54,7 @@ export default function NewExpensePage() {
         description: form.description.trim(),
         accountId: form.accountId,
         taxCode: form.taxCode,
-        amountIncGst: amountCents,
+        amountIncGst: parsedAmount,
         notes: form.notes.trim() || null,
       }
       const res = await apiFetch('/api/admin/accounting/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })

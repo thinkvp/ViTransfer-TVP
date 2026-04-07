@@ -33,9 +33,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await params
-  // Resolve by id or by account code (codes look like "1-1000", CUIDs start with "c")
+  // Resolve by id or by account code
   const account = await prisma.account.findFirst({
-    where: id.startsWith('c') && id.length > 20 ? { id } : { code: id },
+    where: { OR: [{ id }, { code: id }] },
     include: { children: { orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }] } },
   })
 
@@ -62,7 +62,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params
   const existing = await prisma.account.findFirst({
-    where: id.startsWith('c') && id.length > 20 ? { id } : { code: id },
+    where: { OR: [{ id }, { code: id }] },
   })
   if (!existing) {
     return NextResponse.json({ error: 'Account not found' }, { status: 404 })
@@ -128,7 +128,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   const { id } = await params
   const existing = await prisma.account.findFirst({
-    where: id.startsWith('c') && id.length > 20 ? { id } : { code: id },
+    where: { OR: [{ id }, { code: id }] },
     include: { _count: { select: { expenses: true, children: true } } },
   })
 

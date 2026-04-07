@@ -119,7 +119,14 @@ export interface BasPeriod {
   notes: string | null
   g2Override: number | null
   g3Override: number | null
+  calculationJson: BasCalculation | null
+  recordsJson: { sales: BasSalesRecord[]; expenses: BasExpenseRecord[] } | null
   createdAt: string
+  updatedAt: string
+}
+
+export interface AccountingSettings {
+  reportingBasis: 'CASH' | 'ACCRUAL'
   updatedAt: string
 }
 
@@ -147,6 +154,31 @@ export interface BasIssue {
   code: string
   message: string
   count?: number
+}
+
+export interface BasSalesRecord {
+  id: string
+  invoiceNumber: string
+  clientName: string
+  date: string
+  subtotalCents: number
+  gstCents: number
+  totalIncGstCents: number
+  taxEnabled: boolean
+}
+
+export interface BasExpenseRecord {
+  id: string
+  date: string
+  supplier: string | null
+  description: string
+  accountCode: string
+  accountName: string
+  amountIncGstCents: number
+  gstCents: number
+  taxCode: string
+  isCapital: boolean
+  issue: 'zero_gst' | 'bas_excluded' | 'input_taxed' | null
 }
 
 export interface TaxRate {
@@ -202,6 +234,49 @@ export interface BalanceSheetSection {
   amountCents: number
   accountId?: string | null
   accountCode?: string | null
+}
+
+// Trial Balance
+export interface TrialBalanceRow {
+  accountId: string
+  code: string
+  name: string
+  type: string
+  debitCents: number
+  creditCents: number
+}
+
+export interface TrialBalanceReport {
+  asAt: string
+  currency: string
+  rows: TrialBalanceRow[]
+  totalDebitCents: number
+  totalCreditCents: number
+}
+
+// Aged Receivables
+export interface AgedReceivablesRow {
+  clientName: string
+  clientId: string | null
+  invoiceId: string
+  invoiceNumber: string
+  issueDate: string
+  dueDate: string | null
+  totalCents: number
+  paidCents: number
+  outstandingCents: number
+  agingBucket: 'current' | '30' | '60' | '90'
+}
+
+export interface AgedReceivablesReport {
+  asAt: string
+  currency: string
+  rows: AgedReceivablesRow[]
+  currentCents: number
+  over30Cents: number
+  over60Cents: number
+  over90Cents: number
+  totalOutstandingCents: number
 }
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {

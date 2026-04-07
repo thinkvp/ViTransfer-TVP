@@ -18,11 +18,13 @@ import { cn, formatDate } from '@/lib/utils'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 
 type SplitEntry = { id: string; description: string; amountCents: number; taxCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
+type SalesInvoiceEntry = { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null }
 
 type Entry =
   | { kind: 'expense'; date: string; entry: Expense }
   | { kind: 'bankTransaction'; date: string; entry: BankTransaction }
   | { kind: 'journal'; date: string; entry: JournalEntry }
+  | { kind: 'salesInvoice'; date: string; entry: SalesInvoiceEntry }
   | { kind: 'split'; date: string; entry: SplitEntry }
 
 function fmtAud(cents: number) {
@@ -195,6 +197,7 @@ export default function AccountLedgerPage() {
                   if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.description, e.supplierName ?? '', (e.amountIncGst / 100).toFixed(2)] }
                   if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.description, t.reference ?? '', (t.amountCents / 100).toFixed(2)] }
                   if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.description, j.reference ?? '', (j.amountCents / 100).toFixed(2)] }
+                  if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', (s.amountCents / 100).toFixed(2)] }
                   const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', (s.amountCents / 100).toFixed(2)]
                 }))
               }}
@@ -278,6 +281,20 @@ export default function AccountLedgerPage() {
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </td>
+                        </tr>
+                      )
+                    } else if (row.kind === 'salesInvoice') {
+                      const s = row.entry as SalesInvoiceEntry
+                      return (
+                        <tr key={`sales-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                          <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs">{formatDate(row.date)}</td>
+                          <td className="px-4 py-2.5">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-700 dark:text-green-400">Sales Invoice</span>
+                          </td>
+                          <td className="px-4 py-2.5 max-w-xs truncate">{s.invoiceNumber} - {s.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.labelName ?? s.clientName ?? '—'}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(s.amountCents)}</td>
+                          <td className="px-4 py-2.5" />
                         </tr>
                       )
                     } else {

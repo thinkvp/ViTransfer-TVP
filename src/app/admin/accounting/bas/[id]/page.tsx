@@ -9,8 +9,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
-import { ArrowLeft, Calculator, CheckCircle, FileCheck } from 'lucide-react'
-import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus } from '@/lib/accounting/types'
+import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp } from 'lucide-react'
+import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord } from '@/lib/accounting/types'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn } from '@/lib/utils'
 
@@ -34,6 +34,9 @@ export default function BasDetailPage() {
   const [loading, setLoading] = useState(true)
   const [calculation, setCalculation] = useState<BasCalculation | null>(null)
   const [issues, setIssues] = useState<BasIssue[]>([])
+  const [records, setRecords] = useState<{ sales: BasSalesRecord[], expenses: BasExpenseRecord[] } | null>(null)
+  const [recordsTab, setRecordsTab] = useState<'sales' | 'expenses'>('sales')
+  const [recordsExpanded, setRecordsExpanded] = useState(true)
   const [calculating, setCalculating] = useState(false)
 
   const [g2Override, setG2Override] = useState('')
@@ -55,6 +58,11 @@ export default function BasDetailPage() {
         setG2Override(p.g2Override != null ? (p.g2Override / 100).toFixed(2) : '')
         setG3Override(p.g3Override != null ? (p.g3Override / 100).toFixed(2) : '')
         setNotes(p.notes ?? '')
+        // Restore saved calculation snapshot if available
+        if (p.calculationJson) {
+          setCalculation(p.calculationJson)
+          setRecords(p.recordsJson ?? null)
+        }
       }
     } finally { setLoading(false) }
   }, [id])
@@ -74,6 +82,7 @@ export default function BasDetailPage() {
         const d = await res.json()
         setCalculation(d.calculation)
         setIssues(d.issues ?? [])
+        setRecords(d.records ?? null)
       }
     } finally { setCalculating(false) }
   }
@@ -233,6 +242,162 @@ export default function BasDetailPage() {
               </div>
             )}
           </CardContent>
+        </Card>
+      )}
+
+      {/* Source Records — drill-down */}
+      {records && (records.sales.length > 0 || records.expenses.length > 0) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <button
+              type="button"
+              className="flex items-center justify-between w-full text-left"
+              onClick={() => setRecordsExpanded((v) => !v)}
+            >
+              <CardTitle className="text-sm">Source Records</CardTitle>
+              {recordsExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </button>
+          </CardHeader>
+          {recordsExpanded && (
+            <CardContent>
+              {/* Tabs */}
+              <div className="flex gap-2 mb-3">
+                <Button
+                  variant={recordsTab === 'sales' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setRecordsTab('sales')}
+                >
+                  Sales ({records.sales.length})
+                </Button>
+                <Button
+                  variant={recordsTab === 'expenses' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setRecordsTab('expenses')}
+                >
+                  Expenses ({records.expenses.length})
+                </Button>
+              </div>
+
+              {/* Sales records table */}
+              {recordsTab === 'sales' && (
+                <div className="border border-border rounded-md overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/40 border-b border-border">
+                        <th className="text-left px-2 py-1.5 font-medium">Date</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Invoice</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Client</th>
+                        <th className="text-right px-2 py-1.5 font-medium">Subtotal</th>
+                        <th className="text-right px-2 py-1.5 font-medium">GST</th>
+                        <th className="text-right px-2 py-1.5 font-medium">Total</th>
+                        <th className="px-2 py-1.5 w-12"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {records.sales.map((r, i) => (
+                        <tr key={`${r.id}-${i}`} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-2 py-1.5">{r.date}</td>
+                          <td className="px-2 py-1.5 font-medium">{r.invoiceNumber}</td>
+                          <td className="px-2 py-1.5 text-muted-foreground max-w-[140px] truncate">{r.clientName}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.subtotalCents)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtAud(r.totalIncGstCents)}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            {!r.taxEnabled && (
+                              <span title="GST disabled on this invoice" className="text-yellow-600 dark:text-yellow-400">
+                                <AlertTriangle className="w-3.5 h-3.5 inline" />
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/40 border-t border-border font-semibold text-xs">
+                        <td className="px-2 py-1.5" colSpan={3}>Totals</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.sales.reduce((s, r) => s + r.subtotalCents, 0))}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.sales.reduce((s, r) => s + r.gstCents, 0))}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.sales.reduce((s, r) => s + r.totalIncGstCents, 0))}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+
+              {/* Expenses records table */}
+              {recordsTab === 'expenses' && (
+                <div className="border border-border rounded-md overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/40 border-b border-border">
+                        <th className="text-left px-2 py-1.5 font-medium">Date</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Supplier</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Description</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Account</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Tax Code</th>
+                        <th className="text-right px-2 py-1.5 font-medium">Inc GST</th>
+                        <th className="text-right px-2 py-1.5 font-medium">GST</th>
+                        <th className="px-2 py-1.5 w-12"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {records.expenses.map((r, i) => (
+                        <tr key={`${r.id}-${i}`} className={cn(
+                          'border-b border-border last:border-0 hover:bg-muted/30',
+                          r.issue === 'zero_gst' && 'bg-yellow-500/5',
+                        )}>
+                          <td className="px-2 py-1.5">{r.date}</td>
+                          <td className="px-2 py-1.5 text-muted-foreground max-w-[120px] truncate">{r.supplier ?? '—'}</td>
+                          <td className="px-2 py-1.5 max-w-[160px] truncate" title={r.description}>{r.description}</td>
+                          <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.accountCode}</td>
+                          <td className="px-2 py-1.5">
+                            <span className={cn(
+                              'px-1.5 py-0.5 rounded text-[10px] font-medium',
+                              r.taxCode === 'GST' ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                                : r.taxCode === 'GST_FREE' ? 'bg-muted text-muted-foreground'
+                                : r.taxCode === 'BAS_EXCLUDED' ? 'bg-orange-500/15 text-orange-700 dark:text-orange-400'
+                                : r.taxCode === 'INPUT_TAXED' ? 'bg-purple-500/15 text-purple-700 dark:text-purple-400'
+                                : 'bg-muted text-muted-foreground',
+                            )}>
+                              {r.taxCode}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.amountIncGstCents)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            {r.issue === 'zero_gst' && (
+                              <span title="Coded GST but $0 GST amount" className="text-yellow-600 dark:text-yellow-400">
+                                <AlertTriangle className="w-3.5 h-3.5 inline" />
+                              </span>
+                            )}
+                            {r.issue === 'bas_excluded' && (
+                              <span title="BAS Excluded — not claimed" className="text-orange-600 dark:text-orange-400">
+                                <Info className="w-3.5 h-3.5 inline" />
+                              </span>
+                            )}
+                            {r.issue === 'input_taxed' && (
+                              <span title="Input Taxed — no GST credit" className="text-purple-600 dark:text-purple-400">
+                                <Info className="w-3.5 h-3.5 inline" />
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/40 border-t border-border font-semibold text-xs">
+                        <td className="px-2 py-1.5" colSpan={5}>Totals</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.expenses.reduce((s, r) => s + r.amountIncGstCents, 0))}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.expenses.reduce((s, r) => s + r.gstCents, 0))}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          )}
         </Card>
       )}
 

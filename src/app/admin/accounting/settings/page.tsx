@@ -10,6 +10,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, Check, X, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { AccountingSettings } from '@/lib/accounting/types'
 
 interface TaxRate {
   id: string
@@ -54,13 +55,18 @@ const emptyForm = (): FormState => ({
 export default function AccountingSettingsPage() {
   const [taxRates, setTaxRates] = useState<TaxRate[]>([])
   const [loading, setLoading] = useState(true)
+  const [settingsLoading, setSettingsLoading] = useState(true)
   const [editId, setEditId] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm())
   const [saving, setSaving] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<TaxRate | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [reportingBasis, setReportingBasis] = useState<'CASH' | 'ACCRUAL'>('ACCRUAL')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -71,6 +77,47 @@ export default function AccountingSettingsPage() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      setSettingsLoading(true)
+      try {
+        const res = await apiFetch('/api/admin/accounting/settings')
+        const data: AccountingSettings | null = res.ok ? await res.json() : null
+        if (!cancelled) setReportingBasis(data?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL')
+      } finally {
+        if (!cancelled) setSettingsLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleSettingsSave() {
+    setSettingsSaving(true)
+    setSettingsError('')
+    setSettingsSaved(false)
+    try {
+      const res = await apiFetch('/api/admin/accounting/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reportingBasis }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        setSettingsError(d.error || 'Failed to save settings')
+        return
+      }
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2000)
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   function startEdit(rate: TaxRate) {
     setEditId(rate.id)
@@ -134,8 +181,36 @@ export default function AccountingSettingsPage() {
     <div className="space-y-6 max-w-3xl">
       <div>
         <h2 className="text-xl font-semibold">Accounting Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">Manage tax rates used when posting bank transactions.</p>
+        <p className="text-sm text-muted-foreground mt-1">Manage reporting defaults and tax rates used when posting bank transactions.</p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Reporting</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1 max-w-sm">
+            <Label>Reporting Basis</Label>
+            <Select value={reportingBasis} onValueChange={v => setReportingBasis(v as 'CASH' | 'ACCRUAL')} disabled={settingsLoading || settingsSaving}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ACCRUAL">Accrual (invoice date)</SelectItem>
+                <SelectItem value="CASH">Cash (payment date)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Used by the Accounting dashboard, Profit &amp; Loss report, and new BAS periods.</p>
+          </div>
+          {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
+          {settingsSaved && <p className="text-xs text-emerald-600 dark:text-emerald-400">Changes saved successfully!</p>}
+          <div>
+            <Button onClick={() => void handleSettingsSave()} disabled={settingsLoading || settingsSaving}>
+              {settingsSaving ? 'Saving…' : 'Save Reporting Settings'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Tax Rates */}
       <Card>
