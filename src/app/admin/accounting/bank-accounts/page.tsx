@@ -12,14 +12,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Upload, ChevronDown, ChevronRight, Landmark, Pencil, Trash2, Paperclip, X, Loader2, EyeOff, RotateCcw, Link2, AlertTriangle, ArrowUp, ArrowDown, ChevronLeft, ChevronsLeft, ChevronsRight, Scissors } from 'lucide-react'
-import type { BankAccount, BankTransaction, AccountType } from '@/lib/accounting/types'
-import { ACCOUNT_TYPE_LABELS as _LABELS } from '@/lib/accounting/types'
-import { DateRangePreset } from '@/components/admin/accounting/DateRangePreset'
+import type { BankAccount, BankTransaction } from '@/lib/accounting/types'
+import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
+import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
 
 interface TaxRateOption { id: string; name: string; code: string; rate: number; isDefault: boolean }
-interface CoaOption { id: string; code: string; name: string; type: string; taxCode: string }
 
 interface OpenInvoice {
   id: string
@@ -56,6 +55,9 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 function txnTypeOptions(amountCents: number): string[] {
+  // Credits (money in) → Deposit/ReceivePayment/Transfer; debits (money out) → Expense/Transfer.
+  // Xero/QBO convention: you never change the type to Expense for a refund — just pick an expense
+  // account with Deposit/Transfer and the debit-normal sign logic reduces the balance correctly.
   return amountCents >= 0 ? ['Deposit', 'ReceivePayment', 'Transfer'] : ['Expense', 'Transfer']
 }
 
@@ -107,12 +109,12 @@ export default function BankAccountsPage() {
   const [loadingTxns, setLoadingTxns] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('UNMATCHED')
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [txnFrom, setTxnFrom] = useState('')
-  const [txnTo, setTxnTo] = useState('')
+  const [txnFrom, setTxnFrom] = useState(() => getThisFinancialYearDates().from)
+  const [txnTo, setTxnTo] = useState(() => getThisFinancialYearDates().to)
   const [txnSortKey, setTxnSortKey] = useState<'date' | 'description' | 'amount'>('date')
   const [txnSortDir, setTxnSortDir] = useState<'asc' | 'desc'>('desc')
 
-  const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
+  const [coaAccounts, setCoaAccounts] = useState<AccountOption[]>([])
   const [taxRates, setTaxRates] = useState<TaxRateOption[]>([])
 
   const [postForms, setPostForms] = useState<Record<string, PostFormState>>({})
@@ -141,8 +143,22 @@ export default function BankAccountsPage() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
   const [matchingInvoice, setMatchingInvoice] = useState(false)
 
+  // Expense matching dialog
+  interface UnmatchedExpense { id: string; date: string; supplierName: string | null; description: string; accountName: string; accountCode: string; taxCode: string; amountIncGstCents: number; status: string }
+  const [matchExpenseTarget, setMatchExpenseTarget] = useState<BankTransaction | null>(null)
+  const [expenseSearch, setExpenseSearch] = useState('')
+  const [unmatchedExpenses, setUnmatchedExpenses] = useState<UnmatchedExpense[]>([])
+  const [loadingExpenses, setLoadingExpenses] = useState(false)
+  const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
+  const [matchingExpense, setMatchingExpense] = useState(false)
+
   // Split transaction state
   const [splitTxnId, setSplitTxnId] = useState<string | null>(null)
+
+  // Quick-match: eagerly loaded matches for pending transactions
+  const [quickMatchInvoices, setQuickMatchInvoices] = useState<OpenInvoice[]>([])
+  const [quickMatchExpenses, setQuickMatchExpenses] = useState<UnmatchedExpense[]>([])
+  const [quickMatching, setQuickMatching] = useState<string | null>(null)
   type SplitFormLine = { accountId: string; accountSearch: string; accountOpen: boolean; description: string; amountCents: string; taxCode: string }
   const emptySplitLine = (): SplitFormLine => ({ accountId: '', accountSearch: '', accountOpen: false, description: '', amountCents: '', taxCode: 'BAS_EXCLUDED' })
   const [splitLines, setSplitLines] = useState<SplitFormLine[]>([emptySplitLine(), emptySplitLine()])
@@ -201,7 +217,7 @@ export default function BankAccountsPage() {
       apiFetch('/api/admin/accounting/accounts?activeOnly=true'),
       apiFetch('/api/admin/accounting/tax-rates'),
     ])
-    if (coaRes.ok) { const d = await coaRes.json(); setCoaAccounts(d.accounts ?? []) }
+    if (coaRes.ok) { const d = await coaRes.json(); setCoaAccounts(buildAccountOptions(d.accounts ?? [])) }
     if (trRes.ok) { const d = await trRes.json(); setTaxRates(d.taxRates ?? []) }
   }, [])
 
@@ -211,8 +227,44 @@ export default function BankAccountsPage() {
     if (selectedAccountId) void loadTransactions(selectedAccountId, activeTab, txnPage)
   }, [selectedAccountId, activeTab, txnPage, loadTransactions])
 
+  // Eagerly load open invoices + unmatched expenses for quick-match badges on the Pending tab
+  useEffect(() => {
+    if (activeTab !== 'UNMATCHED') { setQuickMatchInvoices([]); setQuickMatchExpenses([]); return }
+    apiFetch('/api/admin/accounting/open-invoices').then(r => r.ok ? r.json() : null).then(d => { if (d?.invoices) setQuickMatchInvoices(d.invoices) }).catch(() => {})
+    apiFetch('/api/admin/accounting/unmatched-expenses').then(r => r.ok ? r.json() : null).then(d => { if (d?.expenses) setQuickMatchExpenses(d.expenses) }).catch(() => {})
+  }, [activeTab])
+
+  async function handleQuickMatchInvoice(txn: BankTransaction, invoiceId: string) {
+    setQuickMatching(txn.id)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/match-invoice`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
+      setTransactions(prev => prev.filter(t => t.id !== txn.id))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txn.id ? null : prev)
+      apiFetch('/api/admin/accounting/open-invoices').then(r => r.ok ? r.json() : null).then(d => { if (d?.invoices) setQuickMatchInvoices(d.invoices) }).catch(() => {})
+    } finally { setQuickMatching(null) }
+  }
+
+  async function handleQuickMatchExpense(txn: BankTransaction, expenseId: string) {
+    setQuickMatching(txn.id)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/match`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchType: 'EXPENSE', expenseId }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match expense'); return }
+      setTransactions(prev => prev.filter(t => t.id !== txn.id))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txn.id ? null : prev)
+      apiFetch('/api/admin/accounting/unmatched-expenses').then(r => r.ok ? r.json() : null).then(d => { if (d?.expenses) setQuickMatchExpenses(d.expenses) }).catch(() => {})
+    } finally { setQuickMatching(null) }
+  }
+
   function handleSelectAccount(a: BankAccount) {
-    if (selectedAccountId === a.id) return
     setSelectedAccountId(a.id)
     setActiveTab('UNMATCHED')
     setTxnPage(1)
@@ -266,7 +318,11 @@ export default function BankAccountsPage() {
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to post'); return }
       if (form.file) { const fd = new FormData(); fd.append('file', form.file); await apiFetch(`/api/admin/accounting/transactions/${txn.id}/attachment`, { method: 'POST', body: fd }) }
-      await loadTransactions(selectedAccountId!, activeTab, txnPage)
+      // Remove from list without full reload so the page scroll position is preserved
+      setTransactions(prev => prev.filter(t => t.id !== txn.id))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txn.id ? null : prev)
+      setPostForms(prev => { const next = { ...prev }; delete next[txn.id]; return next })
     } finally { setPosting(null) }
   }
 
@@ -275,7 +331,10 @@ export default function BankAccountsPage() {
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/exclude`, { method: 'POST' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to ignore'); return }
-      await loadTransactions(selectedAccountId!, activeTab, txnPage)
+      setTransactions(prev => prev.filter(t => t.id !== txnId))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txnId ? null : prev)
+      setPostForms(prev => { const next = { ...prev }; delete next[txnId]; return next })
     } finally { setIgnoring(null) }
   }
 
@@ -284,8 +343,10 @@ export default function BankAccountsPage() {
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/unmatch`, { method: 'POST' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to undo'); return }
-      await loadTransactions(selectedAccountId!, activeTab, txnPage)
-      await loadAccounts()
+      setTransactions(prev => prev.filter(t => t.id !== txnId))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txnId ? null : prev)
+      void loadAccounts()
     } finally { setUndoing(null) }
   }
 
@@ -324,7 +385,9 @@ export default function BankAccountsPage() {
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to split'); return }
       setSplitTxnId(null)
-      await loadTransactions(selectedAccountId!, activeTab, txnPage)
+      setTransactions(prev => prev.filter(t => t.id !== txn.id))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txn.id ? null : prev)
     } finally { setSplitting(false) }
   }
 
@@ -435,8 +498,12 @@ export default function BankAccountsPage() {
         body: JSON.stringify({ invoiceId: selectedInvoiceId }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
+      const matchedId = matchInvoiceTarget.id
       setMatchInvoiceTarget(null)
-      await loadTransactions(selectedAccountId!, activeTab, txnPage)
+      setTransactions(prev => prev.filter(t => t.id !== matchedId))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === matchedId ? null : prev)
+      apiFetch('/api/admin/accounting/open-invoices').then(r => r.ok ? r.json() : null).then(d => { if (d?.invoices) setQuickMatchInvoices(d.invoices) }).catch(() => {})
     } finally { setMatchingInvoice(false) }
   }
 
@@ -447,6 +514,42 @@ export default function BankAccountsPage() {
       const tax = inv.taxEnabled ? line * ((item.taxRatePercent ?? 0) / 100) : 0
       return sum + line + tax
     }, 0)
+  }
+
+  function openMatchExpenseDialog(txn: BankTransaction) {
+    setMatchExpenseTarget(txn)
+    setSelectedExpenseId(null)
+    setExpenseSearch('')
+    setUnmatchedExpenses([])
+    void loadUnmatchedExpenses('')
+  }
+
+  const loadUnmatchedExpenses = useCallback(async (q: string) => {
+    setLoadingExpenses(true)
+    try {
+      const params = new URLSearchParams()
+      if (q.trim()) params.set('q', q.trim())
+      const res = await apiFetch(`/api/admin/accounting/unmatched-expenses?${params}`)
+      if (res.ok) { const d = await res.json(); setUnmatchedExpenses(d.expenses ?? []) }
+    } finally { setLoadingExpenses(false) }
+  }, [])
+
+  async function handleMatchExpense() {
+    if (!matchExpenseTarget || !selectedExpenseId) return
+    setMatchingExpense(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${matchExpenseTarget.id}/match`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchType: 'EXPENSE', expenseId: selectedExpenseId }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match expense'); return }
+      const matchedId = matchExpenseTarget.id
+      setMatchExpenseTarget(null)
+      setTransactions(prev => prev.filter(t => t.id !== matchedId))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === matchedId ? null : prev)
+      apiFetch('/api/admin/accounting/unmatched-expenses').then(r => r.ok ? r.json() : null).then(d => { if (d?.expenses) setQuickMatchExpenses(d.expenses) }).catch(() => {})
+    } finally { setMatchingExpense(false) }
   }
 
   return (
@@ -583,6 +686,24 @@ export default function BankAccountsPage() {
                       const isUndoing = undoing === t.id
                       const isIgnoring = ignoring === t.id
                       const types = txnTypeOptions(t.amountCents)
+                      const isQuickMatching = quickMatching === t.id
+
+                      // Compute quick-match candidates (only on Pending tab)
+                      const quickInvoice = activeTab === 'UNMATCHED' && t.amountCents > 0 ? (() => {
+                        const matches = quickMatchInvoices.filter(inv => {
+                          const total = calcInvoiceTotal(inv)
+                          const remaining = inv.status === 'PARTIALLY_PAID' ? Math.max(0, total - inv.totalPaidCents) : total
+                          return remaining === t.amountCents
+                        })
+                        return matches.length === 1 ? matches[0] : null
+                      })() : null
+
+                      const quickExpense = activeTab === 'UNMATCHED' && t.amountCents < 0 ? (() => {
+                        const abs = Math.abs(t.amountCents)
+                        const matches = quickMatchExpenses.filter(exp => exp.amountIncGstCents === abs)
+                        return matches.length === 1 ? matches[0] : null
+                      })() : null
+
                       return (
                         <div key={t.id}>
                           <div onClick={() => handleRowClick(t)}
@@ -619,6 +740,31 @@ export default function BankAccountsPage() {
                                 })()}
                               </div>
                             )}
+                            {/* Quick-match badge — Pending tab only */}
+                            {activeTab === 'UNMATCHED' && quickInvoice && (
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); void handleQuickMatchInvoice(t, quickInvoice.id) }}
+                                disabled={isQuickMatching}
+                                title={`Exact match: Invoice ${quickInvoice.invoiceNumber}${quickInvoice.clientName ? ` — ${quickInvoice.clientName}` : ''}`}
+                                className="hidden sm:flex shrink-0 items-center gap-1 text-xs px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors font-medium whitespace-nowrap"
+                              >
+                                {isQuickMatching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
+                                {quickInvoice.invoiceNumber}
+                              </button>
+                            )}
+                            {activeTab === 'UNMATCHED' && quickExpense && (
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); void handleQuickMatchExpense(t, quickExpense.id) }}
+                                disabled={isQuickMatching}
+                                title={`Exact match: ${quickExpense.supplierName ? `${quickExpense.supplierName} — ` : ''}${quickExpense.description}`}
+                                className="hidden sm:flex shrink-0 items-center gap-1 text-xs px-2 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors font-medium whitespace-nowrap"
+                              >
+                                {isQuickMatching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
+                                {quickExpense.supplierName || quickExpense.description.slice(0, 20)}
+                              </button>
+                            )}
                             <div className={cn('w-28 text-right shrink-0 text-sm tabular-nums font-medium',
                               t.amountCents < 0 ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-400')}>
                               {fmtAmt(t.amountCents)}
@@ -645,32 +791,40 @@ export default function BankAccountsPage() {
                                         )}
                                       </div>
                                       <div className="relative">
-                                        <Input
-                                          className="h-8 text-sm"
-                                          placeholder="Search account…"
-                                          value={form.accountOpen ? form.accountSearch : (() => { const a = coaAccounts.find(x => x.id === form.accountId); return a ? `${_LABELS[a.type as AccountType] ?? a.type} — ${a.name}` : '' })()}
-                                          onFocus={() => setPostFormField(t.id, { accountOpen: true, accountSearch: '' })}
-                                          onBlur={() => setTimeout(() => setPostFormField(t.id, { accountOpen: false }), 150)}
-                                          onChange={e => setPostFormField(t.id, { accountSearch: e.target.value })}
-                                        />
-                                        {form.accountOpen && (
-                                          <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                                            {[...coaAccounts].sort((a, b) => a.name.localeCompare(b.name)).filter(a => {
-                                              const q = form.accountSearch.toLowerCase()
-                                              return !q || a.name.toLowerCase().includes(q) || (_LABELS[a.type as AccountType] ?? a.type).toLowerCase().includes(q)
-                                            }).map(a => (
-                                              <button key={a.id} type="button"
-                                                onMouseDown={() => setPostFormField(t.id, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
-                                                className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors',
-                                                  form.accountId === a.id && 'bg-primary/10 font-medium'
-                                                )}
-                                              >{_LABELS[a.type as AccountType] ?? a.type} — {a.name}</button>
-                                            ))}
-                                            {[...coaAccounts].filter(a => { const q = form.accountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || (_LABELS[a.type as AccountType] ?? a.type).toLowerCase().includes(q) }).length === 0 && (
-                                              <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
-                                            )}
-                                          </div>
-                                        )}
+                                        {(() => {
+                                          const filteredAccounts = coaAccounts.filter(a => {
+                                            const q = form.accountSearch.trim().toLowerCase()
+                                            return !q || a.searchText.includes(q)
+                                          })
+
+                                          return (
+                                            <>
+                                              <Input
+                                                className="h-8 text-sm"
+                                                placeholder="Search account…"
+                                                value={form.accountOpen ? form.accountSearch : (coaAccounts.find(x => x.id === form.accountId)?.label ?? '')}
+                                                onFocus={() => setPostFormField(t.id, { accountOpen: true, accountSearch: '' })}
+                                                onBlur={() => setTimeout(() => setPostFormField(t.id, { accountOpen: false }), 150)}
+                                                onChange={e => setPostFormField(t.id, { accountSearch: e.target.value })}
+                                              />
+                                              {form.accountOpen && (
+                                                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                                                  {filteredAccounts.map(a => (
+                                                    <button key={a.id} type="button"
+                                                      onMouseDown={() => setPostFormField(t.id, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
+                                                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors',
+                                                        form.accountId === a.id && 'bg-primary/10 font-medium'
+                                                      )}
+                                                    >{a.label}</button>
+                                                  ))}
+                                                  {filteredAccounts.length === 0 && (
+                                                    <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </>
+                                          )
+                                        })()}
                                       </div>
                                     </div>
                                     <div className="space-y-1">
@@ -721,6 +875,11 @@ export default function BankAccountsPage() {
                                         <Link2 className="w-3.5 h-3.5 mr-1.5" />Match Invoice
                                       </Button>
                                     )}
+                                    {t.amountCents < 0 && (
+                                      <Button size="sm" variant="outline" onClick={() => openMatchExpenseDialog(t)} disabled={isPosting || isIgnoring}>
+                                        <Link2 className="w-3.5 h-3.5 mr-1.5" />Match Expense
+                                      </Button>
+                                    )}
                                     <Button size="sm" variant="ghost" onClick={() => void handleIgnore(t.id)} disabled={isIgnoring || isPosting}>
                                       {isIgnoring ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <EyeOff className="w-3.5 h-3.5 mr-1.5" />}Ignore
                                     </Button>
@@ -734,9 +893,9 @@ export default function BankAccountsPage() {
                                         <button type="button" onClick={() => setSplitTxnId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                                       </div>
                                       {splitLines.map((line, idx) => {
-                                        const filteredAccounts = [...coaAccounts].sort((a, b) => a.name.localeCompare(b.name)).filter(a => {
-                                          const q = line.accountSearch.toLowerCase()
-                                          return !q || a.name.toLowerCase().includes(q) || (_LABELS[a.type as AccountType] ?? a.type).toLowerCase().includes(q)
+                                        const filteredAccounts = coaAccounts.filter(a => {
+                                          const q = line.accountSearch.trim().toLowerCase()
+                                          return !q || a.searchText.includes(q)
                                         })
                                         return (
                                           <div key={idx} className="grid grid-cols-[1fr_100px_120px_32px] gap-2 items-end">
@@ -746,7 +905,7 @@ export default function BankAccountsPage() {
                                                 <Input
                                                   className="h-8 text-sm"
                                                   placeholder="Search account…"
-                                                  value={line.accountOpen ? line.accountSearch : (() => { const a = coaAccounts.find(x => x.id === line.accountId); return a ? `${a.name}` : '' })()}
+                                                  value={line.accountOpen ? line.accountSearch : (coaAccounts.find(x => x.id === line.accountId)?.label ?? '')}
                                                   onFocus={() => updateSplitLine(idx, { accountOpen: true, accountSearch: '' })}
                                                   onBlur={() => setTimeout(() => updateSplitLine(idx, { accountOpen: false }), 150)}
                                                   onChange={e => updateSplitLine(idx, { accountSearch: e.target.value })}
@@ -757,7 +916,7 @@ export default function BankAccountsPage() {
                                                       <button key={a.id} type="button"
                                                         onMouseDown={() => updateSplitLine(idx, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
                                                         className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', line.accountId === a.id && 'bg-primary/10 font-medium')}
-                                                      >{_LABELS[a.type as AccountType] ?? a.type} — {a.name}</button>
+                                                      >{a.label}</button>
                                                     ))}
                                                     {filteredAccounts.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>}
                                                   </div>
@@ -1046,6 +1205,56 @@ export default function BankAccountsPage() {
             <Button variant="outline" onClick={() => setMatchInvoiceTarget(null)} disabled={matchingInvoice}>Cancel</Button>
             <Button onClick={() => void handleMatchInvoice()} disabled={!selectedInvoiceId || matchingInvoice}>
               {matchingInvoice && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Match Invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Match Expense Dialog */}
+      <Dialog open={!!matchExpenseTarget} onOpenChange={open => { if (!open && !matchingExpense) { setMatchExpenseTarget(null) } }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Match to Expense — {matchExpenseTarget ? fmtAmt(matchExpenseTarget.amountCents) : ''}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder="Search by supplier, description..."
+              value={expenseSearch}
+              onChange={e => { setExpenseSearch(e.target.value); void loadUnmatchedExpenses(e.target.value) }}
+              className="h-9"
+              autoFocus
+            />
+            {loadingExpenses ? (
+              <div className="py-4 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading...</div>
+            ) : unmatchedExpenses.length === 0 ? (
+              <div className="py-4 text-center text-sm text-muted-foreground">No unmatched expenses found.</div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                {unmatchedExpenses.map(exp => (
+                  <button key={exp.id} type="button"
+                    onClick={() => setSelectedExpenseId(exp.id)}
+                    className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
+                      selectedExpenseId === exp.id && 'bg-primary/10 border-l-2 border-primary'
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{exp.supplierName ? `${exp.supplierName} — ` : ''}{exp.description}</p>
+                      <p className="text-xs text-muted-foreground">{exp.accountCode} · {exp.accountName}</p>
+                      <p className="text-xs text-muted-foreground">{formatDate(exp.date)} · {exp.taxCode}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-medium tabular-nums">{fmtAud(exp.amountIncGstCents)}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{exp.status.toLowerCase()}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMatchExpenseTarget(null)} disabled={matchingExpense}>Cancel</Button>
+            <Button onClick={() => void handleMatchExpense()} disabled={!selectedExpenseId || matchingExpense}>
+              {matchingExpense && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Match Expense
             </Button>
           </DialogFooter>
         </DialogContent>

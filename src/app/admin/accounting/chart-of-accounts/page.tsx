@@ -14,7 +14,7 @@ import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Ch
 import type { Account, AccountType, AccountTaxCode } from '@/lib/accounting/types'
 import { ACCOUNT_TYPE_LABELS, TAX_CODE_LABELS } from '@/lib/accounting/types'
 import { cn } from '@/lib/utils'
-import { DateRangePreset } from '@/components/admin/accounting/DateRangePreset'
+import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 
 const TYPE_BADGE: Record<AccountType, string> = {
@@ -49,8 +49,8 @@ export default function ChartOfAccountsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(1)
 
-  const [balanceFrom, setBalanceFrom] = useState('')
-  const [balanceTo, setBalanceTo] = useState('')
+  const [balanceFrom, setBalanceFrom] = useState(() => getThisFinancialYearDates().from)
+  const [balanceTo, setBalanceTo] = useState(() => getThisFinancialYearDates().to)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [loadingBalances, setLoadingBalances] = useState(false)
 

@@ -108,6 +108,7 @@ export async function listSalesInvoiceIncomeEntries(input?: {
   from?: string
   to?: string
   accountId?: string
+  accountIds?: string[]
 }): Promise<SalesInvoiceIncomeEntry[]> {
   const context = await getSalesIncomeAccountContext()
   const issueDateFilter: { gte?: string; lte?: string } = {}
@@ -129,10 +130,17 @@ export async function listSalesInvoiceIncomeEntries(input?: {
     orderBy: [{ issueDate: 'desc' }, { invoiceNumber: 'desc' }],
   })
 
+  // Build the applicable account ID set (accountIds takes precedence over accountId)
+  const filterIds: string[] | null = input?.accountIds?.length
+    ? input.accountIds
+    : input?.accountId
+    ? [input.accountId]
+    : null
+
   return invoices.flatMap((invoice) => {
     const items = Array.isArray(invoice.itemsJson) ? (invoice.itemsJson as SalesLineItem[]) : []
     return allocateSalesLineItemsToIncomeAccounts(items, context)
-      .filter((allocation) => !input?.accountId || allocation.accountId === input.accountId)
+      .filter((allocation) => !filterIds || filterIds.includes(allocation.accountId))
       .map((allocation) => ({
         ...allocation,
         allocationId: `${invoice.id}:${allocation.allocationId}`,

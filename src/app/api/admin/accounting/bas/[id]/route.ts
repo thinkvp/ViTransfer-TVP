@@ -16,6 +16,8 @@ const updateSchema = z.object({
   status: z.enum(['DRAFT', 'REVIEWED', 'LODGED']).optional(),
   g2Override: z.number().min(0).optional().nullable(),
   g3Override: z.number().min(0).optional().nullable(),
+  paygWithholdingCents: z.number().int().min(0).optional().nullable(),
+  paygInstalmentCents: z.number().int().min(0).optional().nullable(),
   notes: z.string().trim().max(5000).optional().nullable(),
 })
 
@@ -102,6 +104,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       ...(data.status !== undefined ? { status: data.status } : {}),
       ...(data.g2Override !== undefined ? { g2Override: data.g2Override !== null ? Math.round(data.g2Override * 100) : null } : {}),
       ...(data.g3Override !== undefined ? { g3Override: data.g3Override !== null ? Math.round(data.g3Override * 100) : null } : {}),
+      ...(data.paygWithholdingCents !== undefined ? { paygWithholdingCents: data.paygWithholdingCents } : {}),
+      ...(data.paygInstalmentCents !== undefined ? { paygInstalmentCents: data.paygInstalmentCents } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
       ...(data.status === 'LODGED' ? { lodgedAt: new Date(), ...snapshotData } : {}),
     },

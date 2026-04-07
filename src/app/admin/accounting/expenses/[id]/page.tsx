@@ -11,8 +11,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { apiFetch } from '@/lib/api-client'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { ArrowLeft, Upload, Trash2, CheckCircle, FileText } from 'lucide-react'
-import type { Account, Expense, AccountTaxCode, ExpenseStatus } from '@/lib/accounting/types'
+import type { Expense, AccountTaxCode, ExpenseStatus } from '@/lib/accounting/types'
 import { TAX_CODE_LABELS, EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
+import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { cn } from '@/lib/utils'
 
 function fmtAud(cents: number) {
@@ -33,7 +34,7 @@ export default function ExpenseFormPage() {
 
   const [loading, setLoading] = useState(!isNew)
   const [expense, setExpense] = useState<Expense | null>(null)
-  const [accounts, setAccounts] = useState<Account[]>([])
+  const [accounts, setAccounts] = useState<AccountOption[]>([])
 
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -57,7 +58,7 @@ export default function ExpenseFormPage() {
     const res = await apiFetch('/api/admin/accounting/accounts?expenseTypes=true&activeOnly=true')
     if (res.ok) {
       const data = await res.json()
-      setAccounts(data.accounts ?? [])
+      setAccounts(buildAccountOptions(data.accounts ?? []))
     }
   }, [])
 
@@ -263,7 +264,7 @@ export default function ExpenseFormPage() {
                 <SelectTrigger id="exp-account"><SelectValue placeholder="Select account" /></SelectTrigger>
                 <SelectContent>
                   {accounts.map(a => (
-                    <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>
+                    <SelectItem key={a.id} value={a.id}>{a.code} — {a.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

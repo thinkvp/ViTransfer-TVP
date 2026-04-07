@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
+import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -54,7 +55,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
-    select: { id: true, status: true },
+    select: { id: true, status: true, attachmentPath: true },
   })
 
   if (!txn) {
@@ -66,6 +67,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       { error: 'Cannot delete a matched transaction. Unmatch it first.' },
       { status: 409 }
     )
+  }
+
+  // Delete the attachment file from disk before removing the DB record
+  if (txn.attachmentPath) {
+    await deleteAccountingFile(txn.attachmentPath).catch(() => {})
   }
 
   await prisma.bankTransaction.delete({ where: { id } })

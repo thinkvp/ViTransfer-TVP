@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
+import { moveAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,7 +60,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const account = await prisma.account.findUnique({ where: { id: d.accountId }, select: { id: true, name: true } })
   if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 400 })
 
-  const amountIncGst = Math.abs(txn.amountCents)
+  // Negate so debit (money out, negative amountCents) yields positive expense,
+  // and credit (money in, positive amountCents) yields negative expense (refund/reduction).
+  const amountIncGst = -txn.amountCents
 
   // Calculate GST breakdown using configurable rate
   let amountExGst: number
@@ -77,6 +80,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (d.transactionType === 'Expense') {
     // Create an Expense record linked to this bank transaction
     const supplierName = d.supplierName?.trim() || undefined
+
+    let createdExpenseId: string | null = null
 
     await prisma.$transaction(async (tx) => {
       // If there was a previous linked expense (e.g. re-posting after undo), unlink it
@@ -104,6 +109,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           notes: null,
         },
       })
+      createdExpenseId = newExpense.id
 
       await tx.bankTransaction.update({
         where: { id },
@@ -121,6 +127,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       return newExpense
     })
+
+    if (txn.attachmentPath && createdExpenseId) {
+      const movedAttachmentPath = await moveAccountingFile(
+        txn.attachmentPath,
+        txn.date,
+        d.accountId,
+        txn.attachmentOriginalName || null,
+      )
+
+      if (movedAttachmentPath !== txn.attachmentPath) {
+        await prisma.bankTransaction.update({
+          where: { id },
+          data: { attachmentPath: movedAttachmentPath },
+        })
+      }
+    }
   } else {
     // Transfer / Deposit / ReceivePayment — mark MATCHED with MANUAL type
     await prisma.bankTransaction.update({

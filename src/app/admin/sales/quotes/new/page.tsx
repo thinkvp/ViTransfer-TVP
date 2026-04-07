@@ -106,6 +106,7 @@ export default function NewQuotePage() {
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
+  const [unitPriceInputs, setUnitPriceInputs] = useState<Record<string, string>>({})
 
   // Read prefill data placed by the duplicate button on the edit page
   useEffect(() => {
@@ -394,11 +395,14 @@ export default function NewQuotePage() {
                 <div className="space-y-1 md:col-span-2">
                   <Label>{`Unit (${getCurrencySymbol(settings.currencyCode)})`}</Label>
                   <Input
-                    value={centsToDollars(it.unitPriceCents)}
+                    value={unitPriceInputs[it.id] ?? centsToDollars(it.unitPriceCents)}
                     onChange={(e) => {
-                      const cents = dollarsToCents(e.target.value)
+                      const raw = e.target.value
+                      setUnitPriceInputs((prev) => ({ ...prev, [it.id]: raw }))
+                      const cents = dollarsToCents(raw)
                       setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, unitPriceCents: cents } : x)))
                     }}
+                    onBlur={() => setUnitPriceInputs((prev) => { const next = { ...prev }; delete next[it.id]; return next })}
                     className="h-9"
                   />
                 </div>

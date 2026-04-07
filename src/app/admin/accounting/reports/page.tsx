@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { DateRangePreset } from '@/components/admin/accounting/DateRangePreset'
+import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
 import { BarChart2, Scale, Printer, FileText, Users } from 'lucide-react'
@@ -17,20 +17,11 @@ function fmtAud(cents: number) {
   return cents < 0 ? `($${abs})` : `$${abs}`
 }
 
-// Default to current FY (July → June)
-function defaultFyDates() {
-  const now = new Date()
-  const m = now.getMonth() + 1 // 1-12
-  const y = now.getFullYear()
-  if (m >= 7) return { from: `${y}-07-01`, to: `${y + 1}-06-30` }
-  return { from: `${y - 1}-07-01`, to: `${y}-06-30` }
-}
-
 export default function ReportsPage() {
   const [tab, setTab] = useState<'pl' | 'bs' | 'tb' | 'ar'>('pl')
 
   // P&L state
-  const { from: defFrom, to: defTo } = defaultFyDates()
+  const { from: defFrom, to: defTo } = getThisFinancialYearDates()
   const [plFrom, setPlFrom] = useState(defFrom)
   const [plTo, setPlTo] = useState(defTo)
   const [plBasis, setPlBasis] = useState<'ACCRUAL' | 'CASH'>('ACCRUAL')

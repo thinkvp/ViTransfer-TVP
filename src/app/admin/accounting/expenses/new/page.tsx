@@ -10,14 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, Upload, Camera } from 'lucide-react'
-import type { AccountTaxCode, AccountType } from '@/lib/accounting/types'
-import { TAX_CODE_LABELS, ACCOUNT_TYPE_LABELS } from '@/lib/accounting/types'
-import type { Account } from '@/lib/accounting/types'
+import type { AccountTaxCode } from '@/lib/accounting/types'
+import { TAX_CODE_LABELS } from '@/lib/accounting/types'
+import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { cn } from '@/lib/utils'
 
 export default function NewExpensePage() {
   const router = useRouter()
-  const [accounts, setAccounts] = useState<Account[]>([])
+  const [accounts, setAccounts] = useState<AccountOption[]>([])
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     supplierName: '',
@@ -37,7 +37,7 @@ export default function NewExpensePage() {
 
   useEffect(() => {
     apiFetch('/api/admin/accounting/accounts?expenseTypes=true&activeOnly=true').then(async res => {
-      if (res.ok) { const d = await res.json(); setAccounts(d.accounts ?? []) }
+      if (res.ok) { const d = await res.json(); setAccounts(buildAccountOptions(d.accounts ?? [])) }
     })
   }, [])
 
@@ -104,32 +104,40 @@ export default function NewExpensePage() {
             <div className="space-y-1">
               <Label htmlFor="account">Account *</Label>
               <div className="relative">
-                <Input
-                  id="account"
-                  className="h-9"
-                  placeholder="Search account…"
-                  autoComplete="off"
-                  value={accountOpen ? accountSearch : (() => { const a = accounts.find(x => x.id === form.accountId); return a ? `${ACCOUNT_TYPE_LABELS[a.type as AccountType]} — ${a.name}` : '' })()}
-                  onFocus={() => { setAccountOpen(true); setAccountSearch('') }}
-                  onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
-                  onChange={e => setAccountSearch(e.target.value)}
-                />
-                {accountOpen && (
-                  <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                    {[...accounts]
-                      .sort((a, b) => a.name.localeCompare(b.name))
-                      .filter(a => { const q = accountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || ACCOUNT_TYPE_LABELS[a.type as AccountType]?.toLowerCase().includes(q) })
-                      .map(a => (
-                        <button key={a.id} type="button"
-                          onMouseDown={() => { setForm(f => ({ ...f, accountId: a.id })); setAccountSearch(''); setAccountOpen(false) }}
-                          className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', form.accountId === a.id && 'bg-primary/10 font-medium')}
-                        >{ACCOUNT_TYPE_LABELS[a.type as AccountType]} — {a.name}</button>
-                      ))}
-                    {[...accounts].filter(a => { const q = accountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || ACCOUNT_TYPE_LABELS[a.type as AccountType]?.toLowerCase().includes(q) }).length === 0 && (
-                      <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
-                    )}
-                  </div>
-                )}
+                {(() => {
+                  const filteredAccounts = accounts.filter(a => {
+                    const q = accountSearch.trim().toLowerCase()
+                    return !q || a.searchText.includes(q)
+                  })
+
+                  return (
+                    <>
+                      <Input
+                        id="account"
+                        className="h-9"
+                        placeholder="Search account…"
+                        autoComplete="off"
+                        value={accountOpen ? accountSearch : (accounts.find(x => x.id === form.accountId)?.label ?? '')}
+                        onFocus={() => { setAccountOpen(true); setAccountSearch('') }}
+                        onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                        onChange={e => setAccountSearch(e.target.value)}
+                      />
+                      {accountOpen && (
+                        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                          {filteredAccounts.map(a => (
+                            <button key={a.id} type="button"
+                              onMouseDown={() => { setForm(f => ({ ...f, accountId: a.id })); setAccountSearch(''); setAccountOpen(false) }}
+                              className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', form.accountId === a.id && 'bg-primary/10 font-medium')}
+                            >{a.label}</button>
+                          ))}
+                          {filteredAccounts.length === 0 && (
+                            <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
             <div className="space-y-1">

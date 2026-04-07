@@ -157,6 +157,12 @@ export function basPeriodFromDb(row: any): BasPeriod {
     g3Override: row.g3Override != null ? Number(row.g3Override) : null,
     calculationJson: row.calculationJson ?? null,
     recordsJson: row.recordsJson ?? null,
+    paygWithholdingCents: row.paygWithholdingCents != null ? Number(row.paygWithholdingCents) : null,
+    paygInstalmentCents: row.paygInstalmentCents != null ? Number(row.paygInstalmentCents) : null,
+    paymentDate: row.paymentDate ?? null,
+    paymentAmountCents: row.paymentAmountCents != null ? Number(row.paymentAmountCents) : null,
+    paymentNotes: row.paymentNotes ?? null,
+    paymentExpenseId: row.paymentExpenseId ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
   }

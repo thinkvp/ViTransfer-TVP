@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   if (to) dateFilter.lte = to
   const hasDateFilter = from || to
 
-  const [expenseGroups, txnGroups, salesIncomeEntries] = await Promise.all([
+  const [expenseGroups, txnGroups, salesIncomeEntries, debitNormalAccounts] = await Promise.all([
     prisma.expense.groupBy({
       by: ['accountId'],
       where: hasDateFilter ? { date: dateFilter } : {},
@@ -46,6 +46,8 @@ export async function GET(request: NextRequest) {
       _sum: { amountCents: true },
     }),
     listSalesInvoiceIncomeEntries({ from, to }),
+    // Fetch IDs of debit-normal accounts so we can apply the correct sign for bank transactions
+    prisma.account.findMany({ where: { type: { in: ['ASSET', 'EXPENSE', 'COGS'] } }, select: { id: true } }),
   ])
 
   const balances: Record<string, number> = {}
@@ -56,10 +58,16 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // For debit-normal accounts (ASSET, EXPENSE, COGS) a bank credit (positive amountCents, money in)
+  // REDUCES the account balance, so we negate. For credit-normal accounts (INCOME, LIABILITY, EQUITY)
+  // raw signed amountCents is correct.
+  const debitNormalSet = new Set(debitNormalAccounts.map((a: { id: string }) => a.id))
+
   for (const g of txnGroups) {
     if (g.accountId) {
-      // amountCents is negative for debits, positive for credits — store signed so UI can format correctly
-      balances[g.accountId] = (balances[g.accountId] ?? 0) + (g._sum.amountCents ?? 0)
+      const raw = g._sum.amountCents ?? 0
+      const contribution = debitNormalSet.has(g.accountId) ? -raw : raw
+      balances[g.accountId] = (balances[g.accountId] ?? 0) + contribution
     }
   }
 

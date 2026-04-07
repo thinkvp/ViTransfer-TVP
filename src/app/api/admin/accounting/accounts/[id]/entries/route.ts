@@ -36,19 +36,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Account not found' }, { status: 404 })
   }
 
+  // Include child accounts so a parent account page shows entries from all sub-accounts
+  const childAccounts = await prisma.account.findMany({
+    where: { parentId: account.id },
+    select: { id: true, name: true, code: true },
+  })
+  const accountIds = [account.id, ...childAccounts.map(c => c.id)]
+  const accountIdFilter = accountIds.length > 1 ? { in: accountIds } : account.id
+
   const dateFilter: { gte?: string; lte?: string } = {}
   if (from) dateFilter.gte = from
   if (to) dateFilter.lte = to
 
   const [expenses, bankTransactions, journalEntries, splitLines, salesInvoiceEntries] = await Promise.all([
     prisma.expense.findMany({
-      where: { accountId: account.id, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
+      where: { accountId: accountIdFilter, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
       include: { account: true },
       orderBy: { date: 'desc' },
     }),
     prisma.bankTransaction.findMany({
       where: {
-        accountId: account.id,
+        accountId: accountIdFilter,
         status: 'MATCHED',
         matchType: { not: 'INVOICE_PAYMENT' },
         ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
@@ -57,13 +65,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       orderBy: { date: 'desc' },
     }),
     prisma.journalEntry.findMany({
-      where: { accountId: account.id, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
+      where: { accountId: accountIdFilter, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
       include: { account: { select: { code: true, name: true } } },
       orderBy: { date: 'desc' },
     }),
     prisma.splitLine.findMany({
       where: {
-        accountId: account.id,
+        accountId: accountIdFilter,
         bankTransaction: {
           status: 'MATCHED',
           ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
@@ -75,14 +83,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
       orderBy: { bankTransaction: { date: 'desc' } },
     }),
-    listSalesInvoiceIncomeEntries({ from, to, accountId: account.id }),
+    listSalesInvoiceIncomeEntries({ from, to, accountIds }),
   ])
 
   type Entry =
     | { kind: 'expense'; date: string; entry: ReturnType<typeof expenseFromDb> }
     | { kind: 'bankTransaction'; date: string; entry: ReturnType<typeof bankTransactionFromDb> }
     | { kind: 'journal'; date: string; entry: ReturnType<typeof journalEntryFromDb> }
-    | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null } }
+    | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string } }
     | { kind: 'split'; date: string; entry: { id: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
 
   const combined: Entry[] = [
@@ -100,6 +108,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         amountCents: entry.amountCents,
         clientName: entry.clientName,
         labelName: entry.labelName,
+        accountName: entry.accountName,
+        accountCode: entry.accountCode,
       },
     })),
     ...splitLines.map(s => ({
@@ -123,14 +133,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return 0
   })
 
+  // Sum all entry amounts for the period (across all pages)
+  // For debit-normal accounts (ASSET, EXPENSE, COGS), bank transaction amountCents must be
+  // negated: a credit (positive, money in) reduces the account balance, not increases it.
+  const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE' || account.type === 'COGS'
+  const periodTotalCents = combined.reduce((sum, row) => {
+    if (row.kind === 'expense') return sum + (row.entry as ReturnType<typeof expenseFromDb>).amountIncGst
+    if (row.kind === 'bankTransaction') {
+      const baCents = (row.entry as ReturnType<typeof bankTransactionFromDb>).amountCents
+      return sum + (isDebitNormal ? -baCents : baCents)
+    }
+    if (row.kind === 'journal') return sum + (row.entry as ReturnType<typeof journalEntryFromDb>).amountCents
+    return sum + (row.entry as { amountCents: number }).amountCents
+  }, 0)
+
   const total = combined.length
   const offset = (page - 1) * pageSize
   const slice = combined.slice(offset, offset + pageSize)
 
   const res = NextResponse.json({
     account: accountFromDb(account),
+    hasChildAccounts: childAccounts.length > 0,
     entries: slice,
     total,
+    periodTotalCents,
     page,
     pageSize,
     pageCount: Math.ceil(total / pageSize),

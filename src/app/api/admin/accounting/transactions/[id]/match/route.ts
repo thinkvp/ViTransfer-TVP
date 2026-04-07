@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
+import { moveAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const data = parsed.data
   let updateData: Record<string, unknown> = { status: 'MATCHED', matchType: data.matchType }
+  let matchedExpenseAccountId: string | null = null
 
   if (data.matchType === 'INVOICE_PAYMENT') {
     const payment = await prisma.salesPayment.findUnique({ where: { id: data.invoicePaymentId } })
@@ -86,6 +88,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         { status: 409 }
       )
     }
+    matchedExpenseAccountId = expense.accountId
     // Link the expense to this transaction
     await prisma.expense.update({
       where: { id: data.expenseId },
@@ -103,6 +106,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
     },
   })
+
+  if (data.matchType === 'EXPENSE' && updated.attachmentPath && matchedExpenseAccountId) {
+    const movedAttachmentPath = await moveAccountingFile(
+      updated.attachmentPath,
+      updated.date,
+      matchedExpenseAccountId,
+      updated.attachmentOriginalName || null,
+    )
+
+    if (movedAttachmentPath !== updated.attachmentPath) {
+      updated.attachmentPath = movedAttachmentPath
+      await prisma.bankTransaction.update({
+        where: { id },
+        data: { attachmentPath: movedAttachmentPath },
+      })
+    }
+  }
 
   const res = NextResponse.json({ transaction: bankTransactionFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')

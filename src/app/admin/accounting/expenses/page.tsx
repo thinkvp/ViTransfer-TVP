@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { DateRangePreset } from '@/components/admin/accounting/DateRangePreset'
+import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown } from 'lucide-react'
@@ -34,8 +34,8 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<ExpenseStatus | 'ALL'>('ALL')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [fromDate, setFromDate] = useState(() => getThisFinancialYearDates().from)
+  const [toDate, setToDate] = useState(() => getThisFinancialYearDates().to)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -163,31 +163,35 @@ export default function ExpensesPage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex flex-wrap gap-2">
-            <Input
-              placeholder="Search supplier/description…"
-              value={search}
-              onChange={e => handleFilterChange(() => setSearch(e.target.value))}
-              className="h-9 max-w-[200px]"
-            />
-            <Select value={filterStatus} onValueChange={v => handleFilterChange(() => setFilterStatus(v as ExpenseStatus | 'ALL'))}>
-              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="All statuses" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All statuses</SelectItem>
-                {(Object.entries(EXPENSE_STATUS_LABELS) as [ExpenseStatus, string][]).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <DateRangePreset
-              from={fromDate}
-              to={toDate}
-              onFromChange={v => handleFilterChange(() => setFromDate(v))}
-              onToChange={v => handleFilterChange(() => setToDate(v))}
-            />
-            {(search || filterStatus !== 'ALL' || fromDate || toDate) && (
-              <Button variant="ghost" size="sm" className="h-9" onClick={() => { setSearch(''); setFilterStatus('ALL'); setFromDate(''); setToDate(''); setPage(1) }}>Clear</Button>
-            )}
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Input
+                placeholder="Search supplier/description…"
+                value={search}
+                onChange={e => handleFilterChange(() => setSearch(e.target.value))}
+                className="h-9 max-w-[200px]"
+              />
+              <Select value={filterStatus} onValueChange={v => handleFilterChange(() => setFilterStatus(v as ExpenseStatus | 'ALL'))}>
+                <SelectTrigger className="h-9 w-36"><SelectValue placeholder="All statuses" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All statuses</SelectItem>
+                  {(Object.entries(EXPENSE_STATUS_LABELS) as [ExpenseStatus, string][]).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:ml-auto">
+              <DateRangePreset
+                from={fromDate}
+                to={toDate}
+                onFromChange={v => handleFilterChange(() => setFromDate(v))}
+                onToChange={v => handleFilterChange(() => setToDate(v))}
+              />
+              {(search || filterStatus !== 'ALL' || fromDate || toDate) && (
+                <Button variant="ghost" size="sm" className="h-9" onClick={() => { setSearch(''); setFilterStatus('ALL'); setFromDate(''); setToDate(''); setPage(1) }}>Clear</Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">

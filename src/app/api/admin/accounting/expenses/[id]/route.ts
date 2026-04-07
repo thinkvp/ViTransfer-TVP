@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { expenseFromDb } from '@/lib/accounting/db-mappers'
+import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -131,7 +132,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const existing = await prisma.expense.findUnique({
     where: { id },
-    select: { id: true, bankTransactionId: true },
+    select: { id: true, bankTransactionId: true, receiptPath: true },
   })
 
   if (!existing) {
@@ -143,6 +144,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       { error: 'Cannot delete expense — it is matched to a bank transaction. Unmatch it first.' },
       { status: 409 }
     )
+  }
+
+  // Delete the receipt file from disk before removing the DB record
+  if (existing.receiptPath) {
+    await deleteAccountingFile(existing.receiptPath).catch(() => {})
   }
 
   await prisma.expense.delete({ where: { id } })

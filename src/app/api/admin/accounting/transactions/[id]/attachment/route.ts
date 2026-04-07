@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { deleteFile, getFilePath, sanitizeFilenameForHeader, uploadFile } from '@/lib/storage'
+import { sanitizeFilenameForHeader } from '@/lib/storage'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import { processImageBuffer } from '@/lib/image-processing'
+import {
+  buildAccountingFilePath,
+  writeAccountingFile,
+  deleteAccountingFile,
+  resolveAccountingFilePath,
+} from '@/lib/accounting/file-storage'
 import fs from 'fs'
 
 export const runtime = 'nodejs'
@@ -36,7 +42,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   let fullPath: string
   try {
-    fullPath = getFilePath(txn.attachmentPath)
+    fullPath = resolveAccountingFilePath(txn.attachmentPath)
   } catch {
     return NextResponse.json({ error: 'Invalid attachment path' }, { status: 500 })
   }
@@ -78,7 +84,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (rl) return rl
 
   const { id } = await params
-  const txn = await prisma.bankTransaction.findUnique({ where: { id }, select: { id: true, attachmentPath: true } })
+  const txn = await prisma.bankTransaction.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      date: true,
+      accountId: true,
+      attachmentPath: true,
+      expense: { select: { accountId: true } },
+    },
+  })
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
 
   const formData = await request.formData()
@@ -101,32 +116,38 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   let finalBuffer = buffer
-  let finalMime = mimeType
   let finalExt = isPdf ? 'pdf' : (mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg')
 
   if (!isPdf) {
     const processed = await processImageBuffer(buffer, mimeType)
     finalBuffer = Buffer.from(processed.buffer)
-    finalMime = processed.mimeType
     finalExt = processed.ext
   }
 
-  const storagePath = `accounting/transaction-attachments/${id}/attachment.${finalExt}`
+  // Build original filename — keep user's name but force correct extension
+  const rawName = file.name || `attachment.${finalExt}`
+  const nameWithoutExt = rawName.replace(/\.[^.]+$/, '')
+  const originalName = `${nameWithoutExt}.${finalExt}`
 
-  await uploadFile(storagePath, finalBuffer, finalBuffer.length, finalMime)
+  // Use the transaction date + account to determine FY folder & account folder
+  const effectiveAccountId = txn.expense?.accountId ?? txn.accountId
+  const storagePath = await buildAccountingFilePath(txn.date, effectiveAccountId, originalName)
+  await writeAccountingFile(storagePath, finalBuffer)
 
   // Remove old attachment if at a different path
-  if (txn.attachmentPath && txn.attachmentPath !== storagePath) {
-    await deleteFile(txn.attachmentPath).catch(() => {})
+  if (txn.attachmentPath && txn.attachmentPath !== storagePath.relativePath) {
+    await deleteAccountingFile(txn.attachmentPath).catch(() => {})
   }
 
-  const originalName = file.name || `attachment.${finalExt}`
   await prisma.bankTransaction.update({
     where: { id },
-    data: { attachmentPath: storagePath, attachmentOriginalName: originalName.slice(0, 500) },
+    data: {
+      attachmentPath: storagePath.relativePath,
+      attachmentOriginalName: rawName.slice(0, 500),
+    },
   })
 
-  return NextResponse.json({ attachmentPath: storagePath, attachmentOriginalName: originalName })
+  return NextResponse.json({ attachmentPath: storagePath.relativePath, attachmentOriginalName: rawName })
 }
 
 // DELETE /api/admin/accounting/transactions/[id]/attachment — remove attachment
@@ -147,7 +168,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   if (!txn.attachmentPath) return NextResponse.json({ error: 'No attachment to delete' }, { status: 404 })
 
-  await deleteFile(txn.attachmentPath).catch(() => {})
+  await deleteAccountingFile(txn.attachmentPath).catch(() => {})
   await prisma.bankTransaction.update({ where: { id }, data: { attachmentPath: null, attachmentOriginalName: null } })
 
   return NextResponse.json({ ok: true })

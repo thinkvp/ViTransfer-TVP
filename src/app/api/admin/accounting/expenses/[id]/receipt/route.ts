@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { deleteFile, getFilePath, sanitizeFilenameForHeader, uploadFile } from '@/lib/storage'
+import { sanitizeFilenameForHeader } from '@/lib/storage'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import { processImageBuffer } from '@/lib/image-processing'
+import {
+  buildAccountingFilePath,
+  writeAccountingFile,
+  readAccountingFile,
+  deleteAccountingFile,
+  resolveAccountingFilePath,
+} from '@/lib/accounting/file-storage'
 import fs from 'fs'
 
 export const runtime = 'nodejs'
@@ -36,7 +43,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   let fullPath: string
   try {
-    fullPath = getFilePath(expense.receiptPath)
+    fullPath = resolveAccountingFilePath(expense.receiptPath)
   } catch {
     return NextResponse.json({ error: 'Invalid receipt path' }, { status: 500 })
   }
@@ -78,7 +85,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await params
-  const expense = await prisma.expense.findUnique({ where: { id }, select: { id: true, receiptPath: true } })
+  const expense = await prisma.expense.findUnique({
+    where: { id },
+    select: { id: true, date: true, accountId: true, receiptPath: true },
+  })
   if (!expense) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
   }
@@ -123,28 +133,37 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   let finalBuffer = buffer
-  let finalMime = mimeType
   let finalExt = isPdf ? 'pdf' : (mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg')
 
   if (!isPdf) {
     const processed = await processImageBuffer(buffer, mimeType)
     finalBuffer = Buffer.from(processed.buffer)
-    finalMime = processed.mimeType
     finalExt = processed.ext
   }
 
-  const storagePath = `accounting/receipts/${id}/receipt.${finalExt}`
+  // Build original filename — keep user's name but force correct extension
+  const rawName = file.name || `receipt.${finalExt}`
+  const nameWithoutExt = rawName.replace(/\.[^.]+$/, '')
+  const originalName = `${nameWithoutExt}.${finalExt}`
 
-  await uploadFile(storagePath, finalBuffer, finalBuffer.length, finalMime)
+  // Use the expense date + account to determine FY folder & account folder
+  const storagePath = await buildAccountingFilePath(expense.date, expense.accountId, originalName)
+  await writeAccountingFile(storagePath, finalBuffer)
 
-  // Remove old receipt at a different path
-  if (expense.receiptPath && expense.receiptPath !== storagePath) {
-    await deleteFile(expense.receiptPath).catch(() => {})
+  // Remove old receipt if it was at a different path
+  if (expense.receiptPath && expense.receiptPath !== storagePath.relativePath) {
+    await deleteAccountingFile(expense.receiptPath).catch(() => {})
   }
 
-  await prisma.expense.update({ where: { id }, data: { receiptPath: storagePath, receiptOriginalName: (file.name || `receipt.${finalExt}`).slice(0, 500) } })
+  await prisma.expense.update({
+    where: { id },
+    data: {
+      receiptPath: storagePath.relativePath,
+      receiptOriginalName: rawName.slice(0, 500),
+    },
+  })
 
-  return NextResponse.json({ receiptPath: storagePath })
+  return NextResponse.json({ receiptPath: storagePath.relativePath })
 }
 
 // DELETE /api/admin/accounting/expenses/[id]/receipt — remove receipt
@@ -170,7 +189,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ error: 'No receipt attached' }, { status: 404 })
   }
 
-  await deleteFile(expense.receiptPath).catch(() => {})
+  await deleteAccountingFile(expense.receiptPath).catch(() => {})
   await prisma.expense.update({ where: { id }, data: { receiptPath: null, receiptOriginalName: null } })
 
   return NextResponse.json({ ok: true })

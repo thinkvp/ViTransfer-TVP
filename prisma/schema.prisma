@@ -2157,6 +2157,9 @@ model Expense {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
+  // Back-relation: BAS payment that used this expense record
+  basPayment   BasPeriod?      @relation("BasPeriodPaymentExpense")
+
   @@index([date])
   @@index([accountId])
   @@index([status])
@@ -2277,6 +2280,17 @@ model BasPeriod {
   // Snapshot of calculation at lodge time (JSON)
   calculationJson Json?
   recordsJson     Json?
+
+  // PAYG amounts — entered alongside BAS figures (cents)
+  paygWithholdingCents Int?                            // W2 — amount withheld from wages
+  paygInstalmentCents  Int?                            // T4 — PAYG instalment amount
+
+  // Payment recorded after lodging
+  paymentDate          String?                         // YYYY-MM-DD
+  paymentAmountCents   Int?
+  paymentNotes         String?  @db.Text
+  paymentExpenseId     String?  @unique
+  paymentExpense       Expense? @relation("BasPeriodPaymentExpense", fields: [paymentExpenseId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -4,12 +4,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
-import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp, CreditCard, Trash2, Loader2 } from 'lucide-react'
 import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord } from '@/lib/accounting/types'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn } from '@/lib/utils'
@@ -41,11 +43,28 @@ export default function BasDetailPage() {
 
   const [g2Override, setG2Override] = useState('')
   const [g3Override, setG3Override] = useState('')
+  const [paygWithholding, setPaygWithholding] = useState('')
+  const [paygInstalment, setPaygInstalment] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const [lodgeConfirm, setLodgeConfirm] = useState(false)
+
+  // Payment recording
+  interface CoaOption { id: string; code: string; name: string; type: string }
+  const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [paymentDate, setPaymentDate] = useState('')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccountSearch, setPaymentAccountSearch] = useState('')
+  const [paymentAccountOpen, setPaymentAccountOpen] = useState(false)
+  const [paymentNotes, setPaymentNotes] = useState('')
+  const [recordingPayment, setRecordingPayment] = useState(false)
+  const [paymentError, setPaymentError] = useState('')
+  const [deletePaymentConfirm, setDeletePaymentConfirm] = useState(false)
+  const [deletingPayment, setDeletingPayment] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -57,6 +76,8 @@ export default function BasDetailPage() {
         setPeriod(p)
         setG2Override(p.g2Override != null ? (p.g2Override / 100).toFixed(2) : '')
         setG3Override(p.g3Override != null ? (p.g3Override / 100).toFixed(2) : '')
+        setPaygWithholding(p.paygWithholdingCents != null ? (p.paygWithholdingCents / 100).toFixed(2) : '')
+        setPaygInstalment(p.paygInstalmentCents != null ? (p.paygInstalmentCents / 100).toFixed(2) : '')
         setNotes(p.notes ?? '')
         // Restore saved calculation snapshot if available
         if (p.calculationJson) {
@@ -68,6 +89,14 @@ export default function BasDetailPage() {
   }, [id])
 
   useEffect(() => { void load() }, [load])
+
+  // Load chart of accounts for payment dialog
+  useEffect(() => {
+    apiFetch('/api/admin/accounting/accounts?activeOnly=true')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.accounts) setCoaAccounts(d.accounts) })
+      .catch(() => {})
+  }, [])
 
   async function handleCalculate() {
     setCalculating(true)
@@ -94,6 +123,8 @@ export default function BasDetailPage() {
       const body: Record<string, unknown> = { notes: notes.trim() || null }
       if (g2Override) body.g2Override = Math.round(parseFloat(g2Override) * 100)
       if (g3Override) body.g3Override = Math.round(parseFloat(g3Override) * 100)
+      body.paygWithholdingCents = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : null
+      body.paygInstalmentCents = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : null
       const res = await apiFetch(`/api/admin/accounting/bas/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
@@ -105,12 +136,49 @@ export default function BasDetailPage() {
   async function handleStatusChange(status: BasPeriodStatus) {
     setSaving(true)
     try {
+      const body: Record<string, unknown> = { status }
+      // When lodging, include the current PAYG values so they're saved alongside the snapshot
+      if (status === 'LODGED') {
+        body.paygWithholdingCents = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : null
+        body.paygInstalmentCents = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : null
+      }
       const res = await apiFetch(`/api/admin/accounting/bas/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed'); return }
       await load()
     } finally { setSaving(false) }
+  }
+
+  async function handleRecordPayment() {
+    if (!paymentDate || !paymentAmount || !paymentAccountId) {
+      setPaymentError('Date, amount and account are required')
+      return
+    }
+    const amountCents = Math.round(parseFloat(paymentAmount) * 100)
+    if (!amountCents || amountCents <= 0) { setPaymentError('Enter a valid amount'); return }
+    setRecordingPayment(true)
+    setPaymentError('')
+    try {
+      const res = await apiFetch(`/api/admin/accounting/bas/${id}/payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentDate, paymentAmountCents: amountCents, paymentNotes: paymentNotes.trim() || null, accountId: paymentAccountId }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setPaymentError(d.error || 'Failed'); return }
+      setPaymentOpen(false)
+      await load()
+    } finally { setRecordingPayment(false) }
+  }
+
+  async function handleDeletePayment() {
+    setDeletingPayment(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/bas/${id}/payment`, { method: 'DELETE' })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to remove payment'); return }
+      setDeletePaymentConfirm(false)
+      await load()
+    } finally { setDeletingPayment(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
@@ -182,6 +250,16 @@ export default function BasDetailPage() {
                 <Input id="g3" type="number" step="0.01" value={g3Override} onChange={e => setG3Override(e.target.value)} placeholder="0.00" />
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="payg-w2">W2 — PAYG Withholding ($)</Label>
+                <Input id="payg-w2" type="number" step="0.01" value={paygWithholding} onChange={e => setPaygWithholding(e.target.value)} placeholder="0.00" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="payg-t4">T4 — PAYG Instalment ($)</Label>
+                <Input id="payg-t4" type="number" step="0.01" value={paygInstalment} onChange={e => setPaygInstalment(e.target.value)} placeholder="0.00" />
+              </div>
+            </div>
             <div className="space-y-1">
               <Label htmlFor="bas-notes">Notes</Label>
               <Textarea id="bas-notes" value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Optional notes" />
@@ -199,10 +277,70 @@ export default function BasDetailPage() {
       )}
 
       {isLodged && (
-        <Button variant="outline" onClick={handleCalculate} disabled={calculating}>
-          <Calculator className="w-4 h-4 mr-1.5" />
-          {calculating ? 'Calculating…' : 'Recalculate'}
-        </Button>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">PAYG Amounts</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <div className="flex justify-between py-0.5">
+              <span className="text-muted-foreground">W2 — PAYG Withholding</span>
+              <span className="tabular-nums">{period.paygWithholdingCents != null ? fmtAud(period.paygWithholdingCents) : '—'}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-muted-foreground">T4 — PAYG Instalment</span>
+              <span className="tabular-nums">{period.paygInstalmentCents != null ? fmtAud(period.paygInstalmentCents) : '—'}</span>
+            </div>
+            {calculation && (
+              <>
+                <div className="my-2 border-t border-border" />
+                <div className="flex justify-between py-0.5 font-semibold">
+                  <span>Total Amount Payable to ATO</span>
+                  <span className="tabular-nums text-red-600 dark:text-red-400">
+                    {fmtAud(Math.max(0, calculation.netGstCents) + (period.paygWithholdingCents ?? 0) + (period.paygInstalmentCents ?? 0))}
+                  </span>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Payment section — only for lodged periods */}
+      {isLodged && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">BAS Payment</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm">
+            {period.paymentDate ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
+                  <div><p className="text-xs text-muted-foreground">Payment Date</p><p>{period.paymentDate}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Amount Paid</p><p className="font-medium">{period.paymentAmountCents != null ? fmtAud(period.paymentAmountCents) : '—'}</p></div>
+                  {period.paymentNotes && <div className="col-span-2 sm:col-span-1"><p className="text-xs text-muted-foreground">Notes</p><p>{period.paymentNotes}</p></div>}
+                </div>
+                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setDeletePaymentConfirm(true)}>
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />Remove Payment
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-muted-foreground text-sm">No payment recorded yet.</p>
+                <Button size="sm" variant="outline" onClick={() => {
+                  setPaymentDate(new Date().toISOString().slice(0, 10))
+                  setPaymentAmount(calculation ? ((Math.max(0, calculation.netGstCents) + (period.paygWithholdingCents ?? 0) + (period.paygInstalmentCents ?? 0)) / 100).toFixed(2) : '')
+                  setPaymentAccountId('')
+                  setPaymentAccountSearch('')
+                  setPaymentNotes('')
+                  setPaymentError('')
+                  setPaymentOpen(true)
+                }}>
+                  <CreditCard className="w-4 h-4 mr-1.5" />Record Payment
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Calculation Results */}
@@ -413,6 +551,81 @@ export default function BasDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { setLodgeConfirm(false); handleStatusChange('LODGED') }}>Lodge</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Record Payment Dialog */}
+      <Dialog open={paymentOpen} onOpenChange={open => { if (!open && !recordingPayment) setPaymentOpen(false) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Record BAS Payment</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="space-y-1">
+              <Label>Payment Date *</Label>
+              <Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Amount Paid ($) *</Label>
+              <Input type="number" step="0.01" placeholder="0.00" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Account *</Label>
+              <p className="text-xs text-muted-foreground">Select the account to record the payment against (e.g. ATO Integrated Client Account, GST Payable, or a tax expense account).</p>
+              <div className="relative">
+                <Input
+                  placeholder="Search account…"
+                  value={paymentAccountOpen ? paymentAccountSearch : (() => { const a = coaAccounts.find(x => x.id === paymentAccountId); return a ? `${a.type} — ${a.name}` : '' })()}
+                  onFocus={() => { setPaymentAccountOpen(true); setPaymentAccountSearch('') }}
+                  onBlur={() => setTimeout(() => setPaymentAccountOpen(false), 150)}
+                  onChange={e => setPaymentAccountSearch(e.target.value)}
+                />
+                {paymentAccountOpen && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                    {coaAccounts.filter(a => {
+                      const q = paymentAccountSearch.toLowerCase()
+                      return !q || a.name.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)
+                    }).sort((a, b) => a.name.localeCompare(b.name)).map(a => (
+                      <button key={a.id} type="button"
+                        onMouseDown={() => { setPaymentAccountId(a.id); setPaymentAccountOpen(false); setPaymentAccountSearch('') }}
+                        className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', paymentAccountId === a.id && 'bg-primary/10 font-medium')}
+                      >{a.type} — {a.name}</button>
+                    ))}
+                    {coaAccounts.filter(a => { const q = paymentAccountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) }).length === 0 && (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Input placeholder="e.g. Paid via BPAY" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} />
+            </div>
+            {paymentError && <p className="text-destructive text-sm">{paymentError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaymentOpen(false)} disabled={recordingPayment}>Cancel</Button>
+            <Button onClick={() => void handleRecordPayment()} disabled={recordingPayment || !paymentDate || !paymentAmount || !paymentAccountId}>
+              {recordingPayment && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Record Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Payment Confirmation */}
+      <AlertDialog open={deletePaymentConfirm} onOpenChange={setDeletePaymentConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Payment Record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will delete the associated expense entry and clear the payment from this BAS period. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingPayment}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleDeletePayment()} disabled={deletingPayment} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+              {deletingPayment ? 'Removing…' : 'Remove'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

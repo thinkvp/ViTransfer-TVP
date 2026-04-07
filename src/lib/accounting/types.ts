@@ -121,6 +121,14 @@ export interface BasPeriod {
   g3Override: number | null
   calculationJson: BasCalculation | null
   recordsJson: { sales: BasSalesRecord[]; expenses: BasExpenseRecord[] } | null
+  // PAYG amounts (cents)
+  paygWithholdingCents: number | null
+  paygInstalmentCents: number | null
+  // Payment recorded after lodging
+  paymentDate: string | null
+  paymentAmountCents: number | null
+  paymentNotes: string | null
+  paymentExpenseId: string | null
   createdAt: string
   updatedAt: string
 }

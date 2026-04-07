@@ -22,12 +22,34 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
   const { id } = await ctx.params
 
   try {
-    // Fetch invoiceId before deletion so we can recompute invoice status afterward
-    const payment = await prisma.salesPayment.findUnique({ where: { id }, select: { invoiceId: true } })
-    await prisma.salesPayment.delete({ where: { id } })
-    if (payment?.invoiceId) {
-      await recomputeInvoiceStoredStatus(prisma as any, payment.invoiceId, { createdByUserId: authResult.id })
-    }
+    // Fetch invoiceId and any linked bank transaction before deletion
+    const payment = await prisma.salesPayment.findUnique({
+      where: { id },
+      select: { invoiceId: true, bankTransaction: { select: { id: true } } },
+    })
+
+    await prisma.$transaction(async (tx) => {
+      // If this payment was matched from a bank transaction, return it to UNMATCHED so it
+      // reappears in the Pending list and can be re-matched or handled differently.
+      if (payment?.bankTransaction?.id) {
+        await tx.bankTransaction.update({
+          where: { id: payment.bankTransaction.id },
+          data: {
+            status: 'UNMATCHED',
+            matchType: null,
+            invoicePaymentId: null,
+            transactionType: null,
+          },
+        })
+      }
+
+      await tx.salesPayment.delete({ where: { id } })
+
+      if (payment?.invoiceId) {
+        await recomputeInvoiceStoredStatus(tx as any, payment.invoiceId, { createdByUserId: authResult.id })
+      }
+    })
+
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('Failed to delete payment:', e)

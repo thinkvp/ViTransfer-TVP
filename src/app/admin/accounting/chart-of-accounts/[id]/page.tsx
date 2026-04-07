@@ -17,8 +17,8 @@ import type { Account, Expense, BankTransaction, JournalEntry } from '@/lib/acco
 import { cn, formatDate } from '@/lib/utils'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 
-type SplitEntry = { id: string; description: string; amountCents: number; taxCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
-type SalesInvoiceEntry = { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null }
+type SplitEntry = { id: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
+type SalesInvoiceEntry = { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string }
 
 type Entry =
   | { kind: 'expense'; date: string; entry: Expense }
@@ -40,6 +40,8 @@ export default function AccountLedgerPage() {
   const [account, setAccount] = useState<Account | null>(null)
   const [entries, setEntries] = useState<Entry[]>([])
   const [total, setTotal] = useState(0)
+  const [periodTotalCents, setPeriodTotalCents] = useState(0)
+  const [hasChildAccounts, setHasChildAccounts] = useState(false)
   const [page, setPage] = useState(1)
   const [pageCount, setPageCount] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -73,6 +75,8 @@ export default function AccountLedgerPage() {
       setAccount(d.account)
       setEntries(d.entries ?? [])
       setTotal(d.total ?? 0)
+      setPeriodTotalCents(d.periodTotalCents ?? 0)
+      setHasChildAccounts(d.hasChildAccounts ?? false)
       setPageCount(d.pageCount ?? 1)
     } finally {
       setLoading(false)
@@ -153,7 +157,7 @@ export default function AccountLedgerPage() {
   }
 
   return (
-    <div className="p-6 space-y-4 max-w-5xl mx-auto">
+    <div className="p-6 space-y-4 max-w-7xl mx-auto">
       <div className="flex items-center gap-3">
         <Link href="/admin/accounting/chart-of-accounts">
           <Button variant="ghost" size="sm" className="gap-1.5">
@@ -168,6 +172,7 @@ export default function AccountLedgerPage() {
           <span className="font-mono text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">{account.code}</span>
           <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', TYPE_BADGE[account.type] ?? 'bg-muted')}>{account.type}</span>
           {!account.isActive && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Inactive</span>}
+          {hasChildAccounts && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Includes sub-accounts</span>}
         </div>
       )}
 
@@ -193,12 +198,12 @@ export default function AccountLedgerPage() {
             </Button>
             <ExportMenu
               onExportCsv={() => {
-                downloadCsv(`${account?.code ?? 'account'}-entries.csv`, ['Date', 'Type', 'Description', 'Ref', 'Amount'], entries.map(row => {
-                  if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.description, e.supplierName ?? '', (e.amountIncGst / 100).toFixed(2)] }
-                  if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.description, t.reference ?? '', (t.amountCents / 100).toFixed(2)] }
-                  if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.description, j.reference ?? '', (j.amountCents / 100).toFixed(2)] }
-                  if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', (s.amountCents / 100).toFixed(2)] }
-                  const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', (s.amountCents / 100).toFixed(2)]
+                downloadCsv(`${account?.code ?? 'account'}-entries.csv`, ['Date', 'Type', 'Account', 'Description', 'Ref', 'Amount'], entries.map(row => {
+                  if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '', (e.amountIncGst / 100).toFixed(2)] }
+                  if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '', (t.amountCents / 100).toFixed(2)] }
+                  if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '', (j.amountCents / 100).toFixed(2)] }
+                  if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', (s.amountCents / 100).toFixed(2)] }
+                  const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', (s.amountCents / 100).toFixed(2)]
                 }))
               }}
               onExportPdf={() => downloadPdf(`${account?.code ?? 'Account'} Entries`)}
@@ -221,6 +226,7 @@ export default function AccountLedgerPage() {
                   <tr className="border-b border-border bg-muted/30">
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground w-28">Date</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground w-28">Type</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground min-w-[140px]">Account</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Description</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Ref / Supplier</th>
                     <th className="px-4 py-2.5 text-right font-medium text-muted-foreground w-32">Amount</th>
@@ -231,55 +237,67 @@ export default function AccountLedgerPage() {
                   {entries.map((row, i) => {
                     if (row.kind === 'expense') {
                       const e = row.entry as Expense
+                      const isOwn = e.accountId === account?.id
                       return (
                         <tr key={`exp-${e.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs">{formatDate(e.date)}</td>
                           <td className="px-4 py-2.5">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-700 dark:text-red-400">Expense</span>
                           </td>
-                          <td className="px-4 py-2.5 max-w-xs truncate">{e.description}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={e.accountName ?? account?.name}>{e.accountName ?? account?.name ?? '—'}</td>
+                          <td className="px-4 py-2.5 truncate">{e.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{e.supplierName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(e.amountIncGst)}</td>
                           <td className="px-4 py-2.5 text-right">
-                            <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete expense">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {isOwn && (
+                              <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete expense">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )
                     } else if (row.kind === 'bankTransaction') {
                       const t = row.entry as BankTransaction
+                      const isOwn = t.accountId === account?.id
                       return (
                         <tr key={`txn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs">{formatDate(t.date)}</td>
                           <td className="px-4 py-2.5">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400">Bank Txn</span>
                           </td>
-                          <td className="px-4 py-2.5 max-w-xs truncate">{t.description}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={t.accountName ?? account?.name ?? undefined}>{t.accountName ?? account?.name ?? '—'}</td>
+                          <td className="px-4 py-2.5 truncate">{t.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{t.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(t.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
-                            <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Unpost bank transaction">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {isOwn && (
+                              <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Unpost bank transaction">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )
                     } else if (row.kind === 'journal') {
                       const j = row.entry as JournalEntry
+                      const isOwn = j.accountId === account?.id
                       return (
                         <tr key={`je-${j.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs">{formatDate(j.date)}</td>
                           <td className="px-4 py-2.5">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-400">Journal</span>
                           </td>
-                          <td className="px-4 py-2.5 max-w-xs truncate">{j.description}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={j.accountName ?? account?.name}>{j.accountName ?? account?.name ?? '—'}</td>
+                          <td className="px-4 py-2.5 truncate">{j.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{j.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(j.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
-                            <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete journal entry">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {isOwn && (
+                              <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete journal entry">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )
@@ -291,7 +309,8 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-700 dark:text-green-400">Sales Invoice</span>
                           </td>
-                          <td className="px-4 py-2.5 max-w-xs truncate">{s.invoiceNumber} - {s.description}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{s.accountName || '—'}</td>
+                          <td className="px-4 py-2.5 truncate">{s.invoiceNumber} - {s.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.labelName ?? s.clientName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(s.amountCents)}</td>
                           <td className="px-4 py-2.5" />
@@ -305,7 +324,8 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">Split</span>
                           </td>
-                          <td className="px-4 py-2.5 max-w-xs truncate">{s.description || s.bankTransactionDescription}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{s.accountName || '—'}</td>
+                          <td className="px-4 py-2.5 truncate">{s.description || s.bankTransactionDescription}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.bankTransactionReference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(s.amountCents)}</td>
                           <td className="px-4 py-2.5" />
@@ -314,6 +334,17 @@ export default function AccountLedgerPage() {
                     }
                   })}
                 </tbody>
+                {!loading && entries.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-muted/30">
+                      <td colSpan={5} className="px-4 py-2.5 text-right text-sm font-semibold text-foreground">
+                        {pageCount > 1 ? 'Period Total (all pages)' : 'Period Total'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">{fmtAud(periodTotalCents)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           )}
