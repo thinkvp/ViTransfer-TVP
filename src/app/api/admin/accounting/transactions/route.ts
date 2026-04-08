@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
         account: true,
         invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true, invoice: { select: { invoiceNumber: true, clientId: true, client: { select: { name: true } } } } } },
         splitLines: { include: { account: true } },
+        accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       skip: (page - 1) * pageSize,

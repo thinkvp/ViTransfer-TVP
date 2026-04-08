@@ -5,7 +5,6 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { moveAccountingFile } from '@/lib/accounting/file-storage'
-
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -44,6 +43,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
+      accountingAttachments: { select: { id: true, storagePath: true, originalName: true } },
     },
   })
 
@@ -128,19 +128,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return newExpense
     })
 
-    if (txn.attachmentPath && createdExpenseId) {
-      const movedAttachmentPath = await moveAccountingFile(
-        txn.attachmentPath,
-        txn.date,
-        d.accountId,
-        txn.attachmentOriginalName || null,
-      )
-
-      if (movedAttachmentPath !== txn.attachmentPath) {
-        await prisma.bankTransaction.update({
-          where: { id },
-          data: { attachmentPath: movedAttachmentPath },
-        })
+    // Move all AccountingAttachment files into the expense account folder
+    for (const a of txn.accountingAttachments) {
+      const newPath = await moveAccountingFile(a.storagePath, txn.date, d.accountId, a.originalName)
+      if (newPath !== a.storagePath) {
+        await prisma.accountingAttachment.update({ where: { id: a.id }, data: { storagePath: newPath } })
       }
     }
   } else {
@@ -166,6 +158,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
+      accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
     },
   })
 

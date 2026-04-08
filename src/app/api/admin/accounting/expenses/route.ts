@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     prisma.expense.count({ where }),
     prisma.expense.findMany({
       where,
-      include: { account: true, user: { select: { id: true, name: true, email: true } } },
+      include: { account: true, user: { select: { id: true, name: true, email: true } }, accountingAttachments: { select: { id: true, storagePath: true, originalName: true, bankTransactionId: true, expenseId: true, uploadedAt: true } } },
       orderBy: { date: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
       notes: d.notes ?? null,
       status: 'DRAFT',
     },
-    include: { account: true, user: { select: { id: true, name: true, email: true } } },
+    include: { account: true, user: { select: { id: true, name: true, email: true } }, accountingAttachments: { select: { id: true, storagePath: true, originalName: true, bankTransactionId: true, expenseId: true, uploadedAt: true } } },
   })
 
   const res = NextResponse.json({ expense: expenseFromDb(expense) }, { status: 201 })

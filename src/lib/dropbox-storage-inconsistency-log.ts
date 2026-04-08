@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { DROPBOX_STORAGE_INCONSISTENCY_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
+import { sendBrowserPushToEligibleUsers } from '@/lib/admin-web-push'
 
 type IssueEntity = {
   entityType: string
@@ -92,6 +93,13 @@ export async function upsertDropboxStorageInconsistencyNotification(
       sentAt,
     },
   })
+
+  sendBrowserPushToEligibleUsers({
+    type: DROPBOX_STORAGE_INCONSISTENCY_NOTIFICATION_TYPE,
+    title: details.__payload.title,
+    message: details.__payload.message,
+    details: { __link: details.__link },
+  }).catch(() => {})
 }
 
 export async function getActiveDropboxStorageIssueEntities(

@@ -2120,6 +2120,25 @@ model SplitLine {
   @@index([accountId])
 }
 
+/// Individual file attachment for a bank transaction or expense.
+/// Supports multiple files per record, stored in ACCOUNTING_STORAGE_ROOT.
+model AccountingAttachment {
+  id                  String  @id @default(cuid())
+  storagePath         String                               // Relative path in ACCOUNTING_STORAGE_ROOT
+  originalName        String  @db.VarChar(500)
+
+  bankTransactionId   String?
+  bankTransaction     BankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
+
+  expenseId           String?
+  expense             Expense?         @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  uploadedAt          DateTime @default(now())
+
+  @@index([bankTransactionId])
+  @@index([expenseId])
+}
+
 /// Business expenses — entered manually or linked to imported bank transactions.
 model Expense {
   id           String          @id @default(cuid())
@@ -2138,8 +2157,7 @@ model Expense {
   gstAmount    Int
   amountIncGst Int
 
-  receiptPath         String?                           // Storage path for uploaded receipt image
-  receiptOriginalName String?  @db.VarChar(500)
+
 
   status       ExpenseStatus   @default(DRAFT)
 
@@ -2153,6 +2171,9 @@ model Expense {
   enteredByName String?        @db.VarChar(200)         // Snapshot of name at entry time
 
   notes        String?         @db.Text
+
+  // Multi-file attachments
+  accountingAttachments AccountingAttachment[]
 
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
@@ -2242,11 +2263,13 @@ model BankTransaction {
   taxCode               AccountTaxCode?
   accountId             String?
   account               Account? @relation("BankTransactionAccount", fields: [accountId], references: [id], onDelete: SetNull)
-  attachmentPath        String?
-  attachmentOriginalName String? @db.VarChar(500)
+
 
   // Split lines (when transaction is split across multiple accounts)
   splitLines    SplitLine[]
+
+  // Multi-file attachments (receipts, tax invoices, etc.)
+  accountingAttachments AccountingAttachment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

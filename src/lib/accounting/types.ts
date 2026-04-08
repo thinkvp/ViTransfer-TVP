@@ -7,6 +7,15 @@ export type BankTransactionStatus = 'UNMATCHED' | 'MATCHED' | 'EXCLUDED'
 export type BankTransactionMatchType = 'INVOICE_PAYMENT' | 'EXPENSE' | 'MANUAL' | 'SPLIT'
 export type BasPeriodStatus = 'DRAFT' | 'REVIEWED' | 'LODGED'
 
+export interface AccountingAttachment {
+  id: string
+  storagePath: string
+  originalName: string
+  bankTransactionId: string | null
+  expenseId: string | null
+  uploadedAt: string
+}
+
 export interface Account {
   id: string
   code: string
@@ -37,13 +46,12 @@ export interface Expense {
   amountExGst: number
   gstAmount: number
   amountIncGst: number
-  receiptPath: string | null
-  receiptOriginalName: string | null
   status: ExpenseStatus
   bankTransactionId: string | null
   userId: string | null
   enteredByName: string | null
   notes: string | null
+  attachments?: AccountingAttachment[]
   createdAt: string
   updatedAt: string
 }
@@ -96,8 +104,7 @@ export interface BankTransaction {
   taxCode: AccountTaxCode | null
   accountId: string | null
   accountName?: string | null
-  attachmentPath: string | null
-  attachmentOriginalName: string | null
+  attachments?: AccountingAttachment[]
   createdAt: string
   updatedAt: string
   // Populated joins

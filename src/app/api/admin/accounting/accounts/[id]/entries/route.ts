@@ -4,7 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { accountFromDb, expenseFromDb, bankTransactionFromDb, journalEntryFromDb } from '@/lib/accounting/db-mappers'
 import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-allocation'
-import { deleteFile } from '@/lib/storage'
+import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
 export const runtime = 'nodejs'
@@ -209,12 +209,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (kind === 'expense') {
     const expense = await prisma.expense.findUnique({
       where: { id: entryId },
-      select: { id: true, accountId: true, receiptPath: true, bankTransactionId: true },
+      select: { id: true, accountId: true, bankTransactionId: true, accountingAttachments: { select: { storagePath: true } } },
     })
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
     if (expense.accountId !== accountId) return NextResponse.json({ error: 'Entry does not belong to this account' }, { status: 403 })
 
-    const receiptPath = expense.receiptPath
+    const attachmentPaths = expense.accountingAttachments.map(a => a.storagePath)
     await prisma.$transaction(async (tx) => {
       // If this expense was linked to a bank transaction, unlink it
       if (expense.bankTransactionId) {
@@ -225,7 +225,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       }
       await tx.expense.delete({ where: { id: entryId } })
     })
-    if (receiptPath) await deleteFile(receiptPath).catch(() => {})
+    const filesToDelete = [...attachmentPaths]
+    await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
     return NextResponse.json({ ok: true })
   }
 
@@ -233,15 +234,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const txn = await prisma.bankTransaction.findUnique({
     where: { id: entryId },
     include: {
-      expense: { select: { id: true, receiptPath: true } },
+      expense: { select: { id: true, accountingAttachments: { select: { storagePath: true } } } },
       invoicePayment: { select: { id: true, invoiceId: true } },
+      accountingAttachments: { select: { id: true, storagePath: true } },
     },
   })
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   if (txn.accountId !== accountId) return NextResponse.json({ error: 'Entry does not belong to this account' }, { status: 403 })
   if (txn.status !== 'MATCHED') return NextResponse.json({ error: 'Transaction is not matched to this account' }, { status: 409 })
-
-  const expenseReceiptPath = txn.matchType === 'EXPENSE' ? (txn.expense?.receiptPath ?? null) : null
 
   await prisma.$transaction(async (tx) => {
     if (txn.matchType === 'EXPENSE' && txn.expense) {
@@ -254,6 +254,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
         await recomputeInvoiceStoredStatus(tx as any, invoiceId, { createdByUserId: authResult.id })
       }
     }
+    // Delete AccountingAttachment records for this transaction (CASCADE won't fire on UPDATE)
+    await tx.accountingAttachment.deleteMany({ where: { bankTransactionId: entryId } })
     await tx.bankTransaction.update({
       where: { id: entryId },
       data: {
@@ -264,13 +266,21 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
         transactionType: null,
         taxCode: null,
         accountId: null,
-        attachmentPath: null,
-        attachmentOriginalName: null,
       },
     })
   })
 
-  if (expenseReceiptPath) await deleteFile(expenseReceiptPath).catch(() => {})
+  // Delete attachment files after the DB transaction (best-effort)
+  const txnFilesToDelete = [
+    ...txn.accountingAttachments.map(a => a.storagePath),
+  ]
+  await Promise.all(txnFilesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
+  if (txn.matchType === 'EXPENSE' && txn.expense) {
+    const expFiles = [
+      ...(txn.expense.accountingAttachments ?? []).map(a => a.storagePath),
+    ]
+    await Promise.all(expFiles.map(p => deleteAccountingFile(p).catch(() => {})))
+  }
 
   return NextResponse.json({ ok: true })
 }

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { QUICKBOOKS_DAILY_PULL_FAILURE_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
+import { sendBrowserPushToEligibleUsers } from '@/lib/admin-web-push'
 
 type QuickBooksDailyPullFailureNotificationInput = {
   attemptedAtIso: string
@@ -83,4 +84,11 @@ export async function upsertQuickBooksDailyPullFailureNotification(
       sentAt,
     },
   })
+
+  sendBrowserPushToEligibleUsers({
+    type: QUICKBOOKS_DAILY_PULL_FAILURE_NOTIFICATION_TYPE,
+    title: details.__payload.title,
+    message: details.__payload.message,
+    details: { __link: details.__link },
+  }).catch(() => {})
 }

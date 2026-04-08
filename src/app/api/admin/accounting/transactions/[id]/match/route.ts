@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await params
-  const txn = await prisma.bankTransaction.findUnique({ where: { id } })
+  const txn = await prisma.bankTransaction.findUnique({ where: { id }, include: { accountingAttachments: { select: { id: true, storagePath: true, originalName: true } } } })
 
   if (!txn) {
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
@@ -104,23 +104,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
+      accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
     },
   })
 
-  if (data.matchType === 'EXPENSE' && updated.attachmentPath && matchedExpenseAccountId) {
-    const movedAttachmentPath = await moveAccountingFile(
-      updated.attachmentPath,
-      updated.date,
-      matchedExpenseAccountId,
-      updated.attachmentOriginalName || null,
-    )
-
-    if (movedAttachmentPath !== updated.attachmentPath) {
-      updated.attachmentPath = movedAttachmentPath
-      await prisma.bankTransaction.update({
-        where: { id },
-        data: { attachmentPath: movedAttachmentPath },
-      })
+  if (data.matchType === 'EXPENSE' && matchedExpenseAccountId) {
+    // Move all AccountingAttachment files into the expense account folder
+    for (const a of txn.accountingAttachments) {
+      const newPath = await moveAccountingFile(a.storagePath, updated.date, matchedExpenseAccountId, a.originalName)
+      if (newPath !== a.storagePath) {
+        await prisma.accountingAttachment.update({ where: { id: a.id }, data: { storagePath: newPath } })
+      }
     }
   }
 

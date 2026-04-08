@@ -1,4 +1,15 @@
-import type { Account, Expense, BankAccount, BankImportBatch, BankTransaction, BasPeriod, JournalEntry, SplitLine } from './types'
+import type { Account, AccountingAttachment, Expense, BankAccount, BankImportBatch, BankTransaction, BasPeriod, JournalEntry, SplitLine } from './types'
+
+export function accountingAttachmentFromDb(row: any): AccountingAttachment {
+  return {
+    id: row.id,
+    storagePath: row.storagePath,
+    originalName: row.originalName,
+    bankTransactionId: row.bankTransactionId ?? null,
+    expenseId: row.expenseId ?? null,
+    uploadedAt: row.uploadedAt instanceof Date ? row.uploadedAt.toISOString() : row.uploadedAt,
+  }
+}
 
 export function accountFromDb(row: any): Account {
   return {
@@ -32,13 +43,12 @@ export function expenseFromDb(row: any): Expense {
     amountExGst: Number(row.amountExGst),
     gstAmount: Number(row.gstAmount),
     amountIncGst: Number(row.amountIncGst),
-    receiptPath: row.receiptPath ?? null,
-    receiptOriginalName: row.receiptOriginalName ?? null,
     status: row.status,
     bankTransactionId: row.bankTransactionId ?? null,
     userId: row.userId ?? null,
     enteredByName: row.enteredByName ?? null,
     notes: row.notes ?? null,
+    attachments: row.accountingAttachments ? row.accountingAttachments.map((a: any) => accountingAttachmentFromDb(a)) : [],
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
   }
@@ -96,8 +106,7 @@ export function bankTransactionFromDb(row: any): BankTransaction {
     taxCode: row.taxCode ?? null,
     accountId: row.accountId ?? null,
     accountName: row.account?.name ?? null,
-    attachmentPath: row.attachmentPath ?? null,
-    attachmentOriginalName: row.attachmentOriginalName ?? null,
+    attachments: row.accountingAttachments ? row.accountingAttachments.map((a: any) => accountingAttachmentFromDb(a)) : [],
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
     expense: row.expense ? expenseFromDb(row.expense) : null,

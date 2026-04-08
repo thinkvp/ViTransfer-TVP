@@ -1,8 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -30,6 +31,7 @@ function fmtAud(cents: number) {
 
 export default function ExpensesPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -43,6 +45,9 @@ export default function ExpensesPage() {
 
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalExpenseId, setModalExpenseId] = useState<string | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -94,6 +99,19 @@ export default function ExpensesPage() {
 
   useEffect(() => { void load() }, [load])
 
+  // Auto-open modal from query params (?new=1 or ?edit=<id>)
+  useEffect(() => {
+    const editId = searchParams?.get('edit')
+    const isNew = searchParams?.get('new') === '1'
+    if (editId) {
+      setModalExpenseId(editId)
+      setModalOpen(true)
+    } else if (isNew) {
+      setModalExpenseId(null)
+      setModalOpen(true)
+    }
+  }, [searchParams])
+
   function handleFilterChange(fn: () => void) {
     fn()
     setPage(1)
@@ -116,28 +134,6 @@ export default function ExpensesPage() {
     }
   }
 
-  async function downloadReceipt(id: string, filename: string) {
-    try {
-      const res = await apiFetch(`/api/admin/accounting/expenses/${id}/receipt`)
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to download receipt')
-        return
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch {
-      alert('Failed to download receipt')
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -155,7 +151,7 @@ export default function ExpensesPage() {
             onExportPdf={() => downloadPdf('Expenses')}
             disabled={expenses.length === 0}
           />
-          <Button onClick={() => router.push('/admin/accounting/expenses/new')}>
+          <Button onClick={() => { setModalExpenseId(null); setModalOpen(true) }}>
             <Plus className="w-4 h-4 mr-1.5" />New Expense
           </Button>
         </div>
@@ -235,25 +231,20 @@ export default function ExpensesPage() {
                     <tr
                       key={e.id}
                       className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
-                      onClick={() => router.push(`/admin/accounting/expenses/${e.id}`)}
+                      onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}
                     >
                       <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground">{formatDate(e.date)}</td>
                       <td className="px-3 py-2 font-medium">
                         <div className="flex items-center gap-1.5">
-                          {e.receiptPath && (
-                            <button
-                              type="button"
-                              onClick={ev => { ev.stopPropagation(); void downloadReceipt(e.id, e.receiptOriginalName ?? 'receipt') }}
-                              className="text-muted-foreground hover:text-primary transition-colors"
-                              title={e.receiptOriginalName ?? 'Download receipt'}
-                            >
-                              <Paperclip className="w-3 h-3 flex-shrink-0" />
-                            </button>
-                          )}
                           {e.supplierName ?? <span className="text-muted-foreground italic">—</span>}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground max-w-[200px] truncate">{e.description}</td>
+                      <td className="px-3 py-2 max-w-[200px]">
+                        <div className="flex items-center gap-1.5 truncate">
+                          {(e.attachments?.length ?? 0) > 0 && <span title="Has attachments" className="shrink-0"><Paperclip className="w-3.5 h-3.5 text-muted-foreground" /></span>}
+                          <span className="truncate">{e.description}</span>
+                        </div>
+                      </td>
                       <td className="px-3 py-2" onClick={ev => ev.stopPropagation()}>
                         {e.accountId ? (
                           <Link
@@ -276,7 +267,7 @@ export default function ExpensesPage() {
                       </td>
                       <td className="px-3 py-2 text-right" onClick={ev => ev.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.push(`/admin/accounting/expenses/${e.id}`)}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}>
                             <Pencil className="w-3.5 h-3.5" />
                           </Button>
                           {e.status !== 'RECONCILED' && !e.bankTransactionId && (
@@ -308,6 +299,14 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
+
+      <ExpenseFormModal
+        open={modalOpen}
+        expenseId={modalExpenseId}
+        onClose={() => { setModalOpen(false); router.replace('/admin/accounting/expenses') }}
+        onSaved={() => { setModalOpen(false); router.replace('/admin/accounting/expenses'); void load() }}
+        onDeleted={() => { setModalOpen(false); router.replace('/admin/accounting/expenses'); void load() }}
+      />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null) }}>
         <AlertDialogContent>

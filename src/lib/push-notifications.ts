@@ -24,6 +24,10 @@ export interface PushNotificationPayload {
     | 'SALES_REMINDER_QUOTE_EXPIRING'
     | 'PASSWORD_RESET_REQUESTED'
     | 'PASSWORD_RESET_SUCCESS'
+    | 'RATE_LIMIT_ALERT'
+    | 'QUICKBOOKS_DAILY_PULL_FAILURE'
+    | 'ORPHAN_PROJECT_FILES_SCAN'
+    | 'DROPBOX_STORAGE_INCONSISTENCY'
   projectId?: string
   projectName?: string
   kanbanCardId?: string

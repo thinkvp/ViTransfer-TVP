@@ -4,7 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
-import { deleteFile } from '@/lib/storage'
+import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,8 +26,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
     include: {
-      expense: { select: { id: true, receiptPath: true } },
+      expense: { select: { id: true, accountingAttachments: { select: { storagePath: true } } } },
       invoicePayment: { select: { id: true, invoiceId: true } },
+      accountingAttachments: { select: { id: true, storagePath: true } },
     },
   })
 
@@ -59,6 +60,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
 
+    // Delete AccountingAttachment records (CASCADE won't fire on UPDATE, only on DELETE)
+    await tx.accountingAttachment.deleteMany({ where: { bankTransactionId: id } })
+
     await tx.bankTransaction.update({
       where: { id },
       data: {
@@ -69,19 +73,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         transactionType: null,
         taxCode: null,
         accountId: null,
-        attachmentPath: null,
-        attachmentOriginalName: null,
       },
     })
   })
 
-  // Delete the attachment file after the DB transaction (best-effort)
-  if (txn.attachmentPath) {
-    await deleteFile(txn.attachmentPath).catch(() => {})
-  }
-  // Delete the expense's receipt file if an expense was removed
-  if (txn.matchType === 'EXPENSE' && txn.expense?.receiptPath) {
-    await deleteFile(txn.expense.receiptPath).catch(() => {})
+  // Delete files after the DB transaction (best-effort)
+  const filesToDelete = [
+    ...txn.accountingAttachments.map(a => a.storagePath),
+  ]
+  await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
+  // Delete the expense's receipt + attachments if an expense was removed
+  if (txn.matchType === 'EXPENSE' && txn.expense) {
+    const expenseFiles = [
+      ...(txn.expense.accountingAttachments ?? []).map(a => a.storagePath),
+    ]
+    await Promise.all(expenseFiles.map(p => deleteAccountingFile(p).catch(() => {})))
   }
 
   const updated = await prisma.bankTransaction.findUnique({
@@ -92,6 +98,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true, invoice: { select: { invoiceNumber: true, clientId: true, client: { select: { name: true } } } } } },
       splitLines: { include: { account: true } },
+      accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
     },
   })
 

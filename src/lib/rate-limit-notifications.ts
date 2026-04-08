@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { RATE_LIMIT_ALERT_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
+import { sendBrowserPushToEligibleUsers } from '@/lib/admin-web-push'
 
 type RateLimitAlertInput = {
   rateLimitType: string
@@ -79,6 +80,13 @@ export async function upsertRateLimitAlertNotification(input: RateLimitAlertInpu
       sentAt: now,
     },
   })
+
+  sendBrowserPushToEligibleUsers({
+    type: RATE_LIMIT_ALERT_NOTIFICATION_TYPE,
+    title: details.__payload.title,
+    message: details.__payload.message,
+    details: { __link: details.__link },
+  }).catch(() => {})
 }
 
 export async function clearRateLimitAlertNotifications(): Promise<void> {

@@ -28,6 +28,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
+      accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
     },
   })
 
@@ -55,7 +56,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
-    select: { id: true, status: true, attachmentPath: true },
+    select: {
+      id: true,
+      status: true,
+      accountingAttachments: { select: { id: true, storagePath: true } },
+    },
   })
 
   if (!txn) {
@@ -69,10 +74,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     )
   }
 
-  // Delete the attachment file from disk before removing the DB record
-  if (txn.attachmentPath) {
-    await deleteAccountingFile(txn.attachmentPath).catch(() => {})
-  }
+  // Delete attachment files from disk before removing the DB record (CASCADE handles DB rows)
+  const filesToDelete = [
+    ...txn.accountingAttachments.map(a => a.storagePath),
+  ]
+  await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
 
   await prisma.bankTransaction.delete({ where: { id } })
   return NextResponse.json({ ok: true })

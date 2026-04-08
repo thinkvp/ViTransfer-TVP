@@ -11,14 +11,13 @@ export const dynamic = 'force-dynamic'
 
 const updateSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  supplierName: z.string().trim().min(1).max(300).optional(),
+  supplierName: z.string().trim().max(300).optional().nullable(),
   description: z.string().trim().min(1).max(5000).optional(),
   accountId: z.string().trim().min(1).optional(),
   taxCode: z.enum(['GST', 'GST_FREE', 'BAS_EXCLUDED', 'INPUT_TAXED']).optional(),
   amountIncGst: z.number().positive().describe('Amount including GST in dollars').optional(),
   notes: z.string().trim().max(5000).optional().nullable(),
   status: z.enum(['DRAFT', 'APPROVED', 'RECONCILED']).optional(),
-  receiptPath: z.string().trim().max(500).optional().nullable(),
 })
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -36,7 +35,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
   const expense = await prisma.expense.findUnique({
     where: { id },
-    include: { account: true, user: { select: { id: true, name: true, email: true } } },
+    include: {
+      account: true,
+      user: { select: { id: true, name: true, email: true } },
+      accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
+    },
   })
 
   if (!expense) {
@@ -93,7 +96,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       ...(data.accountId !== undefined ? { accountId: data.accountId } : {}),
       ...(data.taxCode !== undefined ? { taxCode: data.taxCode } : {}),
       ...(data.status !== undefined ? { status: data.status } : {}),
-      ...(data.receiptPath !== undefined ? { receiptPath: data.receiptPath } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
       // Recalculate cents if amount or taxCode changed
       ...((data.amountIncGst !== undefined || data.taxCode !== undefined) ? await (async () => {
@@ -132,7 +134,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const existing = await prisma.expense.findUnique({
     where: { id },
-    select: { id: true, bankTransactionId: true, receiptPath: true },
+    select: {
+      id: true,
+      bankTransactionId: true,
+      accountingAttachments: { select: { storagePath: true } },
+    },
   })
 
   if (!existing) {
@@ -146,10 +152,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     )
   }
 
-  // Delete the receipt file from disk before removing the DB record
-  if (existing.receiptPath) {
-    await deleteAccountingFile(existing.receiptPath).catch(() => {})
-  }
+  // Delete all attachment files from disk before removing the DB record (CASCADE handles DB rows)
+  const filesToDelete = [
+    ...existing.accountingAttachments.map(a => a.storagePath),
+  ]
+  await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
 
   await prisma.expense.delete({ where: { id } })
   return NextResponse.json({ ok: true })

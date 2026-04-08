@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { ORPHAN_PROJECT_FILES_SCAN_NOTIFICATION_TYPE } from '@/lib/pinned-system-notifications'
+import { sendBrowserPushToEligibleUsers } from '@/lib/admin-web-push'
 import { type ProjectStorageOrphanCleanupResult } from '@/lib/project-storage-orphan-cleanup'
 
 function formatBytes(bytes: number): string {
@@ -102,4 +103,11 @@ export async function upsertOrphanProjectFilesScanNotification(
       sentAt,
     },
   })
+
+  sendBrowserPushToEligibleUsers({
+    type: ORPHAN_PROJECT_FILES_SCAN_NOTIFICATION_TYPE,
+    title: details.__payload.title,
+    message: details.__payload.message,
+    details: { __link: details.__link },
+  }).catch(() => {})
 }

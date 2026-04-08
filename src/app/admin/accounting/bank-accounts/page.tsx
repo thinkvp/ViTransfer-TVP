@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Upload, ChevronDown, ChevronRight, Landmark, Pencil, Trash2, Paperclip, X, Loader2, EyeOff, RotateCcw, Link2, AlertTriangle, ArrowUp, ArrowDown, ChevronLeft, ChevronsLeft, ChevronsRight, Scissors } from 'lucide-react'
+import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
+import type { AccountingAttachment } from '@/lib/accounting/types'
 import type { BankAccount, BankTransaction } from '@/lib/accounting/types'
 import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
@@ -43,7 +45,7 @@ interface PostFormState {
   taxCode: string
   memo: string
   supplierName: string
-  file: File | null
+  files: File[]
   suggestedAccountId: string
 }
 
@@ -72,7 +74,7 @@ function defaultPostForm(txn: BankTransaction, taxRates: TaxRateOption[]): PostF
     taxCode: defaultTax?.code ?? 'GST',
     memo: '',
     supplierName: '',
-    file: null,
+    files: [],
     suggestedAccountId: '',
   }
 }
@@ -121,6 +123,8 @@ export default function BankAccountsPage() {
   const [posting, setPosting] = useState<string | null>(null)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [ignoring, setIgnoring] = useState<string | null>(null)
+  const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null)
+  const [uploadingAttachmentTxnId, setUploadingAttachmentTxnId] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const [importOpen, setImportOpen] = useState(false)
@@ -317,7 +321,13 @@ export default function BankAccountsPage() {
         body: JSON.stringify({ transactionType: form.transactionType, accountId: form.accountId, taxCode: form.taxCode, memo: form.memo || null, supplierName: form.supplierName || null }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to post'); return }
-      if (form.file) { const fd = new FormData(); fd.append('file', form.file); await apiFetch(`/api/admin/accounting/transactions/${txn.id}/attachment`, { method: 'POST', body: fd }) }
+      if (form.files.length > 0) {
+        for (const file of form.files) {
+          const fd = new FormData()
+          fd.append('file', file)
+          await apiFetch(`/api/admin/accounting/transactions/${txn.id}/attachments`, { method: 'POST', body: fd })
+        }
+      }
       // Remove from list without full reload so the page scroll position is preserved
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
@@ -391,9 +401,9 @@ export default function BankAccountsPage() {
     } finally { setSplitting(false) }
   }
 
-  async function downloadTransactionAttachment(txnId: string, filename: string) {
+  async function downloadAccountingAttachment(attachmentId: string, filename: string) {
     try {
-      const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/attachment`)
+      const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         alert(d.error || 'Failed to download attachment')
@@ -411,6 +421,38 @@ export default function BankAccountsPage() {
     } catch {
       alert('Failed to download attachment')
     }
+  }
+
+  async function handleDeleteAccountingAttachment(attachmentId: string, txnId: string) {
+    if (!confirm('Delete this attachment? This cannot be undone.')) return
+    setDeletingAttachment(attachmentId)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete attachment'); return }
+      setTransactions(prev => prev.map(t => t.id === txnId
+        ? { ...t, attachments: (t.attachments ?? []).filter(a => a.id !== attachmentId) }
+        : t
+      ))
+    } finally { setDeletingAttachment(null) }
+  }
+
+  async function handleUploadPostedAttachment(txnId: string, files: File[]) {
+    setUploadingAttachmentTxnId(txnId)
+    try {
+      const newAttachments: AccountingAttachment[] = []
+      for (const file of files) {
+        const fd = new FormData()
+        fd.append('file', file)
+        const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/attachments`, { method: 'POST', body: fd })
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Upload failed'); return }
+        const d = await res.json()
+        newAttachments.push(...(d.attachments ?? []))
+      }
+      setTransactions(prev => prev.map(t => t.id === txnId
+        ? { ...t, attachments: [...(t.attachments ?? []), ...newAttachments] }
+        : t
+      ))
+    } finally { setUploadingAttachmentTxnId(null) }
   }
 
   async function handleDeleteAccount() {
@@ -713,6 +755,7 @@ export default function BankAccountsPage() {
                               {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                             </div>
                             <div className="w-24 shrink-0 text-sm tabular-nums text-muted-foreground whitespace-nowrap">{formatDate(t.date)}</div>
+                            {(t.attachments?.length ?? 0) > 0 && <span title="Has attachments" className="shrink-0"><Paperclip className="w-3.5 h-3.5 text-muted-foreground" /></span>}
                             <div className="flex-1 min-w-0">
                               <p className="text-sm truncate">{t.description}</p>
                               {t.reference && <p className="text-xs text-muted-foreground truncate">{t.reference}</p>}
@@ -856,12 +899,31 @@ export default function BankAccountsPage() {
                                       </div>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={e => setPostFormField(t.id, { file: e.target.files?.[0] ?? null })} />
-                                    <button type="button" onClick={() => fileRefs.current[t.id]?.click()} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                                      <Paperclip className="w-3.5 h-3.5" />{form.file ? form.file.name : 'Attach receipt or tax invoice'}
-                                    </button>
-                                    {form.file && <button type="button" onClick={() => setPostFormField(t.id, { file: null })} className="text-muted-foreground hover:text-destructive transition-colors" aria-label="Remove file"><X className="w-3.5 h-3.5" /></button>}
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Attachments <span className="text-muted-foreground">(optional)</span></Label>
+                                    <div className="flex items-start gap-2 flex-wrap">
+                                      <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={e => {
+                                        const picked = Array.from(e.target.files ?? [])
+                                        setPostFormField(t.id, { files: [...(getPostForm(t).files), ...picked] })
+                                        if (fileRefs.current[t.id]) fileRefs.current[t.id]!.value = ''
+                                      }} />
+                                      <button type="button" onClick={() => fileRefs.current[t.id]?.click()} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                                        <Paperclip className="w-3.5 h-3.5" />Attach receipt or tax invoice
+                                      </button>
+                                    </div>
+                                    {form.files.length > 0 && (
+                                      <div className="flex flex-col gap-0.5 mt-1">
+                                        {form.files.map((f, fi) => (
+                                          <div key={fi} className="flex items-center gap-1 text-xs text-muted-foreground">
+                                            <Paperclip className="w-3 h-3 shrink-0" />
+                                            <span className="truncate max-w-[200px]">{f.name}</span>
+                                            <button type="button" onClick={() => setPostFormField(t.id, { files: form.files.filter((_, i) => i !== fi) })} className="text-muted-foreground hover:text-destructive ml-1" aria-label="Remove file">
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2 pt-1">
                                     <Button size="sm" onClick={() => void handlePost(t)} disabled={isPosting || !form.accountId}>
@@ -982,8 +1044,22 @@ export default function BankAccountsPage() {
                                     {t.invoicePayment?.invoiceId && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Invoice</p><Link href={`/admin/sales/invoices/${t.invoicePayment.invoiceId}`} className="text-sm text-primary hover:underline underline-offset-2">{t.invoicePayment.invoiceNumber ?? t.invoicePayment.invoiceId}{t.invoicePayment.clientName ? ` — ${t.invoicePayment.clientName}` : ''}</Link></div>}
                                     {t.memo && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Memo</p><p>{t.memo}</p></div>}
                                     {t.expense && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Expense</p><p>{t.expense.supplierName ? `${t.expense.supplierName} · ` : ''}{fmtAud(t.expense.amountIncGst)}</p></div>}
-                                    {t.attachmentOriginalName && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Attachment</p><button type="button" onClick={() => void downloadTransactionAttachment(t.id, t.attachmentOriginalName!)} className="flex items-center gap-1 text-sm text-primary hover:underline"><Paperclip className="w-3.5 h-3.5" />{t.attachmentOriginalName}</button></div>}
                                   </div>
+                                  {/* Attachments */}
+                                  {(() => {
+                                    const allItems: AttachmentItem[] = (t.attachments ?? []).map(a => ({ id: a.id, name: a.originalName }))
+                                    return (
+                                      <AttachmentsPanel
+                                        items={allItems}
+                                        canUpload
+                                        uploading={uploadingAttachmentTxnId === t.id}
+                                        deletingId={deletingAttachment}
+                                        onUpload={files => handleUploadPostedAttachment(t.id, files)}
+                                        onDownload={async item => { await downloadAccountingAttachment(item.id, item.name) }}
+                                        onDelete={async item => { await handleDeleteAccountingAttachment(item.id, t.id) }}
+                                      />
+                                    )
+                                  })()}
                                   {t.matchType === 'SPLIT' && t.splitLines && t.splitLines.length > 0 && (
                                     <div className="rounded border border-border overflow-hidden">
                                       <table className="w-full text-xs">
