@@ -6,7 +6,7 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
+import { isDropboxStorageConfigured, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -76,8 +76,15 @@ function asNumberBigInt(v: unknown): number {
 async function computeStorageEntrySizeBytes(storagePath: string | null | undefined): Promise<number> {
   if (!storagePath) return 0
 
+  // Strip the dropbox: prefix so we resolve to the local copy of the file.
+  // Files with Dropbox enabled are stored locally AND uploaded to Dropbox;
+  // the DB path carries the dropbox: prefix but the local file exists at the
+  // same relative path without that prefix.
+  const localPath = stripDropboxStoragePrefix(storagePath)
+  if (!localPath) return 0
+
   try {
-    return await computeDirectorySizeBytes(getFilePath(storagePath))
+    return await computeDirectorySizeBytes(getFilePath(localPath))
   } catch {
     return 0
   }

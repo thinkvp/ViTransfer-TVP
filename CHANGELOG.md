@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Guest share-page videos could stay stuck on loading** — the public share API fix for preview availability was only applied to the authenticated payload shape; the guest-mode serialization path still omitted `preview480Path`, `preview720Path`, and `preview1080Path`, so guest viewers could see videos in the sidebar but never request playback tokens; guest responses now include the same boolean preview-availability flags as the normal share payload
+- **Original Videos missing from Project Data storage breakdown when Dropbox is enabled** — when a video is stored on Dropbox, its `originalStoragePath` (and video asset `storagePath`) is saved in the database with a `dropbox:` prefix; the disk-size helper `computeStorageEntrySizeBytes` passed this prefixed path directly to `getFilePath`, which does not understand the `dropbox:` scheme and resolved to a non-existent path, returning 0 bytes; those bytes then surfaced as unaccounted "Other files" instead of "Original Videos"; the helper now strips the `dropbox:` prefix before resolving the local file path so original video and asset sizes are correctly attributed in the Project Data panel
 
 ## [1.3.9] - 2026-04-08
 
