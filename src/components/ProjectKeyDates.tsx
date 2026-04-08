@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { TimePicker24h } from '@/components/ui/time-picker-24h'
 import { Textarea } from '@/components/ui/textarea'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
+import { formatDate } from '@/lib/utils'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Bell, Check, Pencil, Plus, Trash2, X } from 'lucide-react'
 
@@ -59,6 +60,12 @@ function truncateNotes(notes: string | null | undefined, maxChars = 120): string
   const chars = Array.from(notes)
   if (chars.length <= maxChars) return notes
   return `${chars.slice(0, maxChars).join('').trimEnd()}...`
+}
+
+function formatHumanDate(ymd: string): string {
+  const [year, month, day] = ymd.split('-').map((value) => Number(value))
+  const localDate = new Date(year, (month || 1) - 1, day || 1)
+  return formatDate(localDate.toISOString())
 }
 
 type Draft = {
@@ -468,7 +475,7 @@ export function ProjectKeyDates({
                   <tr key={item.id} className="border-t">
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div className="flex items-center gap-2">
-                        <span>{item.date}</span>
+                        <span>{formatHumanDate(item.date)}</span>
                         {item.reminderAt ? <Bell className="w-4 h-4 text-muted-foreground" /> : null}
                       </div>
                     </td>

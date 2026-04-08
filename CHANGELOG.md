@@ -5,6 +5,11 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-08
+
+### Fixed
+- **Guest share-page videos could stay stuck on loading** — the public share API fix for preview availability was only applied to the authenticated payload shape; the guest-mode serialization path still omitted `preview480Path`, `preview720Path`, and `preview1080Path`, so guest viewers could see videos in the sidebar but never request playback tokens; guest responses now include the same boolean preview-availability flags as the normal share payload
+
 ## [1.3.9] - 2026-04-08
 
 ### Added
