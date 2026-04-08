@@ -82,7 +82,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ...txn.accountingAttachments.map(a => a.storagePath),
   ]
   await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
-  // Delete the expense's receipt + attachments if an expense was removed
+  // Delete the expense attachment files if an expense was removed
   if (txn.matchType === 'EXPENSE' && txn.expense) {
     const expenseFiles = [
       ...(txn.expense.accountingAttachments ?? []).map(a => a.storagePath),
