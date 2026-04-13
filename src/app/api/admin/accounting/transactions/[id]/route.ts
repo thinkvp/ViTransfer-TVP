@@ -27,7 +27,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       bankAccount: { select: { id: true, name: true } },
       expense: { include: { account: true } },
       account: true,
-      invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
+      invoicePayment: {
+        select: {
+          id: true,
+          amountCents: true,
+          paymentDate: true,
+          invoiceId: true,
+          invoice: { select: { invoiceNumber: true, client: { select: { name: true } } } },
+        },
+      },
+      splitLines: { include: { account: true } },
       accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
     },
   })

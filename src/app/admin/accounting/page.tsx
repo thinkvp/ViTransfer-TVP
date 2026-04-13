@@ -26,7 +26,7 @@ function getCurrentFY(): { from: string; to: string; label: string } {
 interface DashboardStats {
   unmatchedCount: number
   draftExpenseCount: number
-  bankAccounts: { id: string; name: string; openingBalance: number }[]
+  bankAccounts: { id: string; name: string; currentBalance: number; pendingTransactionAmount: number }[]
   pl: { totalIncomeCents: number; totalExpenseCents: number; netProfitCents: number } | null
   reportingBasis: 'CASH' | 'ACCRUAL'
 }
@@ -157,7 +157,8 @@ export default function AccountingDashboardPage() {
                 <Card className="hover:bg-accent/30 transition-colors">
                   <CardContent className="py-3 px-4">
                     <p className="font-medium text-sm">{a.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Opening balance: {fmtAud(a.openingBalance)}</p>
+                    <p className="text-sm font-medium mt-1">Current balance: {fmtAud(a.currentBalance)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Pending transactions: {fmtAud(a.pendingTransactionAmount)}</p>
                   </CardContent>
                 </Card>
               </Link>

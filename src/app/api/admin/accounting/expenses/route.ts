@@ -38,6 +38,10 @@ export async function GET(request: NextRequest) {
   const to = searchParams.get('to')
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10))
   const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '50', 10)))
+  const sortKeyRaw = searchParams.get('sortKey') ?? 'date'
+  const sortDir = (searchParams.get('sortDir') ?? 'desc') === 'asc' ? 'asc' : 'desc'
+  const validSortKeys = ['date', 'supplier', 'description', 'category', 'amountExGst', 'gstAmount', 'amountIncGst', 'status']
+  const sortKey = validSortKeys.includes(sortKeyRaw) ? sortKeyRaw : 'date'
 
   const where: Record<string, unknown> = {}
   if (status) where.status = status
@@ -56,7 +60,14 @@ export async function GET(request: NextRequest) {
     prisma.expense.findMany({
       where,
       include: { account: true, user: { select: { id: true, name: true, email: true } }, accountingAttachments: { select: { id: true, storagePath: true, originalName: true, bankTransactionId: true, expenseId: true, uploadedAt: true } } },
-      orderBy: { date: 'desc' },
+      orderBy: sortKey === 'supplier' ? { supplierName: sortDir } as const
+        : sortKey === 'description' ? { description: sortDir } as const
+        : sortKey === 'category' ? { account: { name: sortDir } } as const
+        : sortKey === 'amountExGst' ? { amountExGst: sortDir } as const
+        : sortKey === 'gstAmount' ? { gstAmount: sortDir } as const
+        : sortKey === 'amountIncGst' ? { amountIncGst: sortDir } as const
+        : sortKey === 'status' ? { status: sortDir } as const
+        : { date: sortDir } as const,
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

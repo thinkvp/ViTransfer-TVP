@@ -21,13 +21,9 @@ RUN set -e; \
     done; \
     apk update
 
-# OpenSSL 3.x compatibility for Prisma engines
+# OpenSSL 3.x compatibility for Prisma engines + basic runtime utilities
 RUN apk add --no-cache \
     openssl \
-    openssl-dev
-
-# Utilities + user switching
-RUN apk add --no-cache \
     bash \
     curl \
     ca-certificates
@@ -147,15 +143,15 @@ COPY --chown=app:app --from=builder /app/prisma ./prisma
 # Next will try to write runtime cache (notably image optimizer) under `.next/cache`.
 # Ensure these paths exist and are writable by the runtime user.
 RUN mkdir -p /app/.next/standalone/.next/cache/images && \
+    mkdir -p /app/uploads /app/accounting && \
     if [ ! -e /app/.next/standalone/.next/static ]; then ln -s /app/.next/static /app/.next/standalone/.next/static; fi && \
-    if [ ! -e /app/.next/standalone/public ]; then ln -s /app/public /app/.next/standalone/public; fi
-
-RUN chown -R app:app /app/.next/standalone
+    if [ ! -e /app/.next/standalone/public ]; then ln -s /app/public /app/.next/standalone/public; fi && \
+    chown -R app:app /app/.next/standalone /app/uploads /app/accounting
 
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod -R a+rX /app/.next /app/node_modules /app/public /app/prisma && \
+RUN chmod -R a+rX /app/.next /app/public /app/prisma && \
     chmod -R a+rwX /app/.next/standalone/.next/cache
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
@@ -165,6 +161,8 @@ EXPOSE 4321
 
 ENV PORT=4321
 ENV HOSTNAME="0.0.0.0"
+
+USER app
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["npm", "run", "start:standalone"]
@@ -190,7 +188,11 @@ COPY --chown=app:app --from=builder /app/worker.mjs ./worker.mjs
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod -R a+rX /app/src /app/node_modules /app/prisma
+RUN mkdir -p /app/uploads /app/accounting && \
+    chown -R app:app /app/uploads /app/accounting && \
+    chmod -R a+rX /app/src /app/prisma
+
+USER app
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["npm", "run", "worker"]

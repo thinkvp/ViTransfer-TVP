@@ -41,11 +41,13 @@ type TaskCard = {
 
 export function ProjectTasks({
   projectId,
+  projectTitle,
   clientId,
   clientName,
   canEdit,
 }: {
   projectId: string
+  projectTitle?: string | null
   clientId?: string | null
   clientName?: string | null
   canEdit?: boolean
@@ -81,21 +83,24 @@ export function ProjectTasks({
 
   const loadBoardData = useCallback(async () => {
     if (boardLoadedRef.current) return
-    boardLoadedRef.current = true
     try {
-      const [colRes, userRes, projRes] = await Promise.all([
+      const [colRes, userRes, projRes] = await Promise.allSettled([
         apiFetch('/api/kanban'),
         apiFetch('/api/kanban/users'),
         apiFetch('/api/projects?all=true&limit=500'),
       ])
-      if (colRes.ok) {
-        const data = await colRes.json()
+      let loadedColumns = false
+
+      if (colRes.status === 'fulfilled' && colRes.value.ok) {
+        const data = await colRes.value.json()
         const cols = data.columns || []
         boardColumnsRef.current = cols
         setBoardColumns(cols)
+        loadedColumns = cols.length > 0
       }
-      if (userRes.ok) {
-        const data = await userRes.json()
+
+      if (userRes.status === 'fulfilled' && userRes.value.ok) {
+        const data = await userRes.value.json()
         const list = (data.users || data || []) as any[]
         setBoardUsers(list.map((u: any) => ({
           id: u.id,
@@ -105,17 +110,25 @@ export function ProjectTasks({
           avatarPath: u.avatarPath ?? null,
         })))
       }
-      if (projRes.ok) {
-        const data = await projRes.json()
+
+      let projs: Array<{ id: string; title: string }> = []
+      if (projRes.status === 'fulfilled' && projRes.value.ok) {
+        const data = await projRes.value.json()
         const list = (data.projects || data || []) as any[]
-        const projs = list.map((p: any) => ({ id: p.id, title: p.title }))
-        boardProjectsRef.current = projs
-        setBoardProjects(projs)
+        projs = list.map((p: any) => ({ id: p.id, title: p.title }))
       }
+
+      if (projectId && projectTitle && !projs.some((p) => p.id === projectId)) {
+        projs = [{ id: projectId, title: projectTitle }, ...projs]
+      }
+
+      boardProjectsRef.current = projs
+      setBoardProjects(projs)
+      boardLoadedRef.current = loadedColumns
     } catch {
-      // Non-critical
+      boardLoadedRef.current = false
     }
-  }, [])
+  }, [projectId, projectTitle])
 
   const openTask = useCallback(async (task: TaskCard) => {
     await loadBoardData()
@@ -153,7 +166,10 @@ export function ProjectTasks({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
-      if (!res.ok) throw new Error('Failed to create task')
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.error || 'Failed to create task')
+      }
     } else {
       // Existing task — PATCH to update
       const res = await apiFetch(`/api/kanban/cards/${editingTask.id}`, {
@@ -161,7 +177,10 @@ export function ProjectTasks({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
-      if (!res.ok) throw new Error('Failed to save task')
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.error || 'Failed to save task')
+      }
     }
     setEditingTask(null)
     setIsAddingTask(false)
@@ -172,7 +191,10 @@ export function ProjectTasks({
   const handleAddTask = useCallback(async () => {
     await loadBoardData()
     const firstColumn = boardColumnsRef.current[0]
-    if (!firstColumn) return
+    if (!firstColumn) {
+      window.alert('Unable to load task columns right now. Please refresh and try again.')
+      return
+    }
     const newCard: KanbanCardData = {
       id: '',
       title: '',
@@ -182,7 +204,7 @@ export function ProjectTasks({
       projectId,
       clientId: clientId ?? null,
       members: [],
-      project: boardProjectsRef.current.find((p) => p.id === projectId) ?? null,
+      project: boardProjectsRef.current.find((p) => p.id === projectId) ?? (projectTitle ? { id: projectId, title: projectTitle } : null),
       client: clientId && clientName ? { id: clientId, name: clientName } : null,
       createdBy: { id: '', name: null, email: '' },
       dueDate: null,
@@ -193,7 +215,7 @@ export function ProjectTasks({
     }
     setIsAddingTask(true)
     setEditingTask(newCard)
-  }, [loadBoardData, projectId, clientId, clientName])
+  }, [loadBoardData, projectId, projectTitle, clientId, clientName])
 
   if (loading) return null
 

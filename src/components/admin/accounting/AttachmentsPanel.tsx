@@ -19,7 +19,7 @@ interface AttachmentsPanelProps {
   onDelete?: (item: AttachmentItem) => Promise<void>
   uploading?: boolean
   deletingId?: string | null
-  label?: string
+  label?: string | null
 }
 
 export function AttachmentsPanel({
@@ -53,7 +53,7 @@ export function AttachmentsPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {label ? <p className="text-xs font-medium text-muted-foreground">{label}</p> : null}
 
       {items.length === 0 && !canUpload && (
         <p className="text-xs text-muted-foreground">No attachments.</p>

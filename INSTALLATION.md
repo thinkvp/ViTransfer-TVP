@@ -123,6 +123,8 @@ The script will:
 - Ask for optional settings (port, timezone, HTTPS)
 - Create a ready-to-use `.env` file
 
+The app and worker run as a non-root container user by default. If you later replace the default named volumes with Linux bind mounts, update the Compose `user:` value to match the owner of those host directories or the containers will hit write-permission errors on uploads and accounting storage.
+
 If you would rather manage secrets yourself, skip the setup script and use the manual configuration flow below. The setup scripts are only convenience helpers.
 
 **Option B: Manual Configuration**

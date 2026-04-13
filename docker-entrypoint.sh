@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# ViTransfer Docker Entrypoint Script (simplified)
-# Assumes the container runtime (docker-compose `user:`) controls UID/GID.
-# Keeps only service readiness checks + Prisma migrations.
+# ViTransfer Docker Entrypoint Script
+# Images default to non-root (USER app / 911:911). Compose `user:` can override.
+# Handles service readiness checks + Prisma migrations.
 
 set -e
 

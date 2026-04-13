@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, Check, X, Loader2 } from 'lucide-react'
+import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { cn } from '@/lib/utils'
 import type { AccountingSettings } from '@/lib/accounting/types'
 
@@ -274,12 +275,12 @@ export default function AccountingSettingsPage() {
                           </span>
                         </div>
                         <div className="hidden sm:flex items-center gap-1 justify-end">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rate)}>
+                          <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate">
                             <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => setDeleteTarget(rate)}>
+                          </AccountingTableActionButton>
+                          <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => setDeleteTarget(rate)} title="Delete tax rate" aria-label="Delete tax rate">
                             <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
+                          </AccountingTableActionButton>
                         </div>
                         {/* Mobile row */}
                         <div className="sm:hidden flex items-center justify-between mt-1">
@@ -289,8 +290,8 @@ export default function AccountingSettingsPage() {
                             {rate.isDefault && <span className="text-emerald-600 dark:text-emerald-400">Default</span>}
                           </div>
                           <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(rate)}><Pencil className="w-3.5 h-3.5" /></Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => setDeleteTarget(rate)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                            <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate"><Pencil className="w-3.5 h-3.5" /></AccountingTableActionButton>
+                            <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => setDeleteTarget(rate)} title="Delete tax rate" aria-label="Delete tax rate"><Trash2 className="w-3.5 h-3.5" /></AccountingTableActionButton>
                           </div>
                         </div>
                       </div>

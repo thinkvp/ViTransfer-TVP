@@ -1,8 +1,9 @@
 ﻿'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -30,9 +31,9 @@ interface OpenInvoice {
   dueDate: string | null
   clientName: string | null
   projectTitle: string | null
-  itemsJson: unknown
-  taxEnabled: boolean
+  totalCents: number
   totalPaidCents: number
+  outstandingBalanceCents: number
 }
 
 type TabKey = 'UNMATCHED' | 'MATCHED' | 'EXCLUDED'
@@ -123,6 +124,8 @@ export default function BankAccountsPage() {
   const [posting, setPosting] = useState<string | null>(null)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [ignoring, setIgnoring] = useState<string | null>(null)
+  const [deleteTransactionTarget, setDeleteTransactionTarget] = useState<BankTransaction | null>(null)
+  const [deletingTransaction, setDeletingTransaction] = useState(false)
   const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null)
   const [uploadingAttachmentTxnId, setUploadingAttachmentTxnId] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -190,27 +193,20 @@ export default function BankAccountsPage() {
     setExpandedId(null)
     setPostForms({})
     try {
-      const params = new URLSearchParams({ bankAccountId: accountId, status: tab, page: String(page), pageSize: String(PAGE_SIZE) })
+      const params = new URLSearchParams({ bankAccountId: accountId, status: tab, page: String(page), pageSize: String(PAGE_SIZE), sortKey: txnSortKey, sortDir: txnSortDir })
       if (txnFrom) params.set('from', txnFrom)
       if (txnTo) params.set('to', txnTo)
       const res = await apiFetch(`/api/admin/accounting/transactions?${params}`)
       if (res.ok) { const d = await res.json(); setTransactions(d.transactions ?? []); setTxnTotal(d.pagination?.total ?? 0) }
     } finally { setLoadingTxns(false) }
-  }, [txnFrom, txnTo])
+  }, [txnFrom, txnTo, txnSortKey, txnSortDir])
 
-  const sortedTransactions = useMemo(() => {
-    return [...transactions].sort((a, b) => {
-      let r = 0
-      if (txnSortKey === 'date') r = a.date.localeCompare(b.date)
-      else if (txnSortKey === 'description') r = (a.description ?? '').localeCompare(b.description ?? '')
-      else if (txnSortKey === 'amount') r = a.amountCents - b.amountCents
-      return txnSortDir === 'asc' ? r : -r
-    })
-  }, [transactions, txnSortKey, txnSortDir])
+  const sortedTransactions = transactions
 
   function toggleTxnSort(key: 'date' | 'description' | 'amount') {
+    setTxnPage(1)
     setTxnSortKey(prev => {
-      if (prev !== key) { setTxnSortDir(key === 'amount' ? 'desc' : 'desc'); return key }
+      if (prev !== key) { setTxnSortDir('desc'); return key }
       setTxnSortDir(d => d === 'asc' ? 'desc' : 'asc')
       return prev
     })
@@ -467,6 +463,20 @@ export default function BankAccountsPage() {
     } finally { setDeleting(false) }
   }
 
+  async function handleDeleteTransaction() {
+    if (!deleteTransactionTarget) return
+    setDeletingTransaction(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${deleteTransactionTarget.id}`, { method: 'DELETE' })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete transaction'); return }
+      const txnId = deleteTransactionTarget.id
+      setTransactions(prev => prev.filter(t => t.id !== txnId))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === txnId ? null : prev)
+      setDeleteTransactionTarget(null)
+    } finally { setDeletingTransaction(false) }
+  }
+
   async function handlePreview() {
     if (!importFile || !selectedAccountId) return
     setImportPreviewing(true)
@@ -547,15 +557,6 @@ export default function BankAccountsPage() {
       setExpandedId(prev => prev === matchedId ? null : prev)
       apiFetch('/api/admin/accounting/open-invoices').then(r => r.ok ? r.json() : null).then(d => { if (d?.invoices) setQuickMatchInvoices(d.invoices) }).catch(() => {})
     } finally { setMatchingInvoice(false) }
-  }
-
-  function calcInvoiceTotal(inv: OpenInvoice): number {
-    const items: any[] = Array.isArray(inv.itemsJson) ? inv.itemsJson : []
-    return items.reduce((sum: number, item: any) => {
-      const line = (item.quantity ?? 0) * (item.unitPriceCents ?? 0)
-      const tax = inv.taxEnabled ? line * ((item.taxRatePercent ?? 0) / 100) : 0
-      return sum + line + tax
-    }, 0)
   }
 
   function openMatchExpenseDialog(txn: BankTransaction) {
@@ -706,18 +707,19 @@ export default function BankAccountsPage() {
               ) : (
                 <>
                   <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border text-xs font-medium text-muted-foreground">
-                    <div className="w-5 shrink-0" />
+                    {activeTab !== 'EXCLUDED' && <div className="w-5 shrink-0" />}
                     <button type="button" onClick={() => toggleTxnSort('date')} className="w-24 shrink-0 flex items-center gap-1 hover:text-foreground transition-colors">
                       Date {txnSortKey === 'date' ? (txnSortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : null}
                     </button>
                     <button type="button" onClick={() => toggleTxnSort('description')} className="flex-1 flex items-center gap-1 hover:text-foreground transition-colors">
                       Description {txnSortKey === 'description' ? (txnSortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : null}
                     </button>
-                    {activeTab !== 'UNMATCHED' && <div className="w-28 shrink-0">Type</div>}
-                    {activeTab !== 'UNMATCHED' && <div className="w-32 shrink-0">Account</div>}
+                    {activeTab === 'MATCHED' && <div className="w-28 shrink-0">Type</div>}
+                    {activeTab === 'MATCHED' && <div className="w-32 shrink-0">Account</div>}
                     <button type="button" onClick={() => toggleTxnSort('amount')} className="w-28 text-right shrink-0 flex items-center justify-end gap-1 hover:text-foreground transition-colors">
                       {txnSortKey === 'amount' ? (txnSortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : null} Amount
                     </button>
+                    {activeTab === 'EXCLUDED' && <div className="w-[88px] shrink-0 text-right">Actions</div>}
                   </div>
 
                   <div className="divide-y divide-border">
@@ -727,15 +729,14 @@ export default function BankAccountsPage() {
                       const isPosting = posting === t.id
                       const isUndoing = undoing === t.id
                       const isIgnoring = ignoring === t.id
+                      const isDeletingTxn = deleteTransactionTarget?.id === t.id && deletingTransaction
                       const types = txnTypeOptions(t.amountCents)
                       const isQuickMatching = quickMatching === t.id
 
                       // Compute quick-match candidates (only on Pending tab)
                       const quickInvoice = activeTab === 'UNMATCHED' && t.amountCents > 0 ? (() => {
                         const matches = quickMatchInvoices.filter(inv => {
-                          const total = calcInvoiceTotal(inv)
-                          const remaining = inv.status === 'PARTIALLY_PAID' ? Math.max(0, total - inv.totalPaidCents) : total
-                          return remaining === t.amountCents
+                          return inv.outstandingBalanceCents === t.amountCents
                         })
                         return matches.length === 1 ? matches[0] : null
                       })() : null
@@ -748,26 +749,28 @@ export default function BankAccountsPage() {
 
                       return (
                         <div key={t.id}>
-                          <div onClick={() => handleRowClick(t)}
-                            className={cn('flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors select-none', isExpanded && 'bg-muted/30')}
+                          <div onClick={() => { if (activeTab !== 'EXCLUDED') handleRowClick(t) }}
+                            className={cn('flex items-center gap-2 px-3 py-2.5 hover:bg-muted/40 transition-colors select-none', activeTab !== 'EXCLUDED' && 'cursor-pointer', isExpanded && 'bg-muted/30')}
                           >
-                            <div className="w-5 shrink-0 text-muted-foreground">
-                              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                            </div>
+                            {activeTab !== 'EXCLUDED' && (
+                              <div className="w-5 shrink-0 text-muted-foreground">
+                                {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              </div>
+                            )}
                             <div className="w-24 shrink-0 text-sm tabular-nums text-muted-foreground whitespace-nowrap">{formatDate(t.date)}</div>
                             {(t.attachments?.length ?? 0) > 0 && <span title="Has attachments" className="shrink-0"><Paperclip className="w-3.5 h-3.5 text-muted-foreground" /></span>}
                             <div className="flex-1 min-w-0">
                               <p className="text-sm truncate">{t.description}</p>
                               {t.reference && <p className="text-xs text-muted-foreground truncate">{t.reference}</p>}
                             </div>
-                            {activeTab !== 'UNMATCHED' && (
+                            {activeTab === 'MATCHED' && (
                               <div className="w-28 shrink-0 hidden sm:block">
                                 <span className="text-xs text-muted-foreground">
                                   {t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : t.transactionType ? (TYPE_LABELS[t.transactionType] ?? t.transactionType) : t.expense ? 'Expense' : ''}
                                 </span>
                               </div>
                             )}
-                            {activeTab !== 'UNMATCHED' && (
+                            {activeTab === 'MATCHED' && (
                               <div className="w-32 shrink-0 hidden sm:block">
                                 {(() => {
                                   if (t.matchType === 'SPLIT') return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">Split ({t.splitLines?.length ?? 0})</span>
@@ -812,10 +815,24 @@ export default function BankAccountsPage() {
                               t.amountCents < 0 ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-400')}>
                               {fmtAmt(t.amountCents)}
                             </div>
+                            {activeTab === 'EXCLUDED' && (
+                              <div className="w-[88px] shrink-0 flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                                <AccountingTableActionButton onClick={() => void handleUndo(t.id)} disabled={isUndoing || isDeletingTxn} title="Undo ignored transaction" aria-label="Undo ignored transaction">
+                                  {isUndoing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                                </AccountingTableActionButton>
+                                <AccountingTableActionButton destructive onClick={() => setDeleteTransactionTarget(t)} disabled={isUndoing || isDeletingTxn} title="Delete ignored transaction" aria-label="Delete ignored transaction">
+                                  {isDeletingTxn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-destructive" />}
+                                </AccountingTableActionButton>
+                              </div>
+                            )}
                           </div>
 
-                          {isExpanded && (
+                          {isExpanded && activeTab !== 'EXCLUDED' && (
                             <div className="px-4 pt-3 pb-4 bg-muted/10 border-t border-border">
+                              <div className="sm:hidden space-y-1 pb-3">
+                                <p className="text-xs text-muted-foreground">Description</p>
+                                <p className="text-sm leading-5 whitespace-normal break-words">{t.description}</p>
+                              </div>
                               {activeTab === 'UNMATCHED' ? (
                                 <div className="space-y-3">
                                   <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,140px)_1fr_minmax(0,140px)] gap-3">
@@ -925,7 +942,7 @@ export default function BankAccountsPage() {
                                       </div>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-2 pt-1">
+                                  <div className="flex flex-wrap items-center gap-2 pt-1">
                                     <Button size="sm" onClick={() => void handlePost(t)} disabled={isPosting || !form.accountId}>
                                       {isPosting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Post
                                     </Button>
@@ -960,7 +977,7 @@ export default function BankAccountsPage() {
                                           return !q || a.searchText.includes(q)
                                         })
                                         return (
-                                          <div key={idx} className="grid grid-cols-[1fr_100px_120px_32px] gap-2 items-end">
+                                          <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_100px_120px_32px] sm:items-end">
                                             <div className="space-y-1">
                                               <Label className="text-xs">Account</Label>
                                               <div className="relative">
@@ -993,22 +1010,27 @@ export default function BankAccountsPage() {
                                             </div>
                                             <div className="space-y-1">
                                               <Label className="text-xs">GST</Label>
-                                              <Select value={line.taxCode} onValueChange={v => updateSplitLine(idx, { taxCode: v })}>
-                                                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                                                <SelectContent>
-                                                  {taxRates.length > 0
-                                                    ? taxRates.map(r => <SelectItem key={r.id} value={r.code}>{r.name}</SelectItem>)
-                                                    : <>
-                                                        <SelectItem value="GST">GST (10%)</SelectItem>
-                                                        <SelectItem value="GST_FREE">GST Free</SelectItem>
-                                                        <SelectItem value="BAS_EXCLUDED">BAS Excluded</SelectItem>
-                                                        <SelectItem value="INPUT_TAXED">Input Taxed</SelectItem>
-                                                      </>}
-                                                </SelectContent>
-                                              </Select>
+                                              <div className="flex items-center gap-2">
+                                                <Select value={line.taxCode} onValueChange={v => updateSplitLine(idx, { taxCode: v })}>
+                                                  <SelectTrigger className="h-8 min-w-0 flex-1 text-sm"><SelectValue /></SelectTrigger>
+                                                  <SelectContent>
+                                                    {taxRates.length > 0
+                                                      ? taxRates.map(r => <SelectItem key={r.id} value={r.code}>{r.name}</SelectItem>)
+                                                      : <>
+                                                          <SelectItem value="GST">GST (10%)</SelectItem>
+                                                          <SelectItem value="GST_FREE">GST Free</SelectItem>
+                                                          <SelectItem value="BAS_EXCLUDED">BAS Excluded</SelectItem>
+                                                          <SelectItem value="INPUT_TAXED">Input Taxed</SelectItem>
+                                                        </>}
+                                                  </SelectContent>
+                                                </Select>
+                                                {splitLines.length > 2 && (
+                                                  <button type="button" onClick={() => removeSplitLine(idx)} className="h-8 w-8 shrink-0 flex items-center justify-center text-muted-foreground hover:text-destructive sm:hidden"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                )}
+                                              </div>
                                             </div>
                                             {splitLines.length > 2 && (
-                                              <button type="button" onClick={() => removeSplitLine(idx)} className="h-8 flex items-center justify-center text-muted-foreground hover:text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
+                                              <button type="button" onClick={() => removeSplitLine(idx)} className="hidden h-8 items-center justify-center text-muted-foreground hover:text-destructive sm:flex"><Trash2 className="w-3.5 h-3.5" /></button>
                                             )}
                                           </div>
                                         )
@@ -1038,6 +1060,7 @@ export default function BankAccountsPage() {
                               ) : (
                                 <div className="space-y-3 max-w-xl">
                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
+                                    <div className="col-span-2 sm:hidden"><p className="text-xs text-muted-foreground">Description</p><p className="whitespace-normal break-words">{t.description}</p></div>
                                     {(t.transactionType || t.matchType === 'INVOICE_PAYMENT') && <div><p className="text-xs text-muted-foreground">Type</p><p>{t.matchType === 'SPLIT' ? 'Split' : t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : TYPE_LABELS[t.transactionType!] ?? t.transactionType}</p></div>}
                                     {t.matchType !== 'SPLIT' && (() => { const acctId = t.accountId ?? t.expense?.accountId; const name = t.accountName ?? t.expense?.accountName; const code = acctId ? coaAccounts.find(a => a.id === acctId)?.code : undefined; if (t.matchType === 'INVOICE_PAYMENT') return <div><p className="text-xs text-muted-foreground">Posting</p><p>Invoice payment only</p></div>; if (acctId) return <div><p className="text-xs text-muted-foreground">Account</p>{code ? <Link href={`/admin/accounting/chart-of-accounts/${code}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link> : <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link>}</div>; return null })()}
                                     {t.taxCode && <div><p className="text-xs text-muted-foreground">GST</p><p>{taxRates.find(r => r.code === t.taxCode)?.name ?? t.taxCode}</p></div>}
@@ -1048,13 +1071,14 @@ export default function BankAccountsPage() {
                                   {/* Attachments */}
                                   {(() => {
                                     const allItems: AttachmentItem[] = (t.attachments ?? []).map(a => ({ id: a.id, name: a.originalName }))
+                                    if (t.status === 'EXCLUDED' && allItems.length === 0) return null
                                     return (
                                       <AttachmentsPanel
                                         items={allItems}
-                                        canUpload
+                                        canUpload={t.status === 'MATCHED'}
                                         uploading={uploadingAttachmentTxnId === t.id}
                                         deletingId={deletingAttachment}
-                                        onUpload={files => handleUploadPostedAttachment(t.id, files)}
+                                        onUpload={t.status === 'MATCHED' ? (files => handleUploadPostedAttachment(t.id, files)) : undefined}
                                         onDownload={async item => { await downloadAccountingAttachment(item.id, item.name) }}
                                         onDelete={async item => { await handleDeleteAccountingAttachment(item.id, t.id) }}
                                       />
@@ -1086,9 +1110,11 @@ export default function BankAccountsPage() {
                                       </table>
                                     </div>
                                   )}
-                                  <Button size="sm" variant="outline" onClick={() => void handleUndo(t.id)} disabled={isUndoing}>
-                                    {isUndoing ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 mr-1.5" />}Undo
-                                  </Button>
+                                  <div className="flex items-center gap-2">
+                                    <Button size="sm" variant="outline" onClick={() => void handleUndo(t.id)} disabled={isUndoing || isDeletingTxn}>
+                                      {isUndoing ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 mr-1.5" />}Undo
+                                    </Button>
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1127,6 +1153,23 @@ export default function BankAccountsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDeleteAccount()} disabled={deleting} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">{deleting ? 'Deleting…' : 'Delete'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteTransactionTarget} onOpenChange={open => { if (!open && !deletingTransaction) setDeleteTransactionTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete ignored transaction?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete <strong>{deleteTransactionTarget?.description}</strong>? This will permanently remove the ignored transaction. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingTransaction}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleDeleteTransaction()} disabled={deletingTransaction} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+              {deletingTransaction ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1245,9 +1288,9 @@ export default function BankAccountsPage() {
             ) : (
               <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
                 {openInvoices.map(inv => {
-                  const total = calcInvoiceTotal(inv)
-                  const isPartial = inv.status === 'PARTIALLY_PAID'
-                  const remaining = isPartial ? Math.max(0, total - inv.totalPaidCents) : total
+                  const total = inv.totalCents
+                  const remaining = inv.outstandingBalanceCents
+                  const showRemaining = remaining < total
                   return (
                     <button key={inv.id} type="button"
                       onClick={() => setSelectedInvoiceId(inv.id)}
@@ -1261,7 +1304,7 @@ export default function BankAccountsPage() {
                         <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
                       </div>
                       <div className="text-right shrink-0">
-                        {isPartial ? (
+                        {showRemaining ? (
                           <>
                             <p className="text-sm font-medium tabular-nums">{fmtAud(remaining)} remaining</p>
                             <p className="text-xs text-muted-foreground tabular-nums">{fmtAud(total)} total</p>

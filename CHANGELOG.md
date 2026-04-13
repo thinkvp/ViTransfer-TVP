@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-04-13
+
+### Changed
+- **Removed `node_modules` from Dockerfile `chmod -R` in both app and worker images** — the production containers run as a non-root UID from Docker Compose and only need read and traverse access to dependency files; `npm ci` installs package files and directories with the normal read and execute bits needed at runtime, so recursively re-granting `a+rX` across the entire `node_modules` tree was redundant in practice and was adding significant time to every image build; writable runtime paths remain handled separately, while the smaller read-only runtime targets (`.next`, `public`, `prisma`, `src`) continue to receive explicit permission normalization
+- **Docker images now default to non-root execution** — both app and worker images set `USER app` (UID 911) so containers run unprivileged even without a Compose-level `user:` override; the repository Compose files also explicitly set `user: "911:911"` for consistency
+- **Removed legacy `PUID`/`PGID` environment variables** — these were passed into the container but never consumed by the entrypoint or application; removed from Compose files, `.env.example`, setup scripts, and docs; use Compose `user:` to control the runtime UID/GID instead
+- **Removed `openssl-dev` from runtime images** — only the `openssl` library is needed at runtime; the development headers added unnecessary attack surface and image size
+
+### Security
+- **Upgraded `next` to `^16.2.3`** — addresses known CVEs patched in recent Next.js releases
+- **Upgraded `mailparser` to `^3.9.8`** — picks up security and correctness fixes in the mail parsing library
+- **Upgraded `nodemailer` to `^8.0.5`** — resolves vulnerabilities identified in the previous minor version
+
 ## [1.4.1] - 2026-04-13
 
 ### Added

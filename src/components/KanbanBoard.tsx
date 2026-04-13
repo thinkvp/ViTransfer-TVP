@@ -1046,7 +1046,7 @@ export function CardDialog({
   const [memberIds, setMemberIds] = useState<string[]>(() => {
     const existing = initial?.members?.map((m) => m.userId) || []
     // Auto-select the creating user on new tasks
-    if (!initial && currentUserId && !existing.includes(currentUserId)) {
+    if (!initial?.id && currentUserId && !existing.includes(currentUserId)) {
       return [currentUserId, ...existing]
     }
     return existing
@@ -1171,12 +1171,14 @@ export function CardDialog({
         clientId: clientId || null,
         dueDate: dueDate ? new Date(dueDate + 'T00:00:00Z').toISOString() : null,
       }
-      if (!initial) {
+      if (!initial?.id) {
         data.columnId = selectedColumnId
       } else if (selectedColumnId !== initial.columnId) {
         data.columnId = selectedColumnId
       }
       await onSave(data)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to save task')
     } finally {
       setSaving(false)
     }
@@ -1193,7 +1195,7 @@ export function CardDialog({
     <Dialog open onOpenChange={(open) => !open && guardedClose()}>
       <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>{initial ? 'Edit Task' : 'Add Task'}</DialogTitle>
+          <DialogTitle>{initial?.id ? 'Edit Task' : 'Add Task'}</DialogTitle>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto">
           <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-6 py-2">
@@ -1414,7 +1416,7 @@ export function CardDialog({
                           )}
                         </button>
                         {/* Non-admins can only remove users on Add Task, not Edit Task */}
-                        {(isAdmin || !initial) && (
+                        {(isAdmin || !initial?.id) && (
                           <button
                             type="button"
                             className="p-0.5 rounded hover:bg-destructive/10 transition-colors"
@@ -1462,7 +1464,7 @@ export function CardDialog({
             Cancel
           </Button>
           <Button className="w-full sm:w-auto" variant="default" onClick={handleSave} disabled={!title.trim() || saving}>
-            {saving ? 'Saving...' : initial ? 'Save' : 'Add'}
+            {saving ? 'Saving...' : initial?.id ? 'Save' : 'Add'}
           </Button>
         </DialogFooter>
       </DialogContent>

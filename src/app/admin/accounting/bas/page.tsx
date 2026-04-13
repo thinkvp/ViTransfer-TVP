@@ -8,6 +8,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
 import type { BasPeriod, BasPeriodStatus } from '@/lib/accounting/types'
+import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
 
@@ -109,25 +110,25 @@ export default function BasPage() {
             <div className="py-10 text-center text-muted-foreground">No BAS periods yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[860px] text-sm">
                 <thead className="bg-muted/40">
                   <tr className="border-b border-border">
                     {([
-                      { key: 'label', label: 'Period' },
-                      { key: 'startDate', label: 'Dates' },
-                      { key: 'quarter', label: 'Quarter' },
-                      { key: 'basis', label: 'Basis' },
-                      { key: 'status', label: 'Status' },
-                      { key: 'lodgedAt', label: 'Lodged' },
-                    ] as { key: BasSortKey; label: string }[]).map(col => (
-                      <th key={col.key} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                      { key: 'label', label: 'Period', className: 'min-w-[180px]' },
+                      { key: 'startDate', label: 'Dates', className: 'min-w-[190px]' },
+                      { key: 'quarter', label: 'Quarter', className: 'min-w-[120px]' },
+                      { key: 'basis', label: 'Basis', className: 'min-w-[100px]' },
+                      { key: 'status', label: 'Status', className: 'min-w-[120px]' },
+                      { key: 'lodgedAt', label: 'Lodged', className: 'min-w-[120px]' },
+                    ] as { key: BasSortKey; label: string; className: string }[]).map(col => (
+                      <th key={col.key} className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap', col.className)}>
                         <button type="button" onClick={() => toggleSort(col.key)} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
                           {col.label}
                           {sortKey === col.key ? (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : null}
                         </button>
                       </th>
                     ))}
-                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Actions</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground whitespace-nowrap min-w-[88px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -137,25 +138,25 @@ export default function BasPage() {
                       className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
                       onClick={() => router.push(`/admin/accounting/bas/${p.id}`)}
                     >
-                      <td className="px-3 py-2 font-medium">{p.label || `Q${p.quarter} ${p.financialYear}`}</td>
-                      <td className="px-3 py-2 text-muted-foreground tabular-nums text-xs">{formatDate(p.startDate)} → {formatDate(p.endDate)}</td>
-                      <td className="px-3 py-2 text-muted-foreground">Q{p.quarter} FY{p.financialYear}</td>
-                      <td className="px-3 py-2 text-muted-foreground capitalize">{p.basis.toLowerCase()}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 font-medium whitespace-nowrap min-w-[180px]">{p.label || `Q${p.quarter} ${p.financialYear}`}</td>
+                      <td className="px-3 py-2 text-muted-foreground tabular-nums text-xs whitespace-nowrap min-w-[190px]">{formatDate(p.startDate)} → {formatDate(p.endDate)}</td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap min-w-[120px]">Q{p.quarter} FY{p.financialYear}</td>
+                      <td className="px-3 py-2 text-muted-foreground capitalize whitespace-nowrap min-w-[100px]">{p.basis.toLowerCase()}</td>
+                      <td className="px-3 py-2 whitespace-nowrap min-w-[120px]">
                         <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', STATUS_BADGE[p.status])}>
                           {STATUS_LABELS[p.status]}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground text-xs">{p.lodgedAt ? p.lodgedAt.slice(0, 10) : '—'}</td>
-                      <td className="px-3 py-2 text-right" onClick={ev => ev.stopPropagation()}>
+                      <td className="px-3 py-2 text-muted-foreground text-xs whitespace-nowrap min-w-[120px]">{p.lodgedAt ? p.lodgedAt.slice(0, 10) : '—'}</td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap min-w-[88px]" onClick={ev => ev.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.push(`/admin/accounting/bas/${p.id}`)}>
+                          <AccountingTableActionButton onClick={() => router.push(`/admin/accounting/bas/${p.id}`)} title="Edit BAS period" aria-label="Edit BAS period">
                             <Pencil className="w-3.5 h-3.5" />
-                          </Button>
+                          </AccountingTableActionButton>
                           {p.status !== 'LODGED' && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeleteTarget(p)}>
+                            <AccountingTableActionButton destructive onClick={() => setDeleteTarget(p)} title="Delete BAS period" aria-label="Delete BAS period">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                            </Button>
+                            </AccountingTableActionButton>
                           )}
                         </div>
                       </td>

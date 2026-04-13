@@ -145,17 +145,6 @@ while true; do
     fi
 done
 
-# PUID/PGID (only relevant on Linux)
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    PUID=$(id -u)
-    PGID=$(id -g)
-    echo ""
-    echo "Detected Linux - Using PUID=$PUID, PGID=$PGID"
-else
-    PUID=1000
-    PGID=1000
-fi
-
 echo ""
 echo "Creating .env file..."
 
@@ -164,8 +153,6 @@ cp .env.example .env.tmp
 
 # Replace placeholders using awk (more robust than sed for special characters)
 awk -v app_port="$APP_PORT" \
-    -v puid="$PUID" \
-    -v pgid="$PGID" \
     -v tz="$TZ" \
     -v pg_pass="$POSTGRES_PASSWORD" \
     -v redis_pass="$REDIS_PASSWORD" \
@@ -180,8 +167,6 @@ awk -v app_port="$APP_PORT" \
 '
 BEGIN { FS="="; OFS="=" }
 /^APP_PORT=/ { print $1, app_port; next }
-/^PUID=/ { print $1, puid; next }
-/^PGID=/ { print $1, pgid; next }
 /^TZ=/ { print $1, tz; next }
 /^POSTGRES_PASSWORD=/ { print $1, pg_pass; next }
 /^REDIS_PASSWORD=/ { print $1, redis_pass; next }

@@ -68,6 +68,7 @@ services:
     image: thinkvp/vitransfer-tvp-app:${VITRANSFER_IMAGE_TAG:-latest}
     container_name: vitransfer-app
     restart: unless-stopped
+    user: "911:911"
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,8 +77,6 @@ services:
     environment:
       NODE_ENV: production
       TZ: ${TZ:-UTC}
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-vitransfer}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vitransfer}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -132,6 +131,7 @@ services:
     image: thinkvp/vitransfer-tvp-worker:${VITRANSFER_IMAGE_TAG:-latest}
     container_name: vitransfer-worker
     restart: unless-stopped
+    user: "911:911"
     command: npm run worker
     depends_on:
       postgres:
@@ -143,8 +143,6 @@ services:
     environment:
       NODE_ENV: production
       TZ: ${TZ:-UTC}
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
       # DEBUG_WORKER: "true"  # Uncomment for verbose FFmpeg and worker debug logs
 
       # Worker CPU / concurrency tuning (optional)

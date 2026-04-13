@@ -12,15 +12,28 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
-import { ArrowLeft, ArrowUp, ArrowDown, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, ArrowUp, ArrowDown, Eye, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus } from 'lucide-react'
 import type { Account, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
 import { cn, formatDate } from '@/lib/utils'
+import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
+import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 
-type SplitEntry = { id: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
-type SalesInvoiceEntry = { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string }
+type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
+type SalesInvoiceEntry = {
+  id: string
+  invoiceId: string
+  invoiceNumber: string
+  description: string
+  amountCents: number
+  clientName: string | null
+  labelName: string | null
+  accountName: string
+  accountCode: string
+  linkedBankTransactions: { id: string; date: string; description: string; amountCents: number }[]
+}
 
 type Entry =
   | { kind: 'expense'; date: string; entry: Expense }
@@ -52,6 +65,8 @@ export default function AccountLedgerPage() {
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null)
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [linkedTransactionId, setLinkedTransactionId] = useState<string | null>(null)
+  const [linkedInvoiceTransactions, setLinkedInvoiceTransactions] = useState<SalesInvoiceEntry['linkedBankTransactions']>([])
 
   type SortKey = 'date' | 'type' | 'account' | 'description' | 'ref' | 'amount'
   const [sortKey, setSortKey] = useState<SortKey>('date')
@@ -200,6 +215,34 @@ export default function AccountLedgerPage() {
     }
   }
 
+  async function openLinkedTransaction(transactionId: string) {
+    setLinkedTransactionId(transactionId)
+  }
+
+  function openSalesInvoiceLinkedTransactions(transactions: SalesInvoiceEntry['linkedBankTransactions']) {
+    if (transactions.length === 1) {
+      void openLinkedTransaction(transactions[0].id)
+      return
+    }
+    setLinkedInvoiceTransactions(transactions)
+  }
+
+  function closeLinkedInvoiceTransactions() {
+    setLinkedInvoiceTransactions([])
+  }
+
+  const transactionStatusLabels: Record<string, string> = {
+    UNMATCHED: 'Pending',
+    MATCHED: 'Posted',
+    EXCLUDED: 'Ignored',
+  }
+
+  const transactionStatusBadge: Record<string, string> = {
+    UNMATCHED: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    MATCHED: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    EXCLUDED: 'bg-muted text-muted-foreground',
+  }
+
   const TYPE_BADGE: Record<string, string> = {
     ASSET: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
     LIABILITY: 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
@@ -311,11 +354,18 @@ export default function AccountLedgerPage() {
                             <button type="button" onClick={() => setEditExpenseId(e.id)} className="tabular-nums text-primary hover:underline cursor-pointer">{fmtAud(e.amountIncGst)}</button>
                           </td>
                           <td className="px-4 py-2.5 text-right">
-                            {isOwn && (
-                              <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete expense">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            <div className="flex items-center justify-end gap-2">
+                              {e.bankTransactionId && (
+                                <AccountingTableActionButton onClick={() => void openLinkedTransaction(e.bankTransactionId!)} title="View linked bank transaction" aria-label="View linked bank transaction">
+                                  <Eye className="w-3.5 h-3.5" />
+                                </AccountingTableActionButton>
+                              )}
+                              {isOwn && (
+                                <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Delete expense" aria-label="Delete expense">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </AccountingTableActionButton>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -334,9 +384,9 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(t.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
                             {isOwn && (
-                              <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Unpost bank transaction">
+                              <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Unpost bank transaction" aria-label="Unpost bank transaction">
                                 <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              </AccountingTableActionButton>
                             )}
                           </td>
                         </tr>
@@ -356,9 +406,9 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(j.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
                             {isOwn && (
-                              <button type="button" onClick={() => setDeleteTarget(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete journal entry">
+                              <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Delete journal entry" aria-label="Delete journal entry">
                                 <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              </AccountingTableActionButton>
                             )}
                           </td>
                         </tr>
@@ -377,7 +427,13 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             <Link href={`/admin/sales/invoices/${s.invoiceId}`} className="tabular-nums text-primary hover:underline cursor-pointer">{fmtAud(s.amountCents)}</Link>
                           </td>
-                          <td className="px-4 py-2.5" />
+                          <td className="px-4 py-2.5 text-right">
+                            {s.linkedBankTransactions.length > 0 && (
+                              <AccountingTableActionButton onClick={() => openSalesInvoiceLinkedTransactions(s.linkedBankTransactions)} title="View linked bank transaction" aria-label="View linked bank transaction">
+                                <Eye className="w-3.5 h-3.5" />
+                              </AccountingTableActionButton>
+                            )}
+                          </td>
                         </tr>
                       )
                     } else {
@@ -392,7 +448,11 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 truncate">{s.description || s.bankTransactionDescription}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.bankTransactionReference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(s.amountCents)}</td>
-                          <td className="px-4 py-2.5" />
+                          <td className="px-4 py-2.5 text-right">
+                            <AccountingTableActionButton onClick={() => void openLinkedTransaction(s.bankTransactionId)} title="View linked bank transaction" aria-label="View linked bank transaction">
+                              <Eye className="w-3.5 h-3.5" />
+                            </AccountingTableActionButton>
+                          </td>
                         </tr>
                       )
                     }
@@ -452,6 +512,47 @@ export default function AccountLedgerPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <LinkedBankTransactionDialog
+        open={!!linkedTransactionId}
+        transactionId={linkedTransactionId}
+        onOpenChange={open => { if (!open) setLinkedTransactionId(null) }}
+        onViewExpense={expenseId => setEditExpenseId(expenseId)}
+      />
+
+      <Dialog open={linkedInvoiceTransactions.length > 0} onOpenChange={open => { if (!open) closeLinkedInvoiceTransactions() }}>
+        <DialogContent className="w-[min(96vw,56rem)] max-w-3xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Linked Bank Transactions</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-x-auto pb-1">
+            <div className="min-w-[640px] space-y-2 pr-1 sm:min-w-0">
+              {linkedInvoiceTransactions.map(transaction => (
+                <button
+                  key={transaction.id}
+                  type="button"
+                  onClick={() => {
+                    closeLinkedInvoiceTransactions()
+                    void openLinkedTransaction(transaction.id)
+                  }}
+                  className="w-full rounded-lg border border-border px-3 py-2 text-left hover:bg-accent/30 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium whitespace-normal break-words">{transaction.description}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{formatDate(transaction.date)}</p>
+                    </div>
+                    <p className="text-sm font-medium tabular-nums whitespace-nowrap">{fmtAud(transaction.amountCents)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeLinkedInvoiceTransactions}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={jeOpen} onOpenChange={open => { if (!open && !jeSaving) setJeOpen(false) }}>
         <DialogContent className="sm:max-w-md">

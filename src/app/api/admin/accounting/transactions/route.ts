@@ -28,6 +28,9 @@ export async function GET(request: NextRequest) {
   const importBatchId = searchParams.get('importBatchId')
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10))
   const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '50', 10)))
+  const sortKeyRaw = searchParams.get('sortKey') ?? 'date'
+  const sortDir = (searchParams.get('sortDir') ?? 'desc') === 'asc' ? 'asc' : 'desc'
+  const sortKey = ['date', 'description', 'amount'].includes(sortKeyRaw) ? sortKeyRaw : 'date'
 
   const where: Record<string, unknown> = {}
   if (bankAccountId) where.bankAccountId = bankAccountId
@@ -55,7 +58,11 @@ export async function GET(request: NextRequest) {
         splitLines: { include: { account: true } },
         accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
       },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      orderBy: sortKey === 'description'
+        ? [{ description: sortDir } as const]
+        : sortKey === 'amount'
+          ? [{ amountCents: sortDir } as const]
+          : [{ date: sortDir } as const, { createdAt: sortDir } as const],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

@@ -168,10 +168,6 @@ do {
     }
 } while (-not $validHttps)
 
-# PUID/PGID (defaults for Windows)
-$PUID = "1000"
-$PGID = "1000"
-
 Write-Host ""
 Write-Host "Creating .env file..." -ForegroundColor Green
 
@@ -180,8 +176,6 @@ $envContent = Get-Content .env.example -Raw
 
 # Replace placeholders (using multiline mode with (?m))
 $envContent = $envContent -replace "(?m)^APP_PORT=.*$", "APP_PORT=$APP_PORT"
-$envContent = $envContent -replace "(?m)^PUID=.*$", "PUID=$PUID"
-$envContent = $envContent -replace "(?m)^PGID=.*$", "PGID=$PGID"
 $envContent = $envContent -replace "(?m)^TZ=.*$", "TZ=$TZ"
 $envContent = $envContent -replace "(?m)^POSTGRES_PASSWORD=.*$", "POSTGRES_PASSWORD=$POSTGRES_PASSWORD"
 $envContent = $envContent -replace "(?m)^REDIS_PASSWORD=.*$", "REDIS_PASSWORD=$REDIS_PASSWORD"

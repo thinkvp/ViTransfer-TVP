@@ -57,6 +57,7 @@ services:
       target: app
     container_name: vitransfer-app
     restart: unless-stopped
+    user: "911:911"
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,13 +66,12 @@ services:
     environment:
       NODE_ENV: production
       TZ: ${TZ:-UTC}
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-vitransfer}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vitransfer}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       STORAGE_ROOT: /app/uploads
+      ACCOUNTING_STORAGE_ROOT: /app/accounting
       ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL is required in .env file}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env file}
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
@@ -90,6 +90,12 @@ services:
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
 
+      # Dropbox storage (optional)
+      DROPBOX_APP_KEY: ${DROPBOX_APP_KEY:-}
+      DROPBOX_APP_SECRET: ${DROPBOX_APP_SECRET:-}
+      DROPBOX_REFRESH_TOKEN: ${DROPBOX_REFRESH_TOKEN:-}
+      DROPBOX_ROOT_PATH: ${DROPBOX_ROOT_PATH:-}
+
       # Stripe Checkout (optional)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
@@ -97,6 +103,7 @@ services:
       - "${APP_PORT:-4321}:4321"
     volumes:
       - uploads:/app/uploads
+      - accounting-data:/app/accounting
     networks:
       - vitransfer-internal
     security_opt:
@@ -116,6 +123,7 @@ services:
       target: worker
     container_name: vitransfer-worker
     restart: unless-stopped
+    user: "911:911"
     command: npm run worker
     depends_on:
       postgres:
@@ -127,8 +135,6 @@ services:
     environment:
       NODE_ENV: production
       TZ: ${TZ:-UTC}
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
       # DEBUG_WORKER: "true"  # Uncomment for verbose FFmpeg and worker debug logs
 
       # Worker CPU / concurrency tuning (optional)
@@ -144,9 +150,11 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       STORAGE_ROOT: /app/uploads
+      ACCOUNTING_STORAGE_ROOT: /app/accounting
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET}
       # QuickBooks Online (optional - pull only)
       QBO_CLIENT_ID: ${QBO_CLIENT_ID:-}
       QBO_CLIENT_SECRET: ${QBO_CLIENT_SECRET:-}
@@ -155,8 +163,15 @@ services:
       QBO_SANDBOX: ${QBO_SANDBOX:-false}
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
+
+      # Dropbox storage (optional)
+      DROPBOX_APP_KEY: ${DROPBOX_APP_KEY:-}
+      DROPBOX_APP_SECRET: ${DROPBOX_APP_SECRET:-}
+      DROPBOX_REFRESH_TOKEN: ${DROPBOX_REFRESH_TOKEN:-}
+      DROPBOX_ROOT_PATH: ${DROPBOX_ROOT_PATH:-}
     volumes:
       - uploads:/app/uploads
+      - accounting-data:/app/accounting
     networks:
       - vitransfer-internal
     security_opt:
@@ -175,6 +190,8 @@ volumes:
   redis-data:
     driver: local
   uploads:
+    driver: local
+  accounting-data:
     driver: local
 
 

@@ -86,12 +86,44 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     listSalesInvoiceIncomeEntries({ from, to, accountIds }),
   ])
 
+  const salesInvoiceIds = [...new Set(salesInvoiceEntries.map(entry => entry.invoiceId))]
+  const invoiceLinkedTransactions = salesInvoiceIds.length > 0
+    ? await prisma.bankTransaction.findMany({
+        where: {
+          status: 'MATCHED',
+          matchType: 'INVOICE_PAYMENT',
+          invoicePayment: { invoiceId: { in: salesInvoiceIds } },
+        },
+        select: {
+          id: true,
+          date: true,
+          description: true,
+          amountCents: true,
+          invoicePayment: { select: { invoiceId: true } },
+        },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      })
+    : []
+
+  const invoiceTransactionsByInvoiceId = invoiceLinkedTransactions.reduce<Record<string, { id: string; date: string; description: string; amountCents: number }[]>>((acc, transaction) => {
+    const invoiceId = transaction.invoicePayment?.invoiceId
+    if (!invoiceId) return acc
+    if (!acc[invoiceId]) acc[invoiceId] = []
+    acc[invoiceId].push({
+      id: transaction.id,
+      date: transaction.date,
+      description: transaction.description,
+      amountCents: Number(transaction.amountCents),
+    })
+    return acc
+  }, {})
+
   type Entry =
     | { kind: 'expense'; date: string; entry: ReturnType<typeof expenseFromDb> }
     | { kind: 'bankTransaction'; date: string; entry: ReturnType<typeof bankTransactionFromDb> }
     | { kind: 'journal'; date: string; entry: ReturnType<typeof journalEntryFromDb> }
-    | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string } }
-    | { kind: 'split'; date: string; entry: { id: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
+    | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string; linkedBankTransactions: { id: string; date: string; description: string; amountCents: number }[] } }
+    | { kind: 'split'; date: string; entry: { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
 
   const combined: Entry[] = [
     ...expenses.map(e => ({ kind: 'expense' as const, date: e.date as string, entry: expenseFromDb(e) })),
@@ -110,6 +142,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         labelName: entry.labelName,
         accountName: entry.accountName,
         accountCode: entry.accountCode,
+        linkedBankTransactions: invoiceTransactionsByInvoiceId[entry.invoiceId] ?? [],
       },
     })),
     ...splitLines.map(s => ({
@@ -117,6 +150,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       date: (s.bankTransaction?.date ?? '') as string,
       entry: {
         id: s.id,
+        bankTransactionId: s.bankTransactionId,
         description: s.description || s.bankTransaction?.description || '',
         amountCents: s.amountCents,
         taxCode: s.taxCode,

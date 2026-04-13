@@ -43,9 +43,17 @@ export async function GET(request: NextRequest) {
   })
   const sumByAccountId = Object.fromEntries(txnSums.map(r => [r.bankAccountId, r._sum.amountCents ?? 0]))
 
+  const pendingTxnSums = await prisma.bankTransaction.groupBy({
+    by: ['bankAccountId'],
+    where: { status: 'UNMATCHED' },
+    _sum: { amountCents: true },
+  })
+  const pendingSumByAccountId = Object.fromEntries(pendingTxnSums.map(r => [r.bankAccountId, r._sum.amountCents ?? 0]))
+
   const accountsWithBalance = accounts.map(a => ({
     ...a,
     currentBalance: Number(a.openingBalance) + (sumByAccountId[a.id] ?? 0),
+    pendingTransactionAmount: pendingSumByAccountId[a.id] ?? 0,
   }))
 
   const res = NextResponse.json({ bankAccounts: accountsWithBalance.map(bankAccountFromDb) })

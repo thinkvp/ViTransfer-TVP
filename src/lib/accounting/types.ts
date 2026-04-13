@@ -65,6 +65,7 @@ export interface BankAccount {
   currency: string
   openingBalance: number
   currentBalance: number
+  pendingTransactionAmount: number
   openingBalanceDate: string | null
   isActive: boolean
   createdAt: string

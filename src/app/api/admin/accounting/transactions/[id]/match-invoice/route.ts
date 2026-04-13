@@ -48,6 +48,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: `Invoice status is ${invoice.status} — only open invoices can be matched` }, { status: 409 })
   }
 
+  const invoiceBalance = await recomputeInvoiceStoredStatus(prisma as any, invoice.id, { createdByUserId: authResult.id })
+  if (invoiceBalance && invoiceBalance.totalCents > 0 && invoiceBalance.paidCents >= invoiceBalance.totalCents) {
+    return NextResponse.json({ error: 'Invoice is already fully paid' }, { status: 409 })
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     // Create a payment record for the full bank transaction amount
     const payment = await tx.salesPayment.create({

@@ -29,9 +29,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { id } = await params
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
-    select: { id: true, date: true, accountId: true, expense: { select: { accountId: true } } },
+    select: { id: true, date: true, status: true, accountId: true, expense: { select: { accountId: true } } },
   })
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
+  if (txn.status === 'EXCLUDED') {
+    return NextResponse.json({ error: 'Ignored transactions cannot store attachments' }, { status: 409 })
+  }
 
   const formData = await request.formData()
   const files = formData.getAll('file') as File[]

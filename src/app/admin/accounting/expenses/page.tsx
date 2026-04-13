@@ -1,9 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
+import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -12,7 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
-import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown, Eye } from 'lucide-react'
 import type { Expense, ExpenseStatus } from '@/lib/accounting/types'
 import { EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
 import { cn, formatDate } from '@/lib/utils'
@@ -48,28 +50,15 @@ export default function ExpensesPage() {
 
   const [modalOpen, setModalOpen] = useState(false)
   const [modalExpenseId, setModalExpenseId] = useState<string | null>(null)
+  const [linkedTransactionId, setLinkedTransactionId] = useState<string | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const sortedExpenses = useMemo(() => {
-    return [...expenses].sort((a, b) => {
-      let r = 0
-      switch (sortKey) {
-        case 'date': r = a.date.localeCompare(b.date); break
-        case 'supplier': r = (a.supplierName ?? '').localeCompare(b.supplierName ?? ''); break
-        case 'description': r = (a.description ?? '').localeCompare(b.description ?? ''); break
-        case 'category': r = (a.accountName ?? '').localeCompare(b.accountName ?? ''); break
-        case 'amountExGst': r = a.amountExGst - b.amountExGst; break
-        case 'gstAmount': r = a.gstAmount - b.gstAmount; break
-        case 'amountIncGst': r = a.amountIncGst - b.amountIncGst; break
-        case 'status': r = a.status.localeCompare(b.status); break
-      }
-      return sortDir === 'asc' ? r : -r
-    })
-  }, [expenses, sortKey, sortDir])
+  const sortedExpenses = expenses
 
   function toggleSort(key: SortKey) {
+    setPage(1)
     setSortKey(prev => {
       if (prev !== key) { setSortDir('asc'); return key }
       setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -80,7 +69,7 @@ export default function ExpensesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sortKey, sortDir })
       if (filterStatus !== 'ALL') params.set('status', filterStatus)
       if (search.trim()) params.set('supplierName', search.trim())
       if (fromDate) params.set('from', fromDate)
@@ -95,7 +84,7 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, filterStatus, search, fromDate, toDate])
+  }, [page, filterStatus, search, fromDate, toDate, sortKey, sortDir])
 
   useEffect(() => { void load() }, [load])
 
@@ -133,6 +122,10 @@ export default function ExpensesPage() {
       setDeleting(false)
     }
   }
+
+  const handleExpenseChanged = useCallback((updatedExpense: Expense) => {
+    setExpenses(prev => prev.map(expense => expense.id === updatedExpense.id ? { ...expense, ...updatedExpense } : expense))
+  }, [])
 
   return (
     <div className="space-y-4">
@@ -267,13 +260,18 @@ export default function ExpensesPage() {
                       </td>
                       <td className="px-3 py-2 text-right" onClick={ev => ev.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}>
+                          <AccountingTableActionButton onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }} title="Edit expense" aria-label="Edit expense">
                             <Pencil className="w-3.5 h-3.5" />
-                          </Button>
+                          </AccountingTableActionButton>
+                          {e.bankTransactionId && (
+                            <AccountingTableActionButton onClick={() => setLinkedTransactionId(e.bankTransactionId)} title="View linked bank transaction" aria-label="View linked bank transaction">
+                              <Eye className="w-3.5 h-3.5" />
+                            </AccountingTableActionButton>
+                          )}
                           {e.status !== 'RECONCILED' && !e.bankTransactionId && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeleteTarget(e)}>
+                            <AccountingTableActionButton destructive onClick={() => setDeleteTarget(e)} title="Delete expense" aria-label="Delete expense">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                            </Button>
+                            </AccountingTableActionButton>
                           )}
                         </div>
                       </td>
@@ -304,8 +302,20 @@ export default function ExpensesPage() {
         open={modalOpen}
         expenseId={modalExpenseId}
         onClose={() => { setModalOpen(false); router.replace('/admin/accounting/expenses') }}
+        onExpenseChanged={handleExpenseChanged}
         onSaved={() => { setModalOpen(false); router.replace('/admin/accounting/expenses'); void load() }}
         onDeleted={() => { setModalOpen(false); router.replace('/admin/accounting/expenses'); void load() }}
+      />
+
+      <LinkedBankTransactionDialog
+        open={!!linkedTransactionId}
+        transactionId={linkedTransactionId}
+        onOpenChange={open => { if (!open) setLinkedTransactionId(null) }}
+        onViewExpense={expenseId => {
+          setModalExpenseId(expenseId)
+          setModalOpen(true)
+          setLinkedTransactionId(null)
+        }}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null) }}>

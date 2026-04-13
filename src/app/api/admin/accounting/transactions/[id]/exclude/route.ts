@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
+import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,7 +23,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await params
-  const txn = await prisma.bankTransaction.findUnique({ where: { id } })
+  const txn = await prisma.bankTransaction.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      status: true,
+      accountingAttachments: { select: { storagePath: true } },
+    },
+  })
 
   if (!txn) {
     return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
@@ -32,16 +40,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Cannot exclude a matched transaction. Unmatch it first.' }, { status: 409 })
   }
 
-  const updated = await prisma.bankTransaction.update({
-    where: { id },
-    data: { status: 'EXCLUDED' },
-    include: {
-      bankAccount: { select: { id: true, name: true } },
-      expense: { include: { account: true } },
-      account: true,
-      invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.accountingAttachment.deleteMany({ where: { bankTransactionId: id } })
+
+    return tx.bankTransaction.update({
+      where: { id },
+      data: { status: 'EXCLUDED' },
+      include: {
+        bankAccount: { select: { id: true, name: true } },
+        expense: { include: { account: true } },
+        account: true,
+        invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
+        accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
+      },
+    })
   })
+
+  await Promise.all(txn.accountingAttachments.map(a => deleteAccountingFile(a.storagePath).catch(() => {})))
 
   const res = NextResponse.json({ transaction: bankTransactionFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')

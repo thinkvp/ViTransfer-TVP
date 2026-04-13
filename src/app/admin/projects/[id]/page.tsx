@@ -780,6 +780,7 @@ export default function ProjectPage() {
             {sectionVisibility.tasks && (
               <ProjectTasks
                 projectId={project.id}
+                projectTitle={project.title}
                 clientId={project.clientId ?? null}
                 clientName={projectClientName}
                 canEdit={canChangeProjectSettings}

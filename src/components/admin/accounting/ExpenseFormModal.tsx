@@ -10,8 +10,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Trash2, CheckCircle } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
-import type { Expense, AccountTaxCode, ExpenseStatus, AccountingAttachment } from '@/lib/accounting/types'
+import type { Expense, AccountTaxCode, ExpenseStatus, AccountingAttachment, BankTransaction } from '@/lib/accounting/types'
 import { TAX_CODE_LABELS, EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
+import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { cn } from '@/lib/utils'
@@ -31,10 +32,11 @@ interface ExpenseFormModalProps {
   expenseId?: string | null
   onClose: () => void
   onSaved?: (expense: Expense) => void
+  onExpenseChanged?: (expense: Expense) => void
   onDeleted?: () => void
 }
 
-export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted }: ExpenseFormModalProps) {
+export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseChanged, onDeleted }: ExpenseFormModalProps) {
   const isNew = !expenseId
 
   const [loading, setLoading] = useState(false)
@@ -59,6 +61,11 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
   const [uploadingReceipt, setUploadingReceipt] = useState(false)
   const [uploadingAttachmentId, setUploadingAttachmentId] = useState<string | null>(null)
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null)
+  const [accountSearch, setAccountSearch] = useState('')
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [linkedTransactionId, setLinkedTransactionId] = useState<string | null>(null)
+  const [linkedTransactionAttachments, setLinkedTransactionAttachments] = useState<AccountingAttachment[]>([])
+  const [loadingLinkedTransactionAttachments, setLoadingLinkedTransactionAttachments] = useState(false)
 
   const loadAccounts = useCallback(async () => {
     const res = await apiFetch('/api/admin/accounting/accounts?expenseTypes=true&activeOnly=true')
@@ -77,6 +84,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
         const data = await res.json()
         const e: Expense = data.expense
         setExpense(e)
+        onExpenseChanged?.(e)
         setForm({
           date: e.date,
           supplierName: e.supplierName ?? '',
@@ -90,7 +98,29 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
     } finally {
       setLoading(false)
     }
-  }, [expenseId])
+  }, [expenseId, onExpenseChanged])
+
+  const loadLinkedTransactionAttachments = useCallback(async (transactionId: string | null | undefined) => {
+    if (!transactionId) {
+      setLinkedTransactionAttachments([])
+      setLoadingLinkedTransactionAttachments(false)
+      return
+    }
+
+    setLoadingLinkedTransactionAttachments(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${transactionId}`)
+      if (!res.ok) {
+        setLinkedTransactionAttachments([])
+        return
+      }
+      const data = await res.json()
+      const transaction = data.transaction as BankTransaction | null
+      setLinkedTransactionAttachments(transaction?.attachments ?? [])
+    } finally {
+      setLoadingLinkedTransactionAttachments(false)
+    }
+  }, [])
 
   // Reset & load when modal opens
   useEffect(() => {
@@ -98,6 +128,10 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
     setError('')
     setShowDeleteDialog(false)
     setReceiptFiles([])
+    setAccountSearch('')
+    setAccountOpen(false)
+    setLinkedTransactionAttachments([])
+    setLoadingLinkedTransactionAttachments(false)
     if (isNew) {
       setExpense(null)
       setForm({
@@ -113,6 +147,15 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
     void loadAccounts()
     void loadExpense()
   }, [open, isNew, loadAccounts, loadExpense])
+
+  useEffect(() => {
+    if (!open || !expense?.bankTransactionId) {
+      setLinkedTransactionAttachments([])
+      setLoadingLinkedTransactionAttachments(false)
+      return
+    }
+    void loadLinkedTransactionAttachments(expense.bankTransactionId)
+  }, [open, expense?.bankTransactionId, loadLinkedTransactionAttachments])
 
   async function handleSave() {
     setError('')
@@ -204,11 +247,20 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
 
   async function handleDeleteAccountingAttachment(attachmentId: string) {
     if (!expenseId) return
+    if (!confirm('Delete this attachment? This cannot be undone.')) return
     setDeletingAttachmentId(attachmentId)
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
       if (res.ok) {
-        setExpense(prev => prev ? { ...prev, attachments: (prev.attachments ?? []).filter((a: AccountingAttachment) => a.id !== attachmentId) } : prev)
+        setExpense(prev => {
+          if (!prev) return prev
+          const nextExpense = {
+            ...prev,
+            attachments: (prev.attachments ?? []).filter((a: AccountingAttachment) => a.id !== attachmentId),
+          }
+          onExpenseChanged?.(nextExpense)
+          return nextExpense
+        })
       }
     } finally {
       setDeletingAttachmentId(null)
@@ -230,7 +282,15 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
         }
       }
       if (newAttachments.length > 0) {
-        setExpense(prev => prev ? { ...prev, attachments: [...(prev.attachments ?? []), ...newAttachments] } : prev)
+        setExpense(prev => {
+          if (!prev) return prev
+          const nextExpense = {
+            ...prev,
+            attachments: [...(prev.attachments ?? []), ...newAttachments],
+          }
+          onExpenseChanged?.(nextExpense)
+          return nextExpense
+        })
       }
     } finally {
       setUploadingAttachmentId(null)
@@ -255,6 +315,11 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
   }
 
   const isFinancialLocked = expense?.status === 'RECONCILED'
+  const selectedAccount = accounts.find(account => account.id === form.accountId) ?? null
+  const filteredAccounts = accounts.filter(account => {
+    const query = accountSearch.trim().toLowerCase()
+    return !query || account.searchText.includes(query)
+  })
 
   return (
     <>
@@ -289,6 +354,10 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
             <div className="py-8 text-center text-muted-foreground">Loading…</div>
           ) : (
             <div className="space-y-4 pt-1">
+              {isFinancialLocked && (
+                <p className="text-xs text-muted-foreground">Financial fields are locked for reconciled expenses. You can still update supplier, description, notes, and attachments.</p>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="ef-date">Date *</Label>
@@ -305,17 +374,50 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
                 <Input id="ef-desc" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description of expense" />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="ef-account">Account *</Label>
-                  <Select value={form.accountId} onValueChange={v => setForm(f => ({ ...f, accountId: v }))} disabled={isFinancialLocked}>
-                    <SelectTrigger id="ef-account"><SelectValue placeholder="Select account" /></SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(a => (
-                        <SelectItem key={a.id} value={a.id}>{a.code} — {a.label}</SelectItem>
+              <div className="space-y-1">
+                <Label htmlFor="ef-account">Account *</Label>
+                <div className="relative">
+                  <Input
+                    id="ef-account"
+                    value={accountOpen ? accountSearch : (selectedAccount?.label ?? '')}
+                    onFocus={() => {
+                      if (isFinancialLocked) return
+                      setAccountOpen(true)
+                      setAccountSearch('')
+                    }}
+                    onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                    onChange={e => setAccountSearch(e.target.value)}
+                    placeholder="Search account…"
+                    disabled={isFinancialLocked}
+                  />
+                  {accountOpen && !isFinancialLocked && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                      {filteredAccounts.map(account => (
+                        <button
+                          key={account.id}
+                          type="button"
+                          onMouseDown={() => {
+                            setForm(prev => ({ ...prev, accountId: account.id }))
+                            setAccountOpen(false)
+                            setAccountSearch('')
+                          }}
+                          className={cn('w-full px-3 py-1.5 text-left text-sm hover:bg-accent/50 transition-colors', form.accountId === account.id && 'bg-primary/10 font-medium')}
+                        >
+                          {account.code} - {account.label}
+                        </button>
                       ))}
-                    </SelectContent>
-                  </Select>
+                      {filteredAccounts.length === 0 && (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 items-start">
+                <div className="space-y-1">
+                  <Label htmlFor="ef-amount">Amount inc. GST ($) *</Label>
+                  <Input id="ef-amount" type="number" step="0.01" min="0" value={form.amountIncGst} onChange={e => setForm(f => ({ ...f, amountIncGst: e.target.value }))} placeholder="0.00" disabled={isFinancialLocked} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="ef-taxcode">Tax Code</Label>
@@ -330,23 +432,50 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="ef-amount">Amount inc. GST ($) *</Label>
-                  <Input id="ef-amount" type="number" step="0.01" min="0" value={form.amountIncGst} onChange={e => setForm(f => ({ ...f, amountIncGst: e.target.value }))} placeholder="0.00" disabled={isFinancialLocked} />
+              {!isNew && expense && (
+                <div className="space-y-1 text-sm text-muted-foreground">
+                  <div>Ex-GST: <span className="font-medium text-foreground">${fmtAud(expense.amountExGst)}</span></div>
+                  <div>GST: <span className="font-medium text-foreground">${fmtAud(expense.gstAmount)}</span></div>
                 </div>
-                {!isNew && expense && (
-                  <div className="space-y-1 pt-6 text-sm text-muted-foreground">
-                    <div>Ex-GST: <span className="font-medium text-foreground">${fmtAud(expense.amountExGst)}</span></div>
-                    <div>GST: <span className="font-medium text-foreground">${fmtAud(expense.gstAmount)}</span></div>
-                  </div>
-                )}
-              </div>
+              )}
 
               <div className="space-y-1">
                 <Label htmlFor="ef-notes">Notes</Label>
                 <Textarea id="ef-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" rows={2} />
               </div>
+
+              {expense?.bankTransactionId && (
+                <div className="space-y-2">
+                  <Label>Linked Bank Transaction</Label>
+                  <button
+                    type="button"
+                    onClick={() => setLinkedTransactionId(expense.bankTransactionId)}
+                    className="block text-left text-sm text-primary hover:underline underline-offset-2"
+                  >
+                    View linked bank transaction
+                  </button>
+                  {(loadingLinkedTransactionAttachments || linkedTransactionAttachments.length > 0) && (
+                    <div className="space-y-2">
+                      {loadingLinkedTransactionAttachments ? (
+                        <p className="text-xs text-muted-foreground">Loading linked transaction attachments...</p>
+                      ) : (
+                        <>
+                          <AttachmentsPanel
+                            items={linkedTransactionAttachments.map((a: AccountingAttachment) => ({ id: a.id, name: a.originalName }) satisfies AttachmentItem)}
+                            label={null}
+                            onDownload={async (item: AttachmentItem) => {
+                              await downloadAccountingAttachment(item.id, item.name)
+                            }}
+                          />
+                          {linkedTransactionAttachments.length > 0 && (
+                            <p className="text-xs text-muted-foreground">Read-only. Manage these from the linked bank transaction.</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Attachments</Label>
@@ -356,6 +485,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
                     canUpload
                     uploading={uploadingAttachmentId !== null}
                     deletingId={deletingAttachmentId ?? undefined}
+                    label={null}
                     onUpload={handleUploadAttachments}
                     onDownload={async (item: AttachmentItem) => {
                       await downloadAccountingAttachment(item.id, item.name)
@@ -387,10 +517,6 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
                   </div>
                 )}
               </div>
-
-              {isFinancialLocked && (
-                <p className="text-xs text-muted-foreground">Financial fields are locked for reconciled expenses. You can still update supplier, description, notes, and attachments.</p>
-              )}
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -424,6 +550,12 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onDeleted 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <LinkedBankTransactionDialog
+        open={!!linkedTransactionId}
+        transactionId={linkedTransactionId}
+        onOpenChange={open => { if (!open) setLinkedTransactionId(null) }}
+      />
     </>
   )
 }

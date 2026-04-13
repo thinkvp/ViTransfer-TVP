@@ -64,6 +64,7 @@ export function bankAccountFromDb(row: any): BankAccount {
     currency: row.currency,
     openingBalance: Number(row.openingBalance ?? 0),
     currentBalance: Number(row.currentBalance ?? row.openingBalance ?? 0),
+    pendingTransactionAmount: Number(row.pendingTransactionAmount ?? 0),
     openingBalanceDate: row.openingBalanceDate ?? null,
     isActive: Boolean(row.isActive),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,

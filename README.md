@@ -509,8 +509,6 @@ The source code will be built into Docker images locally instead of pulling from
 | Variable | Required | Description | Default | Example |
 |----------|----------|-------------|---------|---------|
 | `APP_PORT` | No | Port to expose on host | `4321` | `8080` |
-| `PUID` | No | User ID for file permissions (Linux) | `1000` | `1000` |
-| `PGID` | No | Group ID for file permissions (Linux) | `1000` | `1000` |
 | `TZ` | No | Timezone for notification schedules | `UTC` | `Europe/Amsterdam` |
 | `POSTGRES_USER` | Yes | PostgreSQL username | `vitransfer` | `vitransfer` |
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password (hex only) | — | `openssl rand -hex 32` |
@@ -527,6 +525,8 @@ The source code will be built into Docker images locally instead of pulling from
 | `CLOUDFLARE_TUNNEL` | No | Enable Cloudflare script/connect CSP | `false` | `true` |
 | `TRUSTED_PROXIES` | No | Comma-separated proxy IPs for `X-Forwarded-For` peeling | — | `192.168.1.1` |
 | `NEXT_PUBLIC_TUS_ENDPOINT` | No | Custom TUS origin for connect-src | — | `https://uploads.example.com` |
+
+The app and worker containers run as non-root user `911:911` by default. If you replace the named volumes with Linux bind mounts, update the compose `user:` value to match the owner of those host directories.
 
 **Optional Integrations:**
 

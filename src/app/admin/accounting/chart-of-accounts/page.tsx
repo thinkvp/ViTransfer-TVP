@@ -13,6 +13,7 @@ import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import type { Account, AccountType, AccountTaxCode } from '@/lib/accounting/types'
 import { ACCOUNT_TYPE_LABELS, TAX_CODE_LABELS } from '@/lib/accounting/types'
+import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { cn } from '@/lib/utils'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
@@ -345,17 +346,17 @@ export default function ChartOfAccountsPage() {
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {!a.parentId && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openAddChild(a)} title="Add sub-account">
+                            <AccountingTableActionButton onClick={() => openAddChild(a)} title="Add sub-account" aria-label="Add sub-account">
                               <Plus className="w-3.5 h-3.5" />
-                            </Button>
+                            </AccountingTableActionButton>
                           )}
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(a)} title="Edit">
+                          <AccountingTableActionButton onClick={() => openEdit(a)} title="Edit account" aria-label="Edit account">
                             <Pencil className="w-3.5 h-3.5" />
-                          </Button>
+                          </AccountingTableActionButton>
                           {!a.isSystem && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeleteTarget(a)} title="Delete">
+                            <AccountingTableActionButton destructive onClick={() => setDeleteTarget(a)} title="Delete account" aria-label="Delete account">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                            </Button>
+                            </AccountingTableActionButton>
                           )}
                         </div>
                       </td>
