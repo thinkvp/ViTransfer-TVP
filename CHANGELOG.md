@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-04-13
+
+### Added
+- **Linked bank transaction viewer across accounting tables** — an eye icon button now appears on relevant rows throughout the Accounting section to open a modal showing the full linked bank transaction without leaving the page; the icon appears on expense rows and split-line rows in the account ledger, on sales invoice rows (with a chooser dialog when multiple matched payments exist), and in the Expenses list between the edit and delete actions
+- **Edit Expense modal shows linked bank transaction attachments** — when an expense is linked to a bank transaction, a read-only "Linked Bank Transaction" section appears in the Edit Expense modal with a link to view the transaction and a list of the bank transaction's attachments; files in that section can be downloaded in place
+- **Accounting Dashboard shows current balance and pending transaction count** — the bank account cards on the Accounting Dashboard now display the live current balance and a count of pending (unmatched) transactions instead of the static opening balance
+
+### Changed
+- **Unified accounting table action buttons** — row action buttons across the entire Accounting section (Expenses, Chart of Accounts, BAS, Settings, Bank Transactions) are now styled consistently with the Sales/Invoices pattern: circular outline, icon-only, red trash can for destructive actions
+- **Ignored bank transactions desktop view simplified** — the Ignored tab no longer shows Type or Account columns (which are always empty for excluded transactions) and replaces the expand chevron with direct icon-only Undo and Delete action buttons in the row
+- **Confirmation required before deleting an expense attachment** — deleting an attachment from the Edit Expense modal now shows a confirmation prompt matching the safeguard already present on Bank Transaction attachments
+
+### Fixed
+- **Expenses list paperclip icon updates immediately after editing attachments** — adding or deleting an attachment inside the Edit Expense modal now updates the row's attachment indicator in the list without requiring a full page refresh
+- **Project-page Add Task flow now opens and saves reliably** — the Project detail page was passing a prefilled stub task object into the shared Kanban card dialog, which caused the dialog to think it was editing an existing task; the create action therefore mislabeled the modal, omitted the required `columnId` on save, and could also abort silently if optional preload requests failed; new tasks from the Project page now stay in true add-mode, include the correct status column in the POST body, tolerate partial preload failures, and show any create error message instead of failing silently
+- **Accounting transaction table sorting now matches the active sort controls** — the Bank Accounts and Expenses pages were re-sorting only the current client-side page after the API returned date-ordered results, which produced inconsistent ordering across pages and incorrect pagination when switching sort columns; both tables now pass the active sort key and direction to their list APIs so sorting happens server-side before pagination
+- **Ignored bank transactions immediately shed attachment support** — when a transaction is marked ignored, any existing `AccountingAttachment` records are deleted and their files are removed from disk, the transaction detail panel stops showing an upload control for ignored rows, and the attachment upload API now rejects attempts to attach files to ignored transactions with a conflict response
+
 ## [1.4.0] - 2026-04-08
 
 ### Fixed
