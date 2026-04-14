@@ -5,7 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.2] - 2026-04-13
+## [1.4.3] - 2026-04-14
+
+### Changed
+- **Docker containers now drop all Linux capabilities** — both the `app` and `worker` services include `cap_drop: ALL` in both Compose files, eliminating the ambient capability set that containers inherit by default; neither service requires any elevated capability at runtime, so removing them reduces the blast radius of any container compromise
+- **Docker containers use an init process for correct signal handling** — both `app` and `worker` services now set `init: true`, which injects a minimal init (tini) as PID 1; this ensures SIGTERM is forwarded correctly on `docker compose stop` and that zombie child processes (e.g. spawned ffmpeg or shell subprocesses) are reaped properly
+- **Structured log rotation on all services** — all four services (`postgres`, `redis`, `app`, `worker`) now configure the `json-file` logging driver with `max-size: "10m"` and `max-file: "3"`, capping the total log footprint to 30 MB per service and preventing unbounded log growth on long-running hosts
+
+### Fixed
+- **Rate limiter key collisions between API endpoints** — the `rateLimit()` calls on `GET /api/client-activity`, `GET /api/running-jobs`, `POST /api/settings/delete-closed-project-previews`, `POST /api/settings/purge-bullmq-jobs`, and `POST /api/settings/purge-notification-backlog` were not passing an explicit key name; without a per-route key, distinct endpoints can share the same Redis counter and trigger each other's limits under concurrent polling; each call now passes a unique string key so rate limit windows are tracked independently per endpoint
+
+## [1.4.2] - 2026-04-14
 
 ### Changed
 - **Removed `node_modules` from Dockerfile `chmod -R` in both app and worker images** — the production containers run as a non-root UID from Docker Compose and only need read and traverse access to dependency files; `npm ci` installs package files and directories with the normal read and execute bits needed at runtime, so recursively re-granting `a+rX` across the entire `node_modules` tree was redundant in practice and was adding significant time to every image build; writable runtime paths remain handled separately, while the smaller read-only runtime targets (`.next`, `public`, `prisma`, `src`) continue to receive explicit permission normalization

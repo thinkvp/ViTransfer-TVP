@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
 
-  const rateLimitResult = await rateLimit(request, { windowMs: 10 * 1000, maxRequests: 20 })
+  const rateLimitResult = await rateLimit(request, { windowMs: 10 * 1000, maxRequests: 20 }, 'client-activity')
   if (rateLimitResult) return rateLimitResult
 
   try {

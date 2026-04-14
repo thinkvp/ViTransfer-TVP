@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
   const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
   if (forbiddenAction) return forbiddenAction
 
-  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 10 })
+  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 10 }, 'purge-notification-backlog')
   if (rateLimitResult) return rateLimitResult
 
   const body = await request.json().catch(() => ({}))
