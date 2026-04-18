@@ -5,6 +5,13 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.9] - 2026-04-18
+
+### Fixed
+- **Account ledger "Account" column now shows `— ChildName` for all entry kinds** — when viewing a parent account's ledger, Sales Invoice and Split entries from child accounts were missing the `— AccountName` prefix that Expense, Bank Transaction, and Journal entries already showed; both entry kinds now compare their `accountCode` against the current account's code and render the dash indicator when the entry belongs to a sub-account
+- **P&L report parent account rows no longer styled differently** — group-header (parent account) rows on the Profit & Loss report were rendered in full foreground colour and bold, making them visually distinct from child account rows; they are now styled identically to other account rows (muted colour, same font weight); child accounts continue to be indented with extra left padding to maintain the hierarchy
+- **Bank Transactions and Expenses CSV/PDF export now includes all records in the date range** — exporting from Bank Transactions or Expenses previously exported only the current visible page; both pages now fetch all matching records (up to 10 000) from the API before building the CSV or triggering the print dialog; the API routes accept a `download=true` parameter that raises the per-request page-size cap accordingly
+
 ## [1.4.8] - 2026-04-18
 
 ### Added

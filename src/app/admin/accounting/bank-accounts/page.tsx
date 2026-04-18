@@ -164,6 +164,10 @@ export default function BankAccountsPage() {
   // Split transaction state
   const [splitTxnId, setSplitTxnId] = useState<string | null>(null)
 
+  // Export state
+  const [txnExportLoading, setTxnExportLoading] = useState(false)
+  const [txnPrintRows, setTxnPrintRows] = useState<BankTransaction[] | null>(null)
+
   // Quick-match: eagerly loaded matches for pending transactions
   const [quickMatchInvoices, setQuickMatchInvoices] = useState<OpenInvoice[]>([])
   const [quickMatchExpenses, setQuickMatchExpenses] = useState<UnmatchedExpense[]>([])
@@ -175,6 +179,27 @@ export default function BankAccountsPage() {
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId) ?? null
   const txnPageCount = Math.max(1, Math.ceil(txnTotal / PAGE_SIZE))
+
+  // Fetch all transactions (ignoring pagination) for export
+  const fetchAllTransactionsForExport = useCallback(async (): Promise<BankTransaction[]> => {
+    if (!selectedAccountId) return []
+    const params = new URLSearchParams({ bankAccountId: selectedAccountId, status: activeTab, page: '1', pageSize: '10000', sortKey: txnSortKey, sortDir: txnSortDir, download: 'true' })
+    if (txnFrom) params.set('from', txnFrom)
+    if (txnTo) params.set('to', txnTo)
+    if (txnSearch.trim()) params.set('search', txnSearch.trim())
+    const res = await apiFetch(`/api/admin/accounting/transactions?${params}`)
+    if (!res.ok) return []
+    const d = await res.json()
+    return d.transactions ?? []
+  }, [selectedAccountId, activeTab, txnFrom, txnTo, txnSortKey, txnSortDir, txnSearch])
+
+  // Trigger print after txnPrintRows state is set
+  useEffect(() => {
+    if (txnPrintRows !== null) {
+      downloadPdf(selectedAccount?.name ? `${selectedAccount.name} Transactions` : 'Transactions')
+      setTxnPrintRows(null)
+    }
+  }, [txnPrintRows, selectedAccount?.name])
 
   const loadAccounts = useCallback(async () => {
     setLoadingAccounts(true)
@@ -672,13 +697,23 @@ export default function BankAccountsPage() {
             <h2 className="text-xl font-semibold">{selectedAccount.name}</h2>
             <div className="flex items-center gap-2">
               <ExportMenu
-                onExportCsv={() => {
-                  downloadCsv(`${selectedAccount.name}-transactions.csv`, ['Date', 'Description', 'Reference', 'Type', 'Amount'], transactions.map(t => [
-                    t.date, t.description, t.reference ?? '', t.transactionType ?? '', (t.amountCents / 100).toFixed(2),
-                  ]))
+                onExportCsv={async () => {
+                  setTxnExportLoading(true)
+                  try {
+                    const all = await fetchAllTransactionsForExport()
+                    downloadCsv(`${selectedAccount.name}-transactions.csv`, ['Date', 'Description', 'Reference', 'Type', 'Amount'], all.map(t => [
+                      t.date, t.description, t.reference ?? '', t.transactionType ?? '', (t.amountCents / 100).toFixed(2),
+                    ]))
+                  } finally { setTxnExportLoading(false) }
                 }}
-                onExportPdf={() => downloadPdf(`${selectedAccount.name} Transactions`)}
-                disabled={transactions.length === 0}
+                onExportPdf={async () => {
+                  setTxnExportLoading(true)
+                  try {
+                    const all = await fetchAllTransactionsForExport()
+                    setTxnPrintRows(all)
+                  } finally { setTxnExportLoading(false) }
+                }}
+                disabled={transactions.length === 0 || txnExportLoading}
               />
               <Button size="sm" variant="outline" onClick={() => { setImportOpen(true); setImportResult(null); setImportFile(null); setImportStep('pick'); setPreviewRows([]); setSelectedImportIndices(new Set()) }}>
                 <Upload className="w-4 h-4 mr-1.5" />Import CSV
@@ -740,7 +775,7 @@ export default function BankAccountsPage() {
                   </div>
 
                   <div className="divide-y divide-border">
-                    {sortedTransactions.map(t => {
+                    {(txnPrintRows ?? sortedTransactions).map(t => {
                       const isExpanded = expandedId === t.id
                       const form = getPostForm(t)
                       const isPosting = posting === t.id
@@ -1163,7 +1198,7 @@ export default function BankAccountsPage() {
                     })}
                   </div>
 
-                  <div className="flex items-center justify-between px-3 py-2 border-t border-border text-sm">
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-border text-sm print:hidden">
                     <span className="text-muted-foreground text-xs">{txnTotal} transaction{txnTotal !== 1 ? 's' : ''}</span>
                     {txnPageCount > 1 && (
                       <div className="flex items-center gap-1">

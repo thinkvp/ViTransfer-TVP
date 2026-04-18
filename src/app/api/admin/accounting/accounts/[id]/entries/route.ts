@@ -174,8 +174,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const periodTotalCents = combined.reduce((sum, row) => {
     if (row.kind === 'expense') return sum + (row.entry as ReturnType<typeof expenseFromDb>).amountExGst
     if (row.kind === 'bankTransaction') {
-      const baCents = (row.entry as ReturnType<typeof bankTransactionFromDb>).amountCents
-      return sum + (isDebitNormal ? -baCents : baCents)
+      const t = row.entry as ReturnType<typeof bankTransactionFromDb>
+      const exGst = t.taxCode === 'GST' ? Math.round(t.amountCents / 1.1) : t.amountCents
+      return sum + (isDebitNormal ? -exGst : exGst)
     }
     if (row.kind === 'journal') return sum + (row.entry as ReturnType<typeof journalEntryFromDb>).amountCents
     return sum + (row.entry as { amountCents: number }).amountCents

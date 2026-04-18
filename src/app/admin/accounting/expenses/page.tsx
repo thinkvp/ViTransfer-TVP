@@ -42,6 +42,8 @@ export default function ExpensesPage() {
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
   const pageSize = 25
+  const [exportLoading, setExportLoading] = useState(false)
+  const [printRows, setPrintRows] = useState<Expense[] | null>(null)
 
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -54,6 +56,26 @@ export default function ExpensesPage() {
   const [deleting, setDeleting] = useState(false)
 
   const sortedExpenses = expenses
+
+  // Fetch all expenses (ignoring pagination) for export
+  const fetchAllExpensesForExport = useCallback(async (): Promise<Expense[]> => {
+    const params = new URLSearchParams({ page: '1', pageSize: '10000', sortKey, sortDir, download: 'true' })
+    if (search.trim()) params.set('supplierName', search.trim())
+    if (fromDate) params.set('from', fromDate)
+    if (toDate) params.set('to', toDate)
+    const res = await apiFetch(`/api/admin/accounting/expenses?${params}`)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.expenses ?? []
+  }, [search, fromDate, toDate, sortKey, sortDir])
+
+  // Trigger print after printRows state is set
+  useEffect(() => {
+    if (printRows !== null) {
+      downloadPdf('Expenses')
+      setPrintRows(null)
+    }
+  }, [printRows])
 
   function toggleSort(key: SortKey) {
     setPage(1)
@@ -133,13 +155,23 @@ export default function ExpensesPage() {
         </div>
         <div className="flex items-center gap-2">
           <ExportMenu
-            onExportCsv={() => {
-              downloadCsv('expenses.csv', ['Date', 'Supplier', 'Description', 'Category', 'Ex GST', 'GST', 'Inc GST', 'Status'], expenses.map(e => [
-                e.date, e.supplierName ?? '', e.description, e.accountName ?? '', fmtAud(e.amountExGst), fmtAud(e.gstAmount), fmtAud(e.amountIncGst), EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status,
-              ]))
+            onExportCsv={async () => {
+              setExportLoading(true)
+              try {
+                const all = await fetchAllExpensesForExport()
+                downloadCsv('expenses.csv', ['Date', 'Supplier', 'Description', 'Category', 'Ex GST', 'GST', 'Inc GST', 'Status'], all.map(e => [
+                  e.date, e.supplierName ?? '', e.description, e.accountName ?? '', fmtAud(e.amountExGst), fmtAud(e.gstAmount), fmtAud(e.amountIncGst), EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status,
+                ]))
+              } finally { setExportLoading(false) }
             }}
-            onExportPdf={() => downloadPdf('Expenses')}
-            disabled={expenses.length === 0}
+            onExportPdf={async () => {
+              setExportLoading(true)
+              try {
+                const all = await fetchAllExpensesForExport()
+                setPrintRows(all)
+              } finally { setExportLoading(false) }
+            }}
+            disabled={expenses.length === 0 || exportLoading}
           />
           <Button onClick={() => { setModalExpenseId(null); setModalOpen(true) }}>
             <Plus className="w-4 h-4 mr-1.5" />New Expense
@@ -208,11 +240,11 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedExpenses.map(e => (
+                  {(printRows ?? sortedExpenses).map(e => (
                     <tr
                       key={e.id}
                       className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
-                      onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}
+                      onClick={() => { if (!printRows) { setModalExpenseId(e.id); setModalOpen(true) } }}
                     >
                       <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground">{formatDate(e.date)}</td>
                       <td className="px-3 py-2 font-medium">
@@ -274,7 +306,7 @@ export default function ExpensesPage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm">
+        <div className="flex items-center justify-between text-sm print:hidden">
           <span className="text-muted-foreground">{total} total</span>
           <div className="flex items-center gap-1">
             <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>

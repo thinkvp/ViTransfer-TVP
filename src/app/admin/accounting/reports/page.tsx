@@ -446,9 +446,8 @@ function PLSection({ title, rows, total, totalLabel, positive, from, to }: {
         <div key={i} className={cn(
           'flex justify-between py-0.5 text-sm',
           row.isSubtotal && 'font-semibold border-t border-border mt-1',
-          row.isGroupHeader && 'font-semibold pt-1'
         )}>
-          <span className={cn(!row.isSubtotal && !row.isGroupHeader && 'text-muted-foreground', row.depth ? 'pl-6' : 'pl-2', row.isGroupHeader && 'pl-0 text-foreground')}>
+          <span className={cn(!row.isSubtotal && 'text-muted-foreground', row.depth ? 'pl-6' : 'pl-2')}>
             {row.accountCode ? `${row.accountCode} — ` : ''}{row.accountName}
           </span>
           {row.hideAmount ? <span /> : (

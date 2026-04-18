@@ -27,7 +27,8 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search')
   const importBatchId = searchParams.get('importBatchId')
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10))
-  const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '50', 10)))
+  const isDownload = searchParams.get('download') === 'true'
+  const pageSize = isDownload ? 10000 : Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '50', 10)))
   const sortKeyRaw = searchParams.get('sortKey') ?? 'date'
   const sortDir = (searchParams.get('sortDir') ?? 'desc') === 'asc' ? 'asc' : 'desc'
   const sortKey = ['date', 'description', 'amount'].includes(sortKeyRaw) ? sortKeyRaw : 'date'

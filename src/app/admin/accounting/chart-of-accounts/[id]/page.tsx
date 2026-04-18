@@ -82,9 +82,14 @@ export default function AccountLedgerPage() {
   }
 
   const sortedEntries = useMemo(() => {
+    const isDebitNormal = account?.type === 'ASSET' || account?.type === 'EXPENSE' || account?.type === 'COGS'
     const getAmt = (row: Entry) => {
       if (row.kind === 'expense') return (row.entry as Expense).amountIncGst
-      if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).amountCents
+      if (row.kind === 'bankTransaction') {
+        const t = row.entry as BankTransaction
+        const exGst = t.taxCode === 'GST' ? Math.round(t.amountCents / 1.1) : t.amountCents
+        return isDebitNormal ? -exGst : exGst
+      }
       if (row.kind === 'journal') return (row.entry as JournalEntry).amountCents
       if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).amountCents
       return (row.entry as SplitEntry).amountCents
@@ -382,13 +387,21 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={t.accountName ?? account?.name ?? undefined}>{!isOwn && t.accountName ? `\u2014 ${t.accountName}` : t.accountName ?? account?.name ?? '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{t.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{t.reference ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(t.amountCents)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{(() => {
+                            const exGst = t.taxCode === 'GST' ? Math.round(t.amountCents / 1.1) : t.amountCents
+                            return fmtAud((account?.type === 'ASSET' || account?.type === 'EXPENSE' || account?.type === 'COGS') ? -exGst : exGst)
+                          })()}</td>
                           <td className="px-4 py-2.5 text-right">
-                            {isOwn && (
-                              <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Unpost bank transaction" aria-label="Unpost bank transaction">
-                                <Trash2 className="w-3.5 h-3.5" />
+                            <div className="flex items-center justify-end gap-2">
+                              <AccountingTableActionButton onClick={() => void openLinkedTransaction(t.id)} title="View bank transaction" aria-label="View bank transaction">
+                                <Eye className="w-3.5 h-3.5" />
                               </AccountingTableActionButton>
-                            )}
+                              {isOwn && (
+                                <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Unpost bank transaction" aria-label="Unpost bank transaction">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </AccountingTableActionButton>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -416,13 +429,14 @@ export default function AccountLedgerPage() {
                       )
                     } else if (row.kind === 'salesInvoice') {
                       const s = row.entry as SalesInvoiceEntry
+                      const isOwnSales = s.accountCode === account?.code
                       return (
                         <tr key={`sales-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(row.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-700 dark:text-green-400">Sales Invoice</span>
                           </td>
-                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{s.accountName || '—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSales && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{s.invoiceNumber} - {s.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.labelName ?? s.clientName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
@@ -439,13 +453,14 @@ export default function AccountLedgerPage() {
                       )
                     } else {
                       const s = row.entry as SplitEntry
+                      const isOwnSplit = s.accountCode === account?.code
                       return (
                         <tr key={`split-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(s.bankTransactionDate)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">Split</span>
                           </td>
-                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{s.accountName || '—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSplit && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{s.description || s.bankTransactionDescription}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.bankTransactionReference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(s.amountCents)}</td>
