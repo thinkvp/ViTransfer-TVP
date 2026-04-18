@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -19,14 +19,13 @@ import { cn } from '@/lib/utils'
 
 function NewExpenseDropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [dragOver, setDragOver] = useState(false)
-  const fileInputRef = useState<HTMLInputElement | null>(null)
-  const refCallback = useCallback((el: HTMLInputElement | null) => { fileInputRef[1](el) }, [])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   return (
     <div className="space-y-1">
-      <input ref={refCallback} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden"
+      <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden"
         onChange={e => { onFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
       <div
-        onClick={() => fileInputRef[0]?.click()}
+        onClick={() => fileInputRef.current?.click()}
         onDragOver={e => { e.preventDefault(); setDragOver(true) }}
         onDragEnter={e => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
