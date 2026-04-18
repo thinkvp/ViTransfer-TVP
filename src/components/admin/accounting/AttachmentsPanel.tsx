@@ -1,8 +1,8 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Loader2, Paperclip, Upload, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Loader2, Paperclip, X } from 'lucide-react'
 
 export interface AttachmentItem {
   id: string
@@ -11,9 +11,9 @@ export interface AttachmentItem {
 
 interface AttachmentsPanelProps {
   items: AttachmentItem[]
-  /** Whether the upload button is shown. */
+  /** Whether the upload drop zone is shown. */
   canUpload?: boolean
-  /** Called with the selected files when the user picks files. Parent owns the upload logic. */
+  /** Called with the selected files when the user picks or drops files. Parent owns the upload logic. */
   onUpload?: (files: File[]) => Promise<void>
   onDownload: (item: AttachmentItem) => Promise<void>
   onDelete?: (item: AttachmentItem) => Promise<void>
@@ -33,20 +33,17 @@ export function AttachmentsPanel({
   label = 'Attachments',
 }: AttachmentsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState('')
 
-  async function handleFilesChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
+  async function handleFiles(files: File[]) {
     if (files.length === 0) return
-    setPendingFiles(files)
     setError('')
     try {
       await onUpload?.(files)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
-      setPendingFiles([])
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -98,25 +95,31 @@ export function AttachmentsPanel({
             accept=".pdf,.jpg,.jpeg,.png,.webp"
             multiple
             className="hidden"
-            onChange={handleFilesChosen}
+            onChange={e => void handleFiles(Array.from(e.target.files ?? []))}
           />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || pendingFiles.length > 0}
-            className="h-7 text-xs"
+          <div
+            onClick={() => { if (!uploading) fileInputRef.current?.click() }}
+            onDragOver={e => { e.preventDefault(); if (!uploading) setDragOver(true) }}
+            onDragEnter={e => { e.preventDefault(); if (!uploading) setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragOver(false)
+              if (!uploading) void handleFiles(Array.from(e.dataTransfer.files))
+            }}
+            className={cn(
+              'flex items-center justify-center gap-1.5 border border-dashed rounded px-3 py-2 text-xs transition-colors',
+              uploading
+                ? 'opacity-60 cursor-not-allowed border-border text-muted-foreground'
+                : dragOver
+                  ? 'border-primary bg-primary/10 text-foreground cursor-copy'
+                  : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground cursor-pointer',
+            )}
           >
-            {uploading || pendingFiles.length > 0
-              ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Uploading…</>
-              : <><Upload className="w-3 h-3 mr-1.5" />Add file{items.length > 0 ? 's' : ''}</>}
-          </Button>
-          {pendingFiles.length > 0 && !uploading && (
-            <p className="text-xs text-muted-foreground mt-1">
-              {pendingFiles.map(f => f.name).join(', ')}
-            </p>
-          )}
+            {uploading
+              ? <><Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />Uploading…</>
+              : <><Paperclip className="w-3.5 h-3.5 shrink-0" />Drop files or click to attach</>}
+          </div>
           {error && <p className="text-xs text-destructive mt-1">{error}</p>}
         </div>
       )}

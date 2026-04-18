@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     prisma.expense.count({ where }),
     prisma.expense.findMany({
       where,
-      include: { account: true, user: { select: { id: true, name: true, email: true } }, accountingAttachments: { select: { id: true, storagePath: true, originalName: true, bankTransactionId: true, expenseId: true, uploadedAt: true } } },
+      include: { account: true, user: { select: { id: true, name: true, email: true } }, accountingAttachments: { select: { id: true, storagePath: true, originalName: true, bankTransactionId: true, expenseId: true, uploadedAt: true } }, bankTransaction: { select: { _count: { select: { accountingAttachments: true } } } } },
       orderBy: sortKey === 'supplier' ? { supplierName: sortDir } as const
         : sortKey === 'description' ? { description: sortDir } as const
         : sortKey === 'category' ? { account: { name: sortDir } } as const

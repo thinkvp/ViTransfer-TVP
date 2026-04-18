@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Trash2, CheckCircle } from 'lucide-react'
+import { Trash2, CheckCircle, Paperclip, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import type { Expense, AccountTaxCode, ExpenseStatus, AccountingAttachment, BankTransaction } from '@/lib/accounting/types'
 import { TAX_CODE_LABELS, EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
@@ -16,6 +16,32 @@ import { LinkedBankTransactionDialog } from '@/components/admin/accounting/Linke
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { cn } from '@/lib/utils'
+
+function NewExpenseDropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useState<HTMLInputElement | null>(null)
+  const refCallback = useCallback((el: HTMLInputElement | null) => { fileInputRef[1](el) }, [])
+  return (
+    <div className="space-y-1">
+      <input ref={refCallback} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden"
+        onChange={e => { onFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+      <div
+        onClick={() => fileInputRef[0]?.click()}
+        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+        onDragEnter={e => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); onFiles(Array.from(e.dataTransfer.files)) }}
+        className={cn(
+          'flex items-center justify-center gap-1.5 border border-dashed rounded px-3 py-2 text-xs transition-colors cursor-pointer',
+          dragOver ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground',
+        )}
+      >
+        <Paperclip className="w-3.5 h-3.5 shrink-0" />
+        <span>Drop files or click to attach</span>
+      </div>
+    </div>
+  )
+}
 
 function fmtAud(cents: number) {
   return (cents / 100).toFixed(2)
@@ -201,7 +227,13 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
         for (const file of receiptFiles) {
           const fd = new FormData()
           fd.append('file', file)
-          await apiFetch(`/api/admin/accounting/expenses/${savedId}/attachments`, { method: 'POST', body: fd })
+          const uploadRes = await apiFetch(`/api/admin/accounting/expenses/${savedId}/attachments`, { method: 'POST', body: fd })
+          if (!uploadRes.ok) {
+            const d = await uploadRes.json().catch(() => ({}))
+            setError(d.error || `Failed to upload attachment "${file.name}"`)
+            setUploadingReceipt(false)
+            return
+          }
         }
         setUploadingReceipt(false)
       }
@@ -276,10 +308,13 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
         const fd = new FormData()
         fd.append('file', file)
         const res = await apiFetch(`/api/admin/accounting/expenses/${expenseId}/attachments`, { method: 'POST', body: fd })
-        if (res.ok) {
-          const data = await res.json()
-          newAttachments.push(...(data.attachments ?? []))
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}))
+          setError(d.error || `Failed to upload attachment "${file.name}"`)
+          return
         }
+        const data = await res.json()
+        newAttachments.push(...(data.attachments ?? []))
       }
       if (newAttachments.length > 0) {
         setExpense(prev => {
@@ -496,24 +531,20 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
                   />
                 ) : (
                   <div className="space-y-2">
-                    <div className="flex flex-col gap-1">
-                      {receiptFiles.map((f, i) => (
-                        <div key={i} className="flex items-center gap-2 text-sm">
-                          <span className="truncate max-w-xs">{f.name}</span>
-                          <button type="button" onClick={() => setReceiptFiles(prev => prev.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">&times;</button>
-                        </div>
-                      ))}
-                    </div>
-                    <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground">
-                      + Add files
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        multiple
-                        className="sr-only"
-                        onChange={e => { if (e.target.files) { setReceiptFiles(prev => [...prev, ...Array.from(e.target.files!)]) } e.target.value = '' }}
-                      />
-                    </label>
+                    {receiptFiles.length > 0 && (
+                      <div className="flex flex-col gap-0.5">
+                        {receiptFiles.map((f, i) => (
+                          <div key={i} className="flex items-center gap-1 text-xs text-white">
+                            <Paperclip className="w-3 h-3 shrink-0" />
+                            <span className="truncate max-w-[200px]">{f.name}</span>
+                            <button type="button" onClick={() => setReceiptFiles(prev => prev.filter((_, j) => j !== i))} className="text-white/60 hover:text-destructive ml-1" aria-label="Remove file">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <NewExpenseDropZone onFiles={files => setReceiptFiles(prev => [...prev, ...files])} />
                   </div>
                 )}
               </div>

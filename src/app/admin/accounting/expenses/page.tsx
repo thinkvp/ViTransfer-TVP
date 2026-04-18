@@ -234,7 +234,7 @@ export default function ExpensesPage() {
                       </td>
                       <td className="px-3 py-2 max-w-[200px]">
                         <div className="flex items-center gap-1.5 truncate">
-                          {(e.attachments?.length ?? 0) > 0 && <span title="Has attachments" className="shrink-0"><Paperclip className="w-3.5 h-3.5 text-muted-foreground" /></span>}
+                          {((e.attachments?.length ?? 0) > 0 || (e.linkedTransactionAttachmentCount ?? 0) > 0) && <span title="Has attachments" className="shrink-0"><Paperclip className="w-3.5 h-3.5 text-muted-foreground" /></span>}
                           <span className="truncate">{e.description}</span>
                         </div>
                       </td>

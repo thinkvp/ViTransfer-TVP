@@ -52,6 +52,7 @@ export interface Expense {
   enteredByName: string | null
   notes: string | null
   attachments?: AccountingAttachment[]
+  linkedTransactionAttachmentCount?: number
   createdAt: string
   updatedAt: string
 }

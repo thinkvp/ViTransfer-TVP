@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-04-18
+
+### Added
+- **Drag-and-drop file attachment on bank transaction posting form** — the "Attach receipt or tax invoice" link on the Pending transactions posting form is replaced with a dashed drop zone that accepts dragged files or a click-to-browse interaction; the zone highlights with a primary-colour tint when a file is dragged over it; queued files are listed with white text and per-file remove buttons consistent with the rest of the attachment UI
+- **Drag-and-drop file attachment on `AttachmentsPanel`** — the plain "Add files" button on the shared `AttachmentsPanel` component (used on Posted transaction detail panels and the Edit Expense modal) is replaced with the same dashed drop-zone used on the posting form; drag-over highlighting, disabled-state handling, and error display are all managed internally so every upload surface is consistent without changes to callers
+- **Drag-and-drop file attachment on New Expense modal** — the New Expense form's bespoke file `<label>` picker is replaced with a `NewExpenseDropZone` component using the same dashed zone; staged files are shown above the zone with white text and per-file remove buttons matching the posting-form style
+- **Expenses list paperclip badge reflects linked bank transaction attachments** — the paperclip icon on each row of the Expenses list now appears when either the expense has its own direct attachments **or** its linked bank transaction has attachments; the list API query is extended with a `_count` sub-select on the bank transaction's `accountingAttachments` relation so no extra round trip is needed, and the `Expense` type gains an optional `linkedTransactionAttachmentCount` field propagated through the DB mapper
+
+### Fixed
+- **Accounting file volume `EACCES` errors on all attachment upload routes** — the `accounting-data` Docker named volume was initialised with root ownership before the Dockerfile established `/app/accounting` as `app:app`, causing every `mkdir` call under that path to fail with `EACCES: permission denied`; fixed by re-owning the existing volume contents to UID/GID 911 (`docker run --rm -v vitransfer-tvp_accounting-data:/data alpine chown -R 911:911 /data`); no Dockerfile or Compose changes are required for fresh installs because the image already creates the directory with correct ownership at build time
+- **Attachment upload failures on transaction post and expense save were silently ignored** — the `handlePost` loop in the bank-accounts page and the `handleSave` receipt-upload loop in `ExpenseFormModal` both awaited attachment uploads without checking the response status; a server error (such as the `EACCES` above) would complete the post/save action and discard the file silently; both paths now inspect the response, surface the server error message to the user, and halt further uploads on the first failure; the `handleUploadAttachments` path in `ExpenseFormModal` likewise now propagates the error into the visible error state instead of silently skipping failed files
+
 ## [1.4.5] - 2026-04-18
 
 ### Fixed

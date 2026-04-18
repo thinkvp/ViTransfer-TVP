@@ -129,6 +129,7 @@ export default function BankAccountsPage() {
   const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null)
   const [uploadingAttachmentTxnId, setUploadingAttachmentTxnId] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -317,13 +318,20 @@ export default function BankAccountsPage() {
         body: JSON.stringify({ transactionType: form.transactionType, accountId: form.accountId, taxCode: form.taxCode, memo: form.memo || null, supplierName: form.supplierName || null }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to post'); return }
+      let attachmentUploadError: string | null = null
       if (form.files.length > 0) {
         for (const file of form.files) {
           const fd = new FormData()
           fd.append('file', file)
-          await apiFetch(`/api/admin/accounting/transactions/${txn.id}/attachments`, { method: 'POST', body: fd })
+          const uploadRes = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/attachments`, { method: 'POST', body: fd })
+          if (!uploadRes.ok) {
+            const d = await uploadRes.json().catch(() => ({}))
+            attachmentUploadError = d.error || `Failed to upload attachment "${file.name}"`
+            break
+          }
         }
       }
+      if (attachmentUploadError) alert(`Transaction posted, but attachment upload failed: ${attachmentUploadError}`)
       // Remove from list without full reload so the page scroll position is preserved
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
@@ -918,23 +926,38 @@ export default function BankAccountsPage() {
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs">Attachments <span className="text-muted-foreground">(optional)</span></Label>
-                                    <div className="flex items-start gap-2 flex-wrap">
-                                      <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={e => {
-                                        const picked = Array.from(e.target.files ?? [])
-                                        setPostFormField(t.id, { files: [...(getPostForm(t).files), ...picked] })
-                                        if (fileRefs.current[t.id]) fileRefs.current[t.id]!.value = ''
-                                      }} />
-                                      <button type="button" onClick={() => fileRefs.current[t.id]?.click()} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                                        <Paperclip className="w-3.5 h-3.5" />Attach receipt or tax invoice
-                                      </button>
+                                    <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={e => {
+                                      const picked = Array.from(e.target.files ?? [])
+                                      setPostFormField(t.id, { files: [...(getPostForm(t).files), ...picked] })
+                                      if (fileRefs.current[t.id]) fileRefs.current[t.id]!.value = ''
+                                    }} />
+                                    <div
+                                      onClick={() => fileRefs.current[t.id]?.click()}
+                                      onDragOver={e => { e.preventDefault(); setDragOverId(t.id) }}
+                                      onDragEnter={e => { e.preventDefault(); setDragOverId(t.id) }}
+                                      onDragLeave={() => setDragOverId(null)}
+                                      onDrop={e => {
+                                        e.preventDefault()
+                                        setDragOverId(null)
+                                        const dropped = Array.from(e.dataTransfer.files)
+                                        if (dropped.length > 0) setPostFormField(t.id, { files: [...(getPostForm(t).files), ...dropped] })
+                                      }}
+                                      className={`flex items-center justify-center gap-1.5 border border-dashed rounded px-3 py-2 cursor-pointer transition-colors text-xs ${
+                                        dragOverId === t.id
+                                          ? 'border-primary bg-primary/10 text-foreground'
+                                          : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                                      }`}
+                                    >
+                                      <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                                      <span>Drop files or click to attach</span>
                                     </div>
                                     {form.files.length > 0 && (
                                       <div className="flex flex-col gap-0.5 mt-1">
                                         {form.files.map((f, fi) => (
-                                          <div key={fi} className="flex items-center gap-1 text-xs text-muted-foreground">
+                                          <div key={fi} className="flex items-center gap-1 text-xs text-white">
                                             <Paperclip className="w-3 h-3 shrink-0" />
                                             <span className="truncate max-w-[200px]">{f.name}</span>
-                                            <button type="button" onClick={() => setPostFormField(t.id, { files: form.files.filter((_, i) => i !== fi) })} className="text-muted-foreground hover:text-destructive ml-1" aria-label="Remove file">
+                                            <button type="button" onClick={() => setPostFormField(t.id, { files: form.files.filter((_, i) => i !== fi) })} className="text-white/60 hover:text-destructive ml-1" aria-label="Remove file">
                                               <X className="w-3 h-3" />
                                             </button>
                                           </div>

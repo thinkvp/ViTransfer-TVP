@@ -49,6 +49,7 @@ export function expenseFromDb(row: any): Expense {
     enteredByName: row.enteredByName ?? null,
     notes: row.notes ?? null,
     attachments: row.accountingAttachments ? row.accountingAttachments.map((a: any) => accountingAttachmentFromDb(a)) : [],
+    linkedTransactionAttachmentCount: row.bankTransaction?._count?.accountingAttachments ?? undefined,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
   }
