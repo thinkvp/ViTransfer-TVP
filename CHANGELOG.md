@@ -5,6 +5,11 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-04-18
+
+### Fixed
+- **Bank transaction suggested-account matching now prefers real merchant matches over generic card-feed text** — the previous `GET /api/admin/accounting/transactions/suggest-account` logic still relied on broad raw-description token matching, so boilerplate terms such as location names, `card`, `value`, `date`, and masked card fragments could cause unrelated historical expenses to dominate by frequency; the route now normalizes descriptions, ignores generic bank-feed tokens, extracts a small set of meaningful merchant-like terms, scores recent matched transactions by description similarity, and then ranks accounts by aggregated score instead of simple count; this keeps the lookup lightweight while allowing recurring merchants such as Adobe to resolve to the correct child expense account instead of falling back to a more common but unrelated account like Website
+
 ## [1.4.4] - 2026-04-18
 
 ### Fixed
