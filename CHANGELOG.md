@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-04-18
+
+### Added
+- **BAS detail page redesigned to match ATO form layout** — the BAS Calculation card is replaced with a structured table that mirrors the official ATO Business Activity Statement form; rows are grouped into labelled sections (GST, PAYG Withholding, Income Tax Instalment, Summary) with a "Line Description", "Line Code" badge, and "Amount" column per row; the PAYG Amounts card that previously appeared only after lodgement is removed and its figures are incorporated directly in the table; the Summary section replaces the old "Net GST Payable / Refund" row with the ATO's own labels — **8A** Amount you owe the ATO, **8B** Amount the ATO owes you, and **9** Your payment amount
+- **G4 Input Taxed Sales line on BAS** — the BAS table and CSV export now include the **G4 — Input taxed sales** line sourced from `g4InputTaxedSalesCents` on the stored calculation snapshot
+- **BAS CSV export matches ATO form columns** — the exported CSV now has three columns (Line Description, Line Code, Amount) and includes all rows visible on the BAS table — G1–G4, G10–G11, 1A, 1B, W2 (if non-zero), T7 (if non-zero), 8A, 8B, and 9 — with amounts rounded to whole dollars per ATO requirements
+
+### Changed
+- **BAS amounts rounded to whole dollars** — all amounts shown on the BAS detail page and exported to CSV are now rounded to the nearest whole dollar, removing cents; this matches the ATO's requirement that BAS figures be reported in whole dollars
+- **PAYG Instalment field relabelled from T4 to T7** — the income tax instalment input on the BAS detail page is corrected from *"T4 — PAYG Instalment"* to *"T7 — Instalment Amount"* to match the ATO's current BAS form field code
+- **P&L report COGS and Expense sections now include bank transactions, journal entries, and split lines** — previously the Cost of Goods Sold and Expenses sections of the Profit & Loss report only aggregated `Expense` records; matched bank transactions posted to COGS or Expense accounts, manually entered journal entries, and their split line components are now also included in the relevant P&L sections, ensuring the report reflects the full double-entry picture for any posting method
+
 ## [1.4.9] - 2026-04-18
 
 ### Fixed

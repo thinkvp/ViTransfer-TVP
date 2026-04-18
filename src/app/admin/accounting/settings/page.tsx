@@ -179,7 +179,7 @@ export default function AccountingSettingsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Accounting Settings</h2>
         <p className="text-sm text-muted-foreground mt-1">Manage reporting defaults and tax rates used when posting bank transactions.</p>

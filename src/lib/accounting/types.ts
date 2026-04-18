@@ -155,6 +155,7 @@ export interface BasCalculation {
   g1TotalSalesCents: number       // Total sales (inc GST)
   g2ExportSalesCents: number      // Export sales (GST-free)
   g3OtherGstFreeCents: number     // Other GST-free sales
+  g4InputTaxedSalesCents: number  // Input taxed sales
   // Purchase labels
   g10CapitalPurchasesCents: number // Capital purchases (inc GST)
   g11NonCapitalPurchasesCents: number // Non-capital purchases (inc GST)

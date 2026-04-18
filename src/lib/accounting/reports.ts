@@ -72,20 +72,20 @@ export interface BalanceSheetReport {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function groupByAccount(
-  expenses: Array<{ accountId: string; amountExGst: number; account: { code: string; name: string; type: string } | null }>
+  entries: Array<{ accountId: string; amountCents: number; account: { code: string; name: string; type: string } | null }>
 ): ReportLine[] {
   const map = new Map<string, ReportLine>()
-  for (const exp of expenses) {
-    if (!exp.account) continue
-    const existing = map.get(exp.accountId)
+  for (const entry of entries) {
+    if (!entry.account || entry.amountCents === 0) continue
+    const existing = map.get(entry.accountId)
     if (existing) {
-      existing.amountCents += exp.amountExGst
+      existing.amountCents += entry.amountCents
     } else {
-      map.set(exp.accountId, {
-        accountId: exp.accountId,
-        code: exp.account.code,
-        name: exp.account.name,
-        amountCents: exp.amountExGst,
+      map.set(entry.accountId, {
+        accountId: entry.accountId,
+        code: entry.account.code,
+        name: entry.account.name,
+        amountCents: entry.amountCents,
       })
     }
   }
@@ -100,6 +100,70 @@ function amountExcludingGst(amountCents: number, taxCode: GstCode, taxRatePercen
   const gstAmount = Math.round((absoluteAmount * taxRatePercent) / (100 + taxRatePercent))
 
   return sign * (absoluteAmount - gstAmount)
+}
+
+async function buildDebitNormalProfitLossLines(
+  accountType: 'COGS' | 'EXPENSE',
+  startDate: string,
+  endDate: string,
+  taxRatePercent: number
+): Promise<ReportLine[]> {
+  const [expenses, bankTransactions, journals, splitLines] = await Promise.all([
+    prisma.expense.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        status: { in: ['APPROVED', 'RECONCILED'] },
+        account: { type: accountType },
+      },
+      include: { account: { select: { code: true, name: true, type: true } } },
+    }),
+    prisma.bankTransaction.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        status: 'MATCHED',
+        matchType: { in: ['MANUAL'] },
+        account: { type: accountType },
+      },
+      include: { account: { select: { code: true, name: true, type: true } } },
+    }),
+    prisma.journalEntry.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        account: { type: accountType },
+      },
+      include: { account: { select: { code: true, name: true, type: true } } },
+    }),
+    prisma.splitLine.findMany({
+      where: {
+        bankTransaction: { date: { gte: startDate, lte: endDate }, status: 'MATCHED' },
+        account: { type: accountType },
+      },
+      include: { account: { select: { code: true, name: true, type: true } } },
+    }),
+  ])
+
+  return groupByAccount([
+    ...expenses.map((expense) => ({
+      accountId: expense.accountId,
+      amountCents: expense.amountExGst,
+      account: expense.account,
+    })),
+    ...bankTransactions.map((transaction) => ({
+      accountId: transaction.accountId!,
+      amountCents: -amountExcludingGst(transaction.amountCents, transaction.taxCode, taxRatePercent),
+      account: transaction.account,
+    })),
+    ...journals.map((journal) => ({
+      accountId: journal.accountId,
+      amountCents: amountExcludingGst(journal.amountCents, journal.taxCode, taxRatePercent),
+      account: journal.account,
+    })),
+    ...splitLines.map((splitLine) => ({
+      accountId: splitLine.accountId,
+      amountCents: -amountExcludingGst(splitLine.amountCents, splitLine.taxCode, taxRatePercent),
+      account: splitLine.account,
+    })),
+  ])
 }
 
 function formatProfitLossRows(
@@ -349,30 +413,12 @@ export async function buildProfitLossReport(
   totalIncomeCents = incomeLines.reduce((s, l) => s + l.amountCents, 0)
 
   // ── COGS ────────────────────────────────────────────────────────────────────
-  const cogsExpenses = await prisma.expense.findMany({
-    where: {
-      date: { gte: startDate, lte: endDate },
-      status: { in: ['APPROVED', 'RECONCILED'] },
-      account: { type: 'COGS' },
-    },
-    include: { account: { select: { code: true, name: true, type: true } } },
-  })
-
-  const cogsLines = groupByAccount(cogsExpenses as any[])
+  const cogsLines = await buildDebitNormalProfitLossLines('COGS', startDate, endDate, taxRatePercent)
   const totalCogsCents = cogsLines.reduce((s, l) => s + l.amountCents, 0)
   const grossProfitCents = totalIncomeCents - totalCogsCents
 
   // ── Expenses ────────────────────────────────────────────────────────────────
-  const opExpenses = await prisma.expense.findMany({
-    where: {
-      date: { gte: startDate, lte: endDate },
-      status: { in: ['APPROVED', 'RECONCILED'] },
-      account: { type: 'EXPENSE' },
-    },
-    include: { account: { select: { code: true, name: true, type: true } } },
-  })
-
-  const expenseLines = groupByAccount(opExpenses as any[])
+  const expenseLines = await buildDebitNormalProfitLossLines('EXPENSE', startDate, endDate, taxRatePercent)
   const totalExpenseCents = expenseLines.reduce((s, l) => s + l.amountCents, 0)
   const netProfitCents = grossProfitCents - totalExpenseCents
 

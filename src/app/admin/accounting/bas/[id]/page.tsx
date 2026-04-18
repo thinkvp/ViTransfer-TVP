@@ -21,6 +21,13 @@ function fmtAud(cents: number) {
   return cents < 0 ? `-$${abs}` : `$${abs}`
 }
 
+/** ATO BAS amounts must be reported in whole dollars (rounded to nearest) */
+function fmtBasDollars(cents: number) {
+  const dollars = Math.round(Math.abs(cents) / 100)
+  const formatted = dollars.toLocaleString('en-AU')
+  return cents < 0 ? `-$${formatted}` : `$${formatted}`
+}
+
 const STATUS_BADGE: Record<BasPeriodStatus, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
   REVIEWED: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
@@ -205,17 +212,30 @@ export default function BasDetailPage() {
           <ExportMenu
             onExportCsv={() => {
               if (!calculation) return
-              const rows = [
-                ['G1 Total Sales', (calculation.g1TotalSalesCents / 100).toFixed(2)],
-                ['G2 Export Sales', (calculation.g2ExportSalesCents / 100).toFixed(2)],
-                ['G3 GST-Free Sales', (calculation.g3OtherGstFreeCents / 100).toFixed(2)],
-                ['G10 Capital Purchases', (calculation.g10CapitalPurchasesCents / 100).toFixed(2)],
-                ['G11 Non-Capital Purchases', (calculation.g11NonCapitalPurchasesCents / 100).toFixed(2)],
-                ['1A GST Collected', (calculation.label1ACents / 100).toFixed(2)],
-                ['1B GST Credits', (calculation.label1BCents / 100).toFixed(2)],
-                ['Net GST', (calculation.netGstCents / 100).toFixed(2)],
+              const w2 = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : 0
+              const t7 = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : 0
+              const sum8A = calculation.label1ACents + w2 + t7
+              const sum8B = calculation.label1BCents
+              const sum9 = sum8A - sum8B
+              const rd = (c: number) => String(Math.round(Math.abs(c) / 100))
+              const rows: string[][] = [
+                ['Total sales (including GST)', 'G1', rd(calculation.g1TotalSalesCents)],
+                ['Export sales', 'G2', rd(calculation.g2ExportSalesCents)],
+                ['Other GST-free sales', 'G3', rd(calculation.g3OtherGstFreeCents)],
+                ['Input taxed sales', 'G4', rd(calculation.g4InputTaxedSalesCents ?? 0)],
+                ['Capital purchases (including GST)', 'G10', rd(calculation.g10CapitalPurchasesCents)],
+                ['Non-capital purchases (including GST)', 'G11', rd(calculation.g11NonCapitalPurchasesCents)],
+                ['GST on sales', '1A', rd(calculation.label1ACents)],
+                ['GST on purchases', '1B', rd(calculation.label1BCents)],
               ]
-              downloadCsv(`bas-${period.label || period.quarter}.csv`, ['Field', 'Amount'], rows)
+              if (w2) rows.push(['Amount withheld from payments', 'W2', rd(w2)])
+              if (t7) rows.push(['Instalment amount', 'T7', rd(t7)])
+              rows.push(
+                ['Amount you owe the ATO', '8A', rd(sum8A)],
+                ['Amount the ATO owes you', '8B', rd(sum8B)],
+                ['Your payment amount', '9', rd(sum9)],
+              )
+              downloadCsv(`bas-${period.label || period.quarter}.csv`, ['Line Description', 'Line Code', 'Amount'], rows)
             }}
             onExportPdf={() => downloadPdf(`BAS ${period.label || `Q${period.quarter}`}`)}
             disabled={!calculation}
@@ -256,8 +276,8 @@ export default function BasDetailPage() {
                 <Input id="payg-w2" type="number" step="0.01" value={paygWithholding} onChange={e => setPaygWithholding(e.target.value)} placeholder="0.00" />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="payg-t4">T4 — PAYG Instalment ($)</Label>
-                <Input id="payg-t4" type="number" step="0.01" value={paygInstalment} onChange={e => setPaygInstalment(e.target.value)} placeholder="0.00" />
+                <Label htmlFor="payg-t7">T7 — Instalment Amount ($)</Label>
+                <Input id="payg-t7" type="number" step="0.01" value={paygInstalment} onChange={e => setPaygInstalment(e.target.value)} placeholder="0.00" />
               </div>
             </div>
             <div className="space-y-1">
@@ -272,35 +292,6 @@ export default function BasDetailPage() {
                 {calculating ? 'Calculating…' : 'Calculate'}
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {isLodged && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">PAYG Amounts</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 text-sm">
-            <div className="flex justify-between py-0.5">
-              <span className="text-muted-foreground">W2 — PAYG Withholding</span>
-              <span className="tabular-nums">{period.paygWithholdingCents != null ? fmtAud(period.paygWithholdingCents) : '—'}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-muted-foreground">T4 — PAYG Instalment</span>
-              <span className="tabular-nums">{period.paygInstalmentCents != null ? fmtAud(period.paygInstalmentCents) : '—'}</span>
-            </div>
-            {calculation && (
-              <>
-                <div className="my-2 border-t border-border" />
-                <div className="flex justify-between py-0.5 font-semibold">
-                  <span>Total Amount Payable to ATO</span>
-                  <span className="tabular-nums text-red-600 dark:text-red-400">
-                    {fmtAud(Math.max(0, calculation.netGstCents) + (period.paygWithholdingCents ?? 0) + (period.paygInstalmentCents ?? 0))}
-                  </span>
-                </div>
-              </>
-            )}
           </CardContent>
         </Card>
       )}
@@ -343,45 +334,96 @@ export default function BasDetailPage() {
         </Card>
       )}
 
-      {/* Calculation Results */}
-      {calculation && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">BAS Calculation ({calculation.basis})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1 text-sm">
-              <BASRow label="G1 — Total Sales (inc GST)" cents={calculation.g1TotalSalesCents} />
-              <BASRow label="G2 — Export Sales" cents={calculation.g2ExportSalesCents} muted />
-              <BASRow label="G3 — GST-Free Sales" cents={calculation.g3OtherGstFreeCents} muted />
-              <div className="my-2 border-t border-border" />
-              <BASRow label="1A — GST on Sales" cents={calculation.label1ACents} bold />
-              <div className="my-2 border-t border-border" />
-              <BASRow label="G10 — Capital Purchases (inc GST)" cents={calculation.g10CapitalPurchasesCents} muted />
-              <BASRow label="G11 — Non-Capital Purchases (inc GST)" cents={calculation.g11NonCapitalPurchasesCents} muted />
-              <BASRow label="1B — GST Credits" cents={calculation.label1BCents} bold />
-              <div className="my-2 border-t border-border" />
-              <BASRow
-                label={calculation.netGstCents >= 0 ? 'Net GST Payable' : 'Net GST Refund'}
-                cents={calculation.netGstCents}
-                bold
-                highlight={calculation.netGstCents >= 0 ? 'payable' : 'refund'}
-              />
-            </div>
+      {/* Calculation Results — ATO BAS form layout */}
+      {calculation && (() => {
+        const w2Cents = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : 0
+        const t7Cents = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : 0
+        const hasPayg = w2Cents !== 0 || t7Cents !== 0
+        // Summary: 8A = amounts you owe, 8B = amounts ATO owes you, 9 = net
+        const label8ACents = calculation.label1ACents + w2Cents + t7Cents
+        const label8BCents = calculation.label1BCents
+        const label9Cents = label8ACents - label8BCents
 
-            {issues.length > 0 && (
-              <div className="mt-4 space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">Issues</p>
-                {issues.map((issue, i) => (
-                  <div key={i} className={cn('text-xs px-2 py-1 rounded', issue.severity === 'warning' ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400' : 'bg-muted text-muted-foreground')}>
-                    {issue.message}{issue.count != null ? ` (${issue.count})` : ''}
-                  </div>
-                ))}
+        return (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">BAS Summary ({calculation.basis})</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Line Description</th>
+                      <th className="text-center py-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide w-28">Line Code</th>
+                      <th className="text-right py-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide w-36">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* ── GST Section ─────────────────── */}
+                    <tr className="bg-muted/30 border-b border-border">
+                      <td className="px-4 py-1.5 font-semibold" colSpan={3}>GST</td>
+                    </tr>
+                    <BASTableRow description="Total sales (including GST)" lineCode="G1" cents={calculation.g1TotalSalesCents} />
+                    <BASTableRow description="Export sales" lineCode="G2" cents={calculation.g2ExportSalesCents} />
+                    <BASTableRow description="Other GST-free sales" lineCode="G3" cents={calculation.g3OtherGstFreeCents} />
+                    <BASTableRow description="Input taxed sales" lineCode="G4" cents={calculation.g4InputTaxedSalesCents ?? 0} />
+                    <BASTableRow description="Capital purchases (including GST)" lineCode="G10" cents={calculation.g10CapitalPurchasesCents} />
+                    <BASTableRow description="Non-capital purchases (including GST)" lineCode="G11" cents={calculation.g11NonCapitalPurchasesCents} />
+                    <BASTableRow description="GST on sales" lineCode="1A" cents={calculation.label1ACents} bold />
+                    <BASTableRow description="GST on purchases" lineCode="1B" cents={calculation.label1BCents} bold />
+
+                    {/* ── PAYG Withholding Section ────── */}
+                    {w2Cents !== 0 && (
+                      <>
+                        <tr className="bg-muted/30 border-t border-b border-border">
+                          <td className="px-4 py-1.5 font-semibold" colSpan={3}>PAYG Withholding</td>
+                        </tr>
+                        <BASTableRow description="Amount withheld from payments" lineCode="W2" cents={w2Cents} />
+                      </>
+                    )}
+
+                    {/* ── PAYG Income Tax Instalment ──── */}
+                    {t7Cents !== 0 && (
+                      <>
+                        <tr className="bg-muted/30 border-t border-b border-border">
+                          <td className="px-4 py-1.5 font-semibold" colSpan={3}>Income Tax Instalment</td>
+                        </tr>
+                        <BASTableRow description="Instalment amount" lineCode="T7" cents={t7Cents} />
+                      </>
+                    )}
+
+                    {/* ── Summary Section ─────────────── */}
+                    <tr className="bg-muted/30 border-t border-b border-border">
+                      <td className="px-4 py-1.5 font-semibold" colSpan={3}>Summary</td>
+                    </tr>
+                    <BASTableRow description="Amount you owe the ATO" lineCode="8A" cents={label8ACents} bold />
+                    <BASTableRow description="Amount the ATO owes you" lineCode="8B" cents={label8BCents} bold />
+                    <BASTableRow
+                      description="Your payment amount"
+                      lineCode="9"
+                      cents={label9Cents}
+                      bold
+                      highlight={label9Cents >= 0 ? 'payable' : 'refund'}
+                    />
+                  </tbody>
+                </table>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+
+              {issues.length > 0 && (
+                <div className="px-4 py-3 space-y-1 border-t border-border">
+                  <p className="text-xs font-medium text-muted-foreground">Issues</p>
+                  {issues.map((issue, i) => (
+                    <div key={i} className={cn('text-xs px-2 py-1 rounded', issue.severity === 'warning' ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400' : 'bg-muted text-muted-foreground')}>
+                      {issue.message}{issue.count != null ? ` (${issue.count})` : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )
+      })()}
 
       {/* Source Records — drill-down */}
       {records && (records.sales.length > 0 || records.expenses.length > 0) && (
@@ -633,20 +675,23 @@ export default function BasDetailPage() {
   )
 }
 
-function BASRow({ label, cents, muted, bold, highlight }: {
-  label: string; cents: number; muted?: boolean; bold?: boolean; highlight?: 'payable' | 'refund'
+function BASTableRow({ description, lineCode, cents, bold, highlight }: {
+  description: string; lineCode: string; cents: number; bold?: boolean; highlight?: 'payable' | 'refund'
 }) {
   return (
-    <div className={cn('flex justify-between py-0.5', muted && 'text-muted-foreground')}>
-      <span className={cn(bold && 'font-semibold')}>{label}</span>
-      <span className={cn(
-        'tabular-nums',
+    <tr className="border-b border-border last:border-b-0">
+      <td className={cn('px-4 py-1.5 pl-8', bold && 'font-semibold')}>{description}</td>
+      <td className="px-4 py-1.5 text-center">
+        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">{lineCode}</span>
+      </td>
+      <td className={cn(
+        'px-4 py-1.5 text-right tabular-nums',
         bold && 'font-semibold',
         highlight === 'payable' && 'text-red-600 dark:text-red-400',
         highlight === 'refund' && 'text-green-600 dark:text-green-400',
       )}>
-        {fmtAud(Math.abs(cents))}
-      </span>
-    </div>
+        {fmtBasDollars(cents)}
+      </td>
+    </tr>
   )
 }
