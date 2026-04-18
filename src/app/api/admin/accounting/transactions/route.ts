@@ -81,6 +81,7 @@ export async function GET(request: NextRequest) {
         invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true, invoice: { select: { invoiceNumber: true, clientId: true, client: { select: { name: true } } } } } },
         splitLines: { include: { account: true } },
         accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
+        basPeriod: { select: { id: true, label: true, quarter: true, financialYear: true } },
       },
       orderBy: sortKey === 'description'
         ? [{ description: sortDir } as const]

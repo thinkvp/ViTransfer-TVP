@@ -38,6 +38,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
       splitLines: { include: { account: true } },
       accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
+      basPeriod: { select: { id: true, label: true, quarter: true, financialYear: true } },
     },
   })
 

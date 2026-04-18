@@ -4,7 +4,7 @@ export type AccountType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'INCOME' | 'COGS' |
 export type AccountTaxCode = 'GST' | 'GST_FREE' | 'BAS_EXCLUDED' | 'INPUT_TAXED'
 export type ExpenseStatus = 'DRAFT' | 'APPROVED' | 'RECONCILED'
 export type BankTransactionStatus = 'UNMATCHED' | 'MATCHED' | 'EXCLUDED'
-export type BankTransactionMatchType = 'INVOICE_PAYMENT' | 'EXPENSE' | 'MANUAL' | 'SPLIT'
+export type BankTransactionMatchType = 'INVOICE_PAYMENT' | 'EXPENSE' | 'MANUAL' | 'SPLIT' | 'BAS_PAYMENT'
 export type BasPeriodStatus = 'DRAFT' | 'REVIEWED' | 'LODGED'
 
 export interface AccountingAttachment {
@@ -114,6 +114,9 @@ export interface BankTransaction {
   expense?: Expense | null
   invoicePayment?: { id: string; amountCents: number; paymentDate: string; invoiceId: string | null; invoiceNumber?: string | null; clientName?: string | null } | null
   splitLines?: SplitLine[]
+  // Populated when matchType=BAS_PAYMENT
+  basPeriodId?: string | null
+  basPeriod?: { id: string; label: string; quarter: number; financialYear: string } | null
 }
 
 export interface BasPeriod {
@@ -138,7 +141,12 @@ export interface BasPeriod {
   paymentDate: string | null
   paymentAmountCents: number | null
   paymentNotes: string | null
-  paymentExpenseId: string | null
+  paymentGstCents: number | null
+  paymentGstAccountId: string | null
+  paymentPaygCents: number | null
+  paymentPaygAccountId: string | null
+  // Set once the ATO bank debit has been matched as BAS_PAYMENT
+  bankTransactionId: string | null
   attachments: AccountingAttachment[]
   createdAt: string
   updatedAt: string
@@ -146,6 +154,8 @@ export interface BasPeriod {
 
 export interface AccountingSettings {
   reportingBasis: 'CASH' | 'ACCRUAL'
+  basGstAccountId: string | null
+  basPaygAccountId: string | null
   updatedAt: string
 }
 

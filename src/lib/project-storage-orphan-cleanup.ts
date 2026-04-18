@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import {
   getFilePath,
   getRawStoragePath,
@@ -199,6 +199,9 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     prisma.video.findMany({
       select: {
         projectId: true,
+        name: true,
+        storageFolderName: true,
+        versionLabel: true,
         originalStoragePath: true,
         preview480Path: true,
         preview720Path: true,
@@ -206,6 +209,14 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         thumbnailPath: true,
         timelinePreviewVttPath: true,
         timelinePreviewSpritesPath: true,
+        project: {
+          select: {
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+          },
+        },
       },
     }),
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
@@ -251,6 +262,22 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     addResolvedFilePath(exactFilePaths, video.thumbnailPath)
     addResolvedFilePath(exactFilePaths, video.timelinePreviewVttPath)
     addResolvedDirectoryPrefix(protectedDirectoryPrefixes, video.timelinePreviewSpritesPath)
+
+    // Also protect the canonical thumbnail path derived from project/video fields.
+    // This mirrors the content API's buildCanonicalFallbackPath logic and prevents
+    // false-positive orphan reports for videos where thumbnailPath is null or stale.
+    const canonicalProjectStoragePath = video.project?.storagePath
+      || buildProjectStorageRoot(
+          video.project?.client?.name || video.project?.companyName || 'Client',
+          video.project?.title || 'Untitled',
+        )
+    const canonicalVideoFolderName = video.storageFolderName || video.name
+    if (canonicalVideoFolderName && video.versionLabel) {
+      addResolvedFilePath(
+        exactFilePaths,
+        buildVideoThumbnailStoragePath(canonicalProjectStoragePath, canonicalVideoFolderName, video.versionLabel),
+      )
+    }
   }
 
   for (const videoAsset of videoAssets) addResolvedFilePath(exactFilePaths, videoAsset.storagePath)

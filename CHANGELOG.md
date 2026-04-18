@@ -5,6 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-04-18
+
+### Added
+- **BAS payment split into GST and PAYG components** — the "Record BAS Payment" dialog now has separate sections for the GST net (1A − 1B) and the PAYG Income Tax Instalment (T7); each component is recorded as its own `BAS_EXCLUDED` expense against a separately chosen account; the PAYG section only appears when the BAS period has a non-zero T7 amount; the dialog footer shows a live total of both amounts
+- **BAS payment default accounts in Accounting Settings** — a new "BAS Payment Defaults" card on the Accounting Settings page lets you pre-configure the default Chart of Accounts entries for the GST Payable and PAYG Instalment components; these defaults pre-fill the payment dialog and can be overridden per payment; stored as `basGstAccountId` and `basPaygAccountId` on `AccountingSettings`
+- **Accounting Settings accessible from nav menu** — the Accounting sub-menu now includes a direct "Settings" link so the settings page is reachable without navigating away from any accounting section
+
+### Changed
+- **BAS expense table columns show Subtotal / GST / Total** — the expenses breakdown on the BAS detail page previously had a single "Inc GST" column; it now has separate "Subtotal" (ex-GST), "GST", and "Total" columns with correct per-row and footer subtotals
+- **BAS date columns formatted via `formatDate`** — the sales records and expenses tables in the BAS drill-down now render dates through the shared `formatDate` utility instead of the raw `YYYY-MM-DD` string
+- **Accounting Settings save button moved to page header** — the save button is now a prominent "Save Changes" button in the page header (visible alongside the title) rather than a small button buried inside the Reporting card; success and error feedback banners appear at the top of the page
+- **Dialog/alert-dialog backdrop blur reduced** — overlay blur on all dialogs and alert dialogs changed from `backdrop-blur-sm` to `backdrop-blur-[2px]` for a subtler background blur effect
+
+### Fixed
+- **BAS payment deletion clears PAYG expense** — the `DELETE /api/admin/accounting/bas/[id]/payment` route now also deletes the linked PAYG instalment expense record (if one exists) and clears the new `paymentPaygExpenseId` field, so no orphaned expense records are left behind
+- **Orphan file scan no longer false-positives on `thumbnail.jpg`** — the weekly dry-run scan was incorrectly flagging video thumbnail files as orphaned when the `thumbnailPath` column on the `Video` record was `null` or stale; the scan now also derives and protects the canonical thumbnail path from `project.storagePath` + `video.storageFolderName` + `video.versionLabel`, mirroring the same fallback logic used by the content-delivery API
+
 ## [1.5.2] - 2026-04-18
 
 ### Added

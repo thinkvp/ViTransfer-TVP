@@ -117,6 +117,8 @@ export function bankTransactionFromDb(row: any): BankTransaction {
       ? { id: row.invoicePayment.id, amountCents: Number(row.invoicePayment.amountCents), paymentDate: row.invoicePayment.paymentDate, invoiceId: row.invoicePayment.invoiceId ?? null, invoiceNumber: row.invoicePayment.invoice?.invoiceNumber ?? null, clientName: row.invoicePayment.invoice?.client?.name ?? null }
       : null,
     splitLines: row.splitLines ? row.splitLines.map((s: any) => splitLineFromDb(s)) : undefined,
+    basPeriodId: row.basPeriodId ?? null,
+    basPeriod: row.basPeriod ? { id: row.basPeriod.id, label: row.basPeriod.label, quarter: Number(row.basPeriod.quarter), financialYear: row.basPeriod.financialYear } : null,
   }
 }
 
@@ -174,7 +176,11 @@ export function basPeriodFromDb(row: any): BasPeriod {
     paymentDate: row.paymentDate ?? null,
     paymentAmountCents: row.paymentAmountCents != null ? Number(row.paymentAmountCents) : null,
     paymentNotes: row.paymentNotes ?? null,
-    paymentExpenseId: row.paymentExpenseId ?? null,
+    paymentGstCents: row.paymentGstCents != null ? Number(row.paymentGstCents) : null,
+    paymentGstAccountId: row.paymentGstAccountId ?? null,
+    paymentPaygCents: row.paymentPaygCents != null ? Number(row.paymentPaygCents) : null,
+    paymentPaygAccountId: row.paymentPaygAccountId ?? null,
+    bankTransactionId: row.bankTransaction?.id ?? null,
     attachments: row.accountingAttachments ? row.accountingAttachments.map((a: any) => accountingAttachmentFromDb(a)) : [],
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,

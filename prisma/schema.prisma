@@ -2038,6 +2038,7 @@ enum BankTransactionMatchType {
   EXPENSE
   MANUAL
   SPLIT
+  BAS_PAYMENT
 }
 
 enum BasPeriodStatus {
@@ -2073,6 +2074,8 @@ model Account {
   splitLines        SplitLine[]
   salesLabels       SalesLabel[]
   salesSettingsDefault SalesSettings[] @relation("SalesSettingsDefaultIncome")
+  basPeriodsGst     BasPeriod[]   @relation("BasPeriodGstAccount")
+  basPeriodsPayg    BasPeriod[]   @relation("BasPeriodPaygAccount")
 
   @@index([type])
   @@index([type, isActive])
@@ -2182,8 +2185,7 @@ model Expense {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
-  // Back-relation: BAS payment that used this expense record
-  basPayment   BasPeriod?      @relation("BasPeriodPaymentExpense")
+
 
   @@index([date])
   @@index([accountId])
@@ -2261,6 +2263,10 @@ model BankTransaction {
   // Link to an expense (matched to expense)
   expense       Expense?                                 // Back-relation: Expense.bankTransactionId
 
+  // Link to a BAS period (set when matchType=BAS_PAYMENT)
+  basPeriodId   String?  @unique
+  basPeriod     BasPeriod? @relation("BankTransactionBasPeriod", fields: [basPeriodId], references: [id], onDelete: SetNull)
+
   // Set when transaction is posted
   memo                  String?  @db.Text
   transactionType       String?  @db.VarChar(50)        // Expense | Transfer | Deposit | ReceivePayment
@@ -2312,12 +2318,18 @@ model BasPeriod {
   paygWithholdingCents Int?                            // W2 — amount withheld from wages
   paygInstalmentCents  Int?                            // T4 — PAYG instalment amount
 
-  // Payment recorded after lodging
-  paymentDate          String?                         // YYYY-MM-DD
-  paymentAmountCents   Int?
-  paymentNotes         String?  @db.Text
-  paymentExpenseId     String?  @unique
-  paymentExpense        Expense? @relation("BasPeriodPaymentExpense", fields: [paymentExpenseId], references: [id], onDelete: SetNull)
+  // Payment recorded after lodging (amounts/accounts stored; bank txn reconciled separately)
+  paymentDate              String?                         // YYYY-MM-DD
+  paymentAmountCents       Int?                            // Total = gst + payg
+  paymentNotes             String?  @db.Text
+  paymentGstCents          Int?                            // 1A − 1B net GST component
+  paymentGstAccountId      String?                         // FK to Account for GST
+  paymentGstAccount        Account? @relation("BasPeriodGstAccount", fields: [paymentGstAccountId], references: [id], onDelete: SetNull)
+  paymentPaygCents         Int?                            // T7 PAYG instalment component
+  paymentPaygAccountId     String?                         // FK to Account for PAYG
+  paymentPaygAccount       Account? @relation("BasPeriodPaygAccount", fields: [paymentPaygAccountId], references: [id], onDelete: SetNull)
+  // Back-link to reconciled bank transaction (set when bank txn matched as BAS_PAYMENT)
+  bankTransaction          BankTransaction? @relation("BankTransactionBasPeriod")
   accountingAttachments AccountingAttachment[]
 
   createdAt DateTime @default(now())
@@ -2332,6 +2344,10 @@ model AccountingSettings {
   id String @id @default("default")
 
   reportingBasis String @default("ACCRUAL")
+
+  // Default Chart of Accounts for BAS payment splitting
+  basGstAccountId  String?   // Account for the GST net component (1A − 1B)
+  basPaygAccountId String?   // Account for the PAYG Income Tax Instalment (T7)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

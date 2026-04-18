@@ -161,6 +161,15 @@ export default function BankAccountsPage() {
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
   const [matchingExpense, setMatchingExpense] = useState(false)
 
+  // BAS Payment matching dialog
+  interface UnreconciledBasPeriod { id: string; label: string; quarter: number; financialYear: string; paymentDate: string | null; paymentAmountCents: number | null }
+  const [matchBasTarget, setMatchBasTarget] = useState<BankTransaction | null>(null)
+  const [basSearch, setBasSearch] = useState('')
+  const [unreconciledBasPeriods, setUnreconciledBasPeriods] = useState<UnreconciledBasPeriod[]>([])
+  const [loadingBasPeriods, setLoadingBasPeriods] = useState(false)
+  const [selectedBasPeriodId, setSelectedBasPeriodId] = useState<string | null>(null)
+  const [matchingBas, setMatchingBas] = useState(false)
+
   // Split transaction state
   const [splitTxnId, setSplitTxnId] = useState<string | null>(null)
 
@@ -630,6 +639,52 @@ export default function BankAccountsPage() {
     } finally { setMatchingExpense(false) }
   }
 
+  function openMatchBasDialog(txn: BankTransaction) {
+    setMatchBasTarget(txn)
+    setSelectedBasPeriodId(null)
+    setBasSearch('')
+    setUnreconciledBasPeriods([])
+    void loadUnreconciledBasPeriods('', txn)
+  }
+
+  const loadUnreconciledBasPeriods = useCallback(async (q: string, txn?: BankTransaction | null) => {
+    setLoadingBasPeriods(true)
+    try {
+      const res = await apiFetch('/api/admin/accounting/bas')
+      if (!res.ok) return
+      const d = await res.json()
+      const targetAmount = txn ? Math.abs(txn.amountCents) : null
+      const list = (d.periods ?? []).filter((p: UnreconciledBasPeriod & { status?: string; bankTransactionId?: string | null }) => {
+        if (p.status !== 'LODGED') return false
+        if (!p.paymentDate || !p.paymentAmountCents) return false
+        if (p.bankTransactionId) return false
+        if (targetAmount !== null && p.paymentAmountCents !== targetAmount) return false
+        const query = q.trim().toLowerCase()
+        if (!query) return true
+        const label = `${p.label || `Q${p.quarter} ${p.financialYear}`}`.toLowerCase()
+        return label.includes(query) || `${p.financialYear}`.toLowerCase().includes(query)
+      })
+      setUnreconciledBasPeriods(list)
+    } finally { setLoadingBasPeriods(false) }
+  }, [])
+
+  async function handleMatchBas() {
+    if (!matchBasTarget || !selectedBasPeriodId) return
+    setMatchingBas(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${matchBasTarget.id}/match-bas`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ basPeriodId: selectedBasPeriodId }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match BAS payment'); return }
+      const matchedId = matchBasTarget.id
+      setMatchBasTarget(null)
+      setTransactions(prev => prev.filter(t => t.id !== matchedId))
+      setTxnTotal(prev => Math.max(0, prev - 1))
+      setExpandedId(prev => prev === matchedId ? null : prev)
+    } finally { setMatchingBas(false) }
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Bank Account Cards */}
@@ -826,6 +881,7 @@ export default function BankAccountsPage() {
                               <div className="w-32 shrink-0 hidden sm:block">
                                 {(() => {
                                   if (t.matchType === 'SPLIT') return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">Split ({t.splitLines?.length ?? 0})</span>
+                                  if (t.matchType === 'BAS_PAYMENT') return <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-400">BAS Payment{t.basPeriod ? ` — ${t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}` : ''}</span>
                                   const acctId = t.accountId ?? t.expense?.accountId
                                   const acctName = t.accountName ?? t.expense?.accountName ?? ''
                                   const acctCode = coaAccounts.find(a => a.id === acctId)?.code
@@ -1033,6 +1089,11 @@ export default function BankAccountsPage() {
                                         <Link2 className="w-3.5 h-3.5 mr-1.5" />Match Expense
                                       </Button>
                                     )}
+                                    {t.amountCents < 0 && (
+                                      <Button size="sm" variant="outline" onClick={() => openMatchBasDialog(t)} disabled={isPosting || isIgnoring}>
+                                        <Link2 className="w-3.5 h-3.5 mr-1.5" />BAS Payment
+                                      </Button>
+                                    )}
                                     <Button size="sm" variant="ghost" onClick={() => void handleIgnore(t.id)} disabled={isIgnoring || isPosting}>
                                       {isIgnoring ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <EyeOff className="w-3.5 h-3.5 mr-1.5" />}Ignore
                                     </Button>
@@ -1135,8 +1196,9 @@ export default function BankAccountsPage() {
                                 <div className="space-y-3 max-w-xl">
                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
                                     <div className="col-span-2 sm:hidden"><p className="text-xs text-muted-foreground">Description</p><p className="whitespace-normal break-words">{t.description}</p></div>
-                                    {(t.transactionType || t.matchType === 'INVOICE_PAYMENT') && <div><p className="text-xs text-muted-foreground">Type</p><p>{t.matchType === 'SPLIT' ? 'Split' : t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : TYPE_LABELS[t.transactionType!] ?? t.transactionType}</p></div>}
-                                    {t.matchType !== 'SPLIT' && (() => { const acctId = t.accountId ?? t.expense?.accountId; const name = t.accountName ?? t.expense?.accountName; const code = acctId ? coaAccounts.find(a => a.id === acctId)?.code : undefined; if (t.matchType === 'INVOICE_PAYMENT') return <div><p className="text-xs text-muted-foreground">Posting</p><p>Invoice payment only</p></div>; if (acctId) return <div><p className="text-xs text-muted-foreground">Account</p>{code ? <Link href={`/admin/accounting/chart-of-accounts/${code}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link> : <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link>}</div>; return null })()}
+                                    {(t.transactionType || t.matchType === 'INVOICE_PAYMENT' || t.matchType === 'BAS_PAYMENT') && <div><p className="text-xs text-muted-foreground">Type</p><p>{t.matchType === 'SPLIT' ? 'Split' : t.matchType === 'BAS_PAYMENT' ? 'BAS Payment' : t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : TYPE_LABELS[t.transactionType!] ?? t.transactionType}</p></div>}
+                                    {t.matchType !== 'SPLIT' && t.matchType !== 'BAS_PAYMENT' && (() => { const acctId = t.accountId ?? t.expense?.accountId; const name = t.accountName ?? t.expense?.accountName; const code = acctId ? coaAccounts.find(a => a.id === acctId)?.code : undefined; if (t.matchType === 'INVOICE_PAYMENT') return <div><p className="text-xs text-muted-foreground">Posting</p><p>Invoice payment only</p></div>; if (acctId) return <div><p className="text-xs text-muted-foreground">Account</p>{code ? <Link href={`/admin/accounting/chart-of-accounts/${code}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link> : <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link>}</div>; return null })()}
+                                    {t.matchType === 'BAS_PAYMENT' && t.basPeriod && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">BAS Period</p><p>{t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}</p></div>}
                                     {t.taxCode && <div><p className="text-xs text-muted-foreground">GST</p><p>{taxRates.find(r => r.code === t.taxCode)?.name ?? t.taxCode}</p></div>}
                                     {t.invoicePayment?.invoiceId && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Invoice</p><Link href={`/admin/sales/invoices/${t.invoicePayment.invoiceId}`} className="text-sm text-primary hover:underline underline-offset-2">{t.invoicePayment.invoiceNumber ?? t.invoicePayment.invoiceId}{t.invoicePayment.clientName ? ` — ${t.invoicePayment.clientName}` : ''}</Link></div>}
                                     {t.memo && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Memo</p><p>{t.memo}</p></div>}
@@ -1158,7 +1220,7 @@ export default function BankAccountsPage() {
                                       />
                                     )
                                   })()}
-                                  {t.matchType === 'SPLIT' && t.splitLines && t.splitLines.length > 0 && (
+                                  {(t.matchType === 'SPLIT' || t.matchType === 'BAS_PAYMENT') && t.splitLines && t.splitLines.length > 0 && (
                                     <div className="rounded border border-border overflow-hidden">
                                       <table className="w-full text-xs">
                                         <thead className="bg-muted/30">
@@ -1448,6 +1510,55 @@ export default function BankAccountsPage() {
             <Button variant="outline" onClick={() => setMatchExpenseTarget(null)} disabled={matchingExpense}>Cancel</Button>
             <Button onClick={() => void handleMatchExpense()} disabled={!selectedExpenseId || matchingExpense}>
               {matchingExpense && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Match Expense
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Match BAS Payment Dialog */}
+      <Dialog open={!!matchBasTarget} onOpenChange={open => { if (!open && !matchingBas) { setMatchBasTarget(null) } }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Match BAS Payment — {matchBasTarget ? fmtAmt(matchBasTarget.amountCents) : ''}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder="Search BAS period..."
+              value={basSearch}
+              onChange={e => { setBasSearch(e.target.value); void loadUnreconciledBasPeriods(e.target.value, matchBasTarget) }}
+              className="h-9"
+              autoFocus
+            />
+            {loadingBasPeriods ? (
+              <div className="py-4 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading...</div>
+            ) : unreconciledBasPeriods.length === 0 ? (
+              <div className="py-4 text-center text-sm text-muted-foreground">No unreconciled lodged BAS periods with a matching payment amount were found.</div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                {unreconciledBasPeriods.map(period => (
+                  <button key={period.id} type="button"
+                    onClick={() => setSelectedBasPeriodId(period.id)}
+                    className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
+                      selectedBasPeriodId === period.id && 'bg-primary/10 border-l-2 border-primary'
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{period.label || `Q${period.quarter} ${period.financialYear}`}</p>
+                      <p className="text-xs text-muted-foreground">Payment date: {period.paymentDate ? formatDate(period.paymentDate) : '—'}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-medium tabular-nums">{fmtAud(period.paymentAmountCents ?? 0)}</p>
+                      <p className="text-xs text-muted-foreground">BAS lodged</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMatchBasTarget(null)} disabled={matchingBas}>Cancel</Button>
+            <Button onClick={() => void handleMatchBas()} disabled={!selectedBasPeriodId || matchingBas}>
+              {matchingBas && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Match BAS Payment
             </Button>
           </DialogFooter>
         </DialogContent>

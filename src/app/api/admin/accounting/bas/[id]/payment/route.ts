@@ -10,14 +10,21 @@ export const dynamic = 'force-dynamic'
 
 const paymentSchema = z.object({
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  paymentAmountCents: z.number().int().positive(),
+  // GST net component (1A − 1B) — must be positive
+  gstAmountCents: z.number().int().min(1),
+  // PAYG Income Tax Instalment component (T7) — 0 if none
+  paygAmountCents: z.number().int().min(0).default(0),
+  // Account for the GST net (e.g. GST Payable liability)
+  gstAccountId: z.string().trim().min(1),
+  // Account for the PAYG instalment (required when paygAmountCents > 0)
+  paygAccountId: z.string().trim().min(1).optional().nullable(),
   paymentNotes: z.string().trim().max(2000).optional().nullable(),
-  // Account to debit (e.g. ATO Integrated Client Account, GST Payable, or a general tax expense account)
-  accountId: z.string().trim().min(1),
 })
 
 // POST /api/admin/accounting/bas/[id]/payment
-// Records payment of a lodged BAS — creates an Expense record and stores the payment reference.
+// Stores payment date, amounts, and target accounts on the BAS period.
+// No Expense records are created — reconciliation happens when the ATO bank debit
+// is matched as BAS_PAYMENT against this period.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenu(request, 'accounting')
   if (authResult instanceof Response) return authResult
@@ -35,51 +42,40 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (!period) return NextResponse.json({ error: 'BAS period not found' }, { status: 404 })
   if (period.status !== 'LODGED') return NextResponse.json({ error: 'Only lodged BAS periods can have a payment recorded' }, { status: 409 })
-  if (period.paymentExpenseId) return NextResponse.json({ error: 'A payment has already been recorded for this period' }, { status: 409 })
+  if (period.paymentDate) return NextResponse.json({ error: 'A payment has already been recorded for this period' }, { status: 409 })
 
   const body = await request.json().catch(() => null)
   const parsed = paymentSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
 
-  const { paymentDate, paymentAmountCents, paymentNotes, accountId } = parsed.data
+  const { paymentDate, gstAmountCents, paygAmountCents, gstAccountId, paygAccountId, paymentNotes } = parsed.data
 
-  const account = await prisma.account.findUnique({ where: { id: accountId } })
-  if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
-  // Allow any account type — BAS payment may go to a liability, expense, or asset account
-  if (!account.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 400 })
+  if (paygAmountCents > 0 && !paygAccountId) {
+    return NextResponse.json({ error: 'A PAYG account is required when a PAYG amount is entered' }, { status: 400 })
+  }
 
-  const description = `BAS payment — ${period.label || `Q${period.quarter} ${period.financialYear}`}`
+  const gstAccount = await prisma.account.findUnique({ where: { id: gstAccountId } })
+  if (!gstAccount) return NextResponse.json({ error: 'GST account not found' }, { status: 404 })
+  if (!gstAccount.isActive) return NextResponse.json({ error: 'GST account is inactive' }, { status: 400 })
 
-  const updated = await prisma.$transaction(async (tx) => {
-    // Create an expense/payment record BAS_EXCLUDED since this is a tax payment (not a GST transaction)
-    const amountCents = paymentAmountCents
-    const expense = await tx.expense.create({
-      data: {
-        date: paymentDate,
-        supplierName: 'ATO',
-        description,
-        accountId,
-        taxCode: 'BAS_EXCLUDED',
-        amountExGst: amountCents,
-        gstAmount: 0,
-        amountIncGst: amountCents,
-        status: 'APPROVED',
-        notes: paymentNotes ?? null,
-        userId: authResult.id,
-      },
-    })
+  if (paygAmountCents > 0 && paygAccountId) {
+    const paygAccount = await prisma.account.findUnique({ where: { id: paygAccountId } })
+    if (!paygAccount) return NextResponse.json({ error: 'PAYG account not found' }, { status: 404 })
+    if (!paygAccount.isActive) return NextResponse.json({ error: 'PAYG account is inactive' }, { status: 400 })
+  }
 
-    const updatedPeriod = await tx.basPeriod.update({
-      where: { id },
-      data: {
-        paymentDate,
-        paymentAmountCents: amountCents,
-        paymentNotes: paymentNotes ?? null,
-        paymentExpenseId: expense.id,
-      },
-    })
-
-    return updatedPeriod
+  const updated = await prisma.basPeriod.update({
+    where: { id },
+    data: {
+      paymentDate,
+      paymentAmountCents: gstAmountCents + paygAmountCents,
+      paymentNotes: paymentNotes ?? null,
+      paymentGstCents: gstAmountCents,
+      paymentGstAccountId: gstAccountId,
+      paymentPaygCents: paygAmountCents > 0 ? paygAmountCents : null,
+      paymentPaygAccountId: paygAmountCents > 0 ? (paygAccountId ?? null) : null,
+    },
+    include: { accountingAttachments: true },
   })
 
   const res = NextResponse.json({ period: basPeriodFromDb(updated) })
@@ -88,7 +84,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 }
 
 // DELETE /api/admin/accounting/bas/[id]/payment
-// Removes a recorded payment (deletes the linked expense and clears payment fields).
+// Clears the recorded payment from the BAS period.
+// If a bank transaction has been matched as BAS_PAYMENT, unmatches it first.
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenu(request, 'accounting')
   if (authResult instanceof Response) return authResult
@@ -105,26 +102,41 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const period = await prisma.basPeriod.findUnique({ where: { id } })
 
   if (!period) return NextResponse.json({ error: 'BAS period not found' }, { status: 404 })
-  if (!period.paymentExpenseId) return NextResponse.json({ error: 'No payment recorded for this period' }, { status: 404 })
+  if (!period.paymentDate) return NextResponse.json({ error: 'No payment recorded for this period' }, { status: 404 })
+
+  const linkedBankTxn = await (prisma.bankTransaction as any).findFirst({
+    where: { basPeriodId: id },
+    select: { id: true },
+  })
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Clear the reference first so the FK constraint is satisfied before deleting
-    const clearedPeriod = await tx.basPeriod.update({
+    // If a bank transaction was matched as BAS_PAYMENT against this period, unmatch it
+    if (linkedBankTxn) {
+      await tx.splitLine.deleteMany({ where: { bankTransactionId: linkedBankTxn.id } })
+      await tx.bankTransaction.update({
+        where: { id: linkedBankTxn.id },
+        data: { status: 'UNMATCHED', matchType: null, basPeriodId: null, transactionType: null },
+      })
+    }
+
+    return tx.basPeriod.update({
       where: { id },
       data: {
         paymentDate: null,
         paymentAmountCents: null,
         paymentNotes: null,
-        paymentExpenseId: null,
+        paymentGstCents: null,
+        paymentGstAccountId: null,
+        paymentPaygCents: null,
+        paymentPaygAccountId: null,
       },
+      include: { accountingAttachments: true },
     })
-
-    await tx.expense.delete({ where: { id: period.paymentExpenseId! } })
-
-    return clearedPeriod
   })
 
   const res = NextResponse.json({ period: basPeriodFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }
+
+

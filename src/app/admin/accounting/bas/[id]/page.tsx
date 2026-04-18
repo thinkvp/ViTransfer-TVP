@@ -16,7 +16,7 @@ import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesReco
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 
 function fmtAud(cents: number) {
   const abs = (Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -63,12 +63,18 @@ export default function BasDetailPage() {
   // Payment recording
   interface CoaOption { id: string; code: string; name: string; type: string }
   const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
+  const [defaultGstAccountId, setDefaultGstAccountId] = useState('')
+  const [defaultPaygAccountId, setDefaultPaygAccountId] = useState('')
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentDate, setPaymentDate] = useState('')
-  const [paymentAmount, setPaymentAmount] = useState('')
-  const [paymentAccountId, setPaymentAccountId] = useState('')
-  const [paymentAccountSearch, setPaymentAccountSearch] = useState('')
-  const [paymentAccountOpen, setPaymentAccountOpen] = useState(false)
+  const [gstAmountStr, setGstAmountStr] = useState('')
+  const [paygAmountStr, setPaygAmountStr] = useState('')
+  const [gstAccountId, setGstAccountId] = useState('')
+  const [gstAccountSearch, setGstAccountSearch] = useState('')
+  const [gstAccountOpen, setGstAccountOpen] = useState(false)
+  const [paygAccountId, setPaygAccountId] = useState('')
+  const [paygAccountSearch, setPaygAccountSearch] = useState('')
+  const [paygAccountOpen, setPaygAccountOpen] = useState(false)
   const [paymentNotes, setPaymentNotes] = useState('')
   const [recordingPayment, setRecordingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState('')
@@ -109,11 +115,20 @@ export default function BasDetailPage() {
 
   useEffect(() => { void load() }, [load])
 
-  // Load chart of accounts for payment dialog
+  // Load chart of accounts and settings defaults for payment dialog
   useEffect(() => {
     apiFetch('/api/admin/accounting/accounts?activeOnly=true')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.accounts) setCoaAccounts(d.accounts) })
+      .catch(() => {})
+    apiFetch('/api/admin/accounting/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d) {
+          setDefaultGstAccountId(d.basGstAccountId ?? '')
+          setDefaultPaygAccountId(d.basPaygAccountId ?? '')
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -218,19 +233,26 @@ export default function BasDetailPage() {
   }
 
   async function handleRecordPayment() {
-    if (!paymentDate || !paymentAmount || !paymentAccountId) {
-      setPaymentError('Date, amount and account are required')
-      return
-    }
-    const amountCents = Math.round(parseFloat(paymentAmount) * 100)
-    if (!amountCents || amountCents <= 0) { setPaymentError('Enter a valid amount'); return }
+    const gstCents = Math.round(parseFloat(gstAmountStr) * 100)
+    const paygCents = paygAmountStr ? Math.round(parseFloat(paygAmountStr) * 100) : 0
+    if (!paymentDate) { setPaymentError('Payment date is required'); return }
+    if (!gstCents || gstCents <= 0) { setPaymentError('Enter a valid GST amount'); return }
+    if (!gstAccountId) { setPaymentError('Select a GST account'); return }
+    if (paygCents > 0 && !paygAccountId) { setPaymentError('Select a PAYG account'); return }
     setRecordingPayment(true)
     setPaymentError('')
     try {
       const res = await apiFetch(`/api/admin/accounting/bas/${id}/payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paymentDate, paymentAmountCents: amountCents, paymentNotes: paymentNotes.trim() || null, accountId: paymentAccountId }),
+        body: JSON.stringify({
+          paymentDate,
+          gstAmountCents: gstCents,
+          paygAmountCents: paygCents,
+          gstAccountId,
+          paygAccountId: paygCents > 0 ? paygAccountId : null,
+          paymentNotes: paymentNotes.trim() || null,
+        }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); setPaymentError(d.error || 'Failed'); return }
       setPaymentOpen(false)
@@ -364,11 +386,36 @@ export default function BasDetailPage() {
           </CardHeader>
           <CardContent className="text-sm">
             {period.paymentDate ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
                   <div><p className="text-xs text-muted-foreground">Payment Date</p><p>{period.paymentDate}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Amount Paid</p><p className="font-medium">{period.paymentAmountCents != null ? fmtAud(period.paymentAmountCents) : '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Total</p><p className="font-medium">{period.paymentAmountCents != null ? fmtAud(period.paymentAmountCents) : '—'}</p></div>
                   {period.paymentNotes && <div className="col-span-2 sm:col-span-1"><p className="text-xs text-muted-foreground">Notes</p><p>{period.paymentNotes}</p></div>}
+                </div>
+                {/* Component breakdown */}
+                <div className="rounded border border-border divide-y divide-border text-xs">
+                  <div className="flex justify-between px-3 py-1.5">
+                    <span className="text-muted-foreground">GST net (1A − 1B)</span>
+                    <span className="tabular-nums font-medium">{period.paymentGstCents != null ? fmtAud(period.paymentGstCents) : '—'}</span>
+                  </div>
+                  {(period.paymentPaygCents ?? 0) > 0 && (
+                    <div className="flex justify-between px-3 py-1.5">
+                      <span className="text-muted-foreground">PAYG Instalment (T7)</span>
+                      <span className="tabular-nums font-medium">{fmtAud(period.paymentPaygCents!)}</span>
+                    </div>
+                  )}
+                </div>
+                {/* Bank reconciliation status */}
+                <div className="flex items-center gap-2 text-xs">
+                  {period.bankTransactionId ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/10 text-green-700 dark:text-green-400">
+                      <CheckCircle className="w-3 h-3" />Bank reconciled
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
+                      Awaiting bank match — match the ATO debit of {fmtAud(period.paymentAmountCents ?? 0)} in Bank Transactions as &ldquo;BAS Payment&rdquo;
+                    </span>
+                  )}
                 </div>
                 <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setDeletePaymentConfirm(true)}>
                   <Trash2 className="w-3.5 h-3.5 mr-1.5" />Remove Payment
@@ -379,9 +426,12 @@ export default function BasDetailPage() {
                 <p className="text-muted-foreground text-sm">No payment recorded yet.</p>
                 <Button size="sm" variant="outline" onClick={() => {
                   setPaymentDate(new Date().toISOString().slice(0, 10))
-                  setPaymentAmount(calculation ? ((Math.max(0, calculation.netGstCents) + (period.paygWithholdingCents ?? 0) + (period.paygInstalmentCents ?? 0)) / 100).toFixed(2) : '')
-                  setPaymentAccountId('')
-                  setPaymentAccountSearch('')
+                  setGstAmountStr(calculation ? (Math.max(0, calculation.netGstCents) / 100).toFixed(2) : '')
+                  setPaygAmountStr((period.paygInstalmentCents ?? 0) > 0 ? ((period.paygInstalmentCents ?? 0) / 100).toFixed(2) : '')
+                  setGstAccountId(defaultGstAccountId)
+                  setGstAccountSearch('')
+                  setPaygAccountId(defaultPaygAccountId)
+                  setPaygAccountSearch('')
                   setPaymentNotes('')
                   setPaymentError('')
                   setPaymentOpen(true)
@@ -536,7 +586,7 @@ export default function BasDetailPage() {
                     <tbody>
                       {records.sales.map((r, i) => (
                         <tr key={`${r.id}-${i}`} className="border-b border-border last:border-0 hover:bg-muted/30">
-                          <td className="px-2 py-1.5">{r.date}</td>
+                          <td className="px-2 py-1.5">{formatDate(r.date)}</td>
                           <td className="px-2 py-1.5 font-medium">{r.invoiceNumber}</td>
                           <td className="px-2 py-1.5 text-muted-foreground max-w-[140px] truncate">{r.clientName}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.subtotalCents)}</td>
@@ -607,8 +657,9 @@ export default function BasDetailPage() {
                                   <th className="text-left px-2 py-1.5 font-medium">Supplier</th>
                                   <th className="text-left px-2 py-1.5 font-medium">Description</th>
                                   <th className="text-left px-2 py-1.5 font-medium">Account</th>
-                                  <th className="text-right px-2 py-1.5 font-medium">Inc GST</th>
+                                  <th className="text-right px-2 py-1.5 font-medium">Subtotal</th>
                                   <th className="text-right px-2 py-1.5 font-medium">GST</th>
+                                  <th className="text-right px-2 py-1.5 font-medium">Total</th>
                                   <th className="px-2 py-1.5 w-8"></th>
                                 </tr>
                               </thead>
@@ -622,12 +673,13 @@ export default function BasDetailPage() {
                                     )}
                                     onClick={() => { setEditExpenseId(r.id); setEditExpenseOpen(true) }}
                                   >
-                                    <td className="px-2 py-1.5">{r.date}</td>
+                                    <td className="px-2 py-1.5">{formatDate(r.date)}</td>
                                     <td className="px-2 py-1.5 text-muted-foreground max-w-[120px] truncate">{r.supplier ?? '—'}</td>
                                     <td className="px-2 py-1.5 max-w-[160px] truncate" title={r.description}>{r.description}</td>
                                     <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.accountCode}</td>
-                                    <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.amountIncGstCents)}</td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.amountIncGstCents - r.gstCents)}</td>
                                     <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtAud(r.amountIncGstCents)}</td>
                                     <td className="px-2 py-1.5 text-center">
                                       {r.issue === 'zero_gst' && (
                                         <span title="Coded GST but $0 GST amount" className="text-yellow-600 dark:text-yellow-400">
@@ -651,8 +703,9 @@ export default function BasDetailPage() {
                               <tfoot>
                                 <tr className="bg-muted/40 border-t border-border font-semibold text-xs">
                                   <td className="px-2 py-1.5" colSpan={4}>Total</td>
-                                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(group.reduce((s, r) => s + r.amountIncGstCents, 0))}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(group.reduce((s, r) => s + r.amountIncGstCents - r.gstCents, 0))}</td>
                                   <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(group.reduce((s, r) => s + r.gstCents, 0))}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(group.reduce((s, r) => s + r.amountIncGstCents, 0))}</td>
                                   <td></td>
                                 </tr>
                               </tfoot>
@@ -711,44 +764,99 @@ export default function BasDetailPage() {
       <Dialog open={paymentOpen} onOpenChange={open => { if (!open && !recordingPayment) setPaymentOpen(false) }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Record BAS Payment</DialogTitle></DialogHeader>
-          <div className="space-y-3 text-sm">
+          <div className="space-y-4 text-sm">
             <div className="space-y-1">
               <Label>Payment Date *</Label>
               <Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
             </div>
-            <div className="space-y-1">
-              <Label>Amount Paid ($) *</Label>
-              <Input type="number" step="0.01" placeholder="0.00" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>Account *</Label>
-              <p className="text-xs text-muted-foreground">Select the account to record the payment against (e.g. ATO Integrated Client Account, GST Payable, or a tax expense account).</p>
-              <div className="relative">
-                <Input
-                  placeholder="Search account…"
-                  value={paymentAccountOpen ? paymentAccountSearch : (() => { const a = coaAccounts.find(x => x.id === paymentAccountId); return a ? `${a.type} — ${a.name}` : '' })()}
-                  onFocus={() => { setPaymentAccountOpen(true); setPaymentAccountSearch('') }}
-                  onBlur={() => setTimeout(() => setPaymentAccountOpen(false), 150)}
-                  onChange={e => setPaymentAccountSearch(e.target.value)}
-                />
-                {paymentAccountOpen && (
-                  <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                    {coaAccounts.filter(a => {
-                      const q = paymentAccountSearch.toLowerCase()
-                      return !q || a.name.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)
-                    }).sort((a, b) => a.name.localeCompare(b.name)).map(a => (
-                      <button key={a.id} type="button"
-                        onMouseDown={() => { setPaymentAccountId(a.id); setPaymentAccountOpen(false); setPaymentAccountSearch('') }}
-                        className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', paymentAccountId === a.id && 'bg-primary/10 font-medium')}
-                      >{a.type} — {a.name}</button>
-                    ))}
-                    {coaAccounts.filter(a => { const q = paymentAccountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) }).length === 0 && (
-                      <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+
+            {/* GST Component */}
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">GST — Net (1A − 1B)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Amount ($) *</Label>
+                  <Input type="number" step="0.01" placeholder="0.00" value={gstAmountStr} onChange={e => setGstAmountStr(e.target.value)} />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label>Account *</Label>
+                  <div className="relative">
+                    <Input
+                      placeholder="Search account…"
+                      value={gstAccountOpen ? gstAccountSearch : (() => { const a = coaAccounts.find(x => x.id === gstAccountId); return a ? `${a.code} — ${a.name}` : '' })()}
+                      onFocus={() => { setGstAccountOpen(true); setGstAccountSearch('') }}
+                      onBlur={() => setTimeout(() => setGstAccountOpen(false), 150)}
+                      onChange={e => setGstAccountSearch(e.target.value)}
+                    />
+                    {gstAccountOpen && (
+                      <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                        {coaAccounts.filter(a => { const q = gstAccountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) }).map(a => (
+                          <button key={a.id} type="button"
+                            onMouseDown={() => { setGstAccountId(a.id); setGstAccountOpen(false); setGstAccountSearch('') }}
+                            className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', gstAccountId === a.id && 'bg-primary/10 font-medium')}
+                          >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                        ))}
+                        {coaAccounts.filter(a => { const q = gstAccountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) }).length === 0 && (
+                          <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
+                </div>
               </div>
             </div>
+
+            {/* PAYG Instalment Component — only shown if period has T7 */}
+            {(period?.paygInstalmentCents ?? 0) > 0 && (
+              <div className="rounded-md border border-border p-3 space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">PAYG Income Tax Instalment (T7)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Amount ($) *</Label>
+                    <Input type="number" step="0.01" placeholder="0.00" value={paygAmountStr} onChange={e => setPaygAmountStr(e.target.value)} />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <Label>Account *</Label>
+                    <div className="relative">
+                      <Input
+                        placeholder="Search account…"
+                        value={paygAccountOpen ? paygAccountSearch : (() => { const a = coaAccounts.find(x => x.id === paygAccountId); return a ? `${a.code} — ${a.name}` : '' })()}
+                        onFocus={() => { setPaygAccountOpen(true); setPaygAccountSearch('') }}
+                        onBlur={() => setTimeout(() => setPaygAccountOpen(false), 150)}
+                        onChange={e => setPaygAccountSearch(e.target.value)}
+                      />
+                      {paygAccountOpen && (
+                        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                          {coaAccounts.filter(a => { const q = paygAccountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) }).map(a => (
+                            <button key={a.id} type="button"
+                              onMouseDown={() => { setPaygAccountId(a.id); setPaygAccountOpen(false); setPaygAccountSearch('') }}
+                              className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', paygAccountId === a.id && 'bg-primary/10 font-medium')}
+                            >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                          ))}
+                          {coaAccounts.filter(a => { const q = paygAccountSearch.toLowerCase(); return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q) }).length === 0 && (
+                            <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Total */}
+            {(() => {
+              const g = parseFloat(gstAmountStr) || 0
+              const p = parseFloat(paygAmountStr) || 0
+              const total = g + p
+              return total > 0 ? (
+                <div className="flex justify-between items-center border-t border-border pt-3">
+                  <span className="text-muted-foreground">Total payment</span>
+                  <span className="font-semibold tabular-nums">{fmtAud(Math.round(total * 100))}</span>
+                </div>
+              ) : null
+            })()}
+
             <div className="space-y-1">
               <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
               <Input placeholder="e.g. Paid via BPAY" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} />
@@ -757,7 +865,7 @@ export default function BasDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPaymentOpen(false)} disabled={recordingPayment}>Cancel</Button>
-            <Button onClick={() => void handleRecordPayment()} disabled={recordingPayment || !paymentDate || !paymentAmount || !paymentAccountId}>
+            <Button onClick={() => void handleRecordPayment()} disabled={recordingPayment || !paymentDate || !gstAmountStr || !gstAccountId}>
               {recordingPayment && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Record Payment
             </Button>
           </DialogFooter>

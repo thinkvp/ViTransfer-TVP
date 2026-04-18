@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
-import { Plus, Pencil, Trash2, Check, X, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, X, Loader2, Save } from 'lucide-react'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { cn } from '@/lib/utils'
 import type { AccountingSettings } from '@/lib/accounting/types'
@@ -68,6 +68,15 @@ export default function AccountingSettingsPage() {
   const [settingsError, setSettingsError] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [reportingBasis, setReportingBasis] = useState<'CASH' | 'ACCRUAL'>('ACCRUAL')
+  // BAS payment default accounts
+  const [basGstAccountId, setBasGstAccountId] = useState('')
+  const [basPaygAccountId, setBasPaygAccountId] = useState('')
+  const [basGstSearch, setBasGstSearch] = useState('')
+  const [basGstOpen, setBasGstOpen] = useState(false)
+  const [basPaygSearch, setBasPaygSearch] = useState('')
+  const [basPaygOpen, setBasPaygOpen] = useState(false)
+  interface CoaOption { id: string; code: string; name: string; type: string }
+  const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -87,7 +96,11 @@ export default function AccountingSettingsPage() {
       try {
         const res = await apiFetch('/api/admin/accounting/settings')
         const data: AccountingSettings | null = res.ok ? await res.json() : null
-        if (!cancelled) setReportingBasis(data?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL')
+        if (!cancelled) {
+          setReportingBasis(data?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL')
+          setBasGstAccountId(data?.basGstAccountId ?? '')
+          setBasPaygAccountId(data?.basPaygAccountId ?? '')
+        }
       } finally {
         if (!cancelled) setSettingsLoading(false)
       }
@@ -98,6 +111,13 @@ export default function AccountingSettingsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    apiFetch('/api/admin/accounting/accounts?activeOnly=true')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.accounts) setCoaAccounts(d.accounts) })
+      .catch(() => {})
+  }, [])
+
   async function handleSettingsSave() {
     setSettingsSaving(true)
     setSettingsError('')
@@ -106,7 +126,11 @@ export default function AccountingSettingsPage() {
       const res = await apiFetch('/api/admin/accounting/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reportingBasis }),
+        body: JSON.stringify({
+          reportingBasis,
+          basGstAccountId: basGstAccountId || null,
+          basPaygAccountId: basPaygAccountId || null,
+        }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
@@ -180,10 +204,28 @@ export default function AccountingSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Accounting Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">Manage reporting defaults and tax rates used when posting bank transactions.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold">Accounting Settings</h2>
+          <p className="text-sm text-muted-foreground mt-1">Manage reporting defaults and tax rates used when posting bank transactions.</p>
+        </div>
+        <Button onClick={() => void handleSettingsSave()} variant="default" disabled={settingsLoading || settingsSaving} size="lg" className="w-full sm:w-auto">
+          <Save className="w-4 h-4 mr-2" />
+          {settingsSaving ? 'Saving...' : 'Save Changes'}
+        </Button>
       </div>
+
+      {settingsError && (
+        <div className="p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
+          <p className="text-xs sm:text-sm text-destructive font-medium">{settingsError}</p>
+        </div>
+      )}
+
+      {settingsSaved && (
+        <div className="p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+          <p className="text-xs sm:text-sm text-success font-medium">Changes saved successfully!</p>
+        </div>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -203,12 +245,85 @@ export default function AccountingSettingsPage() {
             </Select>
             <p className="text-xs text-muted-foreground">Used by the Accounting dashboard, Profit &amp; Loss report, and new BAS periods.</p>
           </div>
-          {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
-          {settingsSaved && <p className="text-xs text-emerald-600 dark:text-emerald-400">Changes saved successfully!</p>}
-          <div>
-            <Button onClick={() => void handleSettingsSave()} disabled={settingsLoading || settingsSaving}>
-              {settingsSaving ? 'Saving…' : 'Save Reporting Settings'}
-            </Button>
+        </CardContent>
+      </Card>
+
+      {/* BAS Payment Defaults */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">BAS Payment Defaults</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Set the default Chart of Accounts entries used when recording a BAS payment. These pre-fill the payment dialog and can be overridden per payment.
+          </p>
+          {/* GST Account */}
+          <div className="space-y-1 max-w-sm">
+            <Label>GST Payable Account</Label>
+            <p className="text-xs text-muted-foreground">Receives the net GST component (1A − 1B). Typically a Liability account such as &ldquo;GST Payable&rdquo;.</p>
+            <div className="relative">
+              <Input
+                placeholder="Search account…"
+                value={basGstOpen ? basGstSearch : (() => { const a = coaAccounts.find(x => x.id === basGstAccountId); return a ? `${a.code} — ${a.name}` : basGstAccountId ? '(unknown account)' : '' })()}
+                onFocus={() => { setBasGstOpen(true); setBasGstSearch('') }}
+                onBlur={() => setTimeout(() => setBasGstOpen(false), 150)}
+                onChange={e => setBasGstSearch(e.target.value)}
+                disabled={settingsLoading}
+              />
+              {basGstOpen && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                  {basGstAccountId && (
+                    <button type="button" onMouseDown={() => { setBasGstAccountId(''); setBasGstOpen(false) }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
+                      Clear selection
+                    </button>
+                  )}
+                  {coaAccounts.filter(a => {
+                    const q = basGstSearch.toLowerCase()
+                    return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
+                  }).map(a => (
+                    <button key={a.id} type="button"
+                      onMouseDown={() => { setBasGstAccountId(a.id); setBasGstOpen(false); setBasGstSearch('') }}
+                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', basGstAccountId === a.id && 'bg-primary/10 font-medium')}
+                    >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          {/* PAYG Account */}
+          <div className="space-y-1 max-w-sm">
+            <Label>PAYG Income Tax Instalment Account</Label>
+            <p className="text-xs text-muted-foreground">Receives the T7 PAYG Instalment component (sole traders / instalments). Typically an Expense or Liability account.</p>
+            <div className="relative">
+              <Input
+                placeholder="Search account…"
+                value={basPaygOpen ? basPaygSearch : (() => { const a = coaAccounts.find(x => x.id === basPaygAccountId); return a ? `${a.code} — ${a.name}` : basPaygAccountId ? '(unknown account)' : '' })()}
+                onFocus={() => { setBasPaygOpen(true); setBasPaygSearch('') }}
+                onBlur={() => setTimeout(() => setBasPaygOpen(false), 150)}
+                onChange={e => setBasPaygSearch(e.target.value)}
+                disabled={settingsLoading}
+              />
+              {basPaygOpen && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                  {basPaygAccountId && (
+                    <button type="button" onMouseDown={() => { setBasPaygAccountId(''); setBasPaygOpen(false) }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
+                      Clear selection
+                    </button>
+                  )}
+                  {coaAccounts.filter(a => {
+                    const q = basPaygSearch.toLowerCase()
+                    return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
+                  }).map(a => (
+                    <button key={a.id} type="button"
+                      onMouseDown={() => { setBasPaygAccountId(a.id); setBasPaygOpen(false); setBasPaygSearch('') }}
+                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', basPaygAccountId === a.id && 'bg-primary/10 font-medium')}
+                    >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

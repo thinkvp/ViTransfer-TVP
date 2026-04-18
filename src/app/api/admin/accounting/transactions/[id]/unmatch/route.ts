@@ -29,6 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       expense: { select: { id: true, accountingAttachments: { select: { storagePath: true } } } },
       invoicePayment: { select: { id: true, invoiceId: true } },
       accountingAttachments: { select: { id: true, storagePath: true } },
+      basPeriod: { select: { id: true } },
     },
   })
 
@@ -41,8 +42,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   await prisma.$transaction(async (tx) => {
-    // If matched via split: delete all split lines
-    if (txn.matchType === 'SPLIT') {
+    // If matched via split or BAS payment: delete all split lines
+    if (txn.matchType === 'SPLIT' || (txn.matchType as string | null) === 'BAS_PAYMENT') {
       await tx.splitLine.deleteMany({ where: { bankTransactionId: id } })
     }
 
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         status: 'UNMATCHED',
         matchType: null,
         invoicePaymentId: null,
+        basPeriodId: null,
         memo: null,
         transactionType: null,
         taxCode: null,
@@ -99,6 +101,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true, invoice: { select: { invoiceNumber: true, clientId: true, client: { select: { name: true } } } } } },
       splitLines: { include: { account: true } },
       accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
+      basPeriod: { select: { id: true, label: true, quarter: true, financialYear: true } },
     },
   })
 

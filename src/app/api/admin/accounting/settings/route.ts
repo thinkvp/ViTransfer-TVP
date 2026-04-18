@@ -9,6 +9,8 @@ export const dynamic = 'force-dynamic'
 
 const settingsSchema = z.object({
   reportingBasis: z.enum(['CASH', 'ACCRUAL']).default('ACCRUAL'),
+  basGstAccountId: z.string().trim().min(1).optional().nullable(),
+  basPaygAccountId: z.string().trim().min(1).optional().nullable(),
 })
 
 export async function GET(request: NextRequest) {

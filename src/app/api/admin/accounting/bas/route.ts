@@ -30,8 +30,9 @@ export async function GET(request: NextRequest) {
   )
   if (rateLimitResult) return rateLimitResult
 
-  const periods = await prisma.basPeriod.findMany({
+  const periods = await (prisma.basPeriod as any).findMany({
     orderBy: [{ financialYear: 'desc' }, { quarter: 'desc' }],
+    include: { bankTransaction: { select: { id: true } } },
   })
 
   const res = NextResponse.json({ periods: periods.map(basPeriodFromDb) })
