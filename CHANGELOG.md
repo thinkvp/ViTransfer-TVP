@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-04-18
+
+### Added
+- **Edit expense directly from BAS drill-down** — clicking any row in the Expenses tab of the BAS records drill-down now opens the Edit Expense modal; after saving, the BAS calculation automatically re-runs so the updated figures are reflected immediately without navigating away
+
+### Changed
+- **BAS expense records grouped by tax code** — the flat expenses table in the BAS drill-down is replaced with separate sub-tables per tax code (GST → GST Free → BAS Excluded → Input Taxed), each with its own subtotal row; the Tax Code column is removed from each sub-table since it is now the group heading
+- **Sales rollup excludes STRIPE-source `SalesPayment` mirror rows** — `SalesPayment` records with `source = STRIPE` (internal mirror rows created for BAS cash-basis queries) are now filtered out of the unified payments list in the sales rollup, preventing duplicate entries alongside the authoritative `SalesInvoiceStripePayment`-derived rows; orphaned Stripe payment entries whose invoice has since been deleted are also excluded
+
+### Fixed
+- **Account attachment migration includes expense-matched bank transactions** — `migrateAccountFolderFiles` previously missed attachments on bank transactions whose account assignment comes from a linked `Expense` record (i.e. `bankTransaction.accountId = null`); the query now also matches transactions whose linked expense belongs to the account being migrated, so all attachment files are correctly moved when an account is renamed
+
 ## [1.5.1] - 2026-04-18
 
 ### Added

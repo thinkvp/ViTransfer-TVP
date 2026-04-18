@@ -361,9 +361,19 @@ export async function migrateAccountFolderFiles(accountId: string): Promise<void
     },
   })
 
-  // Bank-transaction attachments — storagePath lives under the transaction's direct account folder
+  // Bank-transaction attachments — storagePath lives under the transaction's account folder.
+  // EXPENSE-matched transactions intentionally have bankTransaction.accountId = null (the
+  // Expense record owns the account assignment).  We therefore also include transactions
+  // whose *linked expense* belongs to this account so those attachments are migrated too.
   const txnAttachments = await prisma.accountingAttachment.findMany({
-    where: { bankTransaction: { accountId } },
+    where: {
+      bankTransaction: {
+        OR: [
+          { accountId },
+          { expense: { accountId } },
+        ],
+      },
+    },
     select: {
       id: true,
       storagePath: true,

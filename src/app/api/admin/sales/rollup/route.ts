@@ -294,7 +294,14 @@ export async function GET(request: NextRequest) {
 
   const invoiceById = Object.fromEntries(invoices.map((i) => [i.id, i]))
 
-  const stripePayments: RollupPaymentRow[] = (stripePaymentsRaw as any[]).map((p) => {
+  const stripePayments: RollupPaymentRow[] = (stripePaymentsRaw as any[])
+    // Only include Stripe payments whose invoice exists in the loaded set.
+    // Orphaned entries (e.g. test payments for deleted invoices) are excluded.
+    .filter((p) => {
+      const docId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
+      return docId && invoiceById[docId]
+    })
+    .map((p) => {
     const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : null
     const createdAtIso = p?.createdAt instanceof Date ? p.createdAt.toISOString() : String(p?.createdAt ?? '')
     const ymd = /^\d{4}-\d{2}-\d{2}/.test(createdAtIso) ? createdAtIso.slice(0, 10) : new Date().toISOString().slice(0, 10)
@@ -330,18 +337,23 @@ export async function GET(request: NextRequest) {
   })
 
   const unifiedPayments: RollupPaymentRow[] = [
-    ...localPayments.map((p) => ({
-      id: p.id,
-      source: (p.source === 'QUICKBOOKS' ? 'QUICKBOOKS' : p.source === 'STRIPE' ? 'STRIPE' : 'MANUAL') as 'MANUAL' | 'QUICKBOOKS' | 'STRIPE',
-      paymentDate: p.paymentDate,
-      amountCents: p.amountCents,
-      method: p.method || null,
-      reference: p.reference || null,
-      clientId: p.clientId ?? null,
-      invoiceId: p.invoiceId ?? null,
-      excludeFromInvoiceBalance: Boolean((p as any).excludeFromInvoiceBalance),
-      createdAt: p.createdAt,
-    })),
+    ...localPayments
+      // SalesPayment rows with source=STRIPE are internal BAS mirror records — Stripe payments are
+      // already represented in the stripePayments array (from SalesInvoiceStripePayment). Excluding
+      // them here prevents duplicate entries in the payments list UI.
+      .filter((p) => (p as any).source !== 'STRIPE')
+      .map((p) => ({
+        id: p.id,
+        source: (p.source === 'QUICKBOOKS' ? 'QUICKBOOKS' : 'MANUAL') as 'MANUAL' | 'QUICKBOOKS' | 'STRIPE',
+        paymentDate: p.paymentDate,
+        amountCents: p.amountCents,
+        method: p.method || null,
+        reference: p.reference || null,
+        clientId: p.clientId ?? null,
+        invoiceId: p.invoiceId ?? null,
+        excludeFromInvoiceBalance: Boolean((p as any).excludeFromInvoiceBalance),
+        createdAt: p.createdAt,
+      })),
     ...stripePayments,
   ]
 

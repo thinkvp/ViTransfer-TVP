@@ -15,6 +15,7 @@ import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, Che
 import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, AccountingAttachment } from '@/lib/accounting/types'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
+import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
 import { cn } from '@/lib/utils'
 
 function fmtAud(cents: number) {
@@ -78,6 +79,10 @@ export default function BasDetailPage() {
   const [attachments, setAttachments] = useState<AccountingAttachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null)
+
+  // Edit expense from BAS records drill-down
+  const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
+  const [editExpenseOpen, setEditExpenseOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -560,77 +565,105 @@ export default function BasDetailPage() {
                 </div>
               )}
 
-              {/* Expenses records table */}
-              {recordsTab === 'expenses' && (
-                <div className="border border-border rounded-md overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/40 border-b border-border">
-                        <th className="text-left px-2 py-1.5 font-medium">Date</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Supplier</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Description</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Account</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Tax Code</th>
-                        <th className="text-right px-2 py-1.5 font-medium">Inc GST</th>
-                        <th className="text-right px-2 py-1.5 font-medium">GST</th>
-                        <th className="px-2 py-1.5 w-12"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {records.expenses.map((r, i) => (
-                        <tr key={`${r.id}-${i}`} className={cn(
-                          'border-b border-border last:border-0 hover:bg-muted/30',
-                          r.issue === 'zero_gst' && 'bg-yellow-500/5',
-                        )}>
-                          <td className="px-2 py-1.5">{r.date}</td>
-                          <td className="px-2 py-1.5 text-muted-foreground max-w-[120px] truncate">{r.supplier ?? '—'}</td>
-                          <td className="px-2 py-1.5 max-w-[160px] truncate" title={r.description}>{r.description}</td>
-                          <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.accountCode}</td>
-                          <td className="px-2 py-1.5">
+              {/* Expenses records — grouped by tax code */}
+              {recordsTab === 'expenses' && (() => {
+                const TAX_CODE_ORDER = ['GST', 'GST_FREE', 'BAS_EXCLUDED', 'INPUT_TAXED']
+                const TAX_CODE_LABEL: Record<string, string> = {
+                  GST: 'GST',
+                  GST_FREE: 'GST Free',
+                  BAS_EXCLUDED: 'BAS Excluded',
+                  INPUT_TAXED: 'Input Taxed',
+                }
+                const presentCodes = Array.from(new Set(records.expenses.map(r => r.taxCode)))
+                const orderedCodes = [
+                  ...TAX_CODE_ORDER.filter(c => presentCodes.includes(c)),
+                  ...presentCodes.filter(c => !TAX_CODE_ORDER.includes(c)).sort(),
+                ]
+                return (
+                  <div className="space-y-4">
+                    {orderedCodes.map(code => {
+                      const group = records.expenses.filter(r => r.taxCode === code)
+                      if (group.length === 0) return null
+                      return (
+                        <div key={code}>
+                          <p className="text-xs font-semibold text-muted-foreground mb-1.5">
                             <span className={cn(
-                              'px-1.5 py-0.5 rounded text-[10px] font-medium',
-                              r.taxCode === 'GST' ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-                                : r.taxCode === 'GST_FREE' ? 'bg-muted text-muted-foreground'
-                                : r.taxCode === 'BAS_EXCLUDED' ? 'bg-orange-500/15 text-orange-700 dark:text-orange-400'
-                                : r.taxCode === 'INPUT_TAXED' ? 'bg-purple-500/15 text-purple-700 dark:text-purple-400'
+                              'px-1.5 py-0.5 rounded text-[10px] font-medium mr-1.5',
+                              code === 'GST' ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                                : code === 'GST_FREE' ? 'bg-muted text-muted-foreground'
+                                : code === 'BAS_EXCLUDED' ? 'bg-orange-500/15 text-orange-700 dark:text-orange-400'
+                                : code === 'INPUT_TAXED' ? 'bg-purple-500/15 text-purple-700 dark:text-purple-400'
                                 : 'bg-muted text-muted-foreground',
                             )}>
-                              {r.taxCode}
+                              {code}
                             </span>
-                          </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.amountIncGstCents)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>
-                          <td className="px-2 py-1.5 text-center">
-                            {r.issue === 'zero_gst' && (
-                              <span title="Coded GST but $0 GST amount" className="text-yellow-600 dark:text-yellow-400">
-                                <AlertTriangle className="w-3.5 h-3.5 inline" />
-                              </span>
-                            )}
-                            {r.issue === 'bas_excluded' && (
-                              <span title="BAS Excluded — not claimed" className="text-orange-600 dark:text-orange-400">
-                                <Info className="w-3.5 h-3.5 inline" />
-                              </span>
-                            )}
-                            {r.issue === 'input_taxed' && (
-                              <span title="Input Taxed — no GST credit" className="text-purple-600 dark:text-purple-400">
-                                <Info className="w-3.5 h-3.5 inline" />
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-muted/40 border-t border-border font-semibold text-xs">
-                        <td className="px-2 py-1.5" colSpan={5}>Totals</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.expenses.reduce((s, r) => s + r.amountIncGstCents, 0))}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(records.expenses.reduce((s, r) => s + r.gstCents, 0))}</td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
+                            {TAX_CODE_LABEL[code] ?? code}
+                          </p>
+                          <div className="border border-border rounded-md overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-muted/40 border-b border-border">
+                                  <th className="text-left px-2 py-1.5 font-medium">Date</th>
+                                  <th className="text-left px-2 py-1.5 font-medium">Supplier</th>
+                                  <th className="text-left px-2 py-1.5 font-medium">Description</th>
+                                  <th className="text-left px-2 py-1.5 font-medium">Account</th>
+                                  <th className="text-right px-2 py-1.5 font-medium">Inc GST</th>
+                                  <th className="text-right px-2 py-1.5 font-medium">GST</th>
+                                  <th className="px-2 py-1.5 w-8"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.map((r, i) => (
+                                  <tr
+                                    key={`${r.id}-${i}`}
+                                    className={cn(
+                                      'border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer',
+                                      r.issue === 'zero_gst' && 'bg-yellow-500/5',
+                                    )}
+                                    onClick={() => { setEditExpenseId(r.id); setEditExpenseOpen(true) }}
+                                  >
+                                    <td className="px-2 py-1.5">{r.date}</td>
+                                    <td className="px-2 py-1.5 text-muted-foreground max-w-[120px] truncate">{r.supplier ?? '—'}</td>
+                                    <td className="px-2 py-1.5 max-w-[160px] truncate" title={r.description}>{r.description}</td>
+                                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.accountCode}</td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.amountIncGstCents)}</td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>
+                                    <td className="px-2 py-1.5 text-center">
+                                      {r.issue === 'zero_gst' && (
+                                        <span title="Coded GST but $0 GST amount" className="text-yellow-600 dark:text-yellow-400">
+                                          <AlertTriangle className="w-3.5 h-3.5 inline" />
+                                        </span>
+                                      )}
+                                      {r.issue === 'bas_excluded' && (
+                                        <span title="BAS Excluded — not claimed" className="text-orange-600 dark:text-orange-400">
+                                          <Info className="w-3.5 h-3.5 inline" />
+                                        </span>
+                                      )}
+                                      {r.issue === 'input_taxed' && (
+                                        <span title="Input Taxed — no GST credit" className="text-purple-600 dark:text-purple-400">
+                                          <Info className="w-3.5 h-3.5 inline" />
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr className="bg-muted/40 border-t border-border font-semibold text-xs">
+                                  <td className="px-2 py-1.5" colSpan={4}>Total</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(group.reduce((s, r) => s + r.amountIncGstCents, 0))}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(group.reduce((s, r) => s + r.gstCents, 0))}</td>
+                                  <td></td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </CardContent>
           )}
         </Card>
@@ -748,6 +781,19 @@ export default function BasDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit Expense Modal — opened when clicking an expense row in the BAS drill-down */}
+      <ExpenseFormModal
+        open={editExpenseOpen}
+        expenseId={editExpenseId}
+        onClose={() => setEditExpenseOpen(false)}
+        onSaved={() => {
+          setEditExpenseOpen(false)
+          // Re-run calculation so the BAS summary and records tables reflect the saved changes
+          if (calculation) void handleCalculate()
+          else void load()
+        }}
+      />
     </div>
   )
 }
