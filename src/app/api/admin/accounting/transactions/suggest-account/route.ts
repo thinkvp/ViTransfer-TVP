@@ -33,21 +33,27 @@ export async function GET(request: NextRequest) {
     .filter(w => w.length >= 4)
     .slice(0, 5)
 
-  const whereDescription =
+  // Build description filter as an AND clause to avoid colliding with the accountId OR below
+  const descriptionAnd: object[] =
     words.length > 0
-      ? { OR: words.map((w: string) => ({ description: { contains: w, mode: 'insensitive' as const } })) }
+      ? [{ OR: words.map((w: string) => ({ description: { contains: w, mode: 'insensitive' as const } })) }]
       : description.length > 0
-        ? { description: { contains: description.slice(0, 15), mode: 'insensitive' as const } }
-        : {}
+        ? [{ description: { contains: description.slice(0, 15), mode: 'insensitive' as const } }]
+        : []
 
   const matched = await prisma.bankTransaction.findMany({
     where: {
       bankAccountId,
       status: 'MATCHED',
-      accountId: { not: null },
-      ...whereDescription,
+      // Expense-type postings store the accountId on the linked Expense record (BankTransaction.accountId is null);
+      // non-expense postings (Transfer/Deposit/etc.) store it directly on BankTransaction.
+      OR: [
+        { accountId: { not: null } },
+        { expense: { isNot: null } },
+      ],
+      AND: descriptionAnd,
     },
-    select: { accountId: true },
+    include: { expense: { select: { accountId: true } } },
     orderBy: { date: 'desc' },
     take: 50,
   })
@@ -56,10 +62,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ accountId: null })
   }
 
-  // Find the most commonly used accountId
+  // Find the most commonly used accountId, preferring the expense-linked account for expense-type postings
   const counts: Record<string, number> = {}
   for (const t of matched) {
-    if (t.accountId) counts[t.accountId] = (counts[t.accountId] ?? 0) + 1
+    const accountId = t.expense?.accountId ?? t.accountId
+    if (accountId) counts[accountId] = (counts[accountId] ?? 0) + 1
   }
   const topAccountId = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
 

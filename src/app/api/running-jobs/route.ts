@@ -241,6 +241,7 @@ export async function GET(request: NextRequest) {
         select: {
           id: true,
           name: true,
+          versionLabel: true,
           projectId: true,
           updatedAt: true,
           project: { select: { title: true } },
@@ -287,6 +288,7 @@ export async function GET(request: NextRequest) {
         select: {
           id: true,
           name: true,
+          versionLabel: true,
           projectId: true,
           updatedAt: true,
           project: { select: { title: true } },
@@ -348,7 +350,7 @@ export async function GET(request: NextRequest) {
       ...completedDropboxVideos.map((video) => ({
         id: video.id,
         type: 'dropbox' as const,
-        label: video.name,
+        label: video.name + (video.versionLabel ? ` ${video.versionLabel}` : ''),
         sublabel: video.project.title,
         projectId: video.projectId,
         completedAt: video.updatedAt.getTime(),
@@ -365,7 +367,7 @@ export async function GET(request: NextRequest) {
       ...erroredDropboxVideos.map((video) => ({
         id: video.id,
         type: 'dropbox' as const,
-        label: video.name,
+        label: video.name + (video.versionLabel ? ` ${video.versionLabel}` : ''),
         sublabel: video.project.title,
         projectId: video.projectId,
         completedAt: video.updatedAt.getTime(),

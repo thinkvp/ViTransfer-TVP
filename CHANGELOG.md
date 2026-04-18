@@ -5,6 +5,15 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-04-18
+
+### Fixed
+- **Suggest-account endpoint now returns correct account for expense-type postings** — when a bank transaction is matched via an `Expense` record the `accountId` lives on the linked expense row, not on `BankTransaction.accountId` (which is `null` for those postings); the `GET /api/admin/accounting/transactions/suggest-account` route was therefore ignoring all expense-matched transactions when building the frequency table; it now expands the match filter to include rows where `expense.isNot: null`, reads the account from `expense.accountId` when present, and constructs the description filter as an `AND` clause to avoid interfering with the new `OR` broadened match; the suggested account is now drawn from the full history of expense and non-expense postings rather than only non-expense ones
+- **Running Jobs panel shows version label for Dropbox upload entries** — completed and errored Dropbox upload entries in the Running Jobs panel were labelled with only the video file name; the `versionLabel` field is now fetched alongside the other video fields and appended to the label (e.g. "clip.mp4 v2") so version uploads are distinguishable from the original at a glance
+
+### Security
+- **Upgraded `dompurify` to `^3.4.0`** — resolves GHSA-39q2-94rc-95cp (moderate): `ADD_TAGS` form bypass of `FORBID_TAGS` due to short-circuit evaluation in versions ≤ 3.3.3
+
 ## [1.4.3] - 2026-04-14
 
 ### Changed

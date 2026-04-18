@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.4.2",
+  "version": "1.4.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,7 +32,7 @@
     "bullmq": "^5.70.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "dompurify": "^3.3.2",
+    "dompurify": "^3.4.0",
     "file-type": "^21.3.2",
     "html-to-text": "^9.0.5",
     "ioredis": "^5.10.0",
