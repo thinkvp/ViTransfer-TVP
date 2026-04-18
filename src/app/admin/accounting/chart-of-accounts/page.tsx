@@ -45,7 +45,6 @@ export default function ChartOfAccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [filterType, setFilterType] = useState<AccountType | 'ALL'>('ALL')
   const [sortKey, setSortKey] = useState<CoaSortKey>('code')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(1)
@@ -115,11 +114,10 @@ export default function ChartOfAccountsPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return flat.filter(({ account: a }) => {
-      if (filterType !== 'ALL' && a.type !== filterType) return false
       if (q) return a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
       return true
     })
-  }, [flat, search, filterType])
+  }, [flat, search])
 
   const sortedAndPaged = useMemo(() => {
     function cmp(a: Account, b: Account): number {
@@ -265,17 +263,6 @@ export default function ChartOfAccountsPage() {
                 onChange={e => setSearch(e.target.value)}
                 className="h-9 max-w-xs"
               />
-              <Select value={filterType} onValueChange={v => setFilterType(v as AccountType | 'ALL')}>
-                <SelectTrigger className="h-9 w-40">
-                  <SelectValue placeholder="All types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All types</SelectItem>
-                  {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Balance period:</span>

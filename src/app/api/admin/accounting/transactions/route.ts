@@ -40,10 +40,33 @@ export async function GET(request: NextRequest) {
   else if (from) where.date = { gte: from }
   else if (to) where.date = { lte: to }
   if (search) {
-    where.OR = [
+    const orConditions: object[] = [
       { description: { contains: search, mode: 'insensitive' } },
       { reference: { contains: search, mode: 'insensitive' } },
     ]
+    const cleaned = search.replace(/[$,]/g, '')
+    const numericValue = parseFloat(cleaned)
+    if (!isNaN(numericValue) && numericValue >= 0) {
+      if (cleaned.includes('.')) {
+        // Decimal entered — exact match
+        const cents = Math.round(numericValue * 100)
+        orConditions.push({ amountCents: cents }, { amountCents: -cents })
+      } else {
+        // Whole number — match all dollar amounts whose digits start with this value
+        // e.g. "132" matches $132.xx (13200-13299), $1,320.xx (132000-132999), $13,200.xx, etc.
+        const base = Math.round(numericValue)
+        for (let k = 0; k <= 4; k++) {
+          const factor = Math.pow(10, k)
+          const lo = base * factor * 100
+          const hi = (base + 1) * factor * 100
+          orConditions.push(
+            { amountCents: { gte: lo, lt: hi } },
+            { amountCents: { gt: -hi, lte: -lo } },
+          )
+        }
+      }
+    }
+    where.OR = orConditions
   }
 
   const [total, rows] = await Promise.all([

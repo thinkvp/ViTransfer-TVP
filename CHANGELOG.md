@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] - 2026-04-18
+
+### Added
+- **GST column on Matched bank transactions** — the Matched tab in Bank Accounts now shows a "GST" column displaying the tax code/rate name (e.g. "GST 10%", "GST Free") for each posted transaction row, giving a quick visual audit trail without expanding the transaction
+- **Amount search on Bank Transactions and Expenses** — the description/reference search fields on both the Bank Accounts page and the Expenses list now also match by dollar amount; entering a whole number (e.g. `132`) matches all transactions or expenses whose amount starts with those digits across multiple magnitudes ($132.xx, $1,320.xx, $13,200.xx etc.); entering a decimal (e.g. `132.50`) matches exactly; both credit and debit amounts are matched on the transactions list
+- **Bank Transactions search input** — a search box is added next to the tab bar on the Bank Accounts transactions table, allowing free-text filtering by description, reference, or amount across the active tab; the search field clears automatically when switching tabs
+
+### Changed
+- **Profit & Loss report shows ex-GST amounts** — all income, COGS, and expense figures on the P&L report are now reported excluding GST; a `"All figures shown ex GST"` note is shown at the top of the report card; bank transaction income lines, journal entry lines, and split lines all pass through a new `amountExcludingGst()` helper that strips the GST component before accumulation; the CSV export column header is updated to `"Amount (ex GST)"`; the Balance Sheet equity calculation likewise switches from `amountIncGst` to `amountExGst` for expense accumulation
+- **Profit & Loss report groups lines by parent/child account hierarchy** — income, COGS, and expense rows are now structured hierarchically: parent accounts appear as bold group headers with no amount, and their child accounts are listed below indented; accounts with no activity are hidden; any accounts not belonging to a known parent are appended flat at the end as before; the CSV export preserves the same structure with account codes prefixed to names
+- **Profit & Loss report adds COGS and Expenses subtotals** — the Cost of Goods Sold section now shows a "Total Cost of Goods Sold" subtotal row and the Expenses section shows a "Total Expenses" subtotal row; `totalCogsCents` and `totalExpenseCents` are added as explicit fields on the `ProfitLossReport` type
+- **Expenses list status filter removed** — the "All statuses" dropdown filter on the Expenses list is removed; filtering by status is handled via the existing search and date range controls; the search input is widened and its placeholder updated to `"Search supplier, description, amount…"`
+- **Chart of Accounts type filter removed** — the "All types" account-type dropdown on the Chart of Accounts page is removed; the search input already filters across code and name and the hierarchical grouping makes per-type filtering redundant
+- **BAS detail page uses full-width layout** — the `max-w-3xl` container constraint is removed from the BAS period detail page so the form and lodgement cards use the full available width consistent with the rest of the accounting section
+
+### Fixed
+- **`NewExpenseDropZone` file-input click did nothing** — the hidden `<input type="file">` was wired with a `useState<HTMLInputElement | null>` pair and a manual `useCallback` ref-setter instead of a plain `useRef`; `fileInputRef[0]` was always `null` so clicking the drop zone never opened the file picker; fixed by replacing the pattern with `useRef<HTMLInputElement | null>(null)` and calling `fileInputRef.current?.click()`
+
 ## [1.4.6] - 2026-04-18
 
 ### Added

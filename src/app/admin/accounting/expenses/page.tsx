@@ -9,7 +9,6 @@ import { LinkedBankTransactionDialog } from '@/components/admin/accounting/Linke
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
@@ -37,7 +36,6 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [filterStatus, setFilterStatus] = useState<ExpenseStatus | 'ALL'>('ALL')
   const [fromDate, setFromDate] = useState(() => getThisFinancialYearDates().from)
   const [toDate, setToDate] = useState(() => getThisFinancialYearDates().to)
   const [page, setPage] = useState(1)
@@ -70,7 +68,6 @@ export default function ExpensesPage() {
     setLoading(true)
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sortKey, sortDir })
-      if (filterStatus !== 'ALL') params.set('status', filterStatus)
       if (search.trim()) params.set('supplierName', search.trim())
       if (fromDate) params.set('from', fromDate)
       if (toDate) params.set('to', toDate)
@@ -84,7 +81,7 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, filterStatus, search, fromDate, toDate, sortKey, sortDir])
+  }, [page, search, fromDate, toDate, sortKey, sortDir])
 
   useEffect(() => { void load() }, [load])
 
@@ -153,22 +150,13 @@ export default function ExpensesPage() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-1 flex-wrap gap-2">
               <Input
-                placeholder="Search supplier/description…"
+                placeholder="Search supplier, description, amount…"
                 value={search}
                 onChange={e => handleFilterChange(() => setSearch(e.target.value))}
-                className="h-9 max-w-[200px]"
+                className="h-9 w-full sm:max-w-[320px]"
               />
-              <Select value={filterStatus} onValueChange={v => handleFilterChange(() => setFilterStatus(v as ExpenseStatus | 'ALL'))}>
-                <SelectTrigger className="h-9 w-36"><SelectValue placeholder="All statuses" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All statuses</SelectItem>
-                  {(Object.entries(EXPENSE_STATUS_LABELS) as [ExpenseStatus, string][]).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:ml-auto">
               <DateRangePreset
@@ -177,8 +165,8 @@ export default function ExpensesPage() {
                 onFromChange={v => handleFilterChange(() => setFromDate(v))}
                 onToChange={v => handleFilterChange(() => setToDate(v))}
               />
-              {(search || filterStatus !== 'ALL' || fromDate || toDate) && (
-                <Button variant="ghost" size="sm" className="h-9" onClick={() => { setSearch(''); setFilterStatus('ALL'); setFromDate(''); setToDate(''); setPage(1) }}>Clear</Button>
+              {(search || fromDate || toDate) && (
+                <Button variant="ghost" size="sm" className="h-9" onClick={() => { setSearch(''); setFromDate(''); setToDate(''); setPage(1) }}>Clear</Button>
               )}
             </div>
           </div>

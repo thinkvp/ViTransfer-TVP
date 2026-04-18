@@ -187,7 +187,7 @@ export default function BasDetailPage() {
   const isLodged = period.status === 'LODGED'
 
   return (
-    <div className="space-y-5 max-w-3xl">
+    <div className="space-y-5">
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => router.push('/admin/accounting/bas')}>
           <ArrowLeft className="w-4 h-4" />

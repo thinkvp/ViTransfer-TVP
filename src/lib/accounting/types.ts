@@ -218,11 +218,13 @@ export interface ProfitLossReport {
   basis: 'CASH' | 'ACCRUAL'
   currency: string
   income: ProfitLossSection[]
+  totalIncomeCents: number
   cogs: ProfitLossSection[]
+  totalCogsCents: number
   grossProfitCents: number
   expenses: ProfitLossSection[]
+  totalExpenseCents: number
   netProfitCents: number
-  totalIncomeCents: number
   totalCogsAndExpensesCents: number
 }
 
@@ -232,6 +234,9 @@ export interface ProfitLossSection {
   accountName: string
   amountCents: number
   isSubtotal?: boolean
+  isGroupHeader?: boolean
+  hideAmount?: boolean
+  depth?: number
 }
 
 // Balance sheet

@@ -46,10 +46,30 @@ export async function GET(request: NextRequest) {
   const where: Record<string, unknown> = {}
   if (status) where.status = status
   if (accountId) where.accountId = accountId
-  if (supplierName) where.OR = [
-    { supplierName: { contains: supplierName, mode: 'insensitive' } },
-    { description: { contains: supplierName, mode: 'insensitive' } },
-  ]
+  if (supplierName) {
+    const orConditions: object[] = [
+      { supplierName: { contains: supplierName, mode: 'insensitive' } },
+      { description: { contains: supplierName, mode: 'insensitive' } },
+    ]
+    const cleaned = supplierName.replace(/[$,]/g, '')
+    const numericValue = parseFloat(cleaned)
+    if (!isNaN(numericValue) && numericValue >= 0) {
+      if (cleaned.includes('.')) {
+        // Decimal entered — exact match
+        orConditions.push({ amountIncGst: Math.round(numericValue * 100) })
+      } else {
+        // Whole number — match all dollar amounts whose digits start with this value
+        const base = Math.round(numericValue)
+        for (let k = 0; k <= 4; k++) {
+          const factor = Math.pow(10, k)
+          const lo = base * factor * 100
+          const hi = (base + 1) * factor * 100
+          orConditions.push({ amountIncGst: { gte: lo, lt: hi } })
+        }
+      }
+    }
+    where.OR = orConditions
+  }
   // date is stored as YYYY-MM-DD string; string range comparison works correctly
   if (from && to) where.date = { gte: from, lte: to }
   else if (from) where.date = { gte: from }

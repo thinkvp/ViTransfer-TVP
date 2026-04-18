@@ -116,6 +116,7 @@ export default function BankAccountsPage() {
   const [txnTo, setTxnTo] = useState(() => getThisFinancialYearDates().to)
   const [txnSortKey, setTxnSortKey] = useState<'date' | 'description' | 'amount'>('date')
   const [txnSortDir, setTxnSortDir] = useState<'asc' | 'desc'>('desc')
+  const [txnSearch, setTxnSearch] = useState('')
 
   const [coaAccounts, setCoaAccounts] = useState<AccountOption[]>([])
   const [taxRates, setTaxRates] = useState<TaxRateOption[]>([])
@@ -197,10 +198,11 @@ export default function BankAccountsPage() {
       const params = new URLSearchParams({ bankAccountId: accountId, status: tab, page: String(page), pageSize: String(PAGE_SIZE), sortKey: txnSortKey, sortDir: txnSortDir })
       if (txnFrom) params.set('from', txnFrom)
       if (txnTo) params.set('to', txnTo)
+      if (txnSearch.trim()) params.set('search', txnSearch.trim())
       const res = await apiFetch(`/api/admin/accounting/transactions?${params}`)
       if (res.ok) { const d = await res.json(); setTransactions(d.transactions ?? []); setTxnTotal(d.pagination?.total ?? 0) }
     } finally { setLoadingTxns(false) }
-  }, [txnFrom, txnTo, txnSortKey, txnSortDir])
+  }, [txnFrom, txnTo, txnSortKey, txnSortDir, txnSearch])
 
   const sortedTransactions = transactions
 
@@ -271,7 +273,7 @@ export default function BankAccountsPage() {
     setTxnPage(1)
   }
 
-  function handleTabChange(tab: TabKey) { setActiveTab(tab); setTxnPage(1) }
+  function handleTabChange(tab: TabKey) { setActiveTab(tab); setTxnPage(1); setTxnSearch('') }
 
   function getPostForm(txn: BankTransaction): PostFormState {
     return postForms[txn.id] ?? defaultPostForm(txn, taxRates)
@@ -694,6 +696,12 @@ export default function BankAccountsPage() {
               >{tab.label}</button>
             ))}
             </div>
+            <Input
+              placeholder="Search description, reference…"
+              value={txnSearch}
+              onChange={e => { setTxnSearch(e.target.value); setTxnPage(1) }}
+              className="h-9 w-72 mx-3"
+            />
             <DateRangePreset
               from={txnFrom}
               to={txnTo}
@@ -724,6 +732,7 @@ export default function BankAccountsPage() {
                     </button>
                     {activeTab === 'MATCHED' && <div className="w-28 shrink-0">Type</div>}
                     {activeTab === 'MATCHED' && <div className="w-32 shrink-0">Account</div>}
+                    {activeTab === 'MATCHED' && <div className="w-24 shrink-0">GST</div>}
                     <button type="button" onClick={() => toggleTxnSort('amount')} className="w-28 text-right shrink-0 flex items-center justify-end gap-1 hover:text-foreground transition-colors">
                       {txnSortKey === 'amount' ? (txnSortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : null} Amount
                     </button>
@@ -792,6 +801,13 @@ export default function BankAccountsPage() {
                                   if (t.matchType === 'INVOICE_PAYMENT') return <span className="text-xs text-muted-foreground truncate block">Matched Invoice</span>
                                   return <span className="text-xs text-muted-foreground truncate block">{acctName}</span>
                                 })()}
+                              </div>
+                            )}
+                            {activeTab === 'MATCHED' && (
+                              <div className="w-24 shrink-0 hidden sm:block">
+                                <span className="text-xs text-muted-foreground">
+                                  {t.matchType === 'SPLIT' ? '—' : t.taxCode ? (taxRates.find(r => r.code === t.taxCode)?.name ?? t.taxCode) : '—'}
+                                </span>
                               </div>
                             )}
                             {/* Quick-match badge — Pending tab only */}

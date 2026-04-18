@@ -111,17 +111,19 @@ export default function ReportsPage() {
             if (tab === 'pl' && plReport) {
               const rows: string[][] = []
               rows.push(['INCOME', '', ''])
-              plReport.income.forEach(l => rows.push(['', l.accountName, (l.amountCents / 100).toFixed(2)]))
+              plReport.income.forEach(l => rows.push(['', l.accountCode ? `${l.accountCode} — ${l.accountName}` : l.accountName, l.hideAmount ? '' : (l.amountCents / 100).toFixed(2)]))
               rows.push(['Total Income', '', (plReport.totalIncomeCents / 100).toFixed(2)])
               if (plReport.cogs.length) {
                 rows.push(['COGS', '', ''])
-                plReport.cogs.forEach(l => rows.push(['', l.accountName, (l.amountCents / 100).toFixed(2)]))
+                plReport.cogs.forEach(l => rows.push(['', l.accountCode ? `${l.accountCode} — ${l.accountName}` : l.accountName, l.hideAmount ? '' : (l.amountCents / 100).toFixed(2)]))
+                rows.push(['Total Cost of Goods Sold', '', (plReport.totalCogsCents / 100).toFixed(2)])
               }
               rows.push(['Gross Profit', '', (plReport.grossProfitCents / 100).toFixed(2)])
               rows.push(['EXPENSES', '', ''])
-              plReport.expenses.forEach(l => rows.push(['', l.accountName, (l.amountCents / 100).toFixed(2)]))
+              plReport.expenses.forEach(l => rows.push(['', l.accountCode ? `${l.accountCode} — ${l.accountName}` : l.accountName, l.hideAmount ? '' : (l.amountCents / 100).toFixed(2)]))
+              rows.push(['Total Expenses', '', (plReport.totalExpenseCents / 100).toFixed(2)])
               rows.push(['Net Profit', '', (plReport.netProfitCents / 100).toFixed(2)])
-              downloadCsv('profit-and-loss.csv', ['Section', 'Account', 'Amount'], rows)
+              downloadCsv('profit-and-loss.csv', ['Section', 'Account', 'Amount (ex GST)'], rows)
             } else if (tab === 'bs' && bsReport) {
               const rows: string[][] = []
               rows.push(['ASSETS', '', ''])
@@ -202,9 +204,10 @@ export default function ReportsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                <p className="text-xs text-muted-foreground mb-3">All figures shown ex GST.</p>
                 <PLSection title="Income" rows={plReport.income} total={plReport.totalIncomeCents} totalLabel="Total Income" positive />
                 {plReport.cogs.length > 0 && (
-                  <PLSection title="Cost of Goods Sold" rows={plReport.cogs} />
+                  <PLSection title="Cost of Goods Sold" rows={plReport.cogs} total={plReport.totalCogsCents} totalLabel="Total Cost of Goods Sold" />
                 )}
                 <div className="flex justify-between py-1.5 font-semibold text-sm border-t border-border mt-2">
                   <span>Gross Profit</span>
@@ -212,7 +215,7 @@ export default function ReportsPage() {
                     {fmtAud(plReport.grossProfitCents)}
                   </span>
                 </div>
-                <PLSection title="Expenses" rows={plReport.expenses} />
+                <PLSection title="Expenses" rows={plReport.expenses} total={plReport.totalExpenseCents} totalLabel="Total Expenses" />
                 <div className="flex justify-between py-2 font-bold text-sm border-t-2 border-border mt-2">
                   <span>Net Profit</span>
                   <span className={plReport.netProfitCents >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
@@ -437,9 +440,15 @@ function PLSection({ title, rows, total, totalLabel, positive }: {
     <div className="mt-4">
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">{title}</p>
       {rows.map((row, i) => (
-        <div key={i} className={cn('flex justify-between py-0.5 text-sm', row.isSubtotal && 'font-semibold border-t border-border mt-1')}>
-          <span className={row.isSubtotal ? '' : 'text-muted-foreground pl-2'}>{row.accountCode ? `${row.accountCode} — ` : ''}{row.accountName}</span>
-          <span className="tabular-nums">{fmtAud(row.amountCents)}</span>
+        <div key={i} className={cn(
+          'flex justify-between py-0.5 text-sm',
+          row.isSubtotal && 'font-semibold border-t border-border mt-1',
+          row.isGroupHeader && 'font-semibold pt-1'
+        )}>
+          <span className={cn(!row.isSubtotal && !row.isGroupHeader && 'text-muted-foreground', row.depth ? 'pl-6' : 'pl-2', row.isGroupHeader && 'pl-0 text-foreground')}>
+            {row.accountCode ? `${row.accountCode} — ` : ''}{row.accountName}
+          </span>
+          <span className="tabular-nums">{row.hideAmount ? '' : fmtAud(row.amountCents)}</span>
         </div>
       ))}
       {total != null && (

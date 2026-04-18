@@ -25,6 +25,23 @@ interface ReportSection {
   totalCents: number
 }
 
+type GstCode = 'GST' | 'GST_FREE' | 'BAS_EXCLUDED' | 'INPUT_TAXED' | null | undefined
+
+type ProfitLossAccountNode = {
+  id: string
+  code: string
+  name: string
+  type: string
+  parentId: string | null
+  children: Array<{
+    id: string
+    code: string
+    name: string
+    type: string
+    parentId: string | null
+  }>
+}
+
 export interface ProfitLossReport {
   fromDate: string
   toDate: string
@@ -33,8 +50,10 @@ export interface ProfitLossReport {
   income: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number }>
   totalIncomeCents: number
   cogs: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number }>
+  totalCogsCents: number
   grossProfitCents: number
   expenses: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number }>
+  totalExpenseCents: number
   netProfitCents: number
   totalCogsAndExpensesCents: number
 }
@@ -53,24 +72,99 @@ export interface BalanceSheetReport {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function groupByAccount(
-  expenses: Array<{ accountId: string; amountIncGst: number; account: { code: string; name: string; type: string } | null }>
+  expenses: Array<{ accountId: string; amountExGst: number; account: { code: string; name: string; type: string } | null }>
 ): ReportLine[] {
   const map = new Map<string, ReportLine>()
   for (const exp of expenses) {
     if (!exp.account) continue
     const existing = map.get(exp.accountId)
     if (existing) {
-      existing.amountCents += exp.amountIncGst
+      existing.amountCents += exp.amountExGst
     } else {
       map.set(exp.accountId, {
         accountId: exp.accountId,
         code: exp.account.code,
         name: exp.account.name,
-        amountCents: exp.amountIncGst,
+        amountCents: exp.amountExGst,
       })
     }
   }
   return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code))
+}
+
+function amountExcludingGst(amountCents: number, taxCode: GstCode, taxRatePercent: number): number {
+  if (taxCode !== 'GST' || amountCents === 0) return amountCents
+
+  const sign = Math.sign(amountCents)
+  const absoluteAmount = Math.abs(amountCents)
+  const gstAmount = Math.round((absoluteAmount * taxRatePercent) / (100 + taxRatePercent))
+
+  return sign * (absoluteAmount - gstAmount)
+}
+
+function formatProfitLossRows(
+  lines: ReportLine[],
+  accounts: ProfitLossAccountNode[]
+): Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number; isGroupHeader?: boolean; hideAmount?: boolean; depth?: number }> {
+  const lineMap = new Map(lines.map((line) => [line.accountId, line]))
+  const consumed = new Set<string>()
+  const rows: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number; isGroupHeader?: boolean; hideAmount?: boolean; depth?: number }> = []
+
+  for (const account of accounts) {
+    const directLine = lineMap.get(account.id)
+    const childRows = account.children
+      .map((child) => ({ child, line: lineMap.get(child.id) ?? null }))
+      .filter((entry): entry is { child: ProfitLossAccountNode['children'][number]; line: ReportLine } => Boolean(entry.line))
+    const hasVisibleChildren = childRows.length > 0
+
+    if (!directLine && childRows.length === 0) continue
+
+    if (directLine) {
+      rows.push({
+        accountId: directLine.accountId,
+        accountCode: directLine.code,
+        accountName: directLine.name,
+        amountCents: directLine.amountCents,
+        isGroupHeader: hasVisibleChildren,
+      })
+      consumed.add(account.id)
+    } else {
+      rows.push({
+        accountId: account.id,
+        accountCode: account.code,
+        accountName: account.name,
+        amountCents: 0,
+        isGroupHeader: true,
+        hideAmount: true,
+      })
+    }
+
+    for (const { child, line } of childRows) {
+      rows.push({
+        accountId: line.accountId,
+        accountCode: line.code,
+        accountName: line.name,
+        amountCents: line.amountCents,
+        depth: 1,
+      })
+      consumed.add(child.id)
+    }
+  }
+
+  const remainingRows = lines
+    .filter((line) => !consumed.has(line.accountId))
+    .sort((left, right) => left.code.localeCompare(right.code))
+
+  rows.push(
+    ...remainingRows.map((line) => ({
+      accountId: line.accountId,
+      accountCode: line.code,
+      accountName: line.name,
+      amountCents: line.amountCents,
+    }))
+  )
+
+  return rows
 }
 
 // ── Profit & Loss ─────────────────────────────────────────────────────────────
@@ -84,17 +178,47 @@ export async function buildProfitLossReport(
   let incomeLines: ReportLine[] = []
   let totalIncomeCents = 0
 
-  const settings = await prisma.salesSettings.findUnique({
-    where: { id: 'default' },
-    include: { defaultIncomeAccount: { select: { id: true, code: true, name: true } } },
-  })
+  const [settings, allLabels, profitLossAccounts] = await Promise.all([
+    prisma.salesSettings.findUnique({
+      where: { id: 'default' },
+      include: { defaultIncomeAccount: { select: { id: true, code: true, name: true } } },
+    }),
+    prisma.salesLabel.findMany({
+      select: { id: true, name: true, accountId: true, account: { select: { code: true, name: true } } },
+    }),
+    prisma.account.findMany({
+      where: {
+        type: { in: ['INCOME', 'COGS', 'EXPENSE'] },
+        isActive: true,
+        parentId: null,
+      },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        type: true,
+        parentId: true,
+        children: {
+          where: { isActive: true },
+          orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            type: true,
+            parentId: true,
+          },
+        },
+      },
+    }),
+  ])
   const taxRatePercent = settings?.taxRatePercent ?? 10
 
-  // Build a map of all SalesLabels (id → { accountId, account.code, account.name })
-  const allLabels = await prisma.salesLabel.findMany({
-    select: { id: true, name: true, accountId: true, account: { select: { code: true, name: true } } },
-  })
   const labelAccountMap = new Map(allLabels.map((l) => [l.id, l]))
+  const incomeAccounts = profitLossAccounts.filter((account) => account.type === 'INCOME')
+  const cogsAccounts = profitLossAccounts.filter((account) => account.type === 'COGS')
+  const expenseAccounts = profitLossAccounts.filter((account) => account.type === 'EXPENSE')
 
   // Default income account: falls back to a synthetic "Sales Revenue" line if none configured
   const defaultIncomeAcct = settings?.defaultIncomeAccount
@@ -194,23 +318,26 @@ export async function buildProfitLossReport(
   const otherIncomeMap = new Map<string, ReportLine>()
   for (const t of incomeBankTxns) {
     if (!t.account) continue
+    const reportingAmountCents = amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent)
     const existing = otherIncomeMap.get(t.accountId!)
-    if (existing) { existing.amountCents += t.amountCents } else {
-      otherIncomeMap.set(t.accountId!, { accountId: t.accountId!, code: t.account.code, name: t.account.name, amountCents: t.amountCents })
+    if (existing) { existing.amountCents += reportingAmountCents } else {
+      otherIncomeMap.set(t.accountId!, { accountId: t.accountId!, code: t.account.code, name: t.account.name, amountCents: reportingAmountCents })
     }
   }
   for (const j of incomeJournals) {
     if (!j.account) continue
+    const reportingAmountCents = amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
     const existing = otherIncomeMap.get(j.accountId)
-    if (existing) { existing.amountCents += j.amountCents } else {
-      otherIncomeMap.set(j.accountId, { accountId: j.accountId, code: j.account.code, name: j.account.name, amountCents: j.amountCents })
+    if (existing) { existing.amountCents += reportingAmountCents } else {
+      otherIncomeMap.set(j.accountId, { accountId: j.accountId, code: j.account.code, name: j.account.name, amountCents: reportingAmountCents })
     }
   }
   for (const s of incomeSplits) {
     if (!s.account) continue
+    const reportingAmountCents = amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent)
     const existing = otherIncomeMap.get(s.accountId)
-    if (existing) { existing.amountCents += s.amountCents } else {
-      otherIncomeMap.set(s.accountId, { accountId: s.accountId, code: s.account.code, name: s.account.name, amountCents: s.amountCents })
+    if (existing) { existing.amountCents += reportingAmountCents } else {
+      otherIncomeMap.set(s.accountId, { accountId: s.accountId, code: s.account.code, name: s.account.name, amountCents: reportingAmountCents })
     }
   }
 
@@ -254,11 +381,13 @@ export async function buildProfitLossReport(
     toDate: endDate,
     basis,
     currency: 'AUD',
-    income: incomeLines.map(l => ({ accountId: l.accountId, accountCode: l.code, accountName: l.name, amountCents: l.amountCents })),
+    income: formatProfitLossRows(incomeLines, incomeAccounts),
     totalIncomeCents,
-    cogs: cogsLines.map(l => ({ accountId: l.accountId, accountCode: l.code, accountName: l.name, amountCents: l.amountCents })),
+    cogs: formatProfitLossRows(cogsLines, cogsAccounts),
+    totalCogsCents,
     grossProfitCents,
-    expenses: expenseLines.map(l => ({ accountId: l.accountId, accountCode: l.code, accountName: l.name, amountCents: l.amountCents })),
+    expenses: formatProfitLossRows(expenseLines, expenseAccounts),
+    totalExpenseCents,
     netProfitCents,
     totalCogsAndExpensesCents: totalCogsCents + totalExpenseCents,
   }
@@ -331,9 +460,9 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   // Accumulated net profit (all time up to asOf) as equity
   const allExpenses = await prisma.expense.findMany({
     where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] } },
-    select: { amountIncGst: true, gstAmount: true },
+    select: { amountExGst: true },
   })
-  const totalExpCents = allExpenses.reduce((s, e) => s + e.amountIncGst, 0)
+  const totalExpCents = allExpenses.reduce((s, e) => s + e.amountExGst, 0)
 
   const allReceipts = await listSalesCashReceiptsUpTo(asOf)
   const totalRevCents = allReceipts.reduce(
