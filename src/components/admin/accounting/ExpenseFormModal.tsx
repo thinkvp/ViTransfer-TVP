@@ -187,18 +187,20 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
     setSaving(true)
     try {
       if (!form.description.trim()) { setError('Enter a description'); return }
+      if (!form.accountId) { setError('Select an account'); return }
 
       let body: Record<string, unknown>
-      if (isFinancialLocked) {
+      if (isDateAmountLocked) {
         body = {
-          description: form.description.trim(),
           supplierName: form.supplierName.trim() || null,
+          description: form.description.trim(),
+          accountId: form.accountId,
+          taxCode: form.taxCode,
           notes: form.notes.trim() || null,
         }
       } else {
         const parsedAmount = parseFloat(form.amountIncGst)
         if (isNaN(parsedAmount) || parsedAmount <= 0) { setError('Enter a valid amount'); return }
-        if (!form.accountId) { setError('Select an account'); return }
         body = {
           date: form.date,
           supplierName: form.supplierName.trim() || null,
@@ -348,7 +350,8 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
     }
   }
 
-  const isFinancialLocked = expense?.status === 'RECONCILED'
+  // Reconciled expenses: date and amount are locked, but account and tax code can be changed
+  const isDateAmountLocked = expense?.status === 'RECONCILED'
   const selectedAccount = accounts.find(account => account.id === form.accountId) ?? null
   const filteredAccounts = accounts.filter(account => {
     const query = accountSearch.trim().toLowerCase()
@@ -388,14 +391,14 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
             <div className="py-8 text-center text-muted-foreground">Loading…</div>
           ) : (
             <div className="space-y-4 pt-1">
-              {isFinancialLocked && (
-                <p className="text-xs text-muted-foreground">Financial fields are locked for reconciled expenses. You can still update supplier, description, notes, and attachments.</p>
+              {isDateAmountLocked && (
+                <p className="text-xs text-muted-foreground">Date and amount are locked for reconciled expenses. You can still update account, tax code, supplier, description, notes, and attachments.</p>
               )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="ef-date">Date *</Label>
-                  <Input id="ef-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} disabled={isFinancialLocked} />
+                  <Input id="ef-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} disabled={isDateAmountLocked} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="ef-supplier">Supplier</Label>
@@ -415,16 +418,14 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
                     id="ef-account"
                     value={accountOpen ? accountSearch : (selectedAccount?.label ?? '')}
                     onFocus={() => {
-                      if (isFinancialLocked) return
                       setAccountOpen(true)
                       setAccountSearch('')
                     }}
                     onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
                     onChange={e => setAccountSearch(e.target.value)}
                     placeholder="Search account…"
-                    disabled={isFinancialLocked}
                   />
-                  {accountOpen && !isFinancialLocked && (
+                  {accountOpen && (
                     <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
                       {filteredAccounts.map(account => (
                         <button
@@ -451,11 +452,11 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
               <div className="grid grid-cols-2 gap-4 items-start">
                 <div className="space-y-1">
                   <Label htmlFor="ef-amount">Amount inc. GST ($) *</Label>
-                  <Input id="ef-amount" type="number" step="0.01" min="0" value={form.amountIncGst} onChange={e => setForm(f => ({ ...f, amountIncGst: e.target.value }))} placeholder="0.00" disabled={isFinancialLocked} />
+                  <Input id="ef-amount" type="number" step="0.01" min="0" value={form.amountIncGst} onChange={e => setForm(f => ({ ...f, amountIncGst: e.target.value }))} placeholder="0.00" disabled={isDateAmountLocked} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="ef-taxcode">Tax Code</Label>
-                  <Select value={form.taxCode} onValueChange={v => setForm(f => ({ ...f, taxCode: v as AccountTaxCode }))} disabled={isFinancialLocked}>
+                  <Select value={form.taxCode} onValueChange={v => setForm(f => ({ ...f, taxCode: v as AccountTaxCode }))}>
                     <SelectTrigger id="ef-taxcode"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {(Object.entries(TAX_CODE_LABELS) as [AccountTaxCode, string][]).map(([k, v]) => (
@@ -554,7 +555,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
                 <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
                 <Button
                   onClick={() => void handleSave()}
-                  disabled={saving || uploadingReceipt || uploadingAttachmentId !== null || !form.description.trim() || (!isFinancialLocked && !form.amountIncGst)}
+                  disabled={saving || uploadingReceipt || uploadingAttachmentId !== null || !form.description.trim() || !form.accountId || (!isDateAmountLocked && !form.amountIncGst)}
                 >
                   {saving || uploadingReceipt ? 'Saving…' : (isNew ? 'Create Expense' : 'Save Changes')}
                 </Button>

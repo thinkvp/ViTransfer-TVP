@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
+import Link from 'next/link'
 import { BarChart2, Scale, Printer, FileText, Users } from 'lucide-react'
 import type { ProfitLossReport, BalanceSheetReport, ProfitLossSection, BalanceSheetSection, AccountingSettings, TrialBalanceReport, TrialBalanceRow, AgedReceivablesReport, AgedReceivablesRow } from '@/lib/accounting/types'
 import { cn } from '@/lib/utils'
@@ -205,9 +206,9 @@ export default function ReportsPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground mb-3">All figures shown ex GST.</p>
-                <PLSection title="Income" rows={plReport.income} total={plReport.totalIncomeCents} totalLabel="Total Income" positive />
+                <PLSection title="Income" rows={plReport.income} total={plReport.totalIncomeCents} totalLabel="Total Income" positive from={plFrom} to={plTo} />
                 {plReport.cogs.length > 0 && (
-                  <PLSection title="Cost of Goods Sold" rows={plReport.cogs} total={plReport.totalCogsCents} totalLabel="Total Cost of Goods Sold" />
+                  <PLSection title="Cost of Goods Sold" rows={plReport.cogs} total={plReport.totalCogsCents} totalLabel="Total Cost of Goods Sold" from={plFrom} to={plTo} />
                 )}
                 <div className="flex justify-between py-1.5 font-semibold text-sm border-t border-border mt-2">
                   <span>Gross Profit</span>
@@ -215,7 +216,7 @@ export default function ReportsPage() {
                     {fmtAud(plReport.grossProfitCents)}
                   </span>
                 </div>
-                <PLSection title="Expenses" rows={plReport.expenses} total={plReport.totalExpenseCents} totalLabel="Total Expenses" />
+                <PLSection title="Expenses" rows={plReport.expenses} total={plReport.totalExpenseCents} totalLabel="Total Expenses" from={plFrom} to={plTo} />
                 <div className="flex justify-between py-2 font-bold text-sm border-t-2 border-border mt-2">
                   <span>Net Profit</span>
                   <span className={plReport.netProfitCents >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
@@ -428,12 +429,14 @@ export default function ReportsPage() {
   )
 }
 
-function PLSection({ title, rows, total, totalLabel, positive }: {
+function PLSection({ title, rows, total, totalLabel, positive, from, to }: {
   title: string
   rows: import('@/lib/accounting/types').ProfitLossSection[]
   total?: number
   totalLabel?: string
   positive?: boolean
+  from?: string
+  to?: string
 }) {
   if (rows.length === 0) return null
   return (
@@ -448,7 +451,18 @@ function PLSection({ title, rows, total, totalLabel, positive }: {
           <span className={cn(!row.isSubtotal && !row.isGroupHeader && 'text-muted-foreground', row.depth ? 'pl-6' : 'pl-2', row.isGroupHeader && 'pl-0 text-foreground')}>
             {row.accountCode ? `${row.accountCode} — ` : ''}{row.accountName}
           </span>
-          <span className="tabular-nums">{row.hideAmount ? '' : fmtAud(row.amountCents)}</span>
+          {row.hideAmount ? <span /> : (
+            row.accountCode && from && to
+              ? (
+                <Link
+                  href={`/admin/accounting/chart-of-accounts/${row.accountCode}?from=${from}&to=${to}`}
+                  className="tabular-nums hover:underline underline-offset-2"
+                >
+                  {fmtAud(row.amountCents)}
+                </Link>
+              )
+              : <span className="tabular-nums">{fmtAud(row.amountCents)}</span>
+          )}
         </div>
       ))}
       {total != null && (

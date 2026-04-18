@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -51,6 +51,7 @@ export default function AccountLedgerPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id ?? ''
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [account, setAccount] = useState<Account | null>(null)
   const [entries, setEntries] = useState<Entry[]>([])
@@ -60,8 +61,8 @@ export default function AccountLedgerPage() {
   const [page, setPage] = useState(1)
   const [pageCount, setPageCount] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [from, setFrom] = useState(() => getThisFinancialYearDates().from)
-  const [to, setTo] = useState(() => getThisFinancialYearDates().to)
+  const [from, setFrom] = useState(() => searchParams?.get('from') ?? getThisFinancialYearDates().from)
+  const [to, setTo] = useState(() => searchParams?.get('to') ?? getThisFinancialYearDates().to)
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null)
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -287,7 +288,7 @@ export default function AccountLedgerPage() {
             <ExportMenu
               onExportCsv={() => {
                 downloadCsv(`${account?.code ?? 'account'}-entries.csv`, ['Date', 'Type', 'Account', 'Description', 'Ref', 'Amount'], entries.map(row => {
-                  if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '', (e.amountIncGst / 100).toFixed(2)] }
+                  if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '', (e.amountExGst / 100).toFixed(2)] }
                   if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '', (t.amountCents / 100).toFixed(2)] }
                   if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '', (j.amountCents / 100).toFixed(2)] }
                   if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', (s.amountCents / 100).toFixed(2)] }
@@ -318,7 +319,7 @@ export default function AccountLedgerPage() {
                       { key: 'account', label: 'Account', align: 'left', cls: 'min-w-[140px]' },
                       { key: 'description', label: 'Description', align: 'left', cls: '' },
                       { key: 'ref', label: 'Ref / Supplier', align: 'left', cls: '' },
-                      { key: 'amount', label: 'Amount', align: 'right', cls: 'w-32' },
+                      { key: 'amount', label: 'Amount (ex-GST)', align: 'right', cls: 'w-32 whitespace-nowrap' },
                     ] as { key: SortKey; label: string; align: string; cls: string }[]).map(col => (
                       <th key={col.key} className={`px-4 py-2.5 text-${col.align} font-medium text-muted-foreground ${col.cls}`}>
                         <button
@@ -351,7 +352,7 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 truncate">{e.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{e.supplierName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
-                            <button type="button" onClick={() => setEditExpenseId(e.id)} className="tabular-nums text-primary hover:underline cursor-pointer">{fmtAud(e.amountIncGst)}</button>
+                            <button type="button" onClick={() => setEditExpenseId(e.id)} className="tabular-nums hover:underline cursor-pointer">{fmtAud(e.amountExGst)}</button>
                           </td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -425,7 +426,7 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 truncate">{s.invoiceNumber} - {s.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.labelName ?? s.clientName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
-                            <Link href={`/admin/sales/invoices/${s.invoiceId}`} className="tabular-nums text-primary hover:underline cursor-pointer">{fmtAud(s.amountCents)}</Link>
+                            <Link href={`/admin/sales/invoices/${s.invoiceId}`} className="tabular-nums hover:underline cursor-pointer">{fmtAud(s.amountCents)}</Link>
                           </td>
                           <td className="px-4 py-2.5 text-right">
                             {s.linkedBankTransactions.length > 0 && (
@@ -462,7 +463,7 @@ export default function AccountLedgerPage() {
                   <tfoot>
                     <tr className="border-t-2 border-border bg-muted/30">
                       <td colSpan={5} className="px-4 py-2.5 text-right text-sm font-semibold text-foreground">
-                        {pageCount > 1 ? 'Period Total (all pages)' : 'Period Total'}
+                        {pageCount > 1 ? 'Period Total ex-GST (all pages)' : 'Period Total (ex-GST)'}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">{fmtAud(periodTotalCents)}</td>
                       <td />

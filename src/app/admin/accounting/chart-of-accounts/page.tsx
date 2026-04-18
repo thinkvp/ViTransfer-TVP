@@ -300,7 +300,7 @@ export default function ChartOfAccountsPage() {
                       </th>
                     ))}
                     <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground min-w-[110px]">
-                      Balance{loadingBalances ? ' …' : ''}
+                      Balance (ex-GST){loadingBalances ? ' …' : ''}
                     </th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Actions</th>
                   </tr>

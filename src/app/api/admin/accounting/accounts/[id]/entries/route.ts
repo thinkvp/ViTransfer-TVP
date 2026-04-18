@@ -172,7 +172,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // negated: a credit (positive, money in) reduces the account balance, not increases it.
   const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE' || account.type === 'COGS'
   const periodTotalCents = combined.reduce((sum, row) => {
-    if (row.kind === 'expense') return sum + (row.entry as ReturnType<typeof expenseFromDb>).amountIncGst
+    if (row.kind === 'expense') return sum + (row.entry as ReturnType<typeof expenseFromDb>).amountExGst
     if (row.kind === 'bankTransaction') {
       const baCents = (row.entry as ReturnType<typeof bankTransactionFromDb>).amountCents
       return sum + (isDebitNormal ? -baCents : baCents)

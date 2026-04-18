@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     prisma.expense.groupBy({
       by: ['accountId'],
       where: hasDateFilter ? { date: dateFilter } : {},
-      _sum: { amountIncGst: true },
+      _sum: { amountExGst: true },
     }),
     prisma.bankTransaction.groupBy({
       by: ['accountId'],
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
 
   for (const g of expenseGroups) {
     if (g.accountId) {
-      balances[g.accountId] = (balances[g.accountId] ?? 0) + (g._sum.amountIncGst ?? 0)
+      balances[g.accountId] = (balances[g.accountId] ?? 0) + (g._sum.amountExGst ?? 0)
     }
   }
 

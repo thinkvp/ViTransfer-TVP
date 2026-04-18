@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { expenseFromDb } from '@/lib/accounting/db-mappers'
-import { deleteAccountingFile } from '@/lib/accounting/file-storage'
+import { deleteAccountingFile, moveAccountingFile } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -64,7 +64,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await params
-  const existing = await prisma.expense.findUnique({ where: { id } })
+  const existing = await prisma.expense.findUnique({
+    where: { id },
+    include: {
+      accountingAttachments: { select: { id: true, storagePath: true, originalName: true } },
+    },
+  })
   if (!existing) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
   }
@@ -76,6 +81,17 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const data = parsed.data
+
+  // Reconciled expenses: date and amount are immutable
+  const isReconciled = existing.status === 'RECONCILED'
+  if (isReconciled) {
+    if (data.date !== undefined && data.date !== existing.date) {
+      return NextResponse.json({ error: 'Cannot change the date of a reconciled expense' }, { status: 400 })
+    }
+    if (data.amountIncGst !== undefined) {
+      return NextResponse.json({ error: 'Cannot change the amount of a reconciled expense' }, { status: 400 })
+    }
+  }
 
   if (data.accountId) {
     const account = await prisma.account.findUnique({ where: { id: data.accountId } })
@@ -97,7 +113,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       ...(data.taxCode !== undefined ? { taxCode: data.taxCode } : {}),
       ...(data.status !== undefined ? { status: data.status } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
-      // Recalculate cents if amount or taxCode changed
+      // Recalculate GST split if taxCode changed (amount stays fixed for reconciled)
       ...((data.amountIncGst !== undefined || data.taxCode !== undefined) ? await (async () => {
         const resolvedTaxCode = data.taxCode ?? existing.taxCode
         const amountIncGstCents = data.amountIncGst !== undefined ? Math.round(data.amountIncGst * 100) : existing.amountIncGst
@@ -113,6 +129,42 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     },
     include: { account: true, user: { select: { id: true, name: true, email: true } } },
   })
+
+  const accountChanged = data.accountId !== undefined && data.accountId !== existing.accountId
+  const taxCodeChanged = data.taxCode !== undefined && data.taxCode !== existing.taxCode
+
+  // Move expense attachments to the new account folder when account changes
+  if (accountChanged && existing.accountingAttachments.length > 0) {
+    for (const attachment of existing.accountingAttachments) {
+      try {
+        const newPath = await moveAccountingFile(
+          attachment.storagePath,
+          existing.date as string,
+          data.accountId!,
+          attachment.originalName,
+        )
+        if (newPath !== attachment.storagePath) {
+          await prisma.accountingAttachment.update({
+            where: { id: attachment.id },
+            data: { storagePath: newPath },
+          })
+        }
+      } catch {
+        // Non-fatal — file may already be in right place or missing
+      }
+    }
+  }
+
+  // Sync account and/or taxCode to the linked bank transaction
+  if ((accountChanged || taxCodeChanged) && existing.bankTransactionId) {
+    await prisma.bankTransaction.update({
+      where: { id: existing.bankTransactionId },
+      data: {
+        ...(accountChanged ? { accountId: data.accountId } : {}),
+        ...(taxCodeChanged ? { taxCode: data.taxCode } : {}),
+      },
+    })
+  }
 
   const res = NextResponse.json({ expense: expenseFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')

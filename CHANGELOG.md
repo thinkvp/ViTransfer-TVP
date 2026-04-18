@@ -5,6 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.8] - 2026-04-18
+
+### Added
+- **Clickable P&L amounts drill through to account ledger** — each line-item amount on the Profit & Loss report is now a link that opens the corresponding account's ledger page pre-filtered to the same date range that was used to run the report; the `from` and `to` values are passed as query parameters and the account ledger initialises its date range from them on load
+- **Edit reconciled expense account and tax code** — reconciled expenses can now have their Account and Tax Code changed from the Edit Expense modal; Date and Amount remain locked; saving a reconciled expense with a changed account or tax code also propagates the change to the linked bank transaction's `accountId` / `taxCode` fields; attachments belonging to the expense are moved to the correct account folder on disk when the account changes
+
+### Changed
+- **Chart of Accounts balance column shows ex-GST amounts** — the Balance column on the Chart of Accounts list and the Period Total / per-row amounts on the individual account ledger now show expense amounts excluding GST, consistent with the P&L report; the column header is labelled "Balance (ex-GST)" and the ledger column is labelled "Amount (ex-GST)"
+- **Edit Expense info text updated for reconciled lock** — the informational note shown at the top of the Edit Expense modal for reconciled expenses now reads: *"Date and amount are locked for reconciled expenses. You can still update account, tax code, supplier, description, notes, and attachments."*
+- **P&L and account ledger clickable amounts use default text colour** — the linked/clickable amounts in the P&L report and the account ledger rows no longer use the primary accent colour; they render in the default foreground colour and only underline on hover
+
 ## [1.4.7] - 2026-04-18
 
 ### Added
