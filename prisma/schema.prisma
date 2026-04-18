@@ -2133,10 +2133,14 @@ model AccountingAttachment {
   expenseId           String?
   expense             Expense?         @relation(fields: [expenseId], references: [id], onDelete: Cascade)
 
+  basPeriodId         String?
+  basPeriod           BasPeriod?       @relation(fields: [basPeriodId], references: [id], onDelete: Cascade)
+
   uploadedAt          DateTime @default(now())
 
   @@index([bankTransactionId])
   @@index([expenseId])
+  @@index([basPeriodId])
 }
 
 /// Business expenses — entered manually or linked to imported bank transactions.
@@ -2313,7 +2317,8 @@ model BasPeriod {
   paymentAmountCents   Int?
   paymentNotes         String?  @db.Text
   paymentExpenseId     String?  @unique
-  paymentExpense       Expense? @relation("BasPeriodPaymentExpense", fields: [paymentExpenseId], references: [id], onDelete: SetNull)
+  paymentExpense        Expense? @relation("BasPeriodPaymentExpense", fields: [paymentExpenseId], references: [id], onDelete: SetNull)
+  accountingAttachments AccountingAttachment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

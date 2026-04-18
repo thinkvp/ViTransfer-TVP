@@ -199,6 +199,29 @@ export function resolveAccountingFilePath(relativePath: string): string {
 }
 
 /**
+ * Build the storage path for a BAS period attachment.
+ * Files are stored under: <ACCOUNTING_STORAGE_ROOT>/<FY label>/BAS/<filename>
+ */
+export async function buildBasPeriodFilePath(
+  periodStartDate: string,
+  originalName: string,
+): Promise<AccountingStoragePath> {
+  const fyStartMonth = await getFyStartMonth()
+  const fyLabel = getFiscalYearLabel(periodStartDate, fyStartMonth)
+  const dir = path.join(ACCOUNTING_STORAGE_ROOT, fyLabel, 'BAS')
+  await fs.promises.mkdir(dir, { recursive: true })
+
+  const safeName = sanitiseFilename(originalName)
+  const finalName = await deduplicateFilename(dir, safeName)
+
+  const absolutePath = path.join(dir, finalName)
+  validateAccountingPath(absolutePath)
+
+  const relativePath = path.relative(ACCOUNTING_STORAGE_ROOT, absolutePath).split(path.sep).join('/')
+  return { relativePath, absolutePath }
+}
+
+/**
  * Write a buffer to the accounting volume.
  */
 export async function writeAccountingFile(
@@ -315,5 +338,61 @@ export async function accountingFileExists(relativePath: string): Promise<boolea
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Migrate all AccountingAttachment files for a given account into the folder
+ * path derived from the account's current name.  Call this after renaming an
+ * account so that existing receipts move from the old folder name to the new one.
+ *
+ * Also handles the case where the account is a parent: pass each child's ID
+ * separately to migrate their files into the updated parent folder segment.
+ */
+export async function migrateAccountFolderFiles(accountId: string): Promise<void> {
+  // Expense attachments — storagePath lives under the expense's account folder
+  const expenseAttachments = await prisma.accountingAttachment.findMany({
+    where: { expense: { accountId } },
+    select: {
+      id: true,
+      storagePath: true,
+      originalName: true,
+      expense: { select: { date: true } },
+    },
+  })
+
+  // Bank-transaction attachments — storagePath lives under the transaction's direct account folder
+  const txnAttachments = await prisma.accountingAttachment.findMany({
+    where: { bankTransaction: { accountId } },
+    select: {
+      id: true,
+      storagePath: true,
+      originalName: true,
+      bankTransaction: { select: { date: true } },
+    },
+  })
+
+  const all: Array<{ id: string; storagePath: string; originalName: string; date: string }> = [
+    ...expenseAttachments
+      .filter((a) => a.expense)
+      .map((a) => ({ id: a.id, storagePath: a.storagePath, originalName: a.originalName, date: a.expense!.date })),
+    ...txnAttachments
+      .filter((a) => a.bankTransaction)
+      .map((a) => ({ id: a.id, storagePath: a.storagePath, originalName: a.originalName, date: a.bankTransaction!.date })),
+  ]
+
+  for (const attachment of all) {
+    const newPath = await moveAccountingFile(
+      attachment.storagePath,
+      attachment.date,
+      accountId,
+      attachment.originalName,
+    )
+    if (newPath !== attachment.storagePath) {
+      await prisma.accountingAttachment.update({
+        where: { id: attachment.id },
+        data: { storagePath: newPath },
+      })
+    }
   }
 }

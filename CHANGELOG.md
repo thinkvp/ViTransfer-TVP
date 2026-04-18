@@ -5,6 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-04-18
+
+### Added
+- **BAS lodgement documents** — a new "Lodgement Documents" card on the BAS period detail page lets you upload, download, and delete file attachments (e.g. ATO lodgement confirmation PDFs) directly against a BAS period; files are stored under the accounting storage volume at `<FY>/BAS/`; a new API route `POST /api/admin/accounting/bas/[id]/attachments` handles uploads and the existing shared attachment download/delete routes serve the files
+- **Stripe payments backfilled into SalesPayment table** — existing `SalesInvoiceStripePayment` records are backfilled into the `SalesPayment` table (source `STRIPE`, `excludeFromInvoiceBalance = true`) via a new migration; going forward the Stripe webhook creates a `SalesPayment` record on each successful checkout so that Stripe income is visible in BAS cash-basis calculations and cash-receipts reports through a single, consistent query path
+
+### Changed
+- **BAS/GST amounts now round down to whole dollars** — all BAS figures displayed on the BAS detail page and exported to CSV are now truncated (floor) to the nearest whole dollar rather than rounded to nearest; this ensures amounts are never overstated, which is the conservative approach required for ATO reporting
+- **Cash-basis BAS and sales-receipts queries unified** — `listSalesCashReceiptsInRange`, `listSalesCashReceiptsUpTo`, and the BAS `calculateBas` cash-basis path now query only the `SalesPayment` table (matching rows where `excludeFromInvoiceBalance = false` OR `source = STRIPE`), removing the separate `SalesInvoiceStripePayment` fan-out queries and eliminating a class of double-count bugs
+- **Account attachment files migrated when account is renamed** — renaming an account via `PUT /api/admin/accounting/accounts/[id]` now moves all existing receipt files for that account (and its direct children, whose path includes the parent name segment) into the updated folder path on the accounting storage volume
+
 ## [1.5.0] - 2026-04-18
 
 ### Added

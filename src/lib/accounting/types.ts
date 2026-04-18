@@ -13,6 +13,7 @@ export interface AccountingAttachment {
   originalName: string
   bankTransactionId: string | null
   expenseId: string | null
+  basPeriodId: string | null
   uploadedAt: string
 }
 
@@ -138,6 +139,7 @@ export interface BasPeriod {
   paymentAmountCents: number | null
   paymentNotes: string | null
   paymentExpenseId: string | null
+  attachments: AccountingAttachment[]
   createdAt: string
   updatedAt: string
 }

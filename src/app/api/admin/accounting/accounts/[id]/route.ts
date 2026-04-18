@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { accountFromDb } from '@/lib/accounting/db-mappers'
+import { migrateAccountFolderFiles } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -108,6 +109,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
     },
   })
+
+  // If the name changed, move existing receipt files into the new folder.
+  // The DB update has already committed so getAccountFolderSegments will use the new name.
+  if (data.name !== undefined && data.name !== existing.name) {
+    // Migrate files for this account
+    await migrateAccountFolderFiles(existing.id)
+
+    // Migrate files for all direct children — their folder path includes this account's name as the parent segment
+    const children = await prisma.account.findMany({
+      where: { parentId: existing.id },
+      select: { id: true },
+    })
+    for (const child of children) {
+      await migrateAccountFolderFiles(child.id)
+    }
+  }
 
   const res = NextResponse.json({ account: accountFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')

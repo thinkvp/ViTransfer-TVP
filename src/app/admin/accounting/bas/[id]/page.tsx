@@ -12,8 +12,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp, CreditCard, Trash2, Loader2 } from 'lucide-react'
-import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord } from '@/lib/accounting/types'
+import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, AccountingAttachment } from '@/lib/accounting/types'
 import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { cn } from '@/lib/utils'
 
 function fmtAud(cents: number) {
@@ -21,9 +22,9 @@ function fmtAud(cents: number) {
   return cents < 0 ? `-$${abs}` : `$${abs}`
 }
 
-/** ATO BAS amounts must be reported in whole dollars (rounded to nearest) */
+/** ATO BAS amounts must be reported in whole dollars (rounded down) */
 function fmtBasDollars(cents: number) {
-  const dollars = Math.round(Math.abs(cents) / 100)
+  const dollars = Math.floor(Math.abs(cents) / 100)
   const formatted = dollars.toLocaleString('en-AU')
   return cents < 0 ? `-$${formatted}` : `$${formatted}`
 }
@@ -73,6 +74,11 @@ export default function BasDetailPage() {
   const [deletePaymentConfirm, setDeletePaymentConfirm] = useState(false)
   const [deletingPayment, setDeletingPayment] = useState(false)
 
+  // Attachments
+  const [attachments, setAttachments] = useState<AccountingAttachment[]>([])
+  const [uploadingAttachment, setUploadingAttachment] = useState(false)
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -91,6 +97,7 @@ export default function BasDetailPage() {
           setCalculation(p.calculationJson)
           setRecords(p.recordsJson ?? null)
         }
+        setAttachments(p.attachments ?? [])
       }
     } finally { setLoading(false) }
   }, [id])
@@ -104,6 +111,54 @@ export default function BasDetailPage() {
       .then(d => { if (d?.accounts) setCoaAccounts(d.accounts) })
       .catch(() => {})
   }, [])
+
+  async function handleUploadAttachments(files: File[]) {
+    setUploadingAttachment(true)
+    try {
+      for (const file of files) {
+        const fd = new FormData()
+        fd.append('file', file)
+        const res = await apiFetch(`/api/admin/accounting/bas/${id}/attachments`, { method: 'POST', body: fd })
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}))
+          throw new Error(d.error || `Failed to upload "${file.name}"`)
+        }
+        const d = await res.json()
+        setAttachments(prev => [...prev, ...(d.attachments ?? [])])
+      }
+    } finally {
+      setUploadingAttachment(false)
+    }
+  }
+
+  async function handleDownloadAttachment(attachmentId: string, filename: string) {
+    try {
+      const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
+      if (!res.ok) { alert('Failed to download attachment'); return }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Failed to download attachment')
+    }
+  }
+
+  async function handleDeleteAttachment(attachmentId: string) {
+    setDeletingAttachmentId(attachmentId)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
+      if (!res.ok) { alert('Failed to delete attachment'); return }
+      setAttachments(prev => prev.filter(a => a.id !== attachmentId))
+    } finally {
+      setDeletingAttachmentId(null)
+    }
+  }
 
   async function handleCalculate() {
     setCalculating(true)
@@ -217,7 +272,7 @@ export default function BasDetailPage() {
               const sum8A = calculation.label1ACents + w2 + t7
               const sum8B = calculation.label1BCents
               const sum9 = sum8A - sum8B
-              const rd = (c: number) => String(Math.round(Math.abs(c) / 100))
+              const rd = (c: number) => String(Math.floor(Math.abs(c) / 100))
               const rows: string[][] = [
                 ['Total sales (including GST)', 'G1', rd(calculation.g1TotalSalesCents)],
                 ['Export sales', 'G2', rd(calculation.g2ExportSalesCents)],
@@ -580,6 +635,28 @@ export default function BasDetailPage() {
           )}
         </Card>
       )}
+
+      {/* Lodgement Documents */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Lodgement Documents</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">
+            Attach a copy of the lodgement confirmation or BAS form received from the ATO portal after lodging.
+          </p>
+          <AttachmentsPanel
+            items={attachments.map((a: AccountingAttachment) => ({ id: a.id, name: a.originalName }) satisfies AttachmentItem)}
+            canUpload
+            uploading={uploadingAttachment}
+            deletingId={deletingAttachmentId}
+            label={null}
+            onUpload={handleUploadAttachments}
+            onDownload={async (item: AttachmentItem) => { await handleDownloadAttachment(item.id, item.name) }}
+            onDelete={async (item: AttachmentItem) => { await handleDeleteAttachment(item.id) }}
+          />
+        </CardContent>
+      </Card>
 
       {/* Lodge Confirmation */}
       <AlertDialog open={lodgeConfirm} onOpenChange={setLodgeConfirm}>

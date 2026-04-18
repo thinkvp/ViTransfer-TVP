@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await params
-  const period = await prisma.basPeriod.findUnique({ where: { id } })
+  const period = await prisma.basPeriod.findUnique({ where: { id }, include: { accountingAttachments: true } })
 
   if (!period) {
     return NextResponse.json({ error: 'BAS period not found' }, { status: 404 })
@@ -97,6 +97,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const updated = await prisma.basPeriod.update({
     where: { id },
+    include: { accountingAttachments: true },
     data: {
       ...(data.label !== undefined ? { label: data.label } : {}),
       ...(data.startDate !== undefined ? { startDate: data.startDate } : {}),

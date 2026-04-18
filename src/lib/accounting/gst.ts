@@ -124,53 +124,32 @@ export async function calculateBas(
       })
     }
   } else {
-    // Cash basis — richer inline query (replaces listSalesCashReceiptsInRange)
+    // Cash basis — single query covering manual payments and Stripe payments (source=STRIPE)
     const invoiceSelect = {
       id: true, invoiceNumber: true, itemsJson: true, taxEnabled: true,
       client: { select: { name: true } },
     } as const
 
-    const [manualPayments, stripeRawPayments] = await Promise.all([
-      prisma.salesPayment.findMany({
-        where: { paymentDate: { gte: startDate, lte: endDate }, excludeFromInvoiceBalance: false },
-        include: { invoice: { select: invoiceSelect } },
-      }),
-      prisma.salesInvoiceStripePayment.findMany({
-        where: {
-          createdAt: {
-            gte: new Date(`${startDate}T00:00:00.000Z`),
-            lte: new Date(`${endDate}T23:59:59.999Z`),
-          },
-        },
-        select: { invoiceDocId: true, invoiceAmountCents: true, createdAt: true },
-      }),
-    ])
-
-    const stripeInvoiceIds = [...new Set(stripeRawPayments.map((p) => p.invoiceDocId).filter(Boolean))] as string[]
-    const stripeInvoices = stripeInvoiceIds.length
-      ? await prisma.salesInvoice.findMany({ where: { id: { in: stripeInvoiceIds } }, select: invoiceSelect })
-      : []
-    const stripeInvoiceMap = new Map(stripeInvoices.map((inv) => [inv.id, inv]))
+    const allPayments = await prisma.salesPayment.findMany({
+      where: {
+        paymentDate: { gte: startDate, lte: endDate },
+        OR: [
+          { excludeFromInvoiceBalance: false },
+          { source: 'STRIPE' },
+        ],
+      },
+      include: { invoice: { select: invoiceSelect } },
+    })
 
     type RichReceipt = {
       paymentDate: string; amountCents: number
       invoice: { id: string; invoiceNumber: string; itemsJson: unknown; taxEnabled: boolean; client: { name: string } | null } | null
     }
-    const allReceipts: RichReceipt[] = [
-      ...manualPayments.map((p) => ({
-        paymentDate: p.paymentDate as string,
-        amountCents: Math.max(0, Math.trunc(p.amountCents)),
-        invoice: p.invoice ? { id: p.invoice.id, invoiceNumber: p.invoice.invoiceNumber, itemsJson: p.invoice.itemsJson, taxEnabled: p.invoice.taxEnabled, client: p.invoice.client } : null,
-      })),
-      ...stripeRawPayments.map((p) => {
-        const inv = p.invoiceDocId ? stripeInvoiceMap.get(p.invoiceDocId) ?? null : null
-        return {
-          paymentDate: new Date(p.createdAt).toISOString().slice(0, 10),
-          amountCents: Math.max(0, Math.trunc(p.invoiceAmountCents)),
-          invoice: inv ? { id: inv.id, invoiceNumber: inv.invoiceNumber, itemsJson: inv.itemsJson, taxEnabled: inv.taxEnabled, client: inv.client } : null,
-        }
-      }),
-    ]
+    const allReceipts: RichReceipt[] = allPayments.map((p) => ({
+      paymentDate: p.paymentDate as string,
+      amountCents: Math.max(0, Math.trunc(p.amountCents)),
+      invoice: p.invoice ? { id: p.invoice.id, invoiceNumber: p.invoice.invoiceNumber, itemsJson: p.invoice.itemsJson, taxEnabled: p.invoice.taxEnabled, client: p.invoice.client } : null,
+    }))
 
     for (const receipt of allReceipts) {
       const invSnapshot = receipt.invoice ? { itemsJson: receipt.invoice.itemsJson, taxEnabled: receipt.invoice.taxEnabled } : null

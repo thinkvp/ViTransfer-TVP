@@ -7,6 +7,7 @@ export function accountingAttachmentFromDb(row: any): AccountingAttachment {
     originalName: row.originalName,
     bankTransactionId: row.bankTransactionId ?? null,
     expenseId: row.expenseId ?? null,
+    basPeriodId: row.basPeriodId ?? null,
     uploadedAt: row.uploadedAt instanceof Date ? row.uploadedAt.toISOString() : row.uploadedAt,
   }
 }
@@ -174,6 +175,7 @@ export function basPeriodFromDb(row: any): BasPeriod {
     paymentAmountCents: row.paymentAmountCents != null ? Number(row.paymentAmountCents) : null,
     paymentNotes: row.paymentNotes ?? null,
     paymentExpenseId: row.paymentExpenseId ?? null,
+    attachments: row.accountingAttachments ? row.accountingAttachments.map((a: any) => accountingAttachmentFromDb(a)) : [],
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
   }

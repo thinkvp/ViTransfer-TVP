@@ -13,18 +13,6 @@ export type SalesCashReceipt = {
   invoice: InvoiceSnapshot | null
 }
 
-function startOfDay(value: string): Date {
-  return new Date(`${value}T00:00:00.000Z`)
-}
-
-function endOfDay(value: string): Date {
-  return new Date(`${value}T23:59:59.999Z`)
-}
-
-function toIsoDate(value: Date): string {
-  return value.toISOString().slice(0, 10)
-}
-
 export function cashReceiptReportingAmountCents(
   amountCents: number,
   invoice: InvoiceSnapshot | null,
@@ -44,102 +32,47 @@ export function cashReceiptReportingAmountCents(
 }
 
 export async function listSalesCashReceiptsInRange(startDate: string, endDate: string): Promise<SalesCashReceipt[]> {
-  const [localPayments, stripePayments] = await Promise.all([
-    prisma.salesPayment.findMany({
-      where: {
-        paymentDate: { gte: startDate, lte: endDate },
-        excludeFromInvoiceBalance: false,
+  const payments = await prisma.salesPayment.findMany({
+    where: {
+      paymentDate: { gte: startDate, lte: endDate },
+      OR: [
+        { excludeFromInvoiceBalance: false },
+        { source: 'STRIPE' },
+      ],
+    },
+    include: {
+      invoice: {
+        select: { itemsJson: true, taxEnabled: true },
       },
-      include: {
-        invoice: {
-          select: { itemsJson: true, taxEnabled: true },
-        },
-      },
-    }),
-    prisma.salesInvoiceStripePayment.findMany({
-      where: {
-        createdAt: {
-          gte: startOfDay(startDate),
-          lte: endOfDay(endDate),
-        },
-      },
-      select: {
-        invoiceDocId: true,
-        invoiceAmountCents: true,
-        createdAt: true,
-      },
-    }),
-  ])
+    },
+  })
 
-  const stripeInvoiceIds = Array.from(new Set(stripePayments.map((payment) => payment.invoiceDocId).filter(Boolean)))
-  const stripeInvoices = stripeInvoiceIds.length
-    ? await prisma.salesInvoice.findMany({
-        where: { id: { in: stripeInvoiceIds } },
-        select: { id: true, itemsJson: true, taxEnabled: true },
-      })
-    : []
-
-  const stripeInvoiceMap = new Map(stripeInvoices.map((invoice) => [invoice.id, { itemsJson: invoice.itemsJson, taxEnabled: invoice.taxEnabled }]))
-
-  return [
-    ...localPayments.map((payment) => ({
-      paymentDate: payment.paymentDate,
-      amountCents: Math.max(0, Math.trunc(payment.amountCents)),
-      invoice: payment.invoice ? { itemsJson: payment.invoice.itemsJson, taxEnabled: payment.invoice.taxEnabled } : null,
-    })),
-    ...stripePayments.map((payment) => ({
-      paymentDate: toIsoDate(payment.createdAt),
-      amountCents: Math.max(0, Math.trunc(payment.invoiceAmountCents)),
-      invoice: payment.invoiceDocId ? stripeInvoiceMap.get(payment.invoiceDocId) ?? null : null,
-    })),
-  ]
+  return payments.map((payment) => ({
+    paymentDate: payment.paymentDate,
+    amountCents: Math.max(0, Math.trunc(payment.amountCents)),
+    invoice: payment.invoice ? { itemsJson: payment.invoice.itemsJson, taxEnabled: payment.invoice.taxEnabled } : null,
+  }))
 }
 
 export async function listSalesCashReceiptsUpTo(asOf: string): Promise<SalesCashReceipt[]> {
-  const [localPayments, stripePayments] = await Promise.all([
-    prisma.salesPayment.findMany({
-      where: {
-        paymentDate: { lte: asOf },
-        excludeFromInvoiceBalance: false,
+  const payments = await prisma.salesPayment.findMany({
+    where: {
+      paymentDate: { lte: asOf },
+      OR: [
+        { excludeFromInvoiceBalance: false },
+        { source: 'STRIPE' },
+      ],
+    },
+    include: {
+      invoice: {
+        select: { itemsJson: true, taxEnabled: true },
       },
-      include: {
-        invoice: {
-          select: { itemsJson: true, taxEnabled: true },
-        },
-      },
-    }),
-    prisma.salesInvoiceStripePayment.findMany({
-      where: {
-        createdAt: { lte: endOfDay(asOf) },
-      },
-      select: {
-        invoiceDocId: true,
-        invoiceAmountCents: true,
-        createdAt: true,
-      },
-    }),
-  ])
+    },
+  })
 
-  const stripeInvoiceIds = Array.from(new Set(stripePayments.map((payment) => payment.invoiceDocId).filter(Boolean)))
-  const stripeInvoices = stripeInvoiceIds.length
-    ? await prisma.salesInvoice.findMany({
-        where: { id: { in: stripeInvoiceIds } },
-        select: { id: true, itemsJson: true, taxEnabled: true },
-      })
-    : []
-
-  const stripeInvoiceMap = new Map(stripeInvoices.map((invoice) => [invoice.id, { itemsJson: invoice.itemsJson, taxEnabled: invoice.taxEnabled }]))
-
-  return [
-    ...localPayments.map((payment) => ({
-      paymentDate: payment.paymentDate,
-      amountCents: Math.max(0, Math.trunc(payment.amountCents)),
-      invoice: payment.invoice ? { itemsJson: payment.invoice.itemsJson, taxEnabled: payment.invoice.taxEnabled } : null,
-    })),
-    ...stripePayments.map((payment) => ({
-      paymentDate: toIsoDate(payment.createdAt),
-      amountCents: Math.max(0, Math.trunc(payment.invoiceAmountCents)),
-      invoice: payment.invoiceDocId ? stripeInvoiceMap.get(payment.invoiceDocId) ?? null : null,
-    })),
-  ]
+  return payments.map((payment) => ({
+    paymentDate: payment.paymentDate,
+    amountCents: Math.max(0, Math.trunc(payment.amountCents)),
+    invoice: payment.invoice ? { itemsJson: payment.invoice.itemsJson, taxEnabled: payment.invoice.taxEnabled } : null,
+  }))
 }

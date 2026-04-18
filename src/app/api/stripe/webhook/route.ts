@@ -141,6 +141,29 @@ export async function POST(request: NextRequest) {
     const paidAtIso = new Date(nowMs).toISOString()
     const paidAtYmd = paidAtIso.slice(0, 10)
 
+    // Create a SalesPayment record so Stripe income is visible in BAS / cash-basis reports
+    // via the standard SalesPayment table. excludeFromInvoiceBalance=true prevents double-counting
+    // against the SalesInvoiceStripePayment that drives invoice status.
+    if (didInsert) {
+      const invoiceRow = await prisma.salesInvoice.findUnique({
+        where: { id: String(docId) },
+        select: { clientId: true },
+      }).catch(() => null)
+
+      await prisma.salesPayment.create({
+        data: {
+          source: 'STRIPE' as any,
+          excludeFromInvoiceBalance: true,
+          paymentDate: paidAtYmd,
+          amountCents: invoiceAmountCents,
+          method: 'Stripe',
+          reference: sessionId,
+          clientId: invoiceRow?.clientId ?? null,
+          invoiceId: String(docId),
+        },
+      }).catch(() => null)
+    }
+
     const expiresAt = addDaysLocal(endOfDayLocal(new Date()), 30)
 
     const existingShare = await prisma.salesDocumentShare.findUnique({
