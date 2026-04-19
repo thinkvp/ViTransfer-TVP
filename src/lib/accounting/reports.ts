@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db'
 import { calcLineSubtotalCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import type { SalesLineItem } from '@/lib/sales/types'
 import { cashReceiptReportingAmountCents, listSalesCashReceiptsInRange, listSalesCashReceiptsUpTo } from '@/lib/accounting/sales-cash-receipts'
+import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,8 +25,6 @@ interface ReportSection {
   lines: ReportLine[]
   totalCents: number
 }
-
-type GstCode = 'GST' | 'GST_FREE' | 'BAS_EXCLUDED' | 'INPUT_TAXED' | null | undefined
 
 type ProfitLossAccountNode = {
   id: string
@@ -90,16 +89,6 @@ function groupByAccount(
     }
   }
   return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code))
-}
-
-function amountExcludingGst(amountCents: number, taxCode: GstCode, taxRatePercent: number): number {
-  if (taxCode !== 'GST' || amountCents === 0) return amountCents
-
-  const sign = Math.sign(amountCents)
-  const absoluteAmount = Math.abs(amountCents)
-  const gstAmount = Math.round((absoluteAmount * taxRatePercent) / (100 + taxRatePercent))
-
-  return sign * (absoluteAmount - gstAmount)
 }
 
 async function buildDebitNormalProfitLossLines(

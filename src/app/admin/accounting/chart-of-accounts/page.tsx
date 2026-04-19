@@ -16,7 +16,7 @@ import { ACCOUNT_TYPE_LABELS, TAX_CODE_LABELS } from '@/lib/accounting/types'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { cn } from '@/lib/utils'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 
 const TYPE_BADGE: Record<AccountType, string> = {
   ASSET: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
@@ -247,7 +247,22 @@ export default function ChartOfAccountsPage() {
                 a.code, a.name, ACCOUNT_TYPE_LABELS[a.type as AccountType] ?? a.type, TAX_CODE_LABELS[a.taxCode as AccountTaxCode] ?? a.taxCode ?? '', a.isActive ? 'Yes' : 'No',
               ]))
             }}
-            onExportPdf={() => downloadPdf('Chart of Accounts')}
+            onExportPdf={() => generateReportPdf({
+              title: 'Chart of Accounts',
+              sections: [{
+                columns: [
+                  { header: 'Code', nowrap: true },
+                  { header: 'Name' },
+                  { header: 'Type', nowrap: true },
+                  { header: 'Tax Code', nowrap: true },
+                  { header: 'Active', nowrap: true },
+                ],
+                rows: filtered.map(({ account: a }) => ({
+                  cells: [a.code, a.name, ACCOUNT_TYPE_LABELS[a.type as AccountType] ?? a.type, TAX_CODE_LABELS[a.taxCode as AccountTaxCode] ?? a.taxCode ?? '', a.isActive ? 'Yes' : 'No'],
+                  indent: !!a.parentId,
+                })),
+              }],
+            })}
           />
           <Button onClick={openNew}><Plus className="w-4 h-4 mr-1.5" />New Account</Button>
         </div>

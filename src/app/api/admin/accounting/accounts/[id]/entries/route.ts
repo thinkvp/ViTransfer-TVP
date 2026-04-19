@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { accountFromDb, expenseFromDb, bankTransactionFromDb, journalEntryFromDb } from '@/lib/accounting/db-mappers'
+import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-allocation'
 import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
@@ -24,8 +25,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params
   const url = new URL(request.url)
+  const download = url.searchParams.get('download') === 'true'
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
-  const pageSize = Math.min(200, Math.max(1, parseInt(url.searchParams.get('pageSize') ?? '50', 10)))
+  const pageSize = download ? 100000 : Math.min(200, Math.max(1, parseInt(url.searchParams.get('pageSize') ?? '50', 10)))
   const from = url.searchParams.get('from') ?? undefined
   const to = url.searchParams.get('to') ?? undefined
 
@@ -48,7 +50,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (from) dateFilter.gte = from
   if (to) dateFilter.lte = to
 
-  const [expenses, bankTransactions, journalEntries, splitLines, salesInvoiceEntries] = await Promise.all([
+  const [expenses, bankTransactions, journalEntries, splitLines, salesInvoiceEntries, settings] = await Promise.all([
     prisma.expense.findMany({
       where: { accountId: accountIdFilter, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
       include: { account: true },
@@ -84,7 +86,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       orderBy: { bankTransaction: { date: 'desc' } },
     }),
     listSalesInvoiceIncomeEntries({ from, to, accountIds }),
+    prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }),
   ])
+
+  const taxRatePercent = settings?.taxRatePercent ?? 10
 
   const salesInvoiceIds = [...new Set(salesInvoiceEntries.map(entry => entry.invoiceId))]
   const invoiceLinkedTransactions = salesInvoiceIds.length > 0
@@ -168,23 +173,46 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   })
 
   // Sum all entry amounts for the period (across all pages)
-  // For debit-normal accounts (ASSET, EXPENSE, COGS), bank transaction amountCents must be
-  // negated: a credit (positive, money in) reduces the account balance, not increases it.
+  // For debit-normal accounts (ASSET, EXPENSE, COGS), bank transaction and split line
+  // amounts must be negated: a credit (positive, money in) reduces the account balance.
   const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE' || account.type === 'COGS'
   const periodTotalCents = combined.reduce((sum, row) => {
     if (row.kind === 'expense') return sum + (row.entry as ReturnType<typeof expenseFromDb>).amountExGst
     if (row.kind === 'bankTransaction') {
       const t = row.entry as ReturnType<typeof bankTransactionFromDb>
-      const exGst = t.taxCode === 'GST' ? Math.round(t.amountCents / 1.1) : t.amountCents
+      const exGst = amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent)
       return sum + (isDebitNormal ? -exGst : exGst)
     }
-    if (row.kind === 'journal') return sum + (row.entry as ReturnType<typeof journalEntryFromDb>).amountCents
+    if (row.kind === 'journal') {
+      const j = row.entry as ReturnType<typeof journalEntryFromDb>
+      return sum + amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+    }
+    if (row.kind === 'split') {
+      const s = row.entry as { amountCents: number; taxCode: 'GST' | 'GST_FREE' | 'BAS_EXCLUDED' | 'INPUT_TAXED' }
+      const exGst = amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent)
+      return sum + (isDebitNormal ? -exGst : exGst)
+    }
     return sum + (row.entry as { amountCents: number }).amountCents
   }, 0)
 
-  const total = combined.length
+  // Apply search filter (affects count/pagination but not period total)
+  const q = url.searchParams.get('q')?.toLowerCase().trim() ?? ''
+  const qMatch = q.replace(/^\$/, '')  // strip leading $ to support amount searches like "$12.50"
+  const searchFiltered = q
+    ? combined.filter(entry => {
+        const fields: (string | null | undefined)[] = []
+        if (entry.kind === 'expense') { const e = entry.entry as { description: string; supplierName?: string | null; amountExGst: number }; fields.push(e.description, e.supplierName, (Math.abs(e.amountExGst) / 100).toFixed(2)) }
+        else if (entry.kind === 'bankTransaction') { const t = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(t.description, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
+        else if (entry.kind === 'journal') { const j = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(j.description, j.reference, (Math.abs(j.amountCents) / 100).toFixed(2)) }
+        else if (entry.kind === 'salesInvoice') { const s = entry.entry as { invoiceNumber: string; description: string; clientName?: string | null; amountCents: number }; fields.push(s.invoiceNumber, s.description, s.clientName, (Math.abs(s.amountCents) / 100).toFixed(2)) }
+        else { const s = entry.entry as { description: string; bankTransactionDescription: string; bankTransactionReference?: string | null; amountCents: number }; fields.push(s.description, s.bankTransactionDescription, s.bankTransactionReference, (Math.abs(s.amountCents) / 100).toFixed(2)) }
+        return fields.some(f => f?.toLowerCase().includes(qMatch))
+      })
+    : combined
+
+  const total = searchFiltered.length
   const offset = (page - 1) * pageSize
-  const slice = combined.slice(offset, offset + pageSize)
+  const slice = searchFiltered.slice(offset, offset + pageSize)
 
   const res = NextResponse.json({
     account: accountFromDb(account),
@@ -192,6 +220,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     entries: slice,
     total,
     periodTotalCents,
+    taxRatePercent,
     page,
     pageSize,
     pageCount: Math.ceil(total / pageSize),

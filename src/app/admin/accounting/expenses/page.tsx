@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown, Eye } from 'lucide-react'
 import type { Expense, ExpenseStatus } from '@/lib/accounting/types'
@@ -43,7 +43,6 @@ export default function ExpensesPage() {
   const [total, setTotal] = useState(0)
   const pageSize = 25
   const [exportLoading, setExportLoading] = useState(false)
-  const [printRows, setPrintRows] = useState<Expense[] | null>(null)
 
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -68,14 +67,6 @@ export default function ExpensesPage() {
     const data = await res.json()
     return data.expenses ?? []
   }, [search, fromDate, toDate, sortKey, sortDir])
-
-  // Trigger print after printRows state is set
-  useEffect(() => {
-    if (printRows !== null) {
-      downloadPdf('Expenses')
-      setPrintRows(null)
-    }
-  }, [printRows])
 
   function toggleSort(key: SortKey) {
     setPage(1)
@@ -168,7 +159,25 @@ export default function ExpensesPage() {
               setExportLoading(true)
               try {
                 const all = await fetchAllExpensesForExport()
-                setPrintRows(all)
+                generateReportPdf({
+                  title: 'Expenses',
+                  subtitle: [fromDate, toDate].filter(Boolean).join(' to ') || undefined,
+                  sections: [{
+                    columns: [
+                      { header: 'Date', nowrap: true },
+                      { header: 'Supplier' },
+                      { header: 'Description' },
+                      { header: 'Category' },
+                      { header: 'Ex GST', align: 'right', nowrap: true },
+                      { header: 'GST', align: 'right', nowrap: true },
+                      { header: 'Inc GST', align: 'right', nowrap: true },
+                      { header: 'Status', nowrap: true },
+                    ],
+                    rows: all.map(e => ({
+                      cells: [formatDate(e.date), e.supplierName ?? '—', e.description, e.accountName ?? '—', '$' + fmtAud(e.amountExGst), '$' + fmtAud(e.gstAmount), '$' + fmtAud(e.amountIncGst), EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status],
+                    })),
+                  }],
+                })
               } finally { setExportLoading(false) }
             }}
             disabled={expenses.length === 0 || exportLoading}
@@ -197,9 +206,6 @@ export default function ExpensesPage() {
                 onFromChange={v => handleFilterChange(() => setFromDate(v))}
                 onToChange={v => handleFilterChange(() => setToDate(v))}
               />
-              {(search || fromDate || toDate) && (
-                <Button variant="ghost" size="sm" className="h-9" onClick={() => { setSearch(''); setFromDate(''); setToDate(''); setPage(1) }}>Clear</Button>
-              )}
             </div>
           </div>
         </CardHeader>
@@ -240,11 +246,11 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(printRows ?? sortedExpenses).map(e => (
+                  {sortedExpenses.map(e => (
                     <tr
                       key={e.id}
                       className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
-                      onClick={() => { if (!printRows) { setModalExpenseId(e.id); setModalOpen(true) } }}
+                      onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}
                     >
                       <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground">{formatDate(e.date)}</td>
                       <td className="px-3 py-2 font-medium">

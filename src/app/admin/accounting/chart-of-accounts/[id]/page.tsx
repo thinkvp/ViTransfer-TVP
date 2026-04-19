@@ -13,15 +13,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, ArrowUp, ArrowDown, Eye, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus, Pencil } from 'lucide-react'
-import type { Account, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
+import type { Account, AccountTaxCode, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
+import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import { cn, formatDate } from '@/lib/utils'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
 import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 
-type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
+type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: AccountTaxCode; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
 type SalesInvoiceEntry = {
   id: string
   invoiceId: string
@@ -52,6 +53,28 @@ function getDefaultJournalDate() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+function isDebitNormalAccountType(accountType: Account['type'] | undefined) {
+  return accountType === 'ASSET' || accountType === 'EXPENSE' || accountType === 'COGS'
+}
+
+function getEntryAmountExGst(row: Entry, accountType: Account['type'] | undefined, taxRatePercent: number) {
+  if (row.kind === 'expense') return (row.entry as Expense).amountExGst
+  if (row.kind === 'bankTransaction') {
+    const t = row.entry as BankTransaction
+    const exGst = amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent)
+    return isDebitNormalAccountType(accountType) ? -exGst : exGst
+  }
+  if (row.kind === 'journal') {
+    const j = row.entry as JournalEntry
+    return amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+  }
+  if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).amountCents
+
+  const s = row.entry as SplitEntry
+  const exGst = amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent)
+  return isDebitNormalAccountType(accountType) ? -exGst : exGst
+}
+
 export default function AccountLedgerPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id ?? ''
@@ -62,12 +85,14 @@ export default function AccountLedgerPage() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [total, setTotal] = useState(0)
   const [periodTotalCents, setPeriodTotalCents] = useState(0)
+  const [taxRatePercent, setTaxRatePercent] = useState(10)
   const [hasChildAccounts, setHasChildAccounts] = useState(false)
   const [page, setPage] = useState(1)
   const [pageCount, setPageCount] = useState(1)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState(() => searchParams?.get('from') ?? getThisFinancialYearDates().from)
   const [to, setTo] = useState(() => searchParams?.get('to') ?? getThisFinancialYearDates().to)
+  const [search, setSearch] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null)
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -87,18 +112,7 @@ export default function AccountLedgerPage() {
   }
 
   const sortedEntries = useMemo(() => {
-    const isDebitNormal = account?.type === 'ASSET' || account?.type === 'EXPENSE' || account?.type === 'COGS'
-    const getAmt = (row: Entry) => {
-      if (row.kind === 'expense') return (row.entry as Expense).amountIncGst
-      if (row.kind === 'bankTransaction') {
-        const t = row.entry as BankTransaction
-        const exGst = t.taxCode === 'GST' ? Math.round(t.amountCents / 1.1) : t.amountCents
-        return isDebitNormal ? -exGst : exGst
-      }
-      if (row.kind === 'journal') return (row.entry as JournalEntry).amountCents
-      if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).amountCents
-      return (row.entry as SplitEntry).amountCents
-    }
+    const getAmt = (row: Entry) => getEntryAmountExGst(row, account?.type, taxRatePercent)
     const getAccount = (row: Entry) => {
       if (row.kind === 'expense') return (row.entry as Expense).accountName ?? account?.name ?? ''
       if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).accountName ?? account?.name ?? ''
@@ -132,7 +146,7 @@ export default function AccountLedgerPage() {
       }
       return sortDir === 'asc' ? r : -r
     })
-  }, [entries, sortKey, sortDir, account])
+  }, [entries, sortKey, sortDir, account, taxRatePercent])
 
   // Journal entry form
   const [jeOpen, setJeOpen] = useState(false)
@@ -148,12 +162,24 @@ export default function AccountLedgerPage() {
 
   const PAGE_SIZE = 50
 
-  const load = useCallback(async (p: number, fromDate: string, toDate: string) => {
+  const fetchAllEntriesForExport = useCallback(async (): Promise<Entry[]> => {
+    const params = new URLSearchParams({ page: '1', pageSize: '100000', download: 'true' })
+    if (from) params.set('from', from)
+    if (to) params.set('to', to)
+    if (search.trim()) params.set('q', search.trim())
+    const res = await apiFetch(`/api/admin/accounting/accounts/${id}/entries?${params}`)
+    if (!res.ok) return []
+    const d = await res.json()
+    return d.entries ?? []
+  }, [id, from, to, search])
+
+  const load = useCallback(async (p: number, fromDate: string, toDate: string, q: string) => {
     setLoading(true)
     try {
       const params = new URLSearchParams({ page: String(p), pageSize: String(PAGE_SIZE) })
       if (fromDate) params.set('from', fromDate)
       if (toDate) params.set('to', toDate)
+      if (q.trim()) params.set('q', q.trim())
       const res = await apiFetch(`/api/admin/accounting/accounts/${id}/entries?${params}`)
       if (!res.ok) { router.push('/admin/accounting/chart-of-accounts'); return }
       const d = await res.json()
@@ -161,6 +187,7 @@ export default function AccountLedgerPage() {
       setEntries(d.entries ?? [])
       setTotal(d.total ?? 0)
       setPeriodTotalCents(d.periodTotalCents ?? 0)
+      setTaxRatePercent(d.taxRatePercent ?? 10)
       setHasChildAccounts(d.hasChildAccounts ?? false)
       setPageCount(d.pageCount ?? 1)
     } finally {
@@ -168,11 +195,11 @@ export default function AccountLedgerPage() {
     }
   }, [id, router])
 
-  useEffect(() => { void load(1, from, to) }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(1, from, to, search) }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function changePage(next: number) {
     setPage(next)
-    void load(next, from, to)
+    void load(next, from, to, search)
   }
 
   async function handleDeleteEntry() {
@@ -190,7 +217,7 @@ export default function AccountLedgerPage() {
         return
       }
       setDeleteTarget(null)
-      void load(page, from, to)
+      void load(page, from, to, search)
     } finally {
       setIsDeleting(false)
     }
@@ -229,7 +256,7 @@ export default function AccountLedgerPage() {
       setJeTaxCode('BAS_EXCLUDED')
       setJeRef('')
       setJeNotes('')
-      void load(page, from, to)
+      void load(page, from, to, search)
     } finally {
       setJeSaving(false)
     }
@@ -241,7 +268,7 @@ export default function AccountLedgerPage() {
     setJeDesc('')
     setJeAmount('')
     setJeType('debit')
-    setJeTaxCode('BAS_EXCLUDED')
+    setJeTaxCode(account?.taxCode ?? 'BAS_EXCLUDED')
     setJeRef('')
     setJeNotes('')
     setJeOpen(true)
@@ -312,41 +339,81 @@ export default function AccountLedgerPage() {
       </div>
 
       {account && (
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold">{account.name}</h1>
-          <span className="font-mono text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">{account.code}</span>
-          <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', TYPE_BADGE[account.type] ?? 'bg-muted')}>{account.type}</span>
-          {!account.isActive && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Inactive</span>}
-          {hasChildAccounts && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Includes sub-accounts</span>}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl font-semibold">{account.name}</h1>
+            <span className="font-mono text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">{account.code}</span>
+            <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', TYPE_BADGE[account.type] ?? 'bg-muted')}>{account.type}</span>
+            {!account.isActive && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Inactive</span>}
+            {hasChildAccounts && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Includes sub-accounts</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              onExportCsv={async () => {
+                const all = await fetchAllEntriesForExport()
+                downloadCsv(`${account?.code ?? 'account'}-entries.csv`, ['Date', 'Type', 'Account', 'Description', 'Ref', 'Amount'], all.map(row => {
+                  const amount = (getEntryAmountExGst(row, account?.type, taxRatePercent) / 100).toFixed(2)
+                  if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '', amount] }
+                  if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '', amount] }
+                  if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '', amount] }
+                  if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', amount] }
+                  const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', amount]
+                }))
+              }}
+              onExportPdf={async () => {
+                const all = await fetchAllEntriesForExport()
+                const fmtAudLocal = (cents: number) => { const abs = Math.abs(cents); return (cents < 0 ? '-' : '') + '$' + (abs / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+                generateReportPdf({
+                  title: `${account?.code ?? 'Account'} — ${account?.name ?? 'Entries'}`,
+                  subtitle: `${from} to ${to}`,
+                  sections: [{
+                    columns: [
+                      { header: 'Date', nowrap: true },
+                      { header: 'Type', nowrap: true },
+                      { header: 'Account' },
+                      { header: 'Description' },
+                      { header: 'Ref / Supplier' },
+                      { header: 'Amount (ex-GST)', align: 'right', nowrap: true },
+                    ],
+                    rows: all.map(row => {
+                      const amount = fmtAudLocal(getEntryAmountExGst(row, account?.type, taxRatePercent))
+                      if (row.kind === 'expense') { const e = row.entry as Expense; return { cells: [formatDate(e.date), 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '—', amount] } }
+                      if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return { cells: [formatDate(t.date), 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '—', amount] } }
+                      if (row.kind === 'journal') { const j = row.entry as JournalEntry; return { cells: [formatDate(j.date), 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '—', amount] } }
+                      if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return { cells: [formatDate(row.date), 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '—', amount] } }
+                      const s = row.entry as SplitEntry; return { cells: [formatDate(s.bankTransactionDate), 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '—', amount] }
+                    }),
+                  }],
+                })
+              }}
+              disabled={entries.length === 0}
+            />
+            <Button className="gap-1.5" onClick={openNewJournalEntry}>
+              <Plus className="w-4 h-4" />Journal Entry
+            </Button>
+          </div>
         </div>
       )}
 
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <DateRangePreset
-              from={from}
-              to={to}
-              onFromChange={v => { setFrom(v); setPage(1); void load(1, v, to) }}
-              onToChange={v => { setTo(v); setPage(1); void load(1, from, v) }}
-            />
-            <Button size="sm" variant="outline" className="ml-auto gap-1.5" onClick={openNewJournalEntry}>
-              <Plus className="w-3.5 h-3.5" />Journal Entry
-            </Button>
-            <ExportMenu
-              onExportCsv={() => {
-                downloadCsv(`${account?.code ?? 'account'}-entries.csv`, ['Date', 'Type', 'Account', 'Description', 'Ref', 'Amount'], entries.map(row => {
-                  if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '', (e.amountExGst / 100).toFixed(2)] }
-                  if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '', (t.amountCents / 100).toFixed(2)] }
-                  if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '', (j.amountCents / 100).toFixed(2)] }
-                  if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', (s.amountCents / 100).toFixed(2)] }
-                  const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', (s.amountCents / 100).toFixed(2)]
-                }))
-              }}
-              onExportPdf={() => downloadPdf(`${account?.code ?? 'Account'} Entries`)}
-              disabled={entries.length === 0}
-            />
-            <span className="text-sm text-muted-foreground self-end">{total} entr{total !== 1 ? 'ies' : 'y'}</span>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="flex flex-1 flex-wrap gap-2">
+              <Input
+                placeholder="Search description, supplier, reference, amount…"
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1); void load(1, from, to, e.target.value) }}
+                className="h-9 w-full sm:max-w-[320px]"
+              />
+            </div>
+            <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:ml-auto">
+              <DateRangePreset
+                from={from}
+                to={to}
+                onFromChange={v => { setFrom(v); setPage(1); void load(1, v, to, search) }}
+                onToChange={v => { setTo(v); setPage(1); void load(1, from, v, search) }}
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -430,10 +497,7 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={t.accountName ?? account?.name ?? undefined}>{!isOwn && t.accountName ? `\u2014 ${t.accountName}` : t.accountName ?? account?.name ?? '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{t.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{t.reference ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">{(() => {
-                            const exGst = t.taxCode === 'GST' ? Math.round(t.amountCents / 1.1) : t.amountCents
-                            return fmtAud((account?.type === 'ASSET' || account?.type === 'EXPENSE' || account?.type === 'COGS') ? -exGst : exGst)
-                          })()}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <AccountingTableActionButton onClick={() => void openLinkedTransaction(t.id)} title="View bank transaction" aria-label="View bank transaction">
@@ -460,7 +524,7 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={j.accountName ?? account?.name}>{!isOwn && j.accountName ? `\u2014 ${j.accountName}` : j.accountName ?? account?.name ?? '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{j.description}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{j.reference ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(j.amountCents)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
                             {isOwn && (
                               <div className="flex items-center justify-end gap-2">
@@ -511,7 +575,7 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSplit && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{s.description || s.bankTransactionDescription}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.bankTransactionReference ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(s.amountCents)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
                             <AccountingTableActionButton onClick={() => void openLinkedTransaction(s.bankTransactionId)} title="View linked bank transaction" aria-label="View linked bank transaction">
                               <Eye className="w-3.5 h-3.5" />
@@ -537,17 +601,23 @@ export default function AccountLedgerPage() {
             </div>
           )}
 
+        </CardContent>
+      </Card>
+
+      {entries.length > 0 && (
+        <div className="flex items-center justify-between text-sm print:hidden">
+          <span className="text-muted-foreground">{total} entr{total !== 1 ? 'ies' : 'y'}</span>
           {pageCount > 1 && (
-            <div className="flex items-center justify-center gap-1 px-4 py-3 border-t border-border">
+            <div className="flex items-center gap-1">
               <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => changePage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
               <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => changePage(page - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
-              <span className="text-sm text-muted-foreground px-2">Page {page} of {pageCount}</span>
+              <span className="px-3 text-muted-foreground">Page {page} of {pageCount}</span>
               <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => changePage(page + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
               <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => changePage(pageCount)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
       <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open && !isDeleting) setDeleteTarget(null) }}>
         <AlertDialogContent>
@@ -648,7 +718,7 @@ export default function AccountLedgerPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Amount ($)</Label>
+                <Label className="text-xs">Amount (inc. GST)</Label>
                 <Input type="number" min="0" step="0.01" value={jeAmount} onChange={e => setJeAmount(e.target.value)} placeholder="0.00" className="mt-1" />
               </div>
               <div>
@@ -685,8 +755,8 @@ export default function AccountLedgerPage() {
         open={editExpenseId !== null}
         expenseId={editExpenseId}
         onClose={() => setEditExpenseId(null)}
-        onSaved={() => { setEditExpenseId(null); void load(page, from, to) }}
-        onDeleted={() => { setEditExpenseId(null); void load(page, from, to) }}
+        onSaved={() => { setEditExpenseId(null); void load(page, from, to, search) }}
+        onDeleted={() => { setEditExpenseId(null); void load(page, from, to, search) }}
       />
     </div>
   )

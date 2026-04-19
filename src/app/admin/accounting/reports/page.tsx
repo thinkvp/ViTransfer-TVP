@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
+import type { PdfSection, PdfRow } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
 import Link from 'next/link'
 import { BarChart2, Scale, Printer, FileText, Users } from 'lucide-react'
@@ -148,8 +149,95 @@ export default function ReportsPage() {
             }
           }}
           onExportPdf={() => {
-            const labels: Record<string, string> = { pl: 'Profit & Loss', bs: 'Balance Sheet', tb: 'Trial Balance', ar: 'Aged Receivables' }
-            downloadPdf(labels[tab] ?? 'Report')
+            if (tab === 'pl' && plReport) {
+              const plCols = [{ header: 'Account' }, { header: 'Amount (ex GST)', align: 'right' as const, nowrap: true }]
+              const sections: PdfSection[] = []
+              // Income
+              const incomeRows: PdfRow[] = plReport.income.filter(l => !l.hideAmount).map(l => ({
+                cells: [l.accountCode ? `${l.accountCode} — ${l.accountName}` : l.accountName, fmtAud(l.amountCents)],
+                indent: !!l.depth,
+              }))
+              incomeRows.push({ cells: ['Total Income', fmtAud(plReport.totalIncomeCents)], bold: true, separator: true })
+              sections.push({ title: 'Income', columns: plCols, rows: incomeRows })
+              // COGS
+              if (plReport.cogs.length > 0) {
+                const cogsRows: PdfRow[] = plReport.cogs.filter(l => !l.hideAmount).map(l => ({
+                  cells: [l.accountCode ? `${l.accountCode} — ${l.accountName}` : l.accountName, fmtAud(l.amountCents)],
+                  indent: !!l.depth,
+                }))
+                cogsRows.push({ cells: ['Total Cost of Goods Sold', fmtAud(plReport.totalCogsCents)], bold: true, separator: true })
+                sections.push({ title: 'Cost of Goods Sold', columns: plCols, rows: cogsRows })
+              }
+              // Gross Profit
+              sections.push({ columns: plCols, rows: [{ cells: ['Gross Profit', fmtAud(plReport.grossProfitCents)], bold: true, doubleSeparator: true, color: plReport.grossProfitCents >= 0 ? 'green' : 'red' }] })
+              // Expenses
+              const expRows: PdfRow[] = plReport.expenses.filter(l => !l.hideAmount).map(l => ({
+                cells: [l.accountCode ? `${l.accountCode} — ${l.accountName}` : l.accountName, fmtAud(l.amountCents)],
+                indent: !!l.depth,
+              }))
+              expRows.push({ cells: ['Total Expenses', fmtAud(plReport.totalExpenseCents)], bold: true, separator: true })
+              sections.push({ title: 'Expenses', columns: plCols, rows: expRows })
+              // Net Profit
+              sections.push({ columns: plCols, rows: [{ cells: ['Net Profit', fmtAud(plReport.netProfitCents)], bold: true, doubleSeparator: true, color: plReport.netProfitCents >= 0 ? 'green' : 'red' }] })
+              generateReportPdf({ title: 'Profit & Loss', subtitle: `${plReport.fromDate} to ${plReport.toDate} (${plReport.basis}) — All figures ex GST`, sections })
+            } else if (tab === 'bs' && bsReport) {
+              const bsCols = [{ header: 'Account' }, { header: 'Amount', align: 'right' as const, nowrap: true }]
+              const mkSection = (title: string, rows: typeof bsReport.assets, total: number, totalLabel: string): PdfSection => ({
+                title,
+                columns: bsCols,
+                rows: [
+                  ...rows.map(r => ({ cells: [r.accountCode ? `${r.accountCode} — ${r.label}` : r.label, fmtAud(r.amountCents)] })),
+                  { cells: [totalLabel, fmtAud(total)], bold: true, separator: true },
+                ],
+              })
+              const sections: PdfSection[] = [
+                mkSection('Assets', bsReport.assets, bsReport.totalAssetsCents, 'Total Assets'),
+                mkSection('Liabilities', bsReport.liabilities, bsReport.totalLiabilitiesCents, 'Total Liabilities'),
+                mkSection('Equity', bsReport.equity, bsReport.totalEquityCents, 'Total Equity'),
+                { columns: bsCols, rows: [{ cells: ['Net Assets', fmtAud(bsReport.totalAssetsCents - bsReport.totalLiabilitiesCents)], bold: true, doubleSeparator: true }] },
+              ]
+              generateReportPdf({ title: 'Balance Sheet', subtitle: `As at ${bsReport.asAt}`, sections })
+            } else if (tab === 'tb' && tbReport) {
+              const tbCols = [
+                { header: 'Code', nowrap: true },
+                { header: 'Account' },
+                { header: 'Type', nowrap: true },
+                { header: 'Debit', align: 'right' as const, nowrap: true },
+                { header: 'Credit', align: 'right' as const, nowrap: true },
+              ]
+              const rows: PdfRow[] = tbReport.rows.map(r => ({
+                cells: [r.code, r.name, r.type, r.debitCents > 0 ? fmtAud(r.debitCents) : '', r.creditCents > 0 ? fmtAud(r.creditCents) : ''],
+              }))
+              rows.push({ cells: ['', 'Total', '', fmtAud(tbReport.totalDebitCents), fmtAud(tbReport.totalCreditCents)], bold: true, doubleSeparator: true })
+              generateReportPdf({ title: 'Trial Balance', subtitle: `As at ${tbReport.asAt}`, sections: [{ columns: tbCols, rows }] })
+            } else if (tab === 'ar' && arReport) {
+              const summarySection: PdfSection = {
+                title: 'Summary',
+                columns: [{ header: 'Aging Bucket' }, { header: 'Amount', align: 'right' as const, nowrap: true }],
+                rows: [
+                  { cells: ['Current', fmtAud(arReport.currentCents)] },
+                  { cells: ['31–60 days', fmtAud(arReport.over30Cents)] },
+                  { cells: ['61–90 days', fmtAud(arReport.over60Cents)] },
+                  { cells: ['90+ days', fmtAud(arReport.over90Cents)] },
+                  { cells: ['Total Outstanding', fmtAud(arReport.totalOutstandingCents)], bold: true, separator: true },
+                ],
+              }
+              const detailCols = [
+                { header: 'Client' },
+                { header: 'Invoice', nowrap: true },
+                { header: 'Issue Date', nowrap: true },
+                { header: 'Due Date', nowrap: true },
+                { header: 'Total', align: 'right' as const, nowrap: true },
+                { header: 'Paid', align: 'right' as const, nowrap: true },
+                { header: 'Outstanding', align: 'right' as const, nowrap: true },
+                { header: 'Aging', nowrap: true },
+              ]
+              const detailRows: PdfRow[] = arReport.rows.map(r => ({
+                cells: [r.clientName, r.invoiceNumber, r.issueDate, r.dueDate ?? '—', fmtAud(r.totalCents), fmtAud(r.paidCents), fmtAud(r.outstandingCents), r.agingBucket === 'current' ? 'Current' : `${r.agingBucket}+ days`],
+              }))
+              detailRows.push({ cells: ['', '', '', '', '', 'Total Outstanding', fmtAud(arReport.totalOutstandingCents), ''], bold: true, doubleSeparator: true })
+              generateReportPdf({ title: 'Aged Receivables', subtitle: `As at ${arReport.asAt}`, sections: [summarySection, { title: 'Detail', columns: detailCols, rows: detailRows }] })
+            }
           }}
           disabled={tab === 'pl' ? !plReport : tab === 'bs' ? !bsReport : tab === 'tb' ? !tbReport : !arReport}
         />

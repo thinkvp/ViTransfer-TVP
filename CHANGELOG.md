@@ -5,6 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-04-19
+
+### Added
+- **`generateReportPdf` — structured PDF export engine** — replaces the old `window.print()`-the-current-page approach with a dedicated PDF renderer that builds a self-contained A4 HTML document (title, subtitle, sections, typed columns with optional `nowrap`/alignment, rows with bold/separator/double-separator/indent/colour options) and prints it through a hidden iframe; the old `downloadPdf` helper is retained but deprecated
+- **`gst-amounts.ts` shared utility** — the `amountExcludingGst(amountCents, taxCode, taxRatePercent)` helper previously private to `reports.ts` is extracted into its own module and re-exported so it can be used consistently across the API route layer and the client account ledger
+
+### Changed
+- **All accounting PDF exports use `generateReportPdf`** — Chart of Accounts, Account Ledger, Expenses, BAS Periods list, BAS Detail, Bank Transactions, and all four Financial Reports tabs (P&L, Balance Sheet, Trial Balance, Aged Receivables) now produce clean, properly formatted A4 reports with labelled sections and aligned columns instead of printing the live page view; the Expenses and Bank Transactions pages also drop the old `printRows` state + `useEffect` print-trigger pattern in favour of a direct synchronous call
+- **Financial Reports PDF export is data-driven per tab** — the P&L export renders Income / COGS / Gross Profit / Expenses / Net Profit sections with hierarchy-indent support and green/red Net Profit colouring; the Balance Sheet export includes Assets, Liabilities, Equity, and Net Assets sections; the Trial Balance includes a totals footer row; the Aged Receivables export includes a Summary aging-bucket section followed by a full Detail section
+- **Account ledger amounts now consistently ex-GST** — journal entry and split line rows in the account ledger were previously displayed at their raw (inc-GST) `amountCents`; they now pass through `amountExcludingGst` using the account's configured tax rate (fetched from `SalesSettings.taxRatePercent` and returned by the entries API), matching the existing behaviour for expenses and bank transactions; sorting, CSV export, PDF export, and the `periodTotalCents` running total are all updated accordingly
+- **Entries API returns `taxRatePercent`** — `GET /api/admin/accounting/accounts/[id]/entries` now fetches `SalesSettings.taxRatePercent` in the same parallel query batch and includes it in the response payload; clients use this value for all ex-GST display calculations so amounts match the configured rate rather than a hardcoded 10%
+- **New journal entry form pre-fills tax code from account default** — opening the "New Journal Entry" dialog from the account ledger now seeds the tax code selector with the account's own default tax code (`account.taxCode`) instead of always defaulting to `BAS_EXCLUDED`; the amount field label is updated to "Amount (inc. GST)" to clarify expected input
+- **Sales Overview chart uses cents-based arithmetic** — revenue bar chart data now carries a `revenueCents` integer field to avoid floating-point precision loss; total, avg/month, and projected labels are all derived from the integer value and formatted via a new `formatCurrencyCents` helper that always renders two decimal places and a proper `−` sign for negative values
+
+### Fixed
+- **Account ledger `periodTotalCents` incorrectly included GST for journal and split entries** — the server-side running total aggregation treated journal entries and split lines as full inc-GST amounts; it now strips GST from these entry kinds using `amountExcludingGst`, so the period balance shown in the ledger header matches the sum of the displayed ex-GST amounts
+
 ## [1.5.4] - 2026-04-19
 
 ### Added

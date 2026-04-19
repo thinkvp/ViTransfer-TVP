@@ -18,7 +18,7 @@ import type { AccountingAttachment } from '@/lib/accounting/types'
 import type { BankAccount, BankTransaction } from '@/lib/accounting/types'
 import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
 
 interface TaxRateOption { id: string; name: string; code: string; rate: number; isDefault: boolean }
@@ -175,7 +175,6 @@ export default function BankAccountsPage() {
 
   // Export state
   const [txnExportLoading, setTxnExportLoading] = useState(false)
-  const [txnPrintRows, setTxnPrintRows] = useState<BankTransaction[] | null>(null)
 
   // Quick-match: eagerly loaded matches for pending transactions
   const [quickMatchInvoices, setQuickMatchInvoices] = useState<OpenInvoice[]>([])
@@ -201,14 +200,6 @@ export default function BankAccountsPage() {
     const d = await res.json()
     return d.transactions ?? []
   }, [selectedAccountId, activeTab, txnFrom, txnTo, txnSortKey, txnSortDir, txnSearch])
-
-  // Trigger print after txnPrintRows state is set
-  useEffect(() => {
-    if (txnPrintRows !== null) {
-      downloadPdf(selectedAccount?.name ? `${selectedAccount.name} Transactions` : 'Transactions')
-      setTxnPrintRows(null)
-    }
-  }, [txnPrintRows, selectedAccount?.name])
 
   const loadAccounts = useCallback(async () => {
     setLoadingAccounts(true)
@@ -765,7 +756,22 @@ export default function BankAccountsPage() {
                   setTxnExportLoading(true)
                   try {
                     const all = await fetchAllTransactionsForExport()
-                    setTxnPrintRows(all)
+                    generateReportPdf({
+                      title: selectedAccount?.name ? `${selectedAccount.name} — Transactions` : 'Bank Transactions',
+                      subtitle: [txnFrom, txnTo].filter(Boolean).join(' to ') || undefined,
+                      sections: [{
+                        columns: [
+                          { header: 'Date', nowrap: true },
+                          { header: 'Description' },
+                          { header: 'Reference' },
+                          { header: 'Type', nowrap: true },
+                          { header: 'Amount', align: 'right', nowrap: true },
+                        ],
+                        rows: all.map(t => ({
+                          cells: [formatDate(t.date), t.description, t.reference ?? '—', t.transactionType ?? '—', fmtAud(t.amountCents)],
+                        })),
+                      }],
+                    })
                   } finally { setTxnExportLoading(false) }
                 }}
                 disabled={transactions.length === 0 || txnExportLoading}
@@ -830,7 +836,7 @@ export default function BankAccountsPage() {
                   </div>
 
                   <div className="divide-y divide-border">
-                    {(txnPrintRows ?? sortedTransactions).map(t => {
+                    {sortedTransactions.map(t => {
                       const isExpanded = expandedId === t.id
                       const form = getPostForm(t)
                       const isPosting = posting === t.id

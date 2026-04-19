@@ -56,6 +56,21 @@ interface ProjectChartRow {
   clientName: string | null
 }
 
+function formatCurrencyAmount(
+  amount: number,
+  currencySymbol: string,
+  minimumFractionDigits = 2,
+  maximumFractionDigits = 2,
+): string {
+  const sign = amount < 0 ? '-' : ''
+  const abs = Math.abs(amount)
+  return `${sign}${currencySymbol}${abs.toLocaleString('en-AU', { minimumFractionDigits, maximumFractionDigits })}`
+}
+
+function formatCurrencyCents(cents: number, currencySymbol: string): string {
+  return formatCurrencyAmount(cents / 100, currencySymbol)
+}
+
 // ---------------------------------------------------------------------------
 // Period utilities
 // ---------------------------------------------------------------------------
@@ -239,7 +254,8 @@ function useSalesChartData(
 
     return period.months.map((m) => ({
       label: m.label,
-      revenue: Math.round((monthMap.get(m.key) ?? 0) / 100),
+      revenueCents: monthMap.get(m.key) ?? 0,
+      revenue: (monthMap.get(m.key) ?? 0) / 100,
     }))
   }, [rollup, period, settings])
 }
@@ -262,8 +278,8 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
   const reportingBasis = getSalesDashboardReportingBasis(settings)
   const includeGst = salesDashboardIncludesGst(settings)
 
-  const total = data.reduce((s, d) => s + d.revenue, 0)
-  const hasData = data.some((d) => d.revenue > 0)
+  const totalCents = data.reduce((sum, row) => sum + row.revenueCents, 0)
+  const hasData = data.some((row) => row.revenueCents > 0)
 
   const monthCount = periodRange.months.length
 
@@ -276,11 +292,11 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
   // Elapsed = (all months in period except last) + fraction of last month
   const elapsedMonths = Math.max(monthCount - 1 + currentMonthFraction, currentMonthFraction)
 
-  const avgPerMonth = elapsedMonths > 0 ? Math.round(total / elapsedMonths) : 0
+  const avgPerMonthCents = elapsedMonths > 0 ? Math.round(totalCents / elapsedMonths) : 0
 
   const showProjection = period === 'fy-to-date' || period === 'ytd'
   // Projected = run-rate × 12 (fy-to-date projects to a full 12-month FY; ytd to full calendar year)
-  const projected = showProjection && avgPerMonth > 0 ? avgPerMonth * 12 : null
+  const projectedCents = showProjection && avgPerMonthCents > 0 ? avgPerMonthCents * 12 : null
 
   return (
     <Card className="overflow-hidden">
@@ -288,9 +304,9 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
         <div>
           <CardTitle className="text-base">Sales Overview</CardTitle>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Total: {sym}{total.toLocaleString('en-AU')}
-            {avgPerMonth > 0 && ` · avg ${sym}${avgPerMonth.toLocaleString('en-AU')} / mo`}
-            {projected !== null && ` · Projected: ${sym}${projected.toLocaleString('en-AU')}`}
+            Total: {formatCurrencyCents(totalCents, sym)}
+            {avgPerMonthCents > 0 && ` · avg ${formatCurrencyCents(avgPerMonthCents, sym)} / mo`}
+            {projectedCents !== null && ` · Projected: ${formatCurrencyCents(projectedCents, sym)}`}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">{reportingBasis === 'CASH' ? 'Cash basis' : 'Accrual basis'} · {includeGst ? 'Including GST' : 'Excluding GST'}</p>
         </div>
@@ -322,14 +338,14 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(v: number) =>
-                  v >= 1000 ? `${sym}${(v / 1000).toFixed(0)}k` : `${sym}${v}`
+                  v >= 1000 ? `${sym}${(v / 1000).toFixed(0)}k` : `${sym}${Math.round(v).toLocaleString('en-AU')}`
                 }
                 width={52}
               />
               <Tooltip
                 content={
                   <ChartTooltip
-                    formatValue={(val) => `${sym}${val.toLocaleString('en-AU')}`}
+                    formatValue={(val) => formatCurrencyAmount(val, sym)}
                   />
                 }
                 cursor={{ fill: 'currentColor', opacity: 0.05 }}

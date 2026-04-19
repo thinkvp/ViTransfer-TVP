@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
 import type { BasPeriod, BasPeriodStatus } from '@/lib/accounting/types'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
 
 type BasSortKey = 'label' | 'startDate' | 'quarter' | 'basis' | 'status' | 'lodgedAt'
@@ -93,7 +93,23 @@ export default function BasPage() {
                 p.label, String(p.quarter), p.startDate, p.endDate, p.basis, STATUS_LABELS[p.status as BasPeriodStatus] ?? p.status, p.lodgedAt ? formatDate(p.lodgedAt) : '',
               ]))
             }}
-            onExportPdf={() => downloadPdf('BAS Periods')}
+            onExportPdf={() => generateReportPdf({
+              title: 'BAS Periods',
+              sections: [{
+                columns: [
+                  { header: 'Label' },
+                  { header: 'Quarter', nowrap: true },
+                  { header: 'Start', nowrap: true },
+                  { header: 'End', nowrap: true },
+                  { header: 'Basis', nowrap: true },
+                  { header: 'Status', nowrap: true },
+                  { header: 'Lodged', nowrap: true },
+                ],
+                rows: periods.map(p => ({
+                  cells: [p.label, String(p.quarter), p.startDate, p.endDate, p.basis, STATUS_LABELS[p.status as BasPeriodStatus] ?? p.status, p.lodgedAt ? formatDate(p.lodgedAt) : '—'],
+                })),
+              }],
+            })}
             disabled={periods.length === 0}
           />
           <Button onClick={() => router.push('/admin/accounting/bas/new')}>

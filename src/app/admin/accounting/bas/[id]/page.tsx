@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp, CreditCard, Trash2, Loader2 } from 'lucide-react'
 import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, AccountingAttachment } from '@/lib/accounting/types'
-import { ExportMenu, downloadCsv, downloadPdf } from '@/components/admin/accounting/ExportMenu'
+import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
 import { cn, formatDate } from '@/lib/utils'
@@ -319,7 +319,43 @@ export default function BasDetailPage() {
               )
               downloadCsv(`bas-${period.label || period.quarter}.csv`, ['Line Description', 'Line Code', 'Amount'], rows)
             }}
-            onExportPdf={() => downloadPdf(`BAS ${period.label || `Q${period.quarter}`}`)}
+            onExportPdf={() => {
+              if (!calculation) return
+              const w2 = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : 0
+              const t7 = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : 0
+              const sum8A = calculation.label1ACents + w2 + t7
+              const sum8B = calculation.label1BCents
+              const sum9 = sum8A - sum8B
+              const cols = [
+                { header: 'Line Description' },
+                { header: 'Code', align: 'center' as const, nowrap: true },
+                { header: 'Amount', align: 'right' as const, nowrap: true },
+              ]
+              const gstRows = [
+                { cells: ['Total sales (including GST)', 'G1', fmtBasDollars(calculation.g1TotalSalesCents)] },
+                { cells: ['Export sales', 'G2', fmtBasDollars(calculation.g2ExportSalesCents)] },
+                { cells: ['Other GST-free sales', 'G3', fmtBasDollars(calculation.g3OtherGstFreeCents)] },
+                { cells: ['Input taxed sales', 'G4', fmtBasDollars(calculation.g4InputTaxedSalesCents ?? 0)] },
+                { cells: ['Capital purchases (including GST)', 'G10', fmtBasDollars(calculation.g10CapitalPurchasesCents)] },
+                { cells: ['Non-capital purchases (including GST)', 'G11', fmtBasDollars(calculation.g11NonCapitalPurchasesCents)] },
+                { cells: ['GST on sales', '1A', fmtBasDollars(calculation.label1ACents)], bold: true as const },
+                { cells: ['GST on purchases', '1B', fmtBasDollars(calculation.label1BCents)], bold: true as const },
+              ]
+              const paygRows = []
+              if (w2) paygRows.push({ cells: ['Amount withheld from payments', 'W2', fmtBasDollars(w2)] })
+              if (t7) paygRows.push({ cells: ['Instalment amount', 'T7', fmtBasDollars(t7)] })
+              const summaryRows = [
+                { cells: ['Amount you owe the ATO', '8A', fmtBasDollars(sum8A)], bold: true as const, separator: true as const },
+                { cells: ['Amount the ATO owes you', '8B', fmtBasDollars(sum8B)], bold: true as const },
+                { cells: ['Your payment amount', '9', fmtBasDollars(sum9)], bold: true as const, doubleSeparator: true as const, color: sum9 >= 0 ? 'red' : 'green' },
+              ]
+              const sections = [
+                { title: 'GST', columns: cols, rows: gstRows },
+                ...(paygRows.length > 0 ? [{ title: 'PAYG', columns: cols, rows: paygRows }] : []),
+                { title: 'Summary', columns: cols, rows: summaryRows },
+              ]
+              generateReportPdf({ title: `BAS ${period.label || `Q${period.quarter} FY${period.financialYear}`}`, subtitle: `${period.startDate} to ${period.endDate} (${calculation.basis})`, sections })
+            }}
             disabled={!calculation}
           />
           {period.status === 'DRAFT' && (
