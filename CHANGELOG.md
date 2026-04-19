@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-04-19
+
+### Added
+- **BAS calculation includes all four ledger sources** — the BAS engine now queries the same four data sources used by the Chart of Accounts ledger and P&L reports: `Expense` records, MANUAL-matched `BankTransaction` records, `JournalEntry` records, and `SplitLine` records, all filtered to EXPENSE/COGS account types; previously only `Expense` records were included, causing refund bank transactions (e.g. equipment refunds recorded as Deposit/ReceivePayment) to be silently omitted from G10/G11/1B
+- **GET `/api/admin/accounting/journal-entries/[id]`** — new authenticated, rate-limited endpoint that returns a single journal entry by ID via the shared `journalEntryFromDb` mapper; used by the BAS drill-down to pre-populate the edit dialog when clicking a journal row
+- **BAS drill-down row click dispatches by record kind** — clicking a row in the BAS expenses drill-down now opens the correct modal for the record type: `expense` rows open `ExpenseFormModal`, `journal` rows open an inline edit journal-entry dialog (fetches current values, saves via PUT, re-runs calculation on save), and `bankTransaction`/`splitLine` rows open `LinkedBankTransactionDialog` pointing to the parent bank transaction
+
+### Changed
+- **`BasExpenseRecord` extended with `kind` and `bankTransactionId`** — the shared type now carries a `kind` discriminator (`'expense' | 'bankTransaction' | 'journal' | 'splitLine'`) and an optional `bankTransactionId` (set on `bankTransaction` and `splitLine` rows) so the UI can dispatch row clicks to the appropriate viewer/editor without guessing
+
+### Fixed
+- **BAS missing refund/credit bank transactions** — MANUAL-matched bank transactions on EXPENSE/COGS accounts (e.g. equipment refunds, supplier credits processed as Deposit) were not included in BAS G10/G11/1B totals or the drill-down expenses table; they now appear correctly with sign-corrected GST amounts
+
 ## [1.5.5] - 2026-04-19
 
 ### Added

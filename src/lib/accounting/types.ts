@@ -209,6 +209,10 @@ export interface BasExpenseRecord {
   taxCode: string
   isCapital: boolean
   issue: 'zero_gst' | 'bas_excluded' | 'input_taxed' | null
+  /** Identifies the data source — determines which modal/dialog opens on row click */
+  kind: 'expense' | 'bankTransaction' | 'journal' | 'splitLine'
+  /** For bankTransaction and splitLine rows: the bank transaction ID to open in LinkedBankTransactionDialog */
+  bankTransactionId?: string
 }
 
 export interface TaxRate {

@@ -11,11 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
-import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp, CreditCard, Trash2, Loader2 } from 'lucide-react'
-import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, AccountingAttachment } from '@/lib/accounting/types'
+import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp, CreditCard, Trash2, Loader2, ExternalLink } from 'lucide-react'
+import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, AccountingAttachment, JournalEntry } from '@/lib/accounting/types'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
+import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 import { cn, formatDate } from '@/lib/utils'
 
 function fmtAud(cents: number) {
@@ -88,7 +89,63 @@ export default function BasDetailPage() {
 
   // Edit expense from BAS records drill-down
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
-  const [editExpenseOpen, setEditExpenseOpen] = useState(false)
+
+  // View bank transaction from BAS records drill-down (MANUAL bank txn or split line rows)
+  const [linkedTxnId, setLinkedTxnId] = useState<string | null>(null)
+
+  // Edit journal entry from BAS records drill-down
+  const [jeOpen, setJeOpen] = useState(false)
+  const [editingJe, setEditingJe] = useState<JournalEntry | null>(null)
+  const [jeDate, setJeDate] = useState('')
+  const [jeDesc, setJeDesc] = useState('')
+  const [jeAmount, setJeAmount] = useState('')
+  const [jeType, setJeType] = useState<'debit' | 'credit'>('debit')
+  const [jeTaxCode, setJeTaxCode] = useState('BAS_EXCLUDED')
+  const [jeRef, setJeRef] = useState('')
+  const [jeNotes, setJeNotes] = useState('')
+  const [jeSaving, setJeSaving] = useState(false)
+
+  async function openEditJournalEntry(jeId: string) {
+    const res = await apiFetch(`/api/admin/accounting/journal-entries/${jeId}`)
+    if (!res.ok) return
+    const d = await res.json()
+    const je: JournalEntry = d.entry
+    setEditingJe(je)
+    setJeDate(je.date)
+    setJeDesc(je.description)
+    setJeAmount((Math.abs(je.amountCents) / 100).toFixed(2))
+    setJeType(je.amountCents < 0 ? 'credit' : 'debit')
+    setJeTaxCode(je.taxCode)
+    setJeRef(je.reference ?? '')
+    setJeNotes(je.notes ?? '')
+    setJeOpen(true)
+  }
+
+  async function handleSaveJournal() {
+    if (!editingJe) return
+    const cents = Math.round(parseFloat(jeAmount || '0') * 100)
+    if (!cents || !jeDesc.trim()) return
+    setJeSaving(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/journal-entries/${editingJe.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: jeDate,
+          description: jeDesc.trim(),
+          amountCents: jeType === 'credit' ? -cents : cents,
+          taxCode: jeTaxCode,
+          reference: jeRef.trim() || undefined,
+          notes: jeNotes.trim() || undefined,
+        }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to save journal entry'); return }
+      setJeOpen(false)
+      setEditingJe(null)
+      if (calculation) void handleCalculate()
+      else void load()
+    } finally { setJeSaving(false) }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -707,7 +764,12 @@ export default function BasDetailPage() {
                                       'border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer',
                                       r.issue === 'zero_gst' && 'bg-yellow-500/5',
                                     )}
-                                    onClick={() => { setEditExpenseId(r.id); setEditExpenseOpen(true) }}
+                                    onClick={() => {
+                                      if (r.kind === 'expense') { setEditExpenseId(r.id) }
+                                      else if (r.kind === 'journal') { void openEditJournalEntry(r.id) }
+                                      else if (r.kind === 'bankTransaction') { setLinkedTxnId(r.bankTransactionId ?? r.id) }
+                                      else if (r.kind === 'splitLine') { setLinkedTxnId(r.bankTransactionId ?? null) }
+                                    }}
                                   >
                                     <td className="px-2 py-1.5">{formatDate(r.date)}</td>
                                     <td className="px-2 py-1.5 text-muted-foreground max-w-[120px] truncate">{r.supplier ?? '—'}</td>
@@ -926,18 +988,90 @@ export default function BasDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Expense Modal — opened when clicking an expense row in the BAS drill-down */}
+      {/* Edit Expense Modal — expense rows in the BAS drill-down */}
       <ExpenseFormModal
-        open={editExpenseOpen}
+        open={editExpenseId !== null}
         expenseId={editExpenseId}
-        onClose={() => setEditExpenseOpen(false)}
+        onClose={() => setEditExpenseId(null)}
         onSaved={() => {
-          setEditExpenseOpen(false)
+          setEditExpenseId(null)
           // Re-run calculation so the BAS summary and records tables reflect the saved changes
           if (calculation) void handleCalculate()
           else void load()
         }}
       />
+
+      {/* View Bank Transaction — MANUAL bank txn and split line rows */}
+      <LinkedBankTransactionDialog
+        open={linkedTxnId !== null}
+        transactionId={linkedTxnId}
+        onOpenChange={open => { if (!open) setLinkedTxnId(null) }}
+        onViewExpense={expenseId => { setLinkedTxnId(null); setEditExpenseId(expenseId) }}
+      />
+
+      {/* Edit Journal Entry — journal rows in the BAS drill-down */}
+      <Dialog open={jeOpen} onOpenChange={open => { if (!open && !jeSaving) { setJeOpen(false); setEditingJe(null) } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Journal Entry</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Date</Label>
+                <Input type="date" value={jeDate} onChange={e => setJeDate(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Tax Code</Label>
+                <Select value={jeTaxCode} onValueChange={setJeTaxCode}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="GST">GST (10%)</SelectItem>
+                    <SelectItem value="GST_FREE">GST Free</SelectItem>
+                    <SelectItem value="BAS_EXCLUDED">BAS Excluded</SelectItem>
+                    <SelectItem value="INPUT_TAXED">Input Taxed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Description</Label>
+              <Input value={jeDesc} onChange={e => setJeDesc(e.target.value)} placeholder="Description" className="mt-1" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Amount (inc. GST)</Label>
+                <Input type="number" min="0" step="0.01" value={jeAmount} onChange={e => setJeAmount(e.target.value)} placeholder="0.00" className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Direction</Label>
+                <Select value={jeType} onValueChange={v => setJeType(v as 'debit' | 'credit')}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="debit">Debit (+)</SelectItem>
+                    <SelectItem value="credit">Credit (−)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Reference</Label>
+              <Input value={jeRef} onChange={e => setJeRef(e.target.value)} placeholder="Optional reference" className="mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Notes</Label>
+              <Textarea value={jeNotes} onChange={e => setJeNotes(e.target.value)} placeholder="Optional notes" className="mt-1" rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setJeOpen(false); setEditingJe(null) }} disabled={jeSaving}>Cancel</Button>
+            <Button onClick={() => void handleSaveJournal()} disabled={jeSaving || !jeDesc.trim() || !jeAmount}>
+              {jeSaving && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

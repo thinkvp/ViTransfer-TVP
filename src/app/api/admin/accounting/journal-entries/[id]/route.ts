@@ -18,6 +18,26 @@ const updateSchema = z.object({
 })
 
 // PUT /api/admin/accounting/journal-entries/[id]
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authResult = await requireApiMenu(request, 'accounting')
+  if (authResult instanceof Response) return authResult
+
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 120, message: 'Too many requests.' }, 'accounting-journal-entries-get', authResult.id)
+  if (rl) return rl
+
+  const { id } = await params
+  const entry = await prisma.journalEntry.findUnique({
+    where: { id },
+    include: { account: { select: { code: true, name: true } } },
+  })
+  if (!entry) return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 })
+
+  const res = NextResponse.json({ entry: journalEntryFromDb(entry) })
+  res.headers.set('Cache-Control', 'no-store')
+  return res
+}
+
+// PUT /api/admin/accounting/journal-entries/[id]
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenu(request, 'accounting')
   if (authResult instanceof Response) return authResult

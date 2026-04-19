@@ -83,6 +83,44 @@ export async function calculateBas(
     include: { account: { select: { type: true, subType: true, name: true, code: true } } },
   })
 
+  // The BAS engine uses the same four data sources as the P&L report and ledger:
+  // 1. Expense records (above)
+  // 2. MANUAL BankTransactions on expense/COGS accounts (refunds posted as Deposit/ReceivePayment)
+  // 3. JournalEntry records on expense/COGS accounts (manual adjustments from the ledger page)
+  // 4. SplitLine records on expense/COGS accounts (split bank transactions)
+  const taxRate = taxRatePercent / 100
+
+  const [manualExpenseTxns, journalExpenseEntries, splitExpenseLines] = await Promise.all([
+    prisma.bankTransaction.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        status: 'MATCHED',
+        matchType: 'MANUAL',
+        accountId: { not: null },
+        taxCode: { not: null },
+        account: { type: { in: ['EXPENSE', 'COGS'] } },
+      },
+      include: { account: { select: { type: true, subType: true, name: true, code: true } } },
+    }),
+    prisma.journalEntry.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        account: { type: { in: ['EXPENSE', 'COGS'] } },
+      },
+      include: { account: { select: { type: true, subType: true, name: true, code: true } } },
+    }),
+    prisma.splitLine.findMany({
+      where: {
+        bankTransaction: { date: { gte: startDate, lte: endDate }, status: 'MATCHED' },
+        account: { type: { in: ['EXPENSE', 'COGS'] } },
+      },
+      include: {
+        account: { select: { type: true, subType: true, name: true, code: true } },
+        bankTransaction: { select: { date: true, description: true } },
+      },
+    }),
+  ])
+
   // ── Sales totals ──────────────────────────────────────────────────────────
   let totalSalesCents = 0
   let gstOnSalesCents = 0
@@ -209,6 +247,118 @@ export async function calculateBas(
       taxCode,
       isCapital,
       issue,
+      kind: 'expense',
+    })
+  }
+
+  // Process MANUAL bank transactions posted to expense accounts (refunds / credits).
+  // amountCents is positive for credits; negate so the refund reduces expense totals.
+  for (const txn of manualExpenseTxns) {
+    const amountIncGst = -txn.amountCents
+    const txnTaxCode = txn.taxCode as string
+    const gstAmt = txnTaxCode === 'GST' ? Math.round(amountIncGst * taxRate / (1 + taxRate)) : 0
+    const isCapital = txn.account?.subType?.toLowerCase().includes('capital') ?? false
+    let issue: BasExpenseRecord['issue'] = null
+
+    totalExpenseCents += amountIncGst
+    if (txnTaxCode === 'GST') {
+      gstCreditsCents += gstAmt
+      if (isCapital) { capitalPurchasesCents += amountIncGst } else { nonCapitalPurchasesCents += amountIncGst }
+      if (gstAmt === 0 && amountIncGst !== 0) { issue = 'zero_gst'; zeroGstCount++ }
+    } else {
+      nonCapitalPurchasesCents += amountIncGst
+      if (txnTaxCode === 'BAS_EXCLUDED') issue = 'bas_excluded'
+      else if (txnTaxCode === 'INPUT_TAXED') issue = 'input_taxed'
+    }
+
+    expenseRecords.push({
+      id: txn.id,
+      date: txn.date as string,
+      supplier: null,
+      description: txn.memo ?? txn.description,
+      accountCode: txn.account?.code ?? '',
+      accountName: txn.account?.name ?? '',
+      amountIncGstCents: amountIncGst,
+      gstCents: gstAmt,
+      taxCode: txnTaxCode,
+      isCapital,
+      issue,
+      kind: 'bankTransaction',
+      bankTransactionId: txn.id,
+    })
+  }
+
+  // Process JournalEntry records on expense/COGS accounts.
+  // amountCents: positive = debit (increases expense normal balance), negative = credit (reduces).
+  for (const je of journalExpenseEntries) {
+    const amountIncGst = je.amountCents
+    const jeTaxCode = je.taxCode as string
+    const gstAmt = jeTaxCode === 'GST' ? Math.round(amountIncGst * taxRate / (1 + taxRate)) : 0
+    const isCapital = je.account?.subType?.toLowerCase().includes('capital') ?? false
+    let issue: BasExpenseRecord['issue'] = null
+
+    totalExpenseCents += amountIncGst
+    if (jeTaxCode === 'GST') {
+      gstCreditsCents += gstAmt
+      if (isCapital) { capitalPurchasesCents += amountIncGst } else { nonCapitalPurchasesCents += amountIncGst }
+      if (gstAmt === 0 && amountIncGst !== 0) { issue = 'zero_gst'; zeroGstCount++ }
+    } else {
+      nonCapitalPurchasesCents += amountIncGst
+      if (jeTaxCode === 'BAS_EXCLUDED') issue = 'bas_excluded'
+      else if (jeTaxCode === 'INPUT_TAXED') issue = 'input_taxed'
+    }
+
+    expenseRecords.push({
+      id: je.id,
+      date: je.date as string,
+      supplier: null,
+      description: je.description,
+      accountCode: je.account?.code ?? '',
+      accountName: je.account?.name ?? '',
+      amountIncGstCents: amountIncGst,
+      gstCents: gstAmt,
+      taxCode: jeTaxCode,
+      isCapital,
+      issue,
+      kind: 'journal',
+    })
+  }
+
+  // Process SplitLine records on expense/COGS accounts.
+  // amountCents mirrors the bank transaction sign: negative = debit (expense), positive = credit (refund).
+  // Negate so that a debit split line increases expense totals.
+  for (const sl of splitExpenseLines) {
+    const amountIncGst = -sl.amountCents
+    const slTaxCode = sl.taxCode as string
+    const gstAmt = slTaxCode === 'GST' ? Math.round(amountIncGst * taxRate / (1 + taxRate)) : 0
+    const isCapital = sl.account?.subType?.toLowerCase().includes('capital') ?? false
+    let issue: BasExpenseRecord['issue'] = null
+
+    totalExpenseCents += amountIncGst
+    if (slTaxCode === 'GST') {
+      gstCreditsCents += gstAmt
+      if (isCapital) { capitalPurchasesCents += amountIncGst } else { nonCapitalPurchasesCents += amountIncGst }
+      if (gstAmt === 0 && amountIncGst !== 0) { issue = 'zero_gst'; zeroGstCount++ }
+    } else {
+      nonCapitalPurchasesCents += amountIncGst
+      if (slTaxCode === 'BAS_EXCLUDED') issue = 'bas_excluded'
+      else if (slTaxCode === 'INPUT_TAXED') issue = 'input_taxed'
+    }
+
+    expenseRecords.push({
+      id: sl.id,
+      date: sl.bankTransaction?.date as string ?? '',
+      supplier: null,
+      description: sl.description,
+      accountCode: sl.account?.code ?? '',
+      accountName: sl.account?.name ?? '',
+      amountIncGstCents: amountIncGst,
+      gstCents: gstAmt,
+      taxCode: slTaxCode,
+      isCapital,
+      issue,
+      kind: 'splitLine',
+      bankTransactionId: sl.bankTransactionId,
     })
   }
 
