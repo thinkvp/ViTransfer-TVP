@@ -7,6 +7,7 @@ function defaultAccountingSettingsRow() {
     reportingBasis: 'ACCRUAL' as const,
     basGstAccountId: null as string | null,
     basPaygAccountId: null as string | null,
+    basPaygInstalmentDefaultCents: null as number | null,
   }
 }
 
@@ -15,6 +16,7 @@ export function accountingSettingsFromDb(row: any): AccountingSettings {
     reportingBasis: row?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL',
     basGstAccountId: row?.basGstAccountId ?? null,
     basPaygAccountId: row?.basPaygAccountId ?? null,
+    basPaygInstalmentDefaultCents: row?.basPaygInstalmentDefaultCents != null ? Number(row.basPaygInstalmentDefaultCents) : null,
     updatedAt: row?.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row?.updatedAt ?? new Date(0).toISOString()),
   }
 }
@@ -34,11 +36,27 @@ export async function getAccountingReportingBasis(): Promise<'CASH' | 'ACCRUAL'>
   return settings.reportingBasis
 }
 
-export async function saveAccountingSettings(input: { reportingBasis: 'CASH' | 'ACCRUAL'; basGstAccountId?: string | null; basPaygAccountId?: string | null }): Promise<AccountingSettings> {
+export async function saveAccountingSettings(input: {
+  reportingBasis: 'CASH' | 'ACCRUAL'
+  basGstAccountId?: string | null
+  basPaygAccountId?: string | null
+  basPaygInstalmentDefaultCents?: number | null
+}): Promise<AccountingSettings> {
   const row = await prisma.accountingSettings.upsert({
     where: { id: 'default' },
-    create: { id: 'default', reportingBasis: input.reportingBasis, basGstAccountId: input.basGstAccountId ?? null, basPaygAccountId: input.basPaygAccountId ?? null },
-    update: { reportingBasis: input.reportingBasis, basGstAccountId: input.basGstAccountId ?? null, basPaygAccountId: input.basPaygAccountId ?? null },
+    create: {
+      id: 'default',
+      reportingBasis: input.reportingBasis,
+      basGstAccountId: input.basGstAccountId ?? null,
+      basPaygAccountId: input.basPaygAccountId ?? null,
+      basPaygInstalmentDefaultCents: input.basPaygInstalmentDefaultCents ?? null,
+    },
+    update: {
+      reportingBasis: input.reportingBasis,
+      basGstAccountId: input.basGstAccountId ?? null,
+      basPaygAccountId: input.basPaygAccountId ?? null,
+      basPaygInstalmentDefaultCents: input.basPaygInstalmentDefaultCents ?? null,
+    },
   })
 
   return accountingSettingsFromDb(row)

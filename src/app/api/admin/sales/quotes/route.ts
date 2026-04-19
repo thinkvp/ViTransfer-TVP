@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
+import { nextSalesDocumentNumber } from '@/lib/sales/numbering'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
 export const runtime = 'nodejs'
@@ -21,20 +22,6 @@ const createSchema = z.object({
   terms: z.string().max(20000).optional().nullable(),
   items: z.array(z.any()).default([]),
 })
-
-function pad6(n: number): string {
-  return String(n).padStart(6, '0')
-}
-
-async function nextQuoteNumber(tx: any): Promise<string> {
-  const seq = await tx.salesSequence.upsert({
-    where: { id: 'default' },
-    create: { id: 'default', quote: 1, invoice: 0 },
-    update: { quote: { increment: 1 } },
-    select: { quote: true },
-  })
-  return `EST-${pad6(Number(seq.quote))}`
-}
 
 export async function GET(request: NextRequest) {
   const authResult = await requireApiMenu(request, 'sales')
@@ -104,7 +91,7 @@ export async function POST(request: NextRequest) {
   const input = parsed.data
 
   const created = await prisma.$transaction(async (tx) => {
-    const quoteNumber = input.quoteNumber?.trim() || (await nextQuoteNumber(tx))
+    const quoteNumber = input.quoteNumber?.trim() || (await nextSalesDocumentNumber(tx, 'quote'))
 
     // Snapshot the current taxEnabled setting so it persists with the document.
     const settingsRow = await tx.salesSettings.upsert({

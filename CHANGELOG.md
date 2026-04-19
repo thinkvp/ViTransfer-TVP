@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-04-19
+
+### Added
+- **`nextSalesDocumentNumber` — gap-safe invoice and quote numbering** — the duplicated `nextInvoiceNumber` / `nextQuoteNumber` functions in the invoice and quote creation routes are replaced by a shared `nextSalesDocumentNumber(tx, type)` utility in `src/lib/sales/numbering.ts`; the new implementation scans existing documents to derive the highest in-use number before allocating, then uses an optimistic-concurrency retry loop (up to 5 attempts) to jump the sequence counter past any manually-entered numbers, preventing gaps and collisions caused by custom document numbers provided at creation time
+
+### Changed
+- **Bank Transactions only show `BAS Payment` when a lodged BAS payment is actually matchable** — the Pending bank transaction action bar no longer shows `BAS Payment` on every debit; it now appears only when there is at least one lodged BAS period awaiting reconciliation whose recorded payment amount exactly matches that transaction amount; the set of matchable amounts is pre-fetched when the Unmatched tab becomes active and is pruned immediately after a successful match
+- **Accounting Settings — default T7 instalment amount** — the BAS Payment Defaults card can now store a default T7 value that is applied to new BAS periods and pre-fills untouched editable BAS periods until a period-specific amount is saved; the GST Payable account, PAYG account, and T7 default now sit on a single desktop row
+- **Lodgement Document deletion now requires confirmation** — clicking the delete icon on a BAS lodgement attachment previously triggered immediate deletion; it now opens a `Delete Lodgement Document?` alert dialog showing the filename with Cancel and a destructive Delete button; the delete API call fires only on confirmation and the dialog dismisses only after a successful response
+
+### Fixed
+- **CoA account balances now include split lines and journal entries, all amounts ex-GST** — the `/api/admin/accounting/accounts/balances` endpoint previously accumulated bank transaction amounts from an inc-GST `groupBy` total and omitted split lines and journal entries entirely; it now fetches all three record types individually, strips GST from each row using its own tax code via `amountExcludingGst`, and accumulates the correct ex-GST contribution for each account
+
 ## [1.5.8] - 2026-04-19
 
 ### Changed

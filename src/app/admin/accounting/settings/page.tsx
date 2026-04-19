@@ -71,12 +71,19 @@ export default function AccountingSettingsPage() {
   // BAS payment default accounts
   const [basGstAccountId, setBasGstAccountId] = useState('')
   const [basPaygAccountId, setBasPaygAccountId] = useState('')
+  const [basPaygInstalmentDefault, setBasPaygInstalmentDefault] = useState('')
   const [basGstSearch, setBasGstSearch] = useState('')
   const [basGstOpen, setBasGstOpen] = useState(false)
   const [basPaygSearch, setBasPaygSearch] = useState('')
   const [basPaygOpen, setBasPaygOpen] = useState(false)
   interface CoaOption { id: string; code: string; name: string; type: string }
   const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
+
+  function selectedAccountLabel(accountId: string) {
+    const account = coaAccounts.find(item => item.id === accountId)
+    if (account) return `${account.code} — ${account.name}`
+    return accountId ? '(unknown account)' : ''
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -100,6 +107,7 @@ export default function AccountingSettingsPage() {
           setReportingBasis(data?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL')
           setBasGstAccountId(data?.basGstAccountId ?? '')
           setBasPaygAccountId(data?.basPaygAccountId ?? '')
+          setBasPaygInstalmentDefault(data?.basPaygInstalmentDefaultCents != null ? (data.basPaygInstalmentDefaultCents / 100).toFixed(2) : '')
         }
       } finally {
         if (!cancelled) setSettingsLoading(false)
@@ -123,6 +131,17 @@ export default function AccountingSettingsPage() {
     setSettingsError('')
     setSettingsSaved(false)
     try {
+      const paygInstalmentDefaultRaw = basPaygInstalmentDefault.trim()
+      let paygInstalmentDefaultCents: number | null = null
+      if (paygInstalmentDefaultRaw !== '') {
+        const parsedPaygInstalmentDefault = Number.parseFloat(paygInstalmentDefaultRaw)
+        if (!Number.isFinite(parsedPaygInstalmentDefault) || parsedPaygInstalmentDefault < 0) {
+          setSettingsError('Default T7 instalment amount must be 0 or greater')
+          return
+        }
+        paygInstalmentDefaultCents = Math.round(parsedPaygInstalmentDefault * 100)
+      }
+
       const res = await apiFetch('/api/admin/accounting/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -130,6 +149,7 @@ export default function AccountingSettingsPage() {
           reportingBasis,
           basGstAccountId: basGstAccountId || null,
           basPaygAccountId: basPaygAccountId || null,
+          basPaygInstalmentDefaultCents: paygInstalmentDefaultCents,
         }),
       })
       if (!res.ok) {
@@ -255,74 +275,88 @@ export default function AccountingSettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Set the default Chart of Accounts entries used when recording a BAS payment. These pre-fill the payment dialog and can be overridden per payment.
+            Set the defaults used when recording BAS payments and pre-filling T7 on new BAS periods. These can still be overridden per period or payment.
           </p>
-          {/* GST Account */}
-          <div className="space-y-1 max-w-sm">
-            <Label>GST Payable Account</Label>
-            <p className="text-xs text-muted-foreground">Receives the net GST component (1A − 1B). Typically a Liability account such as &ldquo;GST Payable&rdquo;.</p>
-            <div className="relative">
-              <Input
-                placeholder="Search account…"
-                value={basGstOpen ? basGstSearch : (() => { const a = coaAccounts.find(x => x.id === basGstAccountId); return a ? `${a.code} — ${a.name}` : basGstAccountId ? '(unknown account)' : '' })()}
-                onFocus={() => { setBasGstOpen(true); setBasGstSearch('') }}
-                onBlur={() => setTimeout(() => setBasGstOpen(false), 150)}
-                onChange={e => setBasGstSearch(e.target.value)}
-                disabled={settingsLoading}
-              />
-              {basGstOpen && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                  {basGstAccountId && (
-                    <button type="button" onMouseDown={() => { setBasGstAccountId(''); setBasGstOpen(false) }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
-                      Clear selection
-                    </button>
-                  )}
-                  {coaAccounts.filter(a => {
-                    const q = basGstSearch.toLowerCase()
-                    return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
-                  }).map(a => (
-                    <button key={a.id} type="button"
-                      onMouseDown={() => { setBasGstAccountId(a.id); setBasGstOpen(false); setBasGstSearch('') }}
-                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', basGstAccountId === a.id && 'bg-primary/10 font-medium')}
-                    >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
-                  ))}
-                </div>
-              )}
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="space-y-1">
+              <Label>GST Payable Account</Label>
+              <p className="text-xs text-muted-foreground">Receives the net GST component (1A − 1B). Typically a Liability account such as &ldquo;GST Payable&rdquo;.</p>
+              <div className="relative">
+                <Input
+                  placeholder="Search account…"
+                  value={basGstOpen ? basGstSearch : selectedAccountLabel(basGstAccountId)}
+                  onFocus={() => { setBasGstOpen(true); setBasGstSearch('') }}
+                  onBlur={() => setTimeout(() => setBasGstOpen(false), 150)}
+                  onChange={e => setBasGstSearch(e.target.value)}
+                  disabled={settingsLoading || settingsSaving}
+                />
+                {basGstOpen && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                    {basGstAccountId && (
+                      <button type="button" onMouseDown={() => { setBasGstAccountId(''); setBasGstOpen(false) }}
+                        className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
+                        Clear selection
+                      </button>
+                    )}
+                    {coaAccounts.filter(a => {
+                      const q = basGstSearch.toLowerCase()
+                      return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
+                    }).map(a => (
+                      <button key={a.id} type="button"
+                        onMouseDown={() => { setBasGstAccountId(a.id); setBasGstOpen(false); setBasGstSearch('') }}
+                        className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', basGstAccountId === a.id && 'bg-primary/10 font-medium')}
+                      >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-          {/* PAYG Account */}
-          <div className="space-y-1 max-w-sm">
-            <Label>PAYG Income Tax Instalment Account</Label>
-            <p className="text-xs text-muted-foreground">Receives the T7 PAYG Instalment component (sole traders / instalments). Typically an Expense or Liability account.</p>
-            <div className="relative">
+            <div className="space-y-1">
+              <Label>PAYG Income Tax Instalment Account</Label>
+              <p className="text-xs text-muted-foreground">Receives the T7 PAYG Instalment component. Typically an Expense or Liability account.</p>
+              <div className="relative">
+                <Input
+                  placeholder="Search account…"
+                  value={basPaygOpen ? basPaygSearch : selectedAccountLabel(basPaygAccountId)}
+                  onFocus={() => { setBasPaygOpen(true); setBasPaygSearch('') }}
+                  onBlur={() => setTimeout(() => setBasPaygOpen(false), 150)}
+                  onChange={e => setBasPaygSearch(e.target.value)}
+                  disabled={settingsLoading || settingsSaving}
+                />
+                {basPaygOpen && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                    {basPaygAccountId && (
+                      <button type="button" onMouseDown={() => { setBasPaygAccountId(''); setBasPaygOpen(false) }}
+                        className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
+                        Clear selection
+                      </button>
+                    )}
+                    {coaAccounts.filter(a => {
+                      const q = basPaygSearch.toLowerCase()
+                      return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
+                    }).map(a => (
+                      <button key={a.id} type="button"
+                        onMouseDown={() => { setBasPaygAccountId(a.id); setBasPaygOpen(false); setBasPaygSearch('') }}
+                        className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', basPaygAccountId === a.id && 'bg-primary/10 font-medium')}
+                      >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="bas-payg-instalment-default">Default T7 Instalment Amount</Label>
+              <p className="text-xs text-muted-foreground">Pre-fills T7 on new BAS periods and untouched editable periods until you save a period-specific amount.</p>
               <Input
-                placeholder="Search account…"
-                value={basPaygOpen ? basPaygSearch : (() => { const a = coaAccounts.find(x => x.id === basPaygAccountId); return a ? `${a.code} — ${a.name}` : basPaygAccountId ? '(unknown account)' : '' })()}
-                onFocus={() => { setBasPaygOpen(true); setBasPaygSearch('') }}
-                onBlur={() => setTimeout(() => setBasPaygOpen(false), 150)}
-                onChange={e => setBasPaygSearch(e.target.value)}
-                disabled={settingsLoading}
+                id="bas-payg-instalment-default"
+                type="number"
+                min="0"
+                step="0.01"
+                value={basPaygInstalmentDefault}
+                onChange={e => setBasPaygInstalmentDefault(e.target.value)}
+                placeholder="0.00"
+                disabled={settingsLoading || settingsSaving}
               />
-              {basPaygOpen && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                  {basPaygAccountId && (
-                    <button type="button" onMouseDown={() => { setBasPaygAccountId(''); setBasPaygOpen(false) }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
-                      Clear selection
-                    </button>
-                  )}
-                  {coaAccounts.filter(a => {
-                    const q = basPaygSearch.toLowerCase()
-                    return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
-                  }).map(a => (
-                    <button key={a.id} type="button"
-                      onMouseDown={() => { setBasPaygAccountId(a.id); setBasPaygOpen(false); setBasPaygSearch('') }}
-                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', basPaygAccountId === a.id && 'bg-primary/10 font-medium')}
-                    >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </CardContent>

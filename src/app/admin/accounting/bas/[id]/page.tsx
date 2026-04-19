@@ -47,6 +47,10 @@ const STATUS_BADGE: Record<BasPeriodStatus, string> = {
   LODGED: 'bg-green-500/15 text-green-700 dark:text-green-400',
 }
 
+function shouldUseDefaultPaygInstalment(period: BasPeriod) {
+  return period.status !== 'LODGED' && period.paygInstalmentCents == null && period.createdAt === period.updatedAt
+}
+
 export default function BasDetailPage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
@@ -76,6 +80,7 @@ export default function BasDetailPage() {
   const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
   const [defaultGstAccountId, setDefaultGstAccountId] = useState('')
   const [defaultPaygAccountId, setDefaultPaygAccountId] = useState('')
+  const [defaultPaygInstalmentCents, setDefaultPaygInstalmentCents] = useState<number | null>(null)
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentDate, setPaymentDate] = useState('')
   const [gstAmountStr, setGstAmountStr] = useState('')
@@ -96,6 +101,7 @@ export default function BasDetailPage() {
   const [attachments, setAttachments] = useState<AccountingAttachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null)
+  const [deleteAttachmentTarget, setDeleteAttachmentTarget] = useState<AttachmentItem | null>(null)
 
   // Edit expense from BAS records drill-down
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
@@ -194,10 +200,17 @@ export default function BasDetailPage() {
         if (d) {
           setDefaultGstAccountId(d.basGstAccountId ?? '')
           setDefaultPaygAccountId(d.basPaygAccountId ?? '')
+          setDefaultPaygInstalmentCents(d.basPaygInstalmentDefaultCents ?? null)
         }
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!period || defaultPaygInstalmentCents == null) return
+    if (!shouldUseDefaultPaygInstalment(period)) return
+    setPaygInstalment((defaultPaygInstalmentCents / 100).toFixed(2))
+  }, [period, defaultPaygInstalmentCents])
 
   async function handleUploadAttachments(files: File[]) {
     setUploadingAttachment(true)
@@ -240,11 +253,18 @@ export default function BasDetailPage() {
     setDeletingAttachmentId(attachmentId)
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
-      if (!res.ok) { alert('Failed to delete attachment'); return }
+      if (!res.ok) { alert('Failed to delete attachment'); return false }
       setAttachments(prev => prev.filter(a => a.id !== attachmentId))
+      return true
     } finally {
       setDeletingAttachmentId(null)
     }
+  }
+
+  async function handleConfirmDeleteAttachment() {
+    if (!deleteAttachmentTarget) return
+    const deleted = await handleDeleteAttachment(deleteAttachmentTarget.id)
+    if (deleted) setDeleteAttachmentTarget(null)
   }
 
   async function handleCalculate() {
@@ -553,7 +573,7 @@ export default function BasDetailPage() {
             label={null}
             onUpload={handleUploadAttachments}
             onDownload={async (item: AttachmentItem) => { await handleDownloadAttachment(item.id, item.name) }}
-            onDelete={async (item: AttachmentItem) => { await handleDeleteAttachment(item.id) }}
+            onDelete={async (item: AttachmentItem) => { setDeleteAttachmentTarget(item) }}
           />
         </CardContent>
       </Card>
@@ -847,6 +867,32 @@ export default function BasDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { setLodgeConfirm(false); handleStatusChange('LODGED') }}>Lodge</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!deleteAttachmentTarget}
+        onOpenChange={open => {
+          if (!open && deletingAttachmentId !== deleteAttachmentTarget?.id) setDeleteAttachmentTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lodgement Document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete <strong>{deleteAttachmentTarget?.name}</strong>? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingAttachmentId === deleteAttachmentTarget?.id}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void handleConfirmDeleteAttachment()}
+              disabled={deletingAttachmentId === deleteAttachmentTarget?.id}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+            >
+              {deletingAttachmentId === deleteAttachmentTarget?.id ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

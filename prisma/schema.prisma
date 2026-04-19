@@ -2316,7 +2316,7 @@ model BasPeriod {
 
   // PAYG amounts — entered alongside BAS figures (cents)
   paygWithholdingCents Int?                            // W2 — amount withheld from wages
-  paygInstalmentCents  Int?                            // T4 — PAYG instalment amount
+  paygInstalmentCents  Int?                            // T7 — PAYG instalment amount
 
   // Payment recorded after lodging (amounts/accounts stored; bank txn reconciled separately)
   paymentDate              String?                         // YYYY-MM-DD
@@ -2346,8 +2346,9 @@ model AccountingSettings {
   reportingBasis String @default("ACCRUAL")
 
   // Default Chart of Accounts for BAS payment splitting
-  basGstAccountId  String?   // Account for the GST net component (1A − 1B)
-  basPaygAccountId String?   // Account for the PAYG Income Tax Instalment (T7)
+  basGstAccountId                String?   // Account for the GST net component (1A − 1B)
+  basPaygAccountId               String?   // Account for the PAYG Income Tax Instalment (T7)
+  basPaygInstalmentDefaultCents  Int?      // Default T7 amount for new/editable BAS periods
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

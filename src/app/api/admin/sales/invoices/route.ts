@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
+import { nextSalesDocumentNumber } from '@/lib/sales/numbering'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
 export const runtime = 'nodejs'
@@ -21,20 +22,6 @@ const createSchema = z.object({
   terms: z.string().max(20000).optional().nullable(),
   items: z.array(z.any()).default([]),
 })
-
-function pad6(n: number): string {
-  return String(n).padStart(6, '0')
-}
-
-async function nextInvoiceNumber(tx: any): Promise<string> {
-  const seq = await tx.salesSequence.upsert({
-    where: { id: 'default' },
-    create: { id: 'default', quote: 0, invoice: 1 },
-    update: { invoice: { increment: 1 } },
-    select: { invoice: true },
-  })
-  return `INV-${pad6(Number(seq.invoice))}`
-}
 
 export async function GET(request: NextRequest) {
   const authResult = await requireApiMenu(request, 'sales')
@@ -104,7 +91,7 @@ export async function POST(request: NextRequest) {
   const input = parsed.data
 
   const created = await prisma.$transaction(async (tx) => {
-    const invoiceNumber = input.invoiceNumber?.trim() || (await nextInvoiceNumber(tx))
+    const invoiceNumber = input.invoiceNumber?.trim() || (await nextSalesDocumentNumber(tx, 'invoice'))
 
     // Snapshot the current taxEnabled setting so it persists with the document.
     const settingsRow = await tx.salesSettings.upsert({

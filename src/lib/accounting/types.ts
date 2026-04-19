@@ -156,6 +156,7 @@ export interface AccountingSettings {
   reportingBasis: 'CASH' | 'ACCRUAL'
   basGstAccountId: string | null
   basPaygAccountId: string | null
+  basPaygInstalmentDefaultCents: number | null
   updatedAt: string
 }
 

@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
@@ -165,6 +165,7 @@ export default function BankAccountsPage() {
   interface UnreconciledBasPeriod { id: string; label: string; quarter: number; financialYear: string; paymentDate: string | null; paymentAmountCents: number | null }
   const [matchBasTarget, setMatchBasTarget] = useState<BankTransaction | null>(null)
   const [basSearch, setBasSearch] = useState('')
+  const [matchableBasPeriods, setMatchableBasPeriods] = useState<UnreconciledBasPeriod[]>([])
   const [unreconciledBasPeriods, setUnreconciledBasPeriods] = useState<UnreconciledBasPeriod[]>([])
   const [loadingBasPeriods, setLoadingBasPeriods] = useState(false)
   const [selectedBasPeriodId, setSelectedBasPeriodId] = useState<string | null>(null)
@@ -187,6 +188,24 @@ export default function BankAccountsPage() {
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId) ?? null
   const txnPageCount = Math.max(1, Math.ceil(txnTotal / PAGE_SIZE))
+  const matchableBasPaymentAmounts = useMemo(() => new Set(
+    matchableBasPeriods
+      .map(period => period.paymentAmountCents)
+      .filter((amount): amount is number => amount != null)
+  ), [matchableBasPeriods])
+
+  const filterMatchableBasPeriods = useCallback((periods: UnreconciledBasPeriod[], query: string, txn?: BankTransaction | null) => {
+    const normalizedQuery = query.trim().toLowerCase()
+    const targetAmount = txn ? Math.abs(txn.amountCents) : null
+
+    return periods.filter(period => {
+      if (period.paymentAmountCents == null) return false
+      if (targetAmount !== null && period.paymentAmountCents !== targetAmount) return false
+      if (!normalizedQuery) return true
+      const label = `${period.label || `Q${period.quarter} ${period.financialYear}`}`.toLowerCase()
+      return label.includes(normalizedQuery) || `${period.financialYear}`.toLowerCase().includes(normalizedQuery)
+    })
+  }, [])
 
   // Fetch all transactions (ignoring pagination) for export
   const fetchAllTransactionsForExport = useCallback(async (): Promise<BankTransaction[]> => {
@@ -261,6 +280,42 @@ export default function BankAccountsPage() {
     apiFetch('/api/admin/accounting/open-invoices').then(r => r.ok ? r.json() : null).then(d => { if (d?.invoices) setQuickMatchInvoices(d.invoices) }).catch(() => {})
     apiFetch('/api/admin/accounting/unmatched-expenses').then(r => r.ok ? r.json() : null).then(d => { if (d?.expenses) setQuickMatchExpenses(d.expenses) }).catch(() => {})
   }, [activeTab])
+
+  const refreshMatchableBasPeriods = useCallback(async () => {
+    setLoadingBasPeriods(true)
+    try {
+      const res = await apiFetch('/api/admin/accounting/bas')
+      if (!res.ok) {
+        setMatchableBasPeriods([])
+        return
+      }
+
+      const d = await res.json()
+      const periods = (d.periods ?? []).filter((period: UnreconciledBasPeriod & { status?: string; bankTransactionId?: string | null }) => {
+        if (period.status !== 'LODGED') return false
+        if (!period.paymentDate || period.paymentAmountCents == null) return false
+        if (period.bankTransactionId) return false
+        return true
+      })
+      setMatchableBasPeriods(periods)
+    } finally {
+      setLoadingBasPeriods(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'UNMATCHED') {
+      setMatchableBasPeriods([])
+      setUnreconciledBasPeriods([])
+      return
+    }
+    if (!transactions.some(txn => txn.amountCents < 0)) {
+      setMatchableBasPeriods([])
+      setUnreconciledBasPeriods([])
+      return
+    }
+    void refreshMatchableBasPeriods()
+  }, [activeTab, transactions, refreshMatchableBasPeriods])
 
   async function handleQuickMatchInvoice(txn: BankTransaction, invoiceId: string) {
     setQuickMatching(txn.id)
@@ -634,30 +689,16 @@ export default function BankAccountsPage() {
     setMatchBasTarget(txn)
     setSelectedBasPeriodId(null)
     setBasSearch('')
-    setUnreconciledBasPeriods([])
-    void loadUnreconciledBasPeriods('', txn)
+    setUnreconciledBasPeriods(filterMatchableBasPeriods(matchableBasPeriods, '', txn))
   }
 
-  const loadUnreconciledBasPeriods = useCallback(async (q: string, txn?: BankTransaction | null) => {
-    setLoadingBasPeriods(true)
-    try {
-      const res = await apiFetch('/api/admin/accounting/bas')
-      if (!res.ok) return
-      const d = await res.json()
-      const targetAmount = txn ? Math.abs(txn.amountCents) : null
-      const list = (d.periods ?? []).filter((p: UnreconciledBasPeriod & { status?: string; bankTransactionId?: string | null }) => {
-        if (p.status !== 'LODGED') return false
-        if (!p.paymentDate || !p.paymentAmountCents) return false
-        if (p.bankTransactionId) return false
-        if (targetAmount !== null && p.paymentAmountCents !== targetAmount) return false
-        const query = q.trim().toLowerCase()
-        if (!query) return true
-        const label = `${p.label || `Q${p.quarter} ${p.financialYear}`}`.toLowerCase()
-        return label.includes(query) || `${p.financialYear}`.toLowerCase().includes(query)
-      })
-      setUnreconciledBasPeriods(list)
-    } finally { setLoadingBasPeriods(false) }
-  }, [])
+  const loadUnreconciledBasPeriods = useCallback((q: string, txn?: BankTransaction | null) => {
+    setUnreconciledBasPeriods(filterMatchableBasPeriods(matchableBasPeriods, q, txn))
+  }, [filterMatchableBasPeriods, matchableBasPeriods])
+
+  function canShowBasPaymentButton(txn: BankTransaction) {
+    return txn.amountCents < 0 && matchableBasPaymentAmounts.has(Math.abs(txn.amountCents))
+  }
 
   async function handleMatchBas() {
     if (!matchBasTarget || !selectedBasPeriodId) return
@@ -669,10 +710,13 @@ export default function BankAccountsPage() {
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match BAS payment'); return }
       const matchedId = matchBasTarget.id
+      const matchedBasPeriodId = selectedBasPeriodId
       setMatchBasTarget(null)
       setTransactions(prev => prev.filter(t => t.id !== matchedId))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === matchedId ? null : prev)
+      setMatchableBasPeriods(prev => prev.filter(period => period.id !== matchedBasPeriodId))
+      setUnreconciledBasPeriods(prev => prev.filter(period => period.id !== matchedBasPeriodId))
     } finally { setMatchingBas(false) }
   }
 
@@ -1095,7 +1139,7 @@ export default function BankAccountsPage() {
                                         <Link2 className="w-3.5 h-3.5 mr-1.5" />Match Expense
                                       </Button>
                                     )}
-                                    {t.amountCents < 0 && (
+                                    {canShowBasPaymentButton(t) && (
                                       <Button size="sm" variant="outline" onClick={() => openMatchBasDialog(t)} disabled={isPosting || isIgnoring}>
                                         <Link2 className="w-3.5 h-3.5 mr-1.5" />BAS Payment
                                       </Button>
