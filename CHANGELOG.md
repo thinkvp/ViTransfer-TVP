@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-04-19
+
+### Added
+- **Edit journal entries from account ledger** — own journal entries in the account ledger now have an edit (pencil) button alongside the existing delete button; clicking it opens the journal entry dialog pre-populated with the entry's date, description, amount, debit/credit type, tax code, reference, and notes; the dialog title updates to "Edit Journal Entry" and the submit button reads "Save Changes"
+- **PUT `/api/admin/accounting/journal-entries/[id]`** — new authenticated, rate-limited API route that validates and updates an existing journal entry's date, description, amount, tax code, reference, and notes; returns the updated entry via the shared `journalEntryFromDb` mapper
+
+### Changed
+- **Sales rollup Stripe totals now sourced from `SalesPayment` mirrors** — the per-invoice Stripe paid totals in the sales rollup were previously aggregated from `SalesInvoiceStripePayment`; they now aggregate from `SalesPayment` rows where `source = STRIPE`, ensuring deleted test payments are automatically excluded and totals stay consistent with the accounting cash-receipts view
+- **Sales rollup payments list filters out deleted Stripe payments** — `SalesInvoiceStripePayment` rows are now filtered against the set of active `SalesPayment` source=STRIPE mirrors before being included in the dashboard payments list; payments whose corresponding mirror record has been deleted (e.g. test checkouts) are silently excluded
+- **Copy-to-version physically copies asset files** — the copy-assets-to-version endpoint previously used a metadata-only approach (new DB records pointing to the same storage path as the source); it now physically copies each file to the target version's assets folder at the correct path (`<projectStoragePath>/<videoFolder>/<versionLabel>/<fileName>`), creates the destination directory if needed, and recalculates project total bytes after the operation
+- **Copy-to-version supports Dropbox** — when the target video has Dropbox enabled and Dropbox storage is configured, copied assets receive a `dropbox:` storage path, a human-friendly Dropbox path, and are queued for upload to Dropbox immediately after the local copy
+
 ## [1.5.3] - 2026-04-18
 
 ### Added

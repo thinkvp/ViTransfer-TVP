@@ -161,7 +161,7 @@ export async function GET(request: NextRequest) {
   const stripeInvoiceIds = invoiceIds.length ? invoiceIds : invoiceIdList
   const shouldQueryStripePayments = includePayments && (allowUnscopedStripePayments || stripeInvoiceIds.length > 0)
 
-  const [stripePaymentsRaw, localAgg, stripeAgg] = await Promise.all([
+  const [stripePaymentsRaw, localAgg, stripeAgg, activeStripeSessionsRaw] = await Promise.all([
     shouldQueryStripePayments
       ? prisma.salesInvoiceStripePayment.findMany({
           where: stripeInvoiceIds.length ? { invoiceDocId: { in: stripeInvoiceIds } } : undefined,
@@ -188,16 +188,34 @@ export async function GET(request: NextRequest) {
           _max: { paymentDate: true },
         })
       : Promise.resolve([] as any[]),
-    // Stripe totals per invoice (balance/status)
+    // Stripe totals per invoice (balance/status) — aggregated from SalesPayment source=STRIPE mirrors
+    // so that deleted test payments are automatically excluded, consistent with accounting cash receipts.
     invoiceIdList.length
-      ? prisma.salesInvoiceStripePayment.groupBy({
-          by: ['invoiceDocId'],
-          where: { invoiceDocId: { in: invoiceIdList } },
-          _sum: { invoiceAmountCents: true },
-          _max: { createdAt: true },
+      ? prisma.salesPayment.groupBy({
+          by: ['invoiceId'],
+          where: { invoiceId: { in: invoiceIdList }, source: 'STRIPE' as any },
+          _sum: { amountCents: true },
+          _max: { paymentDate: true },
+        })
+      : Promise.resolve([] as any[]),
+    // Active Stripe checkout session IDs — the set of SalesPayment source=STRIPE mirrors that have
+    // NOT been deleted. Used to filter SalesInvoiceStripePayment rows so deleted test payments are
+    // excluded from dashboard totals and the payments list.
+    shouldQueryStripePayments
+      ? prisma.salesPayment.findMany({
+          where: stripeInvoiceIds.length
+            ? { source: 'STRIPE' as any, invoiceId: { in: stripeInvoiceIds } }
+            : { source: 'STRIPE' as any },
+          select: { reference: true },
         })
       : Promise.resolve([] as any[]),
   ])
+
+  const activeStripeSessionIds = new Set(
+    (activeStripeSessionsRaw as Array<{ reference: string | null }>)
+      .map((r) => r.reference)
+      .filter((r): r is string => typeof r === 'string' && r.length > 0),
+  )
 
   const paidLocalByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
   for (const g of localAgg as any[]) {
@@ -213,13 +231,11 @@ export async function GET(request: NextRequest) {
 
   const paidStripeByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
   for (const g of stripeAgg as any[]) {
-    const id = String(g?.invoiceDocId ?? '').trim()
+    const id = String(g?.invoiceId ?? '').trim()
     if (!id) continue
-    const paid = Number(g?._sum?.invoiceAmountCents ?? 0)
-    const latest: unknown = g?._max?.createdAt
-    const latestYmd = latest instanceof Date
-      ? latest.toISOString().slice(0, 10)
-      : (typeof latest === 'string' && /^\d{4}-\d{2}-\d{2}/.test(latest) ? latest.slice(0, 10) : null)
+    const paid = Number(g?._sum?.amountCents ?? 0)
+    const latest = typeof g?._max?.paymentDate === 'string' ? g._max.paymentDate : null
+    const latestYmd = latest && /^\d{4}-\d{2}-\d{2}$/.test(latest) ? latest : null
 
     paidStripeByInvoiceId[id] = {
       paidCents: Number.isFinite(paid) ? Math.max(0, Math.trunc(paid)) : 0,
@@ -295,11 +311,14 @@ export async function GET(request: NextRequest) {
   const invoiceById = Object.fromEntries(invoices.map((i) => [i.id, i]))
 
   const stripePayments: RollupPaymentRow[] = (stripePaymentsRaw as any[])
-    // Only include Stripe payments whose invoice exists in the loaded set.
-    // Orphaned entries (e.g. test payments for deleted invoices) are excluded.
+    // Only include Stripe payments whose invoice exists in the loaded set AND whose
+    // SalesPayment source=STRIPE mirror has not been deleted. This keeps the payments
+    // list consistent with accounting cash receipts (which read SalesPayment source=STRIPE).
     .filter((p) => {
       const docId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : ''
-      return docId && invoiceById[docId]
+      if (!docId || !invoiceById[docId]) return false
+      const sessionId = typeof p?.stripeCheckoutSessionId === 'string' ? p.stripeCheckoutSessionId.trim() : ''
+      return sessionId.length > 0 && activeStripeSessionIds.has(sessionId)
     })
     .map((p) => {
     const invoiceDocId = typeof p?.invoiceDocId === 'string' ? p.invoiceDocId : null

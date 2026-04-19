@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
-import { ArrowLeft, ArrowUp, ArrowDown, Eye, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, ArrowUp, ArrowDown, Eye, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus, Pencil } from 'lucide-react'
 import type { Account, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
 import { cn, formatDate } from '@/lib/utils'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
@@ -45,6 +45,11 @@ type Entry =
 function fmtAud(cents: number) {
   const abs = Math.abs(cents)
   return (cents < 0 ? '-' : '') + '$' + (abs / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function getDefaultJournalDate() {
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 export default function AccountLedgerPage() {
@@ -131,7 +136,8 @@ export default function AccountLedgerPage() {
 
   // Journal entry form
   const [jeOpen, setJeOpen] = useState(false)
-  const [jeDate, setJeDate] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })
+  const [editingJournalEntry, setEditingJournalEntry] = useState<JournalEntry | null>(null)
+  const [jeDate, setJeDate] = useState(getDefaultJournalDate)
   const [jeDesc, setJeDesc] = useState('')
   const [jeAmount, setJeAmount] = useState('')
   const [jeType, setJeType] = useState<'debit' | 'credit'>('debit')
@@ -191,15 +197,16 @@ export default function AccountLedgerPage() {
   }
 
   async function handleCreateJournal() {
+    const isEditingJournal = editingJournalEntry !== null
     const cents = Math.round(parseFloat(jeAmount || '0') * 100)
     if (!cents || !jeDesc.trim()) return
     setJeSaving(true)
     try {
-      const res = await apiFetch('/api/admin/accounting/journal-entries', {
-        method: 'POST',
+      const res = await apiFetch(isEditingJournal ? `/api/admin/accounting/journal-entries/${editingJournalEntry.id}` : '/api/admin/accounting/journal-entries', {
+        method: isEditingJournal ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: account?.id ?? id,
+          ...(isEditingJournal ? {} : { accountId: account?.id ?? id }),
           date: jeDate,
           description: jeDesc.trim(),
           amountCents: jeType === 'credit' ? -cents : cents,
@@ -210,15 +217,51 @@ export default function AccountLedgerPage() {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to create journal entry')
+        alert(d.error || (isEditingJournal ? 'Failed to update journal entry' : 'Failed to create journal entry'))
         return
       }
       setJeOpen(false)
-      setJeDesc(''); setJeAmount(''); setJeRef(''); setJeNotes('')
+      setEditingJournalEntry(null)
+      setJeDate(getDefaultJournalDate())
+      setJeDesc('')
+      setJeAmount('')
+      setJeType('debit')
+      setJeTaxCode('BAS_EXCLUDED')
+      setJeRef('')
+      setJeNotes('')
       void load(page, from, to)
     } finally {
       setJeSaving(false)
     }
+  }
+
+  function openNewJournalEntry() {
+    setEditingJournalEntry(null)
+    setJeDate(getDefaultJournalDate())
+    setJeDesc('')
+    setJeAmount('')
+    setJeType('debit')
+    setJeTaxCode('BAS_EXCLUDED')
+    setJeRef('')
+    setJeNotes('')
+    setJeOpen(true)
+  }
+
+  function openEditJournalEntry(entry: JournalEntry) {
+    setEditingJournalEntry(entry)
+    setJeDate(entry.date)
+    setJeDesc(entry.description)
+    setJeAmount((Math.abs(entry.amountCents) / 100).toFixed(2))
+    setJeType(entry.amountCents < 0 ? 'credit' : 'debit')
+    setJeTaxCode(entry.taxCode)
+    setJeRef(entry.reference ?? '')
+    setJeNotes(entry.notes ?? '')
+    setJeOpen(true)
+  }
+
+  function closeJournalDialog() {
+    setJeOpen(false)
+    setEditingJournalEntry(null)
   }
 
   async function openLinkedTransaction(transactionId: string) {
@@ -287,7 +330,7 @@ export default function AccountLedgerPage() {
               onFromChange={v => { setFrom(v); setPage(1); void load(1, v, to) }}
               onToChange={v => { setTo(v); setPage(1); void load(1, from, v) }}
             />
-            <Button size="sm" variant="outline" className="ml-auto gap-1.5" onClick={() => setJeOpen(true)}>
+            <Button size="sm" variant="outline" className="ml-auto gap-1.5" onClick={openNewJournalEntry}>
               <Plus className="w-3.5 h-3.5" />Journal Entry
             </Button>
             <ExportMenu
@@ -420,9 +463,14 @@ export default function AccountLedgerPage() {
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(j.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
                             {isOwn && (
-                              <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Delete journal entry" aria-label="Delete journal entry">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </AccountingTableActionButton>
+                              <div className="flex items-center justify-end gap-2">
+                                <AccountingTableActionButton onClick={() => openEditJournalEntry(j)} title="Edit journal entry" aria-label="Edit journal entry">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </AccountingTableActionButton>
+                                <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Delete journal entry" aria-label="Delete journal entry">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </AccountingTableActionButton>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -570,10 +618,10 @@ export default function AccountLedgerPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={jeOpen} onOpenChange={open => { if (!open && !jeSaving) setJeOpen(false) }}>
+      <Dialog open={jeOpen} onOpenChange={open => { if (open) setJeOpen(true); else if (!jeSaving) closeJournalDialog() }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>New Journal Entry</DialogTitle>
+            <DialogTitle>{editingJournalEntry ? 'Edit Journal Entry' : 'New Journal Entry'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -624,10 +672,10 @@ export default function AccountLedgerPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setJeOpen(false)} disabled={jeSaving}>Cancel</Button>
+            <Button variant="outline" onClick={closeJournalDialog} disabled={jeSaving}>Cancel</Button>
             <Button onClick={() => void handleCreateJournal()} disabled={jeSaving || !jeDesc.trim() || !jeAmount}>
               {jeSaving && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              Create Entry
+              {editingJournalEntry ? 'Save Changes' : 'Create Entry'}
             </Button>
           </DialogFooter>
         </DialogContent>
