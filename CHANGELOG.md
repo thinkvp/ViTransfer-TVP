@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-04-19
+
+### Changed
+- **BAS amounts truncated to whole dollars before summing** — `8A`, `8B`, and `9` net amounts are now computed by first truncating each component (`1A`, `1B`, `W2`, `T7`) to whole dollars individually (using floor of absolute value, sign-preserved) before addition, matching the ATO's requirement that BAS amounts are reported in whole dollars; previously the raw cent-precision values were summed first and the display format alone truncated, which could produce a displayed net that differed from the ATO-expected result
+- **New `truncateBasCents` helper** — extracted the whole-dollar truncation logic into a reusable `truncateBasCents(cents)` function used consistently across the CSV export, PDF export, and on-screen summary table
+- **New `fmtBasCsvAmount` helper** — BAS CSV export now uses a dedicated formatter that produces plain number strings (e.g. `1234.00` / `-1234.00`, no `$` prefix) from truncated cent values, matching the format expected by ATO lodgement tools
+- **BAS CSV and PDF export streamlined to key lines only** — the CSV and PDF exports previously included informational sub-items `G2` (export sales), `G3` (other GST-free sales), `G4` (input taxed sales), `G10` (capital purchases), and `G11` (non-capital purchases); these rows are removed, leaving only the lodgement-critical lines: `G1`, `1A`, `1B`, `W2` (if non-zero), `T7` (if non-zero), `8A`, `8B`, and `9`
+- **BAS on-screen summary table streamlined to key lines** — the GST section of the BAS detail page table similarly removes `G2`, `G3`, `G4`, `G10`, and `G11` rows, showing only `G1`, `1A`, and `1B` alongside the PAYG and totals sections
+- **BAS line descriptions updated to ATO plain-language wording** — `"GST on sales"` → `"GST you collected on sales"` and `"GST on purchases"` → `"GST you paid on purchases"` across the screen table, PDF export, and CSV export
+
 ## [1.5.6] - 2026-04-19
 
 ### Added

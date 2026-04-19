@@ -24,11 +24,21 @@ function fmtAud(cents: number) {
   return cents < 0 ? `-$${abs}` : `$${abs}`
 }
 
+function truncateBasCents(cents: number) {
+  const wholeDollarsCents = Math.floor(Math.abs(cents) / 100) * 100
+  return cents < 0 ? -wholeDollarsCents : wholeDollarsCents
+}
+
 /** ATO BAS amounts must be reported in whole dollars (rounded down) */
 function fmtBasDollars(cents: number) {
-  const dollars = Math.floor(Math.abs(cents) / 100)
+  const dollars = Math.abs(truncateBasCents(cents)) / 100
   const formatted = dollars.toLocaleString('en-AU')
   return cents < 0 ? `-$${formatted}` : `$${formatted}`
+}
+
+function fmtBasCsvAmount(cents: number) {
+  const dollars = Math.abs(truncateBasCents(cents)) / 100
+  return cents < 0 ? `-${dollars}` : String(dollars)
 }
 
 const STATUS_BADGE: Record<BasPeriodStatus, string> = {
@@ -353,26 +363,20 @@ export default function BasDetailPage() {
               if (!calculation) return
               const w2 = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : 0
               const t7 = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : 0
-              const sum8A = calculation.label1ACents + w2 + t7
-              const sum8B = calculation.label1BCents
+              const sum8A = truncateBasCents(calculation.label1ACents) + truncateBasCents(w2) + truncateBasCents(t7)
+              const sum8B = truncateBasCents(calculation.label1BCents)
               const sum9 = sum8A - sum8B
-              const rd = (c: number) => String(Math.floor(Math.abs(c) / 100))
               const rows: string[][] = [
-                ['Total sales (including GST)', 'G1', rd(calculation.g1TotalSalesCents)],
-                ['Export sales', 'G2', rd(calculation.g2ExportSalesCents)],
-                ['Other GST-free sales', 'G3', rd(calculation.g3OtherGstFreeCents)],
-                ['Input taxed sales', 'G4', rd(calculation.g4InputTaxedSalesCents ?? 0)],
-                ['Capital purchases (including GST)', 'G10', rd(calculation.g10CapitalPurchasesCents)],
-                ['Non-capital purchases (including GST)', 'G11', rd(calculation.g11NonCapitalPurchasesCents)],
-                ['GST on sales', '1A', rd(calculation.label1ACents)],
-                ['GST on purchases', '1B', rd(calculation.label1BCents)],
+                ['Total sales (including GST)', 'G1', fmtBasCsvAmount(calculation.g1TotalSalesCents)],
+                ['GST you collected on sales', '1A', fmtBasCsvAmount(calculation.label1ACents)],
+                ['GST you paid on purchases', '1B', fmtBasCsvAmount(calculation.label1BCents)],
               ]
-              if (w2) rows.push(['Amount withheld from payments', 'W2', rd(w2)])
-              if (t7) rows.push(['Instalment amount', 'T7', rd(t7)])
+              if (w2) rows.push(['Amount withheld from payments', 'W2', fmtBasCsvAmount(w2)])
+              if (t7) rows.push(['Instalment amount', 'T7', fmtBasCsvAmount(t7)])
               rows.push(
-                ['Amount you owe the ATO', '8A', rd(sum8A)],
-                ['Amount the ATO owes you', '8B', rd(sum8B)],
-                ['Your payment amount', '9', rd(sum9)],
+                ['Amount you owe the ATO', '8A', fmtBasCsvAmount(sum8A)],
+                ['Amount the ATO owes you', '8B', fmtBasCsvAmount(sum8B)],
+                ['Your payment amount', '9', fmtBasCsvAmount(sum9)],
               )
               downloadCsv(`bas-${period.label || period.quarter}.csv`, ['Line Description', 'Line Code', 'Amount'], rows)
             }}
@@ -380,8 +384,8 @@ export default function BasDetailPage() {
               if (!calculation) return
               const w2 = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : 0
               const t7 = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : 0
-              const sum8A = calculation.label1ACents + w2 + t7
-              const sum8B = calculation.label1BCents
+              const sum8A = truncateBasCents(calculation.label1ACents) + truncateBasCents(w2) + truncateBasCents(t7)
+              const sum8B = truncateBasCents(calculation.label1BCents)
               const sum9 = sum8A - sum8B
               const cols = [
                 { header: 'Line Description' },
@@ -390,13 +394,8 @@ export default function BasDetailPage() {
               ]
               const gstRows = [
                 { cells: ['Total sales (including GST)', 'G1', fmtBasDollars(calculation.g1TotalSalesCents)] },
-                { cells: ['Export sales', 'G2', fmtBasDollars(calculation.g2ExportSalesCents)] },
-                { cells: ['Other GST-free sales', 'G3', fmtBasDollars(calculation.g3OtherGstFreeCents)] },
-                { cells: ['Input taxed sales', 'G4', fmtBasDollars(calculation.g4InputTaxedSalesCents ?? 0)] },
-                { cells: ['Capital purchases (including GST)', 'G10', fmtBasDollars(calculation.g10CapitalPurchasesCents)] },
-                { cells: ['Non-capital purchases (including GST)', 'G11', fmtBasDollars(calculation.g11NonCapitalPurchasesCents)] },
-                { cells: ['GST on sales', '1A', fmtBasDollars(calculation.label1ACents)], bold: true as const },
-                { cells: ['GST on purchases', '1B', fmtBasDollars(calculation.label1BCents)], bold: true as const },
+                { cells: ['GST you collected on sales', '1A', fmtBasDollars(calculation.label1ACents)], bold: true as const },
+                { cells: ['GST you paid on purchases', '1B', fmtBasDollars(calculation.label1BCents)], bold: true as const },
               ]
               const paygRows = []
               if (w2) paygRows.push({ cells: ['Amount withheld from payments', 'W2', fmtBasDollars(w2)] })
@@ -541,10 +540,8 @@ export default function BasDetailPage() {
       {calculation && (() => {
         const w2Cents = paygWithholding ? Math.round(parseFloat(paygWithholding) * 100) : 0
         const t7Cents = paygInstalment ? Math.round(parseFloat(paygInstalment) * 100) : 0
-        const hasPayg = w2Cents !== 0 || t7Cents !== 0
-        // Summary: 8A = amounts you owe, 8B = amounts ATO owes you, 9 = net
-        const label8ACents = calculation.label1ACents + w2Cents + t7Cents
-        const label8BCents = calculation.label1BCents
+        const label8ACents = truncateBasCents(calculation.label1ACents) + truncateBasCents(w2Cents) + truncateBasCents(t7Cents)
+        const label8BCents = truncateBasCents(calculation.label1BCents)
         const label9Cents = label8ACents - label8BCents
 
         return (
@@ -568,13 +565,8 @@ export default function BasDetailPage() {
                       <td className="px-4 py-1.5 font-semibold" colSpan={3}>GST</td>
                     </tr>
                     <BASTableRow description="Total sales (including GST)" lineCode="G1" cents={calculation.g1TotalSalesCents} />
-                    <BASTableRow description="Export sales" lineCode="G2" cents={calculation.g2ExportSalesCents} />
-                    <BASTableRow description="Other GST-free sales" lineCode="G3" cents={calculation.g3OtherGstFreeCents} />
-                    <BASTableRow description="Input taxed sales" lineCode="G4" cents={calculation.g4InputTaxedSalesCents ?? 0} />
-                    <BASTableRow description="Capital purchases (including GST)" lineCode="G10" cents={calculation.g10CapitalPurchasesCents} />
-                    <BASTableRow description="Non-capital purchases (including GST)" lineCode="G11" cents={calculation.g11NonCapitalPurchasesCents} />
-                    <BASTableRow description="GST on sales" lineCode="1A" cents={calculation.label1ACents} bold />
-                    <BASTableRow description="GST on purchases" lineCode="1B" cents={calculation.label1BCents} bold />
+                    <BASTableRow description="GST you collected on sales" lineCode="1A" cents={calculation.label1ACents} bold />
+                    <BASTableRow description="GST you paid on purchases" lineCode="1B" cents={calculation.label1BCents} bold />
 
                     {/* ── PAYG Withholding Section ────── */}
                     {w2Cents !== 0 && (
