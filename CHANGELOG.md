@@ -5,6 +5,13 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2026-04-19
+
+### Changed
+- **BAS payment dialog pre-fills truncated GST net** — the "Record BAS Payment" dialog now pre-fills the GST amount field using `truncateBasCents(1A) − truncateBasCents(1B)` instead of the raw `netGstCents` value, so the suggested payment amount always matches the whole-dollar figures the ATO expects (consistent with how `8A`, `8B`, and `9` are computed)
+- **Lodgement Documents card moved above Calculation Results** — the attachment panel for ATO portal confirmations now appears directly below the payment card, before the BAS form layout and records drill-down tables, giving it more prominence in the lodgement workflow
+- **BAS drill-down locked when period is lodged** — rows in the Sales and Expenses/Journal/Bank drill-down tables no longer show hover highlighting or a pointer cursor on a lodged BAS period; row click handlers are suppressed; the `ExpenseFormModal`, `LinkedBankTransactionDialog`, and journal-entry edit `Dialog` are all conditionally rendered only when `!isLodged`, preventing accidental data edits after a period has been submitted to the ATO
+
 ## [1.5.7] - 2026-04-19
 
 ### Changed

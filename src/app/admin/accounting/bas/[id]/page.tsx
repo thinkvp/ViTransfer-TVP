@@ -505,7 +505,7 @@ export default function BasDetailPage() {
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
-                      Awaiting bank match — match the ATO debit of {fmtAud(period.paymentAmountCents ?? 0)} in Bank Transactions as &ldquo;BAS Payment&rdquo;
+                      Awaiting bank match — match the ATO debit of {fmtAud(period.paymentAmountCents ?? 0)}{' '}in Bank Transactions as &ldquo;BAS Payment&rdquo;
                     </span>
                   )}
                 </div>
@@ -518,7 +518,7 @@ export default function BasDetailPage() {
                 <p className="text-muted-foreground text-sm">No payment recorded yet.</p>
                 <Button size="sm" variant="outline" onClick={() => {
                   setPaymentDate(new Date().toISOString().slice(0, 10))
-                  setGstAmountStr(calculation ? (Math.max(0, calculation.netGstCents) / 100).toFixed(2) : '')
+                  setGstAmountStr(calculation ? (Math.max(0, truncateBasCents(calculation.label1ACents) - truncateBasCents(calculation.label1BCents)) / 100).toFixed(2) : '')
                   setPaygAmountStr((period.paygInstalmentCents ?? 0) > 0 ? ((period.paygInstalmentCents ?? 0) / 100).toFixed(2) : '')
                   setGstAccountId(defaultGstAccountId)
                   setGstAccountSearch('')
@@ -535,6 +535,28 @@ export default function BasDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Lodgement Documents */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Lodgement Documents</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">
+            Attach a copy of the lodgement confirmation or BAS form received from the ATO portal after lodging.
+          </p>
+          <AttachmentsPanel
+            items={attachments.map((a: AccountingAttachment) => ({ id: a.id, name: a.originalName }) satisfies AttachmentItem)}
+            canUpload
+            uploading={uploadingAttachment}
+            deletingId={deletingAttachmentId}
+            label={null}
+            onUpload={handleUploadAttachments}
+            onDownload={async (item: AttachmentItem) => { await handleDownloadAttachment(item.id, item.name) }}
+            onDelete={async (item: AttachmentItem) => { await handleDeleteAttachment(item.id) }}
+          />
+        </CardContent>
+      </Card>
 
       {/* Calculation Results — ATO BAS form layout */}
       {calculation && (() => {
@@ -670,7 +692,7 @@ export default function BasDetailPage() {
                     </thead>
                     <tbody>
                       {records.sales.map((r, i) => (
-                        <tr key={`${r.id}-${i}`} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <tr key={`${r.id}-${i}`} className={cn('border-b border-border last:border-0', !isLodged && 'hover:bg-muted/30')}>
                           <td className="px-2 py-1.5">{formatDate(r.date)}</td>
                           <td className="px-2 py-1.5 font-medium">{r.invoiceNumber}</td>
                           <td className="px-2 py-1.5 text-muted-foreground max-w-[140px] truncate">{r.clientName}</td>
@@ -753,10 +775,11 @@ export default function BasDetailPage() {
                                   <tr
                                     key={`${r.id}-${i}`}
                                     className={cn(
-                                      'border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer',
+                                      'border-b border-border last:border-0',
+                                      !isLodged && 'hover:bg-muted/30 cursor-pointer',
                                       r.issue === 'zero_gst' && 'bg-yellow-500/5',
                                     )}
-                                    onClick={() => {
+                                    onClick={isLodged ? undefined : () => {
                                       if (r.kind === 'expense') { setEditExpenseId(r.id) }
                                       else if (r.kind === 'journal') { void openEditJournalEntry(r.id) }
                                       else if (r.kind === 'bankTransaction') { setLinkedTxnId(r.bankTransactionId ?? r.id) }
@@ -811,28 +834,6 @@ export default function BasDetailPage() {
           )}
         </Card>
       )}
-
-      {/* Lodgement Documents */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Lodgement Documents</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground mb-3">
-            Attach a copy of the lodgement confirmation or BAS form received from the ATO portal after lodging.
-          </p>
-          <AttachmentsPanel
-            items={attachments.map((a: AccountingAttachment) => ({ id: a.id, name: a.originalName }) satisfies AttachmentItem)}
-            canUpload
-            uploading={uploadingAttachment}
-            deletingId={deletingAttachmentId}
-            label={null}
-            onUpload={handleUploadAttachments}
-            onDownload={async (item: AttachmentItem) => { await handleDownloadAttachment(item.id, item.name) }}
-            onDelete={async (item: AttachmentItem) => { await handleDeleteAttachment(item.id) }}
-          />
-        </CardContent>
-      </Card>
 
       {/* Lodge Confirmation */}
       <AlertDialog open={lodgeConfirm} onOpenChange={setLodgeConfirm}>
@@ -980,29 +981,33 @@ export default function BasDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Expense Modal — expense rows in the BAS drill-down */}
-      <ExpenseFormModal
-        open={editExpenseId !== null}
-        expenseId={editExpenseId}
-        onClose={() => setEditExpenseId(null)}
-        onSaved={() => {
-          setEditExpenseId(null)
-          // Re-run calculation so the BAS summary and records tables reflect the saved changes
-          if (calculation) void handleCalculate()
-          else void load()
-        }}
-      />
+      {/* Edit Expense Modal — expense rows in the BAS drill-down (draft/reviewed only) */}
+      {!isLodged && (
+        <ExpenseFormModal
+          open={editExpenseId !== null}
+          expenseId={editExpenseId}
+          onClose={() => setEditExpenseId(null)}
+          onSaved={() => {
+            setEditExpenseId(null)
+            // Re-run calculation so the BAS summary and records tables reflect the saved changes
+            if (calculation) void handleCalculate()
+            else void load()
+          }}
+        />
+      )}
 
-      {/* View Bank Transaction — MANUAL bank txn and split line rows */}
-      <LinkedBankTransactionDialog
-        open={linkedTxnId !== null}
-        transactionId={linkedTxnId}
-        onOpenChange={open => { if (!open) setLinkedTxnId(null) }}
-        onViewExpense={expenseId => { setLinkedTxnId(null); setEditExpenseId(expenseId) }}
-      />
+      {/* View Bank Transaction — MANUAL bank txn and split line rows (draft/reviewed only) */}
+      {!isLodged && (
+        <LinkedBankTransactionDialog
+          open={linkedTxnId !== null}
+          transactionId={linkedTxnId}
+          onOpenChange={open => { if (!open) setLinkedTxnId(null) }}
+          onViewExpense={expenseId => { setLinkedTxnId(null); setEditExpenseId(expenseId) }}
+        />
+      )}
 
-      {/* Edit Journal Entry — journal rows in the BAS drill-down */}
-      <Dialog open={jeOpen} onOpenChange={open => { if (!open && !jeSaving) { setJeOpen(false); setEditingJe(null) } }}>
+      {/* Edit Journal Entry — journal rows in the BAS drill-down (draft/reviewed only) */}
+      <Dialog open={!isLodged && jeOpen} onOpenChange={open => { if (!open && !jeSaving) { setJeOpen(false); setEditingJe(null) } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Journal Entry</DialogTitle>
