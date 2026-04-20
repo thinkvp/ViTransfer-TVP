@@ -108,8 +108,8 @@ export async function GET(request: NextRequest) {
   // coaAccountId column is added by a pending migration; cast to bypass stale Prisma client types.
   const linkedBankAccounts = await (prisma.bankAccount.findMany as Function)({
     where: { coaAccountId: { not: null } },
-    select: { coaAccountId: true, id: true },
-  }) as { coaAccountId: string; id: string }[]
+    select: { coaAccountId: true, id: true, openingBalance: true },
+  }) as { coaAccountId: string; id: string; openingBalance: number }[]
 
   if (linkedBankAccounts.length > 0) {
     const bankAccountIds = linkedBankAccounts.map(ba => ba.id)
@@ -126,6 +126,11 @@ export async function GET(request: NextRequest) {
       const coaId = coaByBankAccountId[txn.bankAccountId]
       if (!coaId) continue
       balances[coaId] = (balances[coaId] ?? 0) + Number(txn.amountCents)
+    }
+    // Always include the opening balance — it is the account's starting point and must
+    // be reflected in the CoA balance regardless of the selected date range filter.
+    for (const ba of linkedBankAccounts) {
+      balances[ba.coaAccountId] = (balances[ba.coaAccountId] ?? 0) + Number(ba.openingBalance)
     }
   }
 

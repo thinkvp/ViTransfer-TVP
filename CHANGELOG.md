@@ -5,6 +5,14 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-04-20
+
+### Fixed
+- **Account Ledger sorting is now server-side** — the sort key and direction are passed to the `GET /api/admin/accounting/accounts/[id]/entries` endpoint as `sortBy` and `sortDir` query parameters; the combined entries list is sorted on the server before pagination so sorting behaves correctly across all pages rather than only re-sorting the current in-memory page; the page counter is also reset to 1 whenever the sort column or direction changes to avoid stale page offsets
+- **CoA balance for linked ASSET accounts now includes the bank account opening balance** — the `/api/admin/accounting/accounts/balances` endpoint was accumulating only post-import transaction amounts for bank-account-linked CoA accounts and ignoring the account's stored `openingBalance`; the opening balance is now always added to the CoA balance regardless of the active date-range filter, so the balance correctly reflects the account's starting point plus all subsequent activity
+- **Share page video token requests are now deduplicated** — both the admin share page and the public client share page previously fired duplicate concurrent token API requests when the same video was referenced in multiple render cycles; an in-flight promise cache (`tokenRequestCacheRef`) now coalesces all concurrent callers onto a single in-progress request per video, eliminating redundant API calls and potential race conditions; sidebar thumbnail preloads use a new lightweight `fetchSidebarVideos` path that only requests thumbnail tokens, deferring full stream-token fetches until the user actually selects a video
+- **Journal Entry dialog no longer closes on outside click** — the `onOpenChange` handler on the New / Edit Journal Entry dialog was closing the form when the user clicked outside the dialog box, silently discarding any in-progress entry; the handler now ignores the close signal from outside clicks so the dialog can only be dismissed via the explicit cancel or save actions
+
 ## [1.6.0] - 2026-04-20
 
 ### Added

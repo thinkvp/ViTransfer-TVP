@@ -95,6 +95,9 @@ export default function SharePage() {
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
+  const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
+  const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
+  const sidebarThumbnailRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const { isDark } = useTheme()
   const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
 
@@ -695,7 +698,6 @@ export default function SharePage() {
     if (!shareToken) return videos
 
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
-    const isWatermarkEnabled = project?.watermarkEnabled === true
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -704,77 +706,141 @@ export default function SharePage() {
           return cached
         }
 
-        try {
-          let streamToken480p = ''
-          let streamToken720p = ''
-          let streamToken1080p = ''
-          let downloadToken = null
-          let originalStreamToken = ''
-
-          if (video.approved) {
-            // Approval unlocks original download, but playback should use preview streams.
-            // Only request tokens for resolutions that have an actual preview file so that
-            // the VideoPlayer's quality selector reflects what is genuinely available.
-            const [origToken, token480, token720, token1080] = await Promise.all([
-              fetchVideoToken(video.id, 'original'),
-              video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
-              video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
-              video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
-            ])
-            downloadToken = origToken || null
-            originalStreamToken = origToken || ''
-            // Do NOT fall back to origToken here; streamUrlOriginal covers the no-preview case.
-            streamToken480p = token480
-            streamToken720p = token720
-            streamToken1080p = token1080
-          } else {
-            // Unapproved: only previews are accessible.
-            const [token480, token720, token1080] = await Promise.all([
-              video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
-              video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
-              video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
-            ])
-            streamToken480p = token480
-            streamToken720p = token720
-            streamToken1080p = token1080
-          }
-
-          let thumbnailUrl = null
-          if (video.hasThumbnail) {
-            const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
-            if (thumbToken) {
-              thumbnailUrl = `/api/content/${thumbToken}`
-            }
-          }
-
-          let timelineVttUrl = null
-          let timelineSpriteUrl = null
-          if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
-            const [vttToken, spriteToken] = await Promise.all([
-              fetchVideoToken(video.id, 'timeline-vtt'),
-              fetchVideoToken(video.id, 'timeline-sprite'),
-            ])
-            timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
-            timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
-          }
-
-          const tokenized = {
-            ...video,
-            streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
-            streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
-            streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
-            streamUrlOriginal: originalStreamToken ? `/api/content/${originalStreamToken}` : '',
-            downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
-            thumbnailUrl,
-            timelineVttUrl,
-            timelineSpriteUrl,
-          }
-
-          tokenCacheRef.current.set(video.id, tokenized)
-          return tokenized
-        } catch (error) {
-          return video
+        const inFlight = tokenRequestCacheRef.current.get(video.id)
+        if (inFlight) {
+          return inFlight
         }
+
+        const request = (async () => {
+          try {
+            let streamToken480p = ''
+            let streamToken720p = ''
+            let streamToken1080p = ''
+            let downloadToken = null
+            let originalStreamToken = ''
+
+            if (video.approved) {
+              // Approval unlocks original download, but playback should use preview streams.
+              // Only request tokens for resolutions that have an actual preview file so that
+              // the VideoPlayer's quality selector reflects what is genuinely available.
+              const [origToken, token480, token720, token1080] = await Promise.all([
+                fetchVideoToken(video.id, 'original'),
+                video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
+                video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
+                video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
+              ])
+              downloadToken = origToken || null
+              originalStreamToken = origToken || ''
+              // Do NOT fall back to origToken here; streamUrlOriginal covers the no-preview case.
+              streamToken480p = token480
+              streamToken720p = token720
+              streamToken1080p = token1080
+            } else {
+              // Unapproved: only previews are accessible.
+              const [token480, token720, token1080] = await Promise.all([
+                video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
+                video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
+                video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
+              ])
+              streamToken480p = token480
+              streamToken720p = token720
+              streamToken1080p = token1080
+            }
+
+            let thumbnailUrl = sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null
+            if (!thumbnailUrl && video.hasThumbnail) {
+              const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
+              if (thumbToken) {
+                thumbnailUrl = `/api/content/${thumbToken}`
+              }
+            }
+
+            let timelineVttUrl = null
+            let timelineSpriteUrl = null
+            if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+              const [vttToken, spriteToken] = await Promise.all([
+                fetchVideoToken(video.id, 'timeline-vtt'),
+                fetchVideoToken(video.id, 'timeline-sprite'),
+              ])
+              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
+              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
+            }
+
+            const tokenized = {
+              ...video,
+              streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
+              streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
+              streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
+              streamUrlOriginal: originalStreamToken ? `/api/content/${originalStreamToken}` : '',
+              downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
+              thumbnailUrl,
+              timelineVttUrl,
+              timelineSpriteUrl,
+            }
+
+            tokenCacheRef.current.set(video.id, tokenized)
+            sidebarVideoCacheRef.current.set(video.id, tokenized)
+            return tokenized
+          } catch (error) {
+            return video
+          } finally {
+            tokenRequestCacheRef.current.delete(video.id)
+          }
+        })()
+
+        tokenRequestCacheRef.current.set(video.id, request)
+        return request
+      })
+    )
+  }, [shareToken, project, fetchVideoToken])
+
+  const fetchSidebarVideos = useCallback(async (videos: any[]) => {
+    if (project?.enableVideos === false) return videos
+    if (!shareToken) return videos
+
+    return Promise.all(
+      videos.map(async (video: any) => {
+        const fullCached = tokenCacheRef.current.get(video.id)
+        if (fullCached) {
+          return fullCached
+        }
+
+        const sidebarCached = sidebarVideoCacheRef.current.get(video.id)
+        if (sidebarCached) {
+          return sidebarCached
+        }
+
+        const inFlight = sidebarThumbnailRequestCacheRef.current.get(video.id)
+        if (inFlight) {
+          return inFlight
+        }
+
+        const request = (async () => {
+          try {
+            let thumbnailUrl = null
+            if (video.hasThumbnail) {
+              const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
+              if (thumbToken) {
+                thumbnailUrl = `/api/content/${thumbToken}`
+              }
+            }
+
+            const sidebarVideo = {
+              ...video,
+              thumbnailUrl,
+            }
+
+            sidebarVideoCacheRef.current.set(video.id, sidebarVideo)
+            return sidebarVideo
+          } catch {
+            return video
+          } finally {
+            sidebarThumbnailRequestCacheRef.current.delete(video.id)
+          }
+        })()
+
+        sidebarThumbnailRequestCacheRef.current.set(video.id, request)
+        return request
       })
     )
   }, [shareToken, project, fetchVideoToken])
@@ -818,7 +884,7 @@ export default function SharePage() {
 
     // Preload in background without blocking UI
     const preloadThumbnails = async () => {
-      const tokenized = await fetchTokensForVideos(allVideos)
+      const tokenized = await fetchSidebarVideos(allVideos)
       
       // Update allVideosByName with tokenized videos
       setAllVideosByName((prev) => {
@@ -847,7 +913,7 @@ export default function SharePage() {
     preloadThumbnails().catch(() => {
       // Silently fail - this is just a performance optimization
     })
-  }, [project?.videosByName, shareToken, fetchTokensForVideos])
+  }, [project?.videosByName, shareToken, fetchSidebarVideos])
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {

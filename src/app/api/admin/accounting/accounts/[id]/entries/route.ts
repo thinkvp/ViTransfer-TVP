@@ -30,6 +30,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const pageSize = download ? 100000 : Math.min(200, Math.max(1, parseInt(url.searchParams.get('pageSize') ?? '50', 10)))
   const from = url.searchParams.get('from') ?? undefined
   const to = url.searchParams.get('to') ?? undefined
+  const sortBy = (url.searchParams.get('sortBy') ?? 'date') as 'date' | 'type' | 'description' | 'ref' | 'amount'
+  const sortDir = (url.searchParams.get('sortDir') ?? 'desc') as 'asc' | 'desc'
 
   const account = await prisma.account.findFirst({
     where: id.startsWith('c') && id.length > 20 ? { id } : { code: id },
@@ -148,6 +150,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     | { kind: 'split'; date: string; entry: { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
     | { kind: 'bankAccountTxn'; date: string; entry: { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null } }
 
+  const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE' || account.type === 'COGS'
+
   const combined: Entry[] = [
     ...expenses.map(e => ({ kind: 'expense' as const, date: e.date as string, entry: expenseFromDb(e) })),
     ...bankTransactions.map(t => ({ kind: 'bankTransaction' as const, date: t.date as string, entry: bankTransactionFromDb(t) })),
@@ -197,15 +201,39 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
     })),
   ].sort((a, b) => {
-    if (b.date < a.date) return -1
-    if (b.date > a.date) return 1
-    return 0
+    let r = 0
+    switch (sortBy) {
+      case 'date':
+        r = a.date < b.date ? -1 : a.date > b.date ? 1 : 0
+        break
+      case 'type':
+        r = a.kind.localeCompare(b.kind)
+        break
+      case 'description': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getDesc = (row: typeof a) => { const e = row.entry as any; if (row.kind === 'salesInvoice') return `${e.invoiceNumber ?? ''} ${e.description ?? ''}`; return e.description ?? e.bankTransactionDescription ?? '' }
+        r = getDesc(a).localeCompare(getDesc(b))
+        break
+      }
+      case 'ref': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getRef = (row: typeof a) => { const e = row.entry as any; if (row.kind === 'expense') return e.supplierName ?? ''; if (row.kind === 'salesInvoice') return e.labelName ?? e.clientName ?? ''; return e.reference ?? e.bankTransactionReference ?? '' }
+        r = getRef(a).localeCompare(getRef(b))
+        break
+      }
+      case 'amount': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getAmt = (row: typeof a): number => { const e = row.entry as any; if (row.kind === 'expense') return e.amountExGst ?? 0; if (row.kind === 'bankTransaction') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } if (row.kind === 'journal') return amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); if (row.kind === 'split') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } return e.amountCents ?? 0 }
+        r = getAmt(a) - getAmt(b)
+        break
+      }
+    }
+    return sortDir === 'asc' ? r : -r
   })
 
   // Sum all entry amounts for the period (across all pages)
   // For debit-normal accounts (ASSET, EXPENSE, COGS), bank transaction and split line
   // amounts must be negated: a credit (positive, money in) reduces the account balance.
-  const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE' || account.type === 'COGS'
   const periodTotalCents = combined.reduce((sum, row) => {
     if (row.kind === 'expense') return sum + (row.entry as ReturnType<typeof expenseFromDb>).amountExGst
     if (row.kind === 'bankTransaction') {

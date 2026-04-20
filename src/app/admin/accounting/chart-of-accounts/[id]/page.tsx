@@ -107,52 +107,14 @@ export default function AccountLedgerPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   function toggleSort(key: SortKey) {
-    setSortKey(prev => {
-      if (prev !== key) { setSortDir('asc'); return key }
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-      return prev
-    })
+    const newDir = sortKey === key ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc'
+    setSortKey(key)
+    setSortDir(newDir)
+    setPage(1)
   }
 
-  const sortedEntries = useMemo(() => {
-    const getAmt = (row: Entry) => getEntryAmountExGst(row, account?.type, taxRatePercent)
-    const getAccount = (row: Entry) => {
-      if (row.kind === 'expense') return (row.entry as Expense).accountName ?? account?.name ?? ''
-      if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).accountName ?? account?.name ?? ''
-      if (row.kind === 'journal') return (row.entry as JournalEntry).accountName ?? account?.name ?? ''
-      if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).accountName
-      if (row.kind === 'bankAccountTxn') return account?.name ?? ''
-      return (row.entry as SplitEntry).accountName
-    }
-    const getDesc = (row: Entry) => {
-      if (row.kind === 'expense') return (row.entry as Expense).description
-      if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).description
-      if (row.kind === 'journal') return (row.entry as JournalEntry).description
-      if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return `${s.invoiceNumber} - ${s.description}` }
-      if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).description
-      const s = row.entry as SplitEntry; return s.description || s.bankTransactionDescription
-    }
-    const getRef = (row: Entry) => {
-      if (row.kind === 'expense') return (row.entry as Expense).supplierName ?? ''
-      if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).reference ?? ''
-      if (row.kind === 'journal') return (row.entry as JournalEntry).reference ?? ''
-      if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return s.labelName ?? s.clientName ?? '' }
-      if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).reference ?? ''
-      return (row.entry as SplitEntry).bankTransactionReference ?? ''
-    }
-    return [...entries].sort((a, b) => {
-      let r = 0
-      switch (sortKey) {
-        case 'date': r = a.date.localeCompare(b.date); break
-        case 'type': r = a.kind.localeCompare(b.kind); break
-        case 'account': r = getAccount(a).localeCompare(getAccount(b)); break
-        case 'description': r = getDesc(a).localeCompare(getDesc(b)); break
-        case 'ref': r = getRef(a).localeCompare(getRef(b)); break
-        case 'amount': r = getAmt(a) - getAmt(b); break
-      }
-      return sortDir === 'asc' ? r : -r
-    })
-  }, [entries, sortKey, sortDir, account, taxRatePercent])
+  // Sorting is server-side; entries arrive pre-sorted for the current page.
+  const sortedEntries = entries
 
   // Journal entry form
   const [jeOpen, setJeOpen] = useState(false)
@@ -173,11 +135,13 @@ export default function AccountLedgerPage() {
     if (from) params.set('from', from)
     if (to) params.set('to', to)
     if (search.trim()) params.set('q', search.trim())
+    params.set('sortBy', sortKey)
+    params.set('sortDir', sortDir)
     const res = await apiFetch(`/api/admin/accounting/accounts/${id}/entries?${params}`)
     if (!res.ok) return []
     const d = await res.json()
     return d.entries ?? []
-  }, [id, from, to, search])
+  }, [id, from, to, search, sortKey, sortDir])
 
   const load = useCallback(async (p: number, fromDate: string, toDate: string, q: string) => {
     setLoading(true)
@@ -186,6 +150,8 @@ export default function AccountLedgerPage() {
       if (fromDate) params.set('from', fromDate)
       if (toDate) params.set('to', toDate)
       if (q.trim()) params.set('q', q.trim())
+      params.set('sortBy', sortKey)
+      params.set('sortDir', sortDir)
       const res = await apiFetch(`/api/admin/accounting/accounts/${id}/entries?${params}`)
       if (!res.ok) { router.push('/admin/accounting/chart-of-accounts'); return }
       const d = await res.json()
@@ -199,7 +165,7 @@ export default function AccountLedgerPage() {
     } finally {
       setLoading(false)
     }
-  }, [id, router])
+  }, [id, router, sortKey, sortDir])
 
   useEffect(() => { void load(1, from, to, search) }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -262,7 +228,8 @@ export default function AccountLedgerPage() {
       setJeTaxCode('BAS_EXCLUDED')
       setJeRef('')
       setJeNotes('')
-      void load(page, from, to, search)
+      setPage(1)
+      void load(1, from, to, search)
     } finally {
       setJeSaving(false)
     }
@@ -715,7 +682,7 @@ export default function AccountLedgerPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={jeOpen} onOpenChange={open => { if (open) setJeOpen(true); else if (!jeSaving) closeJournalDialog() }}>
+      <Dialog open={jeOpen} onOpenChange={open => { if (open) setJeOpen(true) }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editingJournalEntry ? 'Edit Journal Entry' : 'New Journal Entry'}</DialogTitle>
