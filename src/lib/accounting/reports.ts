@@ -41,6 +41,16 @@ type ProfitLossAccountNode = {
   }>
 }
 
+type BalanceSheetAccountType = 'ASSET' | 'LIABILITY' | 'EQUITY'
+
+type BalanceSheetAccountNode = {
+  id: string
+  code: string
+  name: string
+  type: BalanceSheetAccountType
+  subType: string | null
+}
+
 export interface ProfitLossReport {
   fromDate: string
   toDate: string
@@ -89,6 +99,114 @@ function groupByAccount(
     }
   }
   return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code))
+}
+
+function sortReportLines(lines: ReportLine[]): ReportLine[] {
+  return [...lines].sort((a, b) => a.code.localeCompare(b.code) || a.name.localeCompare(b.name))
+}
+
+function mergeReportLines(...lineSets: ReportLine[][]): ReportLine[] {
+  const merged = new Map<string, ReportLine>()
+
+  for (const lines of lineSets) {
+    for (const line of lines) {
+      if (line.amountCents === 0) continue
+      const key = line.accountId || `${line.code}:${line.name}`
+      const existing = merged.get(key)
+      if (existing) {
+        existing.amountCents += line.amountCents
+      } else {
+        merged.set(key, { ...line })
+      }
+    }
+  }
+
+  return sortReportLines(Array.from(merged.values()).filter((line) => line.amountCents !== 0))
+}
+
+function findPreferredBalanceSheetAccount(
+  accounts: BalanceSheetAccountNode[],
+  matchers: Array<(account: BalanceSheetAccountNode) => boolean>
+): BalanceSheetAccountNode | null {
+  for (const matcher of matchers) {
+    const match = accounts.find(matcher)
+    if (match) return match
+  }
+
+  return null
+}
+
+async function buildPostedBalanceSheetLines(
+  accounts: BalanceSheetAccountNode[],
+  asOf: string,
+  excludeAccountIds: Set<string> = new Set()
+): Promise<ReportLine[]> {
+  const includedAccounts = accounts.filter((account) => !excludeAccountIds.has(account.id))
+  if (includedAccounts.length === 0) return []
+
+  const accountIds = includedAccounts.map((account) => account.id)
+  const accountMap = new Map(includedAccounts.map((account) => [account.id, account]))
+  const isDebitNormal = includedAccounts[0].type === 'ASSET'
+  const totals = new Map<string, number>()
+
+  const addAmount = (accountId: string, amountCents: number) => {
+    if (amountCents === 0) return
+    totals.set(accountId, (totals.get(accountId) ?? 0) + amountCents)
+  }
+
+  const [bankTransactions, journalEntries, splitLines] = await Promise.all([
+    prisma.bankTransaction.findMany({
+      where: {
+        accountId: { in: accountIds },
+        date: { lte: asOf },
+        status: 'MATCHED',
+        matchType: { not: 'INVOICE_PAYMENT' },
+      },
+      select: { accountId: true, amountCents: true },
+    }),
+    prisma.journalEntry.findMany({
+      where: {
+        accountId: { in: accountIds },
+        date: { lte: asOf },
+      },
+      select: { accountId: true, amountCents: true },
+    }),
+    prisma.splitLine.findMany({
+      where: {
+        accountId: { in: accountIds },
+        bankTransaction: { date: { lte: asOf }, status: 'MATCHED' },
+      },
+      select: { accountId: true, amountCents: true },
+    }),
+  ])
+
+  for (const transaction of bankTransactions) {
+    if (!transaction.accountId) continue
+    addAmount(transaction.accountId, isDebitNormal ? -transaction.amountCents : transaction.amountCents)
+  }
+
+  for (const journal of journalEntries) {
+    addAmount(journal.accountId, isDebitNormal ? journal.amountCents : -journal.amountCents)
+  }
+
+  for (const splitLine of splitLines) {
+    addAmount(splitLine.accountId, isDebitNormal ? -splitLine.amountCents : splitLine.amountCents)
+  }
+
+  return sortReportLines(
+    Array.from(totals.entries())
+      .map(([accountId, amountCents]) => {
+        const account = accountMap.get(accountId)
+        if (!account || amountCents === 0) return null
+        return {
+          accountId,
+          code: account.code,
+          name: account.name,
+          amountCents,
+        }
+      })
+      .filter((line): line is ReportLine => Boolean(line))
+  )
 }
 
 async function buildDebitNormalProfitLossLines(
@@ -273,10 +391,11 @@ export async function buildProfitLossReport(
   const cogsAccounts = profitLossAccounts.filter((account) => account.type === 'COGS')
   const expenseAccounts = profitLossAccounts.filter((account) => account.type === 'EXPENSE')
 
-  // Default income account: falls back to a synthetic "Sales Revenue" line if none configured
+  // Default income account: if none is configured, surface sales as an unmapped income line
+  // instead of inventing a Chart of Accounts code.
   const defaultIncomeAcct = settings?.defaultIncomeAccount
     ? { id: settings.defaultIncomeAccount.id, code: settings.defaultIncomeAccount.code, name: settings.defaultIncomeAccount.name }
-    : { id: '__sales_revenue__', code: '4-0000', name: 'Sales Revenue' }
+    : { id: '__unmapped_sales_income__', code: '', name: 'Unmapped Sales Income' }
 
   /** Accumulate a subtotal amount into a keyed map of income lines */
   function addToIncomeMap(map: Map<string, ReportLine>, acctId: string, code: string, name: string, cents: number) {
@@ -434,29 +553,80 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' } })
   const taxRatePercent = settings?.taxRatePercent ?? 10
 
-  // Assets: bank account balances (opening balance + net transactions to date)
-  const bankAccounts = await prisma.bankAccount.findMany({
-    where: { isActive: true },
-    include: {
-      transactions: {
-        where: { date: { lte: asOf }, status: { not: 'EXCLUDED' } },
-        select: { amountCents: true },
+  const [balanceSheetAccounts, accountingSettings, bankAccounts] = await Promise.all([
+    prisma.account.findMany({
+      where: { type: { in: ['ASSET', 'LIABILITY', 'EQUITY'] }, isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+      select: { id: true, code: true, name: true, type: true, subType: true },
+    }),
+    prisma.accountingSettings.findUnique({ where: { id: 'default' } }),
+    prisma.bankAccount.findMany({
+      where: { isActive: true },
+      include: {
+        transactions: {
+          where: { date: { lte: asOf }, status: { not: 'EXCLUDED' } },
+          select: { amountCents: true },
+        },
+        coaAccount: { select: { id: true, code: true, name: true } },
       },
-      coaAccount: { select: { id: true, code: true, name: true } },
-    },
-  })
+    }),
+  ])
 
-  const assetLines: ReportLine[] = bankAccounts.map(ba => {
+  const assetAccounts = balanceSheetAccounts.filter((account): account is BalanceSheetAccountNode => account.type === 'ASSET')
+  const liabilityAccounts = balanceSheetAccounts.filter((account): account is BalanceSheetAccountNode => account.type === 'LIABILITY')
+  const equityAccounts = balanceSheetAccounts.filter((account): account is BalanceSheetAccountNode => account.type === 'EQUITY')
+
+  const accountsReceivableAccount = findPreferredBalanceSheetAccount(assetAccounts, [
+    (account) => account.code === '1-1000',
+    (account) => account.subType === 'Accounts Receivable',
+    (account) => account.name.toLowerCase() === 'accounts receivable',
+  ])
+
+  const accountsPayableAccount = findPreferredBalanceSheetAccount(liabilityAccounts, [
+    (account) => account.code === '2-0000',
+    (account) => account.subType === 'Accounts Payable',
+    (account) => account.name.toLowerCase() === 'accounts payable',
+  ])
+
+  const gstPayableAccount = liabilityAccounts.find((account) => account.id === accountingSettings?.basGstAccountId)
+    ?? findPreferredBalanceSheetAccount(liabilityAccounts, [
+      (account) => account.code === '2-1000',
+      (account) => account.subType === 'Tax Liability',
+      (account) => account.name.toLowerCase() === 'gst payable',
+    ])
+
+  const retainedEarningsAccount = findPreferredBalanceSheetAccount(equityAccounts, [
+    (account) => account.code === '3-1000',
+    (account) => account.subType === 'Retained Earnings',
+    (account) => account.name.toLowerCase() === 'retained earnings',
+  ])
+
+  const linkedBankAccountIds = new Set(
+    bankAccounts
+      .map((bankAccount) => (bankAccount as unknown as { coaAccount?: { id: string } | null }).coaAccount?.id ?? null)
+      .filter((accountId): accountId is string => Boolean(accountId))
+  )
+
+  // Assets: bank account balances (opening balance + net transactions to date)
+  const bankAssetLines: ReportLine[] = bankAccounts.map(ba => {
     const balance = ba.openingBalance + ba.transactions.reduce((s, t) => s + t.amountCents, 0)
     // coaAccount is available after the migration adds the relation; cast away until Prisma regenerates
     const linked = (ba as unknown as { coaAccount?: { id: string; code: string; name: string } | null }).coaAccount
     return {
       accountId: linked?.id ?? ba.id,
-      code: linked?.code ?? '1-0000',
+      code: linked?.code ?? '',
       name: linked?.name ?? ba.name,
       amountCents: balance,
     }
   })
+
+  const postedAssetLines = await buildPostedBalanceSheetLines(
+    assetAccounts,
+    asOf,
+    new Set([
+      ...linkedBankAccountIds,
+    ])
+  )
 
   // Accounts Receivable: unpaid / partially-paid invoices (accrue based on issue date)
   const outstandingInvoices = await prisma.salesInvoice.findMany({
@@ -484,9 +654,17 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
     const paidCents = inv.payments.reduce((s, p) => s + p.amountCents, 0) + (stripePaidByInvoice.get(inv.id) ?? 0)
     arCents += Math.max(0, totalCents - paidCents)
   }
-  if (arCents > 0) {
-    assetLines.push({ accountId: 'ar', code: '1-1000', name: 'Accounts Receivable', amountCents: arCents })
-  }
+
+  const assetLines = mergeReportLines(
+    bankAssetLines,
+    postedAssetLines,
+    arCents > 0 ? [{
+      accountId: accountsReceivableAccount?.id ?? 'ar',
+      code: accountsReceivableAccount?.code ?? '',
+      name: accountsReceivableAccount?.name ?? 'Accounts Receivable',
+      amountCents: arCents,
+    }] : []
+  )
 
   const totalAssetsCents = assetLines.reduce((s, l) => s + l.amountCents, 0)
 
@@ -500,54 +678,15 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   })
   const apCents = unpaidExpenses.reduce((s, e) => s + e.amountIncGst, 0)
 
-  // Accumulated net profit (all time up to asOf) as equity.
-  // Use all four ledger sources (consistent with P&L report) and filter to EXPENSE/COGS accounts.
-  const [expensesForEquity, bankTxnsForEquity, journalsForEquity, splitsForEquity, allReceipts, gstExpenses, equityAccounts, accountingSettings] = await Promise.all([
-    prisma.expense.findMany({
-      where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
-      select: { amountExGst: true },
-    }),
-    prisma.bankTransaction.findMany({
-      where: { date: { lte: asOf }, status: 'MATCHED', matchType: { in: ['MANUAL'] }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
-      select: { amountCents: true, taxCode: true },
-    }),
-    prisma.journalEntry.findMany({
-      where: { date: { lte: asOf }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
-      select: { amountCents: true, taxCode: true },
-    }),
-    prisma.splitLine.findMany({
-      where: { bankTransaction: { date: { lte: asOf }, status: 'MATCHED' }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
-      select: { amountCents: true, taxCode: true },
-    }),
+  const [allReceipts, gstExpenses, postedLiabilityLines, postedEquityLines] = await Promise.all([
     listSalesCashReceiptsUpTo(asOf),
     prisma.expense.findMany({
       where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, taxCode: 'GST' },
       select: { gstAmount: true },
     }),
-    prisma.account.findMany({
-      where: { type: 'EQUITY', isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-      select: { id: true, code: true, name: true },
-    }),
-    prisma.accountingSettings.findUnique({ where: { id: 'default' } }),
+    buildPostedBalanceSheetLines(liabilityAccounts, asOf),
+    buildPostedBalanceSheetLines(equityAccounts, asOf),
   ])
-
-  const totalExpCents =
-    expensesForEquity.reduce((s, e) => s + e.amountExGst, 0) +
-    bankTxnsForEquity.reduce((s, t) => s + (-amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent)), 0) +
-    journalsForEquity.reduce((s, j) => s + amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent), 0) +
-    splitsForEquity.reduce((s, l) => s + (-amountExcludingGst(l.amountCents, l.taxCode, taxRatePercent)), 0)
-
-  const totalRevCents = allReceipts.reduce(
-    (sum, receipt) => sum + cashReceiptReportingAmountCents(receipt.amountCents, receipt.invoice, taxRatePercent, false),
-    0
-  )
-
-  const retainedEarningsCents = totalRevCents - totalExpCents
-
-  const liabilityLines: ReportLine[] = [
-    { accountId: 'ap', code: '2-1000', name: 'Accounts Payable', amountCents: apCents },
-  ]
 
   // GST liability: GST collected on sales minus GST credits on expenses (all time to asOf)
   const gstCreditsCents = gstExpenses.reduce((s, e) => s + e.gstAmount, 0)
@@ -578,29 +717,50 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   }
 
   const netGstCents = gstCollectedCents - gstCreditsCents + basGstPaymentsCents
-  if (netGstCents > 0) {
-    liabilityLines.push({ accountId: 'gst_payable', code: '2-2000', name: 'GST Payable', amountCents: netGstCents })
-  } else if (netGstCents < 0) {
-    // GST refund owed to business — show as negative liability (or could be an asset)
-    liabilityLines.push({ accountId: 'gst_payable', code: '2-2000', name: 'GST Receivable', amountCents: netGstCents })
-  }
+  const liabilityLines = mergeReportLines(
+    postedLiabilityLines,
+    apCents !== 0 ? [{
+      accountId: accountsPayableAccount?.id ?? 'ap',
+      code: accountsPayableAccount?.code ?? '',
+      name: accountsPayableAccount?.name ?? 'Accounts Payable',
+      amountCents: apCents,
+    }] : [],
+    netGstCents !== 0 ? [{
+      accountId: gstPayableAccount?.id ?? 'gst_payable',
+      code: gstPayableAccount?.code ?? '',
+      name: netGstCents < 0 ? 'GST Receivable' : (gstPayableAccount?.name ?? 'GST Payable'),
+      amountCents: netGstCents,
+    }] : []
+  )
 
   const totalLiabilitiesCents = liabilityLines.reduce((s, l) => s + l.amountCents, 0)
 
-  // Use the first active EQUITY account from the Chart of Accounts.
-  // Falls back to a generic label only if no equity accounts are configured.
-  const primaryEquityAccount = equityAccounts[0]
-  const equityLines: ReportLine[] = [
-    {
-      accountId: primaryEquityAccount?.id ?? 'equity',
-      code: primaryEquityAccount?.code ?? '3-0000',
-      name: primaryEquityAccount?.name ?? 'Equity',
-      amountCents: retainedEarningsCents,
-    },
-  ]
-  const totalEquityCents = equityLines.reduce((s, l) => s + l.amountCents, 0)
-
   const netAssetsCents = totalAssetsCents - totalLiabilitiesCents
+
+  const contributedEquityLines = postedEquityLines.filter((line) => line.accountId !== retainedEarningsAccount?.id)
+  const retainedEarningsCents = netAssetsCents - contributedEquityLines.reduce((sum, line) => sum + line.amountCents, 0)
+  const balancingEquityLine: ReportLine = retainedEarningsAccount
+    ? {
+        accountId: retainedEarningsAccount.id,
+        code: retainedEarningsAccount.code,
+        name: retainedEarningsAccount.name,
+        amountCents: retainedEarningsCents,
+      }
+    : {
+        accountId: 'equity_balance',
+        code: '',
+        name: 'Equity',
+        amountCents: retainedEarningsCents,
+      }
+
+  const equityLines = mergeReportLines(
+    contributedEquityLines,
+    retainedEarningsCents !== 0 || contributedEquityLines.length === 0
+      ? [balancingEquityLine]
+      : []
+  )
+
+  const totalEquityCents = equityLines.reduce((s, l) => s + l.amountCents, 0)
 
   return {
     asAt: asOf,

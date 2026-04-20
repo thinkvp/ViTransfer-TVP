@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api-client'
-import { AlertTriangle, TrendingUp, TrendingDown, Landmark, Receipt } from 'lucide-react'
+import { AlertTriangle, TrendingUp, TrendingDown, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AccountingSettings } from '@/lib/accounting/types'
 import { AccountingDashboardCharts } from '@/components/admin/accounting/AccountingDashboardCharts'
@@ -167,27 +167,7 @@ export default function AccountingDashboardPage() {
         />
       )}
 
-      {/* Bank accounts */}
-      {(stats?.bankAccounts?.length ?? 0) > 0 && (
-        <div>
-          <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-            <Landmark className="w-4 h-4" />Bank Accounts
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {stats!.bankAccounts.map(a => (
-              <Link key={a.id} href="/admin/accounting/bank-accounts">
-                <Card className="hover:bg-accent/30 transition-colors">
-                  <CardContent className="py-3 px-4">
-                    <p className="font-medium text-sm">{a.name}</p>
-                    <p className="text-sm font-medium mt-1">Current balance: {fmtAud(a.currentBalance)}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Pending transactions: {fmtAud(a.pendingTransactionAmount)}</p>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+
     </div>
   )
 }

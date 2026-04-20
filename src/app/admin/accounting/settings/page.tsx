@@ -462,7 +462,7 @@ export default function AccountingSettingsPage() {
               Remove &ldquo;{deleteTarget?.name}&rdquo;? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDelete()} disabled={deleting} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
               {deleting ? 'Deleting…' : 'Delete'}

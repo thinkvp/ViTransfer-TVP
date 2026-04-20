@@ -12,10 +12,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
-import { deleteSalesQuote, fetchSalesQuote, fetchSalesSettings, fetchTaxRates, listSalesLabels, patchSalesQuote } from '@/lib/sales/admin-api'
+import { deleteSalesQuote, fetchSalesQuote, fetchSalesSettings, fetchTaxRates, listSalesItems, listSalesLabels, patchSalesQuote } from '@/lib/sales/admin-api'
 import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
 import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
-import type { SalesLabel, SalesQuoteWithVersion } from '@/lib/sales/admin-api'
+import { LineItemAutocomplete } from '@/components/sales/LineItemAutocomplete'
+import type { SalesItem, SalesLabel, SalesQuoteWithVersion } from '@/lib/sales/admin-api'
 import type { ClientOption, ProjectOption, QuoteStatus, SalesLineItem, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
@@ -144,6 +145,9 @@ export default function QuoteDetailPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
   const [labels, setLabels] = useState<SalesLabel[]>([])
+  const [libraryItems, setLibraryItems] = useState<SalesItem[]>([])
+  const descInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
+  const pendingFocusRef = useRef<string | null>(null)
   const [unitPriceInputs, setUnitPriceInputs] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -311,7 +315,15 @@ export default function QuoteDetailPage() {
 
   useEffect(() => {
     listSalesLabels().then(setLabels).catch(() => {})
+    listSalesItems().then(setLibraryItems).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const id = pendingFocusRef.current
+    if (!id) return
+    pendingFocusRef.current = null
+    descInputRefs.current.get(id)?.focus()
+  })
 
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
@@ -803,12 +815,37 @@ export default function QuoteDetailPage() {
                 </div>
                 <div className="space-y-1">
                   <Label>Item</Label>
-                  <Input
+                  <LineItemAutocomplete
+                    inputRef={(el) => {
+                      if (el) descInputRefs.current.set(it.id, el)
+                      else descInputRefs.current.delete(it.id)
+                    }}
                     value={it.description}
-                    onChange={(e) => {
-                      const v = e.target.value
+                    onChange={(v) => {
                       setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, description: v } : x)))
                     }}
+                    onSelectItem={(libItem) => {
+                      setItems((prev) => prev.map((x) => x.id === it.id ? {
+                        ...x,
+                        description: libItem.description,
+                        details: libItem.details,
+                        quantity: libItem.quantity,
+                        unitPriceCents: libItem.unitPriceCents,
+                        taxRatePercent: normalizeTaxRatePercent(libItem.taxRatePercent, settings.taxRatePercent),
+                        taxRateName: libItem.taxRateName ?? undefined,
+                        labelId: libItem.labelId ?? null,
+                        labelName: libItem.labelName ?? null,
+                        labelColor: libItem.labelColor ?? null,
+                      } : x))
+                      setUnitPriceInputs((prev) => { const next = { ...prev }; delete next[it.id]; return next })
+                    }}
+                    onAfterSelect={() => {
+                      const pr = taxRates.find((r) => r.isDefault)
+                      const newId = globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}`
+                      pendingFocusRef.current = newId
+                      setItems((prev) => [...prev, { id: newId, description: '', details: '', quantity: 1, unitPriceCents: 0, taxRatePercent: normalizeTaxRatePercent(settings.taxRatePercent, settings.taxRatePercent), taxRateName: pr?.name }])
+                    }}
+                    libraryItems={libraryItems}
                     className="h-9"
                   />
 

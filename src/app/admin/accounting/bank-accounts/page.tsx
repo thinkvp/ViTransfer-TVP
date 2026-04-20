@@ -1336,7 +1336,7 @@ export default function BankAccountsPage() {
             <AlertDialogTitle>Delete Bank Account?</AlertDialogTitle>
             <AlertDialogDescription>This will permanently remove &ldquo;{deleteTarget?.name}&rdquo; and all associated transaction data. This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDeleteAccount()} disabled={deleting} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">{deleting ? 'Deleting…' : 'Delete'}</AlertDialogAction>
           </AlertDialogFooter>
@@ -1351,7 +1351,7 @@ export default function BankAccountsPage() {
               Delete <strong>{deleteTransactionTarget?.description}</strong>? This will permanently remove the ignored transaction. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={deletingTransaction}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDeleteTransaction()} disabled={deletingTransaction} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
               {deletingTransaction ? 'Deleting…' : 'Delete'}

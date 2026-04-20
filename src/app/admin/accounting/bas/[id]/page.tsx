@@ -884,7 +884,7 @@ export default function BasDetailPage() {
               Delete <strong>{deleteAttachmentTarget?.name}</strong>? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={deletingAttachmentId === deleteAttachmentTarget?.id}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void handleConfirmDeleteAttachment()}
@@ -1018,7 +1018,7 @@ export default function BasDetailPage() {
               This will delete the associated expense entry and clear the payment from this BAS period. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={deletingPayment}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDeletePayment()} disabled={deletingPayment} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
               {deletingPayment ? 'Removing…' : 'Remove'}

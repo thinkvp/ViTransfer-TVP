@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils'
 
 // ── Period utilities ──────────────────────────────────────────────────────────
 
-type PeriodKey = 'fy-to-date' | 'last-fy' | 'ytd' | 'last-12'
+type PeriodKey = 'fy-to-date' | 'last-fy' | 'fy-quarter' | 'last-fy-quarter' | 'ytd' | 'last-12' | 'last-6' | 'last-3'
 
 interface PeriodRange {
   from: string
@@ -53,12 +53,33 @@ function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodR
   } else if (key === 'last-fy') {
     start = new Date(fyStartYear - 1, fyStartM, 1)
     end = new Date(fyStartYear, fyStartM, 0, 23, 59, 59)
+  } else if (key === 'fy-quarter') {
+    const offsetInFy = ((now.getMonth() - fyStartM) + 12) % 12
+    const qIdx = Math.floor(offsetInFy / 3)
+    const qStartAbsM = fyStartM + qIdx * 3
+    start = new Date(fyStartYear + Math.floor(qStartAbsM / 12), qStartAbsM % 12, 1)
+    end = now
+  } else if (key === 'last-fy-quarter') {
+    const offsetInFy = ((now.getMonth() - fyStartM) + 12) % 12
+    const qIdx = Math.floor(offsetInFy / 3)
+    const prevQIdx = qIdx === 0 ? 3 : qIdx - 1
+    const prevFyYear = qIdx === 0 ? fyStartYear - 1 : fyStartYear
+    const prevQStartAbsM = fyStartM + prevQIdx * 3
+    const prevQEndAbsM = prevQStartAbsM + 3
+    start = new Date(prevFyYear + Math.floor(prevQStartAbsM / 12), prevQStartAbsM % 12, 1)
+    end = new Date(prevFyYear + Math.floor(prevQEndAbsM / 12), prevQEndAbsM % 12, 0, 23, 59, 59)
   } else if (key === 'ytd') {
     start = new Date(y, 0, 1)
     end = now
-  } else {
-    // last-12
+  } else if (key === 'last-12') {
     start = new Date(y, now.getMonth() - 11, 1)
+    end = now
+  } else if (key === 'last-6') {
+    start = new Date(y, now.getMonth() - 5, 1)
+    end = now
+  } else {
+    // last-3
+    start = new Date(y, now.getMonth() - 2, 1)
     end = now
   }
 
@@ -81,8 +102,12 @@ function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodR
 const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: 'fy-to-date', label: 'Financial year to date' },
   { value: 'last-fy', label: 'Last financial year' },
+  { value: 'fy-quarter', label: 'This financial quarter' },
+  { value: 'last-fy-quarter', label: 'Last financial quarter' },
   { value: 'ytd', label: 'Year to date' },
   { value: 'last-12', label: 'Last 12 months' },
+  { value: 'last-6', label: 'Last 6 months' },
+  { value: 'last-3', label: 'Last 3 months' },
 ]
 
 function PeriodSelect({

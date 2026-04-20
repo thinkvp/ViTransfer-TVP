@@ -18,11 +18,12 @@ import {
   fetchSalesRollup,
   fetchSalesSettings,
   fetchTaxRates,
+  listSalesItems,
   listSalesLabels,
   listSalesPayments,
   patchSalesInvoice,
 } from '@/lib/sales/admin-api'
-import type { SalesInvoiceWithVersion, SalesLabel, SalesRollupResponse } from '@/lib/sales/admin-api'
+import type { SalesInvoiceWithVersion, SalesItem, SalesLabel, SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { ClientOption, InvoiceStatus, ProjectOption, SalesLineItem, SalesPayment, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { invoiceStatusBadgeClass, invoiceStatusLabel } from '@/lib/sales/badge'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
@@ -46,6 +47,7 @@ import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { formatDate } from '@/lib/utils'
 import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
 import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
+import { LineItemAutocomplete } from '@/components/sales/LineItemAutocomplete'
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -155,6 +157,9 @@ export default function InvoiceDetailPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
   const [labels, setLabels] = useState<SalesLabel[]>([])
+  const [libraryItems, setLibraryItems] = useState<SalesItem[]>([])
+  const descInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
+  const pendingFocusRef = useRef<string | null>(null)
   const [unitPriceInputs, setUnitPriceInputs] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -402,7 +407,15 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => {
     listSalesLabels().then(setLabels).catch(() => {})
+    listSalesItems().then(setLibraryItems).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const id = pendingFocusRef.current
+    if (!id) return
+    pendingFocusRef.current = null
+    descInputRefs.current.get(id)?.focus()
+  })
 
   const subtotalCents = useMemo(() => sumLineItemsSubtotal(items), [items])
   const taxCents = useMemo(() => sumLineItemsTax(items, settings.taxRatePercent), [items, settings.taxRatePercent])
@@ -914,12 +927,37 @@ export default function InvoiceDetailPage() {
                 </div>
                 <div className="space-y-1">
                   <Label>Item</Label>
-                  <Input
+                  <LineItemAutocomplete
+                    inputRef={(el) => {
+                      if (el) descInputRefs.current.set(it.id, el)
+                      else descInputRefs.current.delete(it.id)
+                    }}
                     value={it.description}
-                    onChange={(e) => {
-                      const v = e.target.value
+                    onChange={(v) => {
                       setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, description: v } : x)))
                     }}
+                    onSelectItem={(libItem) => {
+                      setItems((prev) => prev.map((x) => x.id === it.id ? {
+                        ...x,
+                        description: libItem.description,
+                        details: libItem.details,
+                        quantity: libItem.quantity,
+                        unitPriceCents: libItem.unitPriceCents,
+                        taxRatePercent: normalizeTaxRatePercent(libItem.taxRatePercent, settings.taxRatePercent),
+                        taxRateName: libItem.taxRateName ?? undefined,
+                        labelId: libItem.labelId ?? null,
+                        labelName: libItem.labelName ?? null,
+                        labelColor: libItem.labelColor ?? null,
+                      } : x))
+                      setUnitPriceInputs((prev) => { const next = { ...prev }; delete next[it.id]; return next })
+                    }}
+                    onAfterSelect={() => {
+                      const pr = taxRates.find((r) => r.isDefault)
+                      const newId = globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}`
+                      pendingFocusRef.current = newId
+                      setItems((prev) => [...prev, { id: newId, description: '', details: '', quantity: 1, unitPriceCents: 0, taxRatePercent: normalizeTaxRatePercent(settings.taxRatePercent, settings.taxRatePercent), taxRateName: pr?.name }])
+                    }}
+                    libraryItems={libraryItems}
                     className="h-9"
                   />
 

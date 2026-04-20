@@ -34,7 +34,7 @@ import { getInvoiceDashboardAmountCents, getPaymentDashboardAmountCents, getSale
 // Types
 // ---------------------------------------------------------------------------
 
-export type PeriodKey = 'fy-to-date' | 'last-fy' | 'ytd' | 'last-12' | 'all-time'
+export type PeriodKey = 'fy-to-date' | 'last-fy' | 'fy-quarter' | 'last-fy-quarter' | 'ytd' | 'last-12' | 'last-6' | 'last-3' | 'all-time'
 
 interface PeriodMonth {
   key: string   // YYYY-MM
@@ -94,12 +94,36 @@ function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodR
   } else if (key === 'last-fy') {
     start = new Date(currentFyStartYear - 1, fyStartM, 1)
     end = new Date(currentFyStartYear, fyStartM, 0, 23, 59, 59, 999)
+  } else if (key === 'fy-quarter') {
+    const offsetInFy = ((now.getMonth() - fyStartM) + 12) % 12
+    const qIdx = Math.floor(offsetInFy / 3)
+    const qStartAbsM = fyStartM + qIdx * 3
+    start = new Date(currentFyStartYear + Math.floor(qStartAbsM / 12), qStartAbsM % 12, 1)
+    end = now
+  } else if (key === 'last-fy-quarter') {
+    const offsetInFy = ((now.getMonth() - fyStartM) + 12) % 12
+    const qIdx = Math.floor(offsetInFy / 3)
+    const prevQIdx = qIdx === 0 ? 3 : qIdx - 1
+    const prevFyYear = qIdx === 0 ? currentFyStartYear - 1 : currentFyStartYear
+    const prevQStartAbsM = fyStartM + prevQIdx * 3
+    const prevQEndAbsM = prevQStartAbsM + 3
+    start = new Date(prevFyYear + Math.floor(prevQStartAbsM / 12), prevQStartAbsM % 12, 1)
+    end = new Date(prevFyYear + Math.floor(prevQEndAbsM / 12), prevQEndAbsM % 12, 0, 23, 59, 59, 999)
   } else if (key === 'ytd') {
     start = new Date(currentYear, 0, 1)
     end = now
-  } else {
-    // last-12: first day of same month 12 months back → today
+  } else if (key === 'last-12') {
     start = new Date(currentYear, now.getMonth() - 11, 1)
+    end = now
+  } else if (key === 'last-6') {
+    start = new Date(currentYear, now.getMonth() - 5, 1)
+    end = now
+  } else if (key === 'last-3') {
+    start = new Date(currentYear, now.getMonth() - 2, 1)
+    end = now
+  } else {
+    // all-time already handled above; fallback to last-3
+    start = new Date(currentYear, now.getMonth() - 2, 1)
     end = now
   }
 
@@ -127,8 +151,12 @@ function isoToYearMonth(iso: string): string {
 const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: 'fy-to-date', label: 'Financial year to date' },
   { value: 'last-fy', label: 'Last financial year' },
+  { value: 'fy-quarter', label: 'This financial quarter' },
+  { value: 'last-fy-quarter', label: 'Last financial quarter' },
   { value: 'ytd', label: 'Year to date' },
   { value: 'last-12', label: 'Last 12 months' },
+  { value: 'last-6', label: 'Last 6 months' },
+  { value: 'last-3', label: 'Last 3 months' },
 ]
 
 const PERIOD_OPTIONS_WITH_ALL_TIME: { value: PeriodKey; label: string }[] = [

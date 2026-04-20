@@ -65,9 +65,9 @@ export async function getSalesIncomeAccountContext(): Promise<SalesIncomeAccount
           name: settings.defaultIncomeAccount.name,
         }
       : {
-          id: '__sales_revenue__',
-          code: '4-0000',
-          name: 'Sales Revenue',
+          id: '__unmapped_sales_income__',
+          code: '',
+          name: 'Unmapped Sales Income',
         },
     labelAccountMap: new Map(labels.map((label) => [label.id, label])),
   }

@@ -627,7 +627,7 @@ export default function AccountLedgerPage() {
                 : 'This will permanently delete this expense record. This cannot be undone.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void handleDeleteEntry()}

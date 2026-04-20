@@ -11,10 +11,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
-import { createSalesQuote, fetchSalesSettings, fetchTaxRates, listSalesLabels } from '@/lib/sales/admin-api'
+import { createSalesQuote, fetchSalesSettings, fetchTaxRates, listSalesItems, listSalesLabels } from '@/lib/sales/admin-api'
 import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
 import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
-import type { SalesLabel } from '@/lib/sales/admin-api'
+import { LineItemAutocomplete } from '@/components/sales/LineItemAutocomplete'
+import type { SalesItem, SalesLabel } from '@/lib/sales/admin-api'
 import type { ClientOption, ProjectOption, SalesLineItem, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import {
@@ -44,7 +45,10 @@ function addDaysYmd(ymd: string, days: number): string {
   const d = new Date(`${ymd}T00:00:00`)
   if (!Number.isFinite(d.getTime())) return ''
   d.setDate(d.getDate() + (Number.isFinite(days) ? days : 0))
-  return d.toISOString().slice(0, 10)
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
 }
 
 function newLineItem(defaultTaxRatePercent: number, defaultTaxRateName?: string): SalesLineItem {
@@ -101,12 +105,22 @@ export default function NewQuotePage() {
   const [items, setItems] = useState<SalesLineItem[]>(() => [newLineItem(10)])
   const [taxRates, setTaxRates] = useState<SalesTaxRate[]>([])
   const [labels, setLabels] = useState<SalesLabel[]>([])
+  const [libraryItems, setLibraryItems] = useState<SalesItem[]>([])
+  const descInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
+  const pendingFocusRef = useRef<string | null>(null)
   const dragEnabledRef = useRef(false)
   const dragIndexRef = useRef<number | null>(null)
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
   const [unitPriceInputs, setUnitPriceInputs] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const id = pendingFocusRef.current
+    if (!id) return
+    pendingFocusRef.current = null
+    descInputRefs.current.get(id)?.focus()
+  })
 
   // Read prefill data placed by the duplicate button on the edit page
   useEffect(() => {
@@ -133,11 +147,12 @@ export default function NewQuotePage() {
     setLoadingSettings(true)
     ;(async () => {
       try {
-        const [s, rates, labelList] = await Promise.all([fetchSalesSettings(), fetchTaxRates(), listSalesLabels()])
+        const [s, rates, labelList, libItems] = await Promise.all([fetchSalesSettings(), fetchTaxRates(), listSalesLabels(), listSalesItems()])
         if (cancelled) return
         setSettings(s)
         setTaxRates(rates)
         setLabels(labelList)
+        setLibraryItems(libItems)
         setTerms((prev) => (prev ? prev : s.defaultTerms))
         const primaryRate = rates.find((r) => r.isDefault)
         setItems((prev) => {
@@ -173,12 +188,13 @@ export default function NewQuotePage() {
   }, [])
 
   useEffect(() => {
-    // Prefill valid-until only when empty or invalid.
+    // Prefill valid-until only once settings have loaded and the field is empty.
+    if (loadingSettings) return
     setValidUntil((prev) => {
       if (prev) return prev
       return addDaysYmd(issueDate, settings.defaultQuoteValidDays ?? 14)
     })
-  }, [issueDate, settings.defaultQuoteValidDays])
+  }, [issueDate, settings.defaultQuoteValidDays, loadingSettings])
 
   useEffect(() => {
     const run = async () => {
@@ -353,12 +369,37 @@ export default function NewQuotePage() {
               </div>
               <div className="space-y-1">
                 <Label>Item</Label>
-                <Input
+                <LineItemAutocomplete
+                  inputRef={(el) => {
+                    if (el) descInputRefs.current.set(it.id, el)
+                    else descInputRefs.current.delete(it.id)
+                  }}
                   value={it.description}
-                  onChange={(e) => {
-                    const v = e.target.value
+                  onChange={(v) => {
                     setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, description: v } : x)))
                   }}
+                  onSelectItem={(libItem) => {
+                    setItems((prev) => prev.map((x) => x.id === it.id ? {
+                      ...x,
+                      description: libItem.description,
+                      details: libItem.details,
+                      quantity: libItem.quantity,
+                      unitPriceCents: libItem.unitPriceCents,
+                      taxRatePercent: normalizeTaxRatePercent(libItem.taxRatePercent, settings.taxRatePercent),
+                      taxRateName: libItem.taxRateName ?? undefined,
+                      labelId: libItem.labelId ?? null,
+                      labelName: libItem.labelName ?? null,
+                      labelColor: libItem.labelColor ?? null,
+                    } : x))
+                    setUnitPriceInputs((prev) => { const next = { ...prev }; delete next[it.id]; return next })
+                  }}
+                  onAfterSelect={() => {
+                    const pr = taxRates.find((r) => r.isDefault)
+                    const newId = globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}`
+                    pendingFocusRef.current = newId
+                    setItems((prev) => [...prev, { id: newId, description: '', details: '', quantity: 1, unitPriceCents: 0, taxRatePercent: normalizeTaxRatePercent(settings.taxRatePercent, settings.taxRatePercent), taxRateName: pr?.name }])
+                  }}
+                  libraryItems={libraryItems}
                   placeholder="e.g. Video editing"
                   className="h-9"
                 />

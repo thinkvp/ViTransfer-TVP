@@ -578,7 +578,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
               Delete <strong>{expense?.supplierName ?? expense?.description}</strong>? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDelete()} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               {deleting ? 'Deleting…' : 'Delete'}

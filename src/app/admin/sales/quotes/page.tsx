@@ -163,6 +163,34 @@ export default function SalesQuotesPage() {
   }, [])
 
   useEffect(() => {
+    const stored = localStorage.getItem('admin_sales_quotes_table_sort')
+    if (!stored) return
+    try {
+      const parsed = JSON.parse(stored)
+      const validKeys = new Set(['quoteNumber', 'issueDate', 'validUntil', 'status', 'amount', 'client', 'project'])
+      if (typeof parsed?.key === 'string' && validKeys.has(parsed.key)) setTableSortKey(parsed.key as any)
+      if (parsed?.direction === 'asc' || parsed?.direction === 'desc') setTableSortDirection(parsed.direction)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('admin_sales_quotes_table_sort', JSON.stringify({ key: tableSortKey, direction: tableSortDirection }))
+  }, [tableSortKey, tableSortDirection])
+
+  useEffect(() => {
+    const stored = localStorage.getItem('admin_sales_quotes_records_per_page')
+    if (!stored) return
+    const n = Number(stored)
+    if (n === 20 || n === 50 || n === 100) setRecordsPerPage(n)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('admin_sales_quotes_records_per_page', String(recordsPerPage))
+  }, [recordsPerPage])
+
+  useEffect(() => {
     const stored = localStorage.getItem('admin_sales_quotes_status_filter')
     if (!stored) return
     try {

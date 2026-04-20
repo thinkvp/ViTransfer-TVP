@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-04-20
+
+### Changed
+- **Balance Sheet rearchitected to use Chart of Accounts directly** — the Balance Sheet report now sources all ASSET, LIABILITY, and EQUITY lines from the live Chart of Accounts rather than hardcoded account placeholders; a new `buildPostedBalanceSheetLines` helper accumulates balances from bank transactions, journal entries, and split lines posted to each CoA account; `mergeReportLines` deduplicates and sums lines by account ID so bank-linked ASSET accounts, Accounts Receivable, Accounts Payable, and GST Payable all render with the correct CoA code and name; Retained Earnings is now derived from the balance sheet identity (Net Assets − Contributed Equity) rather than re-totalling income and expense ledger records separately, ensuring the report always balances; any additional EQUITY accounts (contributed capital, drawings) are rendered as separate lines using their CoA codes; `findPreferredBalanceSheetAccount` locates the preferred AR, AP, GST Payable, and Retained Earnings accounts by code, subType, or name with a defined fallback chain
+- **Period selector expanded on both Accounting and Sales dashboards** — the period selector in both `AccountingDashboardCharts` and `SalesDashboardCharts` now offers eight options in order: Financial year to date, Last financial year, This financial quarter, Last financial quarter, Year to date, Last 12 months, Last 6 months, Last 3 months; quarter boundaries are computed relative to the configured fiscal year start month
+- **Bank Accounts summary removed from Accounting Dashboard** — the bank account balance cards that appeared at the bottom of the Accounting Dashboard overview have been removed; account balances are accessible via the Balance Sheet report and the dedicated Bank Accounts page
+- **New invoice and estimate numbers now use 4-digit padding and reuse deleted gaps** — auto-generated sales document numbers now default to `INV-0001` / `EST-0001` instead of 6-digit padding; the shared generator now allocates the first available number in sequence, so deleting an invoice or quote no longer leaves permanent gaps, while still expanding naturally beyond 9999 when needed
+
+### Fixed
+- **Camera capture now works in-browser** — the `Permissions-Policy` response header previously blocked all camera access with `camera=()`; it is updated to `camera=(self)` so the `CameraCaptureButton` introduced in 1.6.2 can open the device camera within the app's own origin
+- **Invoice due date and quote valid-until date no longer shift by one day** — `addDaysYmd` in both the New Invoice and New Quote pages previously called `toISOString().slice(0, 10)` on the computed date, which converts to UTC and produces the previous calendar day for users in UTC+ timezones; the function now constructs the date string directly from local `getFullYear` / `getMonth` / `getDate` values; additionally the prefill effect now waits until settings have finished loading before writing the default date, preventing a race where a zero-day offset from the unloaded settings was applied before the real default arrived
+- **Confirmation dialog buttons consistently aligned** — `AlertDialogFooter` instances across all accounting and expense pages (BAS detail, BAS list, Bank Accounts, Chart of Accounts, Account Ledger, Expenses, Expense Form Modal, and Accounting Settings) now carry `flex-row justify-end gap-2`, ensuring Cancel and Delete/Remove buttons always appear side-by-side on the right rather than stacking vertically on narrow viewports
+
 ## [1.6.2] - 2026-04-20
 
 ### Added
