@@ -135,16 +135,16 @@ export async function nextSalesDocumentNumber(
   await lockSalesDocumentNumbering(tx, type)
 
   const highestExisting = await findHighestExistingNumber(tx, type)
-  const nextValue = await findLowestAvailableNumber(tx, type)
+  const nextValue = Math.max(1, highestExisting.value + 1)
 
   await tx.salesSequence.upsert({
     where: { id: 'default' },
     create: {
       id: 'default',
-      quote: type === 'quote' ? Math.max(highestExisting.value, nextValue) : 0,
-      invoice: type === 'invoice' ? Math.max(highestExisting.value, nextValue) : 0,
+      quote: type === 'quote' ? nextValue : 0,
+      invoice: type === 'invoice' ? nextValue : 0,
     },
-    update: { [config.field]: { set: Math.max(highestExisting.value, nextValue) } },
+    update: { [config.field]: { set: nextValue } },
   } as any)
 
   return formatDocumentNumber(config.prefix, nextValue, config.defaultWidth)

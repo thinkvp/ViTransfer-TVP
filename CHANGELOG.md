@@ -5,6 +5,11 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-04-21
+
+### Changed
+- **Invoice and quote auto-numbering continues from the highest existing number** — `nextSalesDocumentNumber` now allocates `MAX(existing) + 1` instead of scanning for the first available gap from 1; this ensures new documents continue sequentially after any pre-existing numbers (e.g. INV-2001 after INV-2000) rather than incorrectly reusing low numbers such as INV-0001 that were never issued in the current app
+
 ## [1.6.4] - 2026-04-20
 
 ### Changed
