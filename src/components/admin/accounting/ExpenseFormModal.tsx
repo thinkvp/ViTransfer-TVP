@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Trash2, CheckCircle, Paperclip, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import type { Expense, AccountTaxCode, ExpenseStatus, AccountingAttachment, BankTransaction } from '@/lib/accounting/types'
@@ -80,7 +79,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
   })
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+
   const [error, setError] = useState('')
 
   const [receiptFiles, setReceiptFiles] = useState<File[]>([])
@@ -152,7 +151,6 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
   useEffect(() => {
     if (!open) return
     setError('')
-    setShowDeleteDialog(false)
     setReceiptFiles([])
     setAccountSearch('')
     setAccountOpen(false)
@@ -344,7 +342,6 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
         alert(d.error || 'Failed to delete')
         return
       }
-      setShowDeleteDialog(false)
       onDeleted?.()
     } finally {
       setDeleting(false)
@@ -380,7 +377,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
                   </Button>
                 )}
                 {expense && expense.status !== 'RECONCILED' && !expense.bankTransactionId && (
-                  <Button variant="outline" size="sm" onClick={() => setShowDeleteDialog(true)} disabled={saving} className="text-destructive border-destructive/40 hover:bg-destructive/10">
+                  <Button variant="outline" size="sm" onClick={() => { if (!confirm(`Delete expense "${expense?.supplierName ?? expense?.description}"?`)) return; void handleDelete() }} disabled={saving} className="text-destructive border-destructive/40 hover:bg-destructive/10">
                     <Trash2 className="w-4 h-4 mr-1.5" />Delete
                   </Button>
                 )}
@@ -569,23 +566,6 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
           )}
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={showDeleteDialog} onOpenChange={v => { if (!deleting) setShowDeleteDialog(v) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete <strong>{expense?.supplierName ?? expense?.description}</strong>? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDelete()} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <LinkedBankTransactionDialog
         open={!!linkedTransactionId}

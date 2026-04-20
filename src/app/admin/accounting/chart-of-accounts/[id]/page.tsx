@@ -10,7 +10,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, ArrowUp, ArrowDown, Eye, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus, Pencil } from 'lucide-react'
 import type { Account, AccountTaxCode, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
@@ -96,7 +95,7 @@ export default function AccountLedgerPage() {
   const [from, setFrom] = useState(() => searchParams?.get('from') ?? getThisFinancialYearDates().from)
   const [to, setTo] = useState(() => searchParams?.get('to') ?? getThisFinancialYearDates().to)
   const [search, setSearch] = useState('')
-  const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null)
+
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [linkedTransactionId, setLinkedTransactionId] = useState<string | null>(null)
@@ -174,13 +173,12 @@ export default function AccountLedgerPage() {
     void load(next, from, to, search)
   }
 
-  async function handleDeleteEntry() {
-    if (!deleteTarget) return
+  async function handleDeleteEntry(target: Entry) {
     setIsDeleting(true)
     try {
-      const entryId = deleteTarget.entry.id
+      const entryId = target.entry.id
       const res = await apiFetch(
-        `/api/admin/accounting/accounts/${id}/entries?entryId=${entryId}&kind=${deleteTarget.kind}`,
+        `/api/admin/accounting/accounts/${id}/entries?entryId=${entryId}&kind=${target.kind}`,
         { method: 'DELETE' }
       )
       if (!res.ok) {
@@ -188,7 +186,6 @@ export default function AccountLedgerPage() {
         alert(d.error || 'Failed to delete entry')
         return
       }
-      setDeleteTarget(null)
       void load(page, from, to, search)
     } finally {
       setIsDeleting(false)
@@ -452,7 +449,7 @@ export default function AccountLedgerPage() {
                                 </AccountingTableActionButton>
                               )}
                               {isOwn && (
-                                <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Delete expense" aria-label="Delete expense">
+                                <AccountingTableActionButton destructive onClick={() => { if (!confirm('Delete this expense? This cannot be undone.')) return; void handleDeleteEntry(row) }} title="Delete expense" aria-label="Delete expense">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
                               )}
@@ -479,7 +476,7 @@ export default function AccountLedgerPage() {
                                 <Eye className="w-3.5 h-3.5" />
                               </AccountingTableActionButton>
                               {isOwn && (
-                                <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Unpost bank transaction" aria-label="Unpost bank transaction">
+                                <AccountingTableActionButton destructive onClick={() => { if (!confirm('Unpost this bank transaction? This will return it to Pending status and remove any linked expense or invoice payment.')) return; void handleDeleteEntry(row) }} title="Unpost bank transaction" aria-label="Unpost bank transaction">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
                               )}
@@ -506,7 +503,7 @@ export default function AccountLedgerPage() {
                                 <AccountingTableActionButton onClick={() => openEditJournalEntry(j)} title="Edit journal entry" aria-label="Edit journal entry">
                                   <Pencil className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
-                                <AccountingTableActionButton destructive onClick={() => setDeleteTarget(row)} title="Delete journal entry" aria-label="Delete journal entry">
+                                <AccountingTableActionButton destructive onClick={() => { if (!confirm('Delete this journal entry? This cannot be undone.')) return; void handleDeleteEntry(row) }} title="Delete journal entry" aria-label="Delete journal entry">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
                               </div>
@@ -612,34 +609,6 @@ export default function AccountLedgerPage() {
           )}
         </div>
       )}
-
-      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open && !isDeleting) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {deleteTarget?.kind === 'bankTransaction' ? 'Unpost bank transaction?' : deleteTarget?.kind === 'journal' ? 'Delete journal entry?' : 'Delete expense?'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteTarget?.kind === 'bankTransaction'
-                ? 'This will unpost the bank transaction and return it to Pending status. Any linked expense or invoice payment will also be removed.'
-                : deleteTarget?.kind === 'journal'
-                ? 'This will permanently delete this journal entry. This cannot be undone.'
-                : 'This will permanently delete this expense record. This cannot be undone.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void handleDeleteEntry()}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              {deleteTarget?.kind === 'bankTransaction' ? 'Unpost' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <LinkedBankTransactionDialog
         open={!!linkedTransactionId}

@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-04-20
+
+### Changed
+- **Accounting delete confirmations use native browser dialog** — all "Delete X?" `AlertDialog` modals across the accounting section (Expenses list, Expense Form Modal, Chart of Accounts, Account Ledger, Bank Accounts, BAS Periods list, BAS detail page lodgement-document and payment removal, and Accounting Settings tax rates) are replaced with a plain `window.confirm()` call matching the pattern used on the Sales invoices and quotes pages; this avoids the mobile layout issue where the custom dialog footer buttons stacked vertically and the Delete button appeared off-axis; the Lodge BAS confirmation dialog is unchanged
+- **Camera defaults to main rear lens and adds a camera-switch toggle** — `CameraCaptureButton` now enumerates `videoInputDevices` after camera permission is granted and sorts them so the main rear camera (neither ultrawide, telephoto, nor macro lens) is selected first; devices whose label contains "ultra", "telephoto", or "macro" are deprioritised; a `SwitchCamera` icon-only button appears in the lower-left of the live-view area whenever more than one camera is available, cycling through all detected cameras in order; the Retake action also resumes on whichever camera was active when the photo was taken
+
 ## [1.6.3] - 2026-04-20
 
 ### Changed

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
 import type { BasPeriod, BasPeriodStatus } from '@/lib/accounting/types'
@@ -30,7 +29,7 @@ export default function BasPage() {
   const router = useRouter()
   const [periods, setPeriods] = useState<BasPeriod[]>([])
   const [loading, setLoading] = useState(true)
-  const [deleteTarget, setDeleteTarget] = useState<BasPeriod | null>(null)
+
   const [deleting, setDeleting] = useState(false)
   const [sortKey, setSortKey] = useState<BasSortKey>('startDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -68,13 +67,11 @@ export default function BasPage() {
 
   useEffect(() => { void load() }, [load])
 
-  async function handleDelete() {
-    if (!deleteTarget) return
+  async function handleDelete(target: BasPeriod) {
     setDeleting(true)
     try {
-      const res = await apiFetch(`/api/admin/accounting/bas/${deleteTarget.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/admin/accounting/bas/${target.id}`, { method: 'DELETE' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete'); return }
-      setDeleteTarget(null)
       await load()
     } finally { setDeleting(false) }
   }
@@ -170,7 +167,7 @@ export default function BasPage() {
                             <Pencil className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
                           {p.status !== 'LODGED' && (
-                            <AccountingTableActionButton destructive onClick={() => setDeleteTarget(p)} title="Delete BAS period" aria-label="Delete BAS period">
+                            <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete BAS period "${p.label}"?`)) return; void handleDelete(p) }} title="Delete BAS period" aria-label="Delete BAS period">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </AccountingTableActionButton>
                           )}
@@ -185,20 +182,6 @@ export default function BasPage() {
         </CardContent>
       </Card>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete BAS period?</AlertDialogTitle>
-            <AlertDialogDescription>Delete <strong>{deleteTarget?.label}</strong>? This cannot be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

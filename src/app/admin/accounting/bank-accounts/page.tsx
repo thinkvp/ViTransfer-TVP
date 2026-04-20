@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Upload, ChevronDown, ChevronRight, Landmark, Pencil, Trash2, Paperclip, X, Loader2, EyeOff, RotateCcw, Link2, AlertTriangle, ArrowUp, ArrowDown, ChevronLeft, ChevronsLeft, ChevronsRight, Scissors } from 'lucide-react'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
@@ -103,7 +102,7 @@ export default function BankAccountsPage() {
   const [accounts, setAccounts] = useState<BankAccount[]>([])
   const [loadingAccounts, setLoadingAccounts] = useState(true)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<BankAccount | null>(null)
+
   const [deleting, setDeleting] = useState(false)
 
   const [transactions, setTransactions] = useState<BankTransaction[]>([])
@@ -125,7 +124,7 @@ export default function BankAccountsPage() {
   const [posting, setPosting] = useState<string | null>(null)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [ignoring, setIgnoring] = useState<string | null>(null)
-  const [deleteTransactionTarget, setDeleteTransactionTarget] = useState<BankTransaction | null>(null)
+
   const [deletingTransaction, setDeletingTransaction] = useState(false)
   const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null)
   const [uploadingAttachmentTxnId, setUploadingAttachmentTxnId] = useState<string | null>(null)
@@ -541,29 +540,25 @@ export default function BankAccountsPage() {
     } finally { setUploadingAttachmentTxnId(null) }
   }
 
-  async function handleDeleteAccount() {
-    if (!deleteTarget) return
+  async function handleDeleteAccount(target: BankAccount) {
     setDeleting(true)
     try {
-      const res = await apiFetch(`/api/admin/accounting/bank-accounts/${deleteTarget.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/admin/accounting/bank-accounts/${target.id}`, { method: 'DELETE' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete'); return }
-      if (selectedAccountId === deleteTarget.id) { setSelectedAccountId(null); setTransactions([]) }
-      setDeleteTarget(null)
+      if (selectedAccountId === target.id) { setSelectedAccountId(null); setTransactions([]) }
       await loadAccounts()
     } finally { setDeleting(false) }
   }
 
-  async function handleDeleteTransaction() {
-    if (!deleteTransactionTarget) return
+  async function handleDeleteTransaction(target: BankTransaction) {
     setDeletingTransaction(true)
     try {
-      const res = await apiFetch(`/api/admin/accounting/transactions/${deleteTransactionTarget.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/admin/accounting/transactions/${target.id}`, { method: 'DELETE' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete transaction'); return }
-      const txnId = deleteTransactionTarget.id
+      const txnId = target.id
       setTransactions(prev => prev.filter(t => t.id !== txnId))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txnId ? null : prev)
-      setDeleteTransactionTarget(null)
     } finally { setDeletingTransaction(false) }
   }
 
@@ -764,8 +759,8 @@ export default function BankAccountsPage() {
                     ><Pencil className="w-3.5 h-3.5" /></span>
                     <span
                       role="button" tabIndex={0}
-                      onClick={e => { e.stopPropagation(); setDeleteTarget(a) }}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setDeleteTarget(a) } }}
+                      onClick={e => { e.stopPropagation(); if (!confirm(`Delete bank account "${a.name}" and all its transaction data? This cannot be undone.`)) return; void handleDeleteAccount(a) }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); if (!confirm(`Delete bank account "${a.name}" and all its transaction data? This cannot be undone.`)) return; void handleDeleteAccount(a) } }}
                       className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                       aria-label={`Delete ${a.name}`}
                     ><Trash2 className="w-3.5 h-3.5" /></span>
@@ -886,7 +881,7 @@ export default function BankAccountsPage() {
                       const isPosting = posting === t.id
                       const isUndoing = undoing === t.id
                       const isIgnoring = ignoring === t.id
-                      const isDeletingTxn = deleteTransactionTarget?.id === t.id && deletingTransaction
+                      const isDeletingTxn = deletingTransaction
                       const types = txnTypeOptions(t.amountCents)
                       const isQuickMatching = quickMatching === t.id
 
@@ -985,7 +980,7 @@ export default function BankAccountsPage() {
                                 <AccountingTableActionButton onClick={() => void handleUndo(t.id)} disabled={isUndoing || isDeletingTxn} title="Undo ignored transaction" aria-label="Undo ignored transaction">
                                   {isUndoing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                                 </AccountingTableActionButton>
-                                <AccountingTableActionButton destructive onClick={() => setDeleteTransactionTarget(t)} disabled={isUndoing || isDeletingTxn} title="Delete ignored transaction" aria-label="Delete ignored transaction">
+                                <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete "${t.description}"? This will permanently remove the ignored transaction.`)) return; void handleDeleteTransaction(t) }} disabled={isUndoing || isDeletingTxn} title="Delete ignored transaction" aria-label="Delete ignored transaction">
                                   {isDeletingTxn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-destructive" />}
                                 </AccountingTableActionButton>
                               </div>
@@ -1328,37 +1323,6 @@ export default function BankAccountsPage() {
           </Card>
         </div>
       )}
-
-      {/* Delete Account Dialog */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Bank Account?</AlertDialogTitle>
-            <AlertDialogDescription>This will permanently remove &ldquo;{deleteTarget?.name}&rdquo; and all associated transaction data. This cannot be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDeleteAccount()} disabled={deleting} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">{deleting ? 'Deleting…' : 'Delete'}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!deleteTransactionTarget} onOpenChange={open => { if (!open && !deletingTransaction) setDeleteTransactionTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete ignored transaction?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete <strong>{deleteTransactionTarget?.description}</strong>? This will permanently remove the ignored transaction. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deletingTransaction}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDeleteTransaction()} disabled={deletingTransaction} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-              {deletingTransaction ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Import CSV Dialog */}
       <Dialog open={importOpen} onOpenChange={open => { if (!open) closeImportDialog() }}>

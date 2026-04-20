@@ -9,7 +9,6 @@ import { LinkedBankTransactionDialog } from '@/components/admin/accounting/Linke
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
@@ -51,7 +50,7 @@ export default function ExpensesPage() {
   const [modalExpenseId, setModalExpenseId] = useState<string | null>(null)
   const [linkedTransactionId, setLinkedTransactionId] = useState<string | null>(null)
 
-  const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null)
+
   const [deleting, setDeleting] = useState(false)
 
   const sortedExpenses = expenses
@@ -116,17 +115,15 @@ export default function ExpensesPage() {
     setPage(1)
   }
 
-  async function handleDelete() {
-    if (!deleteTarget) return
+  async function handleDelete(target: Expense) {
     setDeleting(true)
     try {
-      const res = await apiFetch(`/api/admin/accounting/expenses/${deleteTarget.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/admin/accounting/expenses/${target.id}`, { method: 'DELETE' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         alert(d.error || 'Failed to delete expense')
         return
       }
-      setDeleteTarget(null)
       await load()
     } finally {
       setDeleting(false)
@@ -295,7 +292,7 @@ export default function ExpensesPage() {
                             </AccountingTableActionButton>
                           )}
                           {e.status !== 'RECONCILED' && !e.bankTransactionId && (
-                            <AccountingTableActionButton destructive onClick={() => setDeleteTarget(e)} title="Delete expense" aria-label="Delete expense">
+                            <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete expense "${e.supplierName ?? e.description}"?`)) return; void handleDelete(e) }} title="Delete expense" aria-label="Delete expense">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </AccountingTableActionButton>
                           )}
@@ -344,22 +341,7 @@ export default function ExpensesPage() {
         }}
       />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete <strong>{deleteTarget?.supplierName ?? deleteTarget?.description}</strong>? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+
     </div>
   )
 }

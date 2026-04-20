@@ -94,14 +94,14 @@ export default function BasDetailPage() {
   const [paymentNotes, setPaymentNotes] = useState('')
   const [recordingPayment, setRecordingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState('')
-  const [deletePaymentConfirm, setDeletePaymentConfirm] = useState(false)
+
   const [deletingPayment, setDeletingPayment] = useState(false)
 
   // Attachments
   const [attachments, setAttachments] = useState<AccountingAttachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null)
-  const [deleteAttachmentTarget, setDeleteAttachmentTarget] = useState<AttachmentItem | null>(null)
+
 
   // Edit expense from BAS records drill-down
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
@@ -261,12 +261,6 @@ export default function BasDetailPage() {
     }
   }
 
-  async function handleConfirmDeleteAttachment() {
-    if (!deleteAttachmentTarget) return
-    const deleted = await handleDeleteAttachment(deleteAttachmentTarget.id)
-    if (deleted) setDeleteAttachmentTarget(null)
-  }
-
   async function handleCalculate() {
     setCalculating(true)
     try {
@@ -352,7 +346,6 @@ export default function BasDetailPage() {
     try {
       const res = await apiFetch(`/api/admin/accounting/bas/${id}/payment`, { method: 'DELETE' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to remove payment'); return }
-      setDeletePaymentConfirm(false)
       await load()
     } finally { setDeletingPayment(false) }
   }
@@ -529,7 +522,7 @@ export default function BasDetailPage() {
                     </span>
                   )}
                 </div>
-                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setDeletePaymentConfirm(true)}>
+                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => { if (!confirm('Remove this payment record? This will delete the associated expense entry and cannot be undone.')) return; void handleDeletePayment() }}>
                   <Trash2 className="w-3.5 h-3.5 mr-1.5" />Remove Payment
                 </Button>
               </div>
@@ -573,7 +566,7 @@ export default function BasDetailPage() {
             label={null}
             onUpload={handleUploadAttachments}
             onDownload={async (item: AttachmentItem) => { await handleDownloadAttachment(item.id, item.name) }}
-            onDelete={async (item: AttachmentItem) => { setDeleteAttachmentTarget(item) }}
+            onDelete={async (item: AttachmentItem) => { if (!confirm(`Delete "${item.name}"? This cannot be undone.`)) return; await handleDeleteAttachment(item.id) }}
           />
         </CardContent>
       </Card>
@@ -871,32 +864,6 @@ export default function BasDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={!!deleteAttachmentTarget}
-        onOpenChange={open => {
-          if (!open && deletingAttachmentId !== deleteAttachmentTarget?.id) setDeleteAttachmentTarget(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Lodgement Document?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete <strong>{deleteAttachmentTarget?.name}</strong>? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deletingAttachmentId === deleteAttachmentTarget?.id}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void handleConfirmDeleteAttachment()}
-              disabled={deletingAttachmentId === deleteAttachmentTarget?.id}
-              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-            >
-              {deletingAttachmentId === deleteAttachmentTarget?.id ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* Record Payment Dialog */}
       <Dialog open={paymentOpen} onOpenChange={open => { if (!open && !recordingPayment) setPaymentOpen(false) }}>
         <DialogContent className="max-w-md">
@@ -1008,24 +975,6 @@ export default function BasDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Delete Payment Confirmation */}
-      <AlertDialog open={deletePaymentConfirm} onOpenChange={setDeletePaymentConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove Payment Record?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will delete the associated expense entry and clear the payment from this BAS period. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deletingPayment}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDeletePayment()} disabled={deletingPayment} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-              {deletingPayment ? 'Removing…' : 'Remove'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Edit Expense Modal — expense rows in the BAS drill-down (draft/reviewed only) */}
       {!isLodged && (

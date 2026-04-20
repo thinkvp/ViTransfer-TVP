@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, Check, X, Loader2, Save } from 'lucide-react'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
@@ -62,7 +61,7 @@ export default function AccountingSettingsPage() {
   const [form, setForm] = useState<FormState>(emptyForm())
   const [saving, setSaving] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<TaxRate | null>(null)
+
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
   const [settingsError, setSettingsError] = useState('')
@@ -211,13 +210,11 @@ export default function AccountingSettingsPage() {
     } finally { setSaving(false) }
   }
 
-  async function handleDelete() {
-    if (!deleteTarget) return
+  async function handleDelete(target: TaxRate) {
     setDeleting(true)
     try {
-      const res = await apiFetch(`/api/admin/accounting/tax-rates/${deleteTarget.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/admin/accounting/tax-rates/${target.id}`, { method: 'DELETE' })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete'); return }
-      setDeleteTarget(null)
       await load()
     } finally { setDeleting(false) }
   }
@@ -427,7 +424,7 @@ export default function AccountingSettingsPage() {
                           <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate">
                             <Pencil className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
-                          <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => setDeleteTarget(rate)} title="Delete tax rate" aria-label="Delete tax rate">
+                          <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => { if (!confirm(`Delete tax rate "${rate.name}"?`)) return; void handleDelete(rate) }} title="Delete tax rate" aria-label="Delete tax rate">
                             <Trash2 className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
                         </div>
@@ -440,7 +437,7 @@ export default function AccountingSettingsPage() {
                           </div>
                           <div className="flex items-center gap-1">
                             <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate"><Pencil className="w-3.5 h-3.5" /></AccountingTableActionButton>
-                            <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => setDeleteTarget(rate)} title="Delete tax rate" aria-label="Delete tax rate"><Trash2 className="w-3.5 h-3.5" /></AccountingTableActionButton>
+                            <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => { if (!confirm(`Delete tax rate "${rate.name}"?`)) return; void handleDelete(rate) }} title="Delete tax rate" aria-label="Delete tax rate"><Trash2 className="w-3.5 h-3.5" /></AccountingTableActionButton>
                           </div>
                         </div>
                       </div>
@@ -453,23 +450,6 @@ export default function AccountingSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Delete dialog */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Tax Rate?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Remove &ldquo;{deleteTarget?.name}&rdquo;? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDelete()} disabled={deleting} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-              {deleting ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

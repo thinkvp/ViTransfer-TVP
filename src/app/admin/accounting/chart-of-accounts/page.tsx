@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import Link from 'next/link'
 import { apiFetch } from '@/lib/api-client'
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
@@ -60,7 +59,7 @@ export default function ChartOfAccountsPage() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
 
-  const [deleteTarget, setDeleteTarget] = useState<Account | null>(null)
+
   const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
@@ -216,17 +215,15 @@ export default function ChartOfAccountsPage() {
     }
   }
 
-  async function handleDelete() {
-    if (!deleteTarget) return
+  async function handleDelete(target: Account) {
     setDeleting(true)
     try {
-      const res = await apiFetch(`/api/admin/accounting/accounts/${deleteTarget.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/admin/accounting/accounts/${target.id}`, { method: 'DELETE' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         alert(d.error || 'Failed to delete account')
         return
       }
-      setDeleteTarget(null)
       await load()
     } finally {
       setDeleting(false)
@@ -356,7 +353,7 @@ export default function ChartOfAccountsPage() {
                             <Pencil className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
                           {!a.isSystem && (
-                            <AccountingTableActionButton destructive onClick={() => setDeleteTarget(a)} title="Delete account" aria-label="Delete account">
+                            <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete account ${a.code} — ${a.name}? This cannot be undone.`)) return; void handleDelete(a) }} title="Delete account" aria-label="Delete account">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </AccountingTableActionButton>
                           )}
@@ -461,24 +458,6 @@ export default function ChartOfAccountsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete account?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete <strong>{deleteTarget?.code} — {deleteTarget?.name}</strong>.
-              This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
