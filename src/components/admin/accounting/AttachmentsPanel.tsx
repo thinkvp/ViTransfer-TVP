@@ -1,6 +1,8 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { CameraCaptureButton } from '@/components/admin/accounting/CameraCaptureButton'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Loader2, Paperclip, X } from 'lucide-react'
 
@@ -20,6 +22,7 @@ interface AttachmentsPanelProps {
   uploading?: boolean
   deletingId?: string | null
   label?: string | null
+  enableCameraCapture?: boolean
 }
 
 export function AttachmentsPanel({
@@ -31,6 +34,7 @@ export function AttachmentsPanel({
   uploading = false,
   deletingId = null,
   label = 'Attachments',
+  enableCameraCapture = false,
 }: AttachmentsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -88,7 +92,15 @@ export function AttachmentsPanel({
       )}
 
       {canUpload && (
-        <div>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {enableCameraCapture && onUpload && (
+              <CameraCaptureButton onCapture={handleFiles} disabled={uploading} className="w-full sm:w-auto" />
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="w-full sm:w-auto">
+              <Paperclip className="w-4 h-4" />Choose Files
+            </Button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"

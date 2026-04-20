@@ -252,7 +252,7 @@ export default function ExpensesPage() {
                       className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
                       onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}
                     >
-                      <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground">{formatDate(e.date)}</td>
+                      <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground whitespace-nowrap">{formatDate(e.date)}</td>
                       <td className="px-3 py-2 font-medium">
                         <div className="flex items-center gap-1.5">
                           {e.supplierName ?? <span className="text-muted-foreground italic">—</span>}

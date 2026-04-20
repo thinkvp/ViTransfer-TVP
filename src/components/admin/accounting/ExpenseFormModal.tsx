@@ -14,6 +14,7 @@ import type { Expense, AccountTaxCode, ExpenseStatus, AccountingAttachment, Bank
 import { TAX_CODE_LABELS, EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
 import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
+import { CameraCaptureButton } from '@/components/admin/accounting/CameraCaptureButton'
 import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { cn } from '@/lib/utils'
 
@@ -518,6 +519,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
                   <AttachmentsPanel
                     items={(expense?.attachments ?? []).map((a: AccountingAttachment) => ({ id: a.id, name: a.originalName }) satisfies AttachmentItem)}
                     canUpload
+                    enableCameraCapture
                     uploading={uploadingAttachmentId !== null}
                     deletingId={deletingAttachmentId ?? undefined}
                     label={null}
@@ -544,6 +546,9 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
                         ))}
                       </div>
                     )}
+                    <div className="flex flex-wrap gap-2">
+                      <CameraCaptureButton onCapture={files => setReceiptFiles(prev => [...prev, ...files])} className="w-full sm:w-auto" />
+                    </div>
                     <NewExpenseDropZone onFiles={files => setReceiptFiles(prev => [...prev, ...files])} />
                   </div>
                 )}

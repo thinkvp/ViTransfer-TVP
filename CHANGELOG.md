@@ -5,6 +5,15 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-04-20
+
+### Added
+- **Camera capture for expense receipts and attachments** — a new `CameraCaptureButton` opens the device camera in-browser (preferring the rear-facing camera on mobile), lets the user snap a photo, preview it, and attach it without leaving the expense form; clear inline error messages are shown for denied permission (`NotAllowedError`), no camera found (`NotFoundError`), and camera already in use (`NotReadableError`); the button appears both in the Expense Form Modal's receipt drop-zone and inside the `AttachmentsPanel` when `enableCameraCapture` is set
+
+### Changed
+- **Accounting Dashboard Leaderboard displays parent–child account names** — sub-accounts in the Income Breakdown and Expense Breakdown leaderboards previously rendered as `Code — Sub-account name` using the account code plus the raw account name; they now display as `Parent - Sub-account` by tracking the most-recent top-level account name as each row is iterated, making the hierarchy legible without knowledge of account codes; the `depth`-based indent and muted-foreground styling is removed so all rows share the same visual weight
+- **Expense date column no longer wraps** — `whitespace-nowrap` added to the Date cell in the Expenses table so dates always render on a single line on narrow viewports
+
 ## [1.6.1] - 2026-04-20
 
 ### Fixed

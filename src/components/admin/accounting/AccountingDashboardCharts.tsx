@@ -425,10 +425,9 @@ const SECTION_BADGE: Record<RowSection, { label: string; className: string }> = 
 interface LeaderboardEntry {
   accountId: string | null
   accountCode: string | null
-  accountName: string
+  displayName: string
   amountCents: number
   section: RowSection
-  depth?: number
 }
 
 function Leaderboard({
@@ -450,9 +449,6 @@ function Leaderboard({
     <div className="overflow-y-auto max-h-[320px] space-y-1 pr-1">
       {rows.map((row, idx) => {
         const pct = (row.amountCents / maxCents) * 100
-        const label = row.accountCode
-          ? `${row.accountCode} — ${row.accountName}`
-          : row.accountName
         const isLinkable =
           row.accountCode &&
           row.accountId &&
@@ -479,21 +475,13 @@ function Leaderboard({
                   {isLinkable ? (
                     <a
                       href={`/admin/accounting/chart-of-accounts/${encodeURIComponent(row.accountCode!)}?from=${from}&to=${to}`}
-                      className={cn(
-                        'text-sm font-medium truncate hover:underline underline-offset-2',
-                        row.depth ? 'pl-3 text-muted-foreground' : '',
-                      )}
+                      className="text-sm font-medium truncate hover:underline underline-offset-2"
                     >
-                      {label}
+                      {row.displayName}
                     </a>
                   ) : (
-                    <span
-                      className={cn(
-                        'text-sm font-medium truncate',
-                        row.depth ? 'pl-3 text-muted-foreground' : '',
-                      )}
-                    >
-                      {label}
+                    <span className="text-sm font-medium truncate">
+                      {row.displayName}
                     </span>
                   )}
                 </div>
@@ -541,15 +529,22 @@ export function IncomeBreakdownChart({
 
   const rows = useMemo<LeaderboardEntry[]>(() => {
     if (!report) return []
-    return report.income
-      .filter((row: ProfitLossSection) => !row.hideAmount && row.amountCents > 0)
-      .map((row: ProfitLossSection) => ({
+    let lastParentName = ''
+    const withDisplayNames = report.income.map((row: ProfitLossSection) => {
+      if (!row.depth) lastParentName = row.accountName
+      const displayName = row.depth && lastParentName
+        ? `${lastParentName} - ${row.accountName}`
+        : row.accountName
+      return { row, displayName }
+    })
+    return withDisplayNames
+      .filter(({ row }) => !row.hideAmount && row.amountCents > 0)
+      .map(({ row, displayName }) => ({
         accountId: row.accountId,
         accountCode: row.accountCode,
-        accountName: row.accountName,
+        displayName,
         amountCents: row.amountCents,
         section: 'INCOME' as const,
-        depth: row.depth,
       }))
       .sort((a, b) => b.amountCents - a.amountCents)
   }, [report])
@@ -620,27 +615,29 @@ export function ExpenseBreakdownChart({
 
   const rows = useMemo<LeaderboardEntry[]>(() => {
     if (!report) return []
-    const cogsRows: LeaderboardEntry[] = report.cogs
-      .filter((row: ProfitLossSection) => !row.hideAmount && row.amountCents > 0)
-      .map((row: ProfitLossSection) => ({
-        accountId: row.accountId,
-        accountCode: row.accountCode,
-        accountName: row.accountName,
-        amountCents: row.amountCents,
-        section: 'COGS' as const,
-        depth: row.depth,
-      }))
-    const expenseRows: LeaderboardEntry[] = report.expenses
-      .filter((row: ProfitLossSection) => !row.hideAmount && row.amountCents > 0)
-      .map((row: ProfitLossSection) => ({
-        accountId: row.accountId,
-        accountCode: row.accountCode,
-        accountName: row.accountName,
-        amountCents: row.amountCents,
-        section: 'EXPENSE' as const,
-        depth: row.depth,
-      }))
-    return [...cogsRows, ...expenseRows].sort((a, b) => b.amountCents - a.amountCents)
+    function buildEntries(sections: ProfitLossSection[], section: 'COGS' | 'EXPENSE'): LeaderboardEntry[] {
+      let lastParentName = ''
+      const withDisplayNames = sections.map((row: ProfitLossSection) => {
+        if (!row.depth) lastParentName = row.accountName
+        const displayName = row.depth && lastParentName
+          ? `${lastParentName} - ${row.accountName}`
+          : row.accountName
+        return { row, displayName }
+      })
+      return withDisplayNames
+        .filter(({ row }) => !row.hideAmount && row.amountCents > 0)
+        .map(({ row, displayName }) => ({
+          accountId: row.accountId,
+          accountCode: row.accountCode,
+          displayName,
+          amountCents: row.amountCents,
+          section,
+        }))
+    }
+    return [
+      ...buildEntries(report.cogs, 'COGS'),
+      ...buildEntries(report.expenses, 'EXPENSE'),
+    ].sort((a, b) => b.amountCents - a.amountCents)
   }, [report])
 
   const totalCents = report
