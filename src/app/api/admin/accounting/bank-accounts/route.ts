@@ -16,6 +16,7 @@ const createSchema = z.object({
   currency: z.string().trim().length(3).default('AUD'),
   openingBalance: z.number().min(0).default(0).describe('Opening balance in dollars'),
   openingBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  coaAccountId: z.string().trim().min(1).optional().nullable(),
 })
 
 export async function GET(request: NextRequest) {
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   const accounts = await prisma.bankAccount.findMany({
-    include: { _count: { select: { transactions: true } } },
+    include: { _count: { select: { transactions: true } }, coaAccount: { select: { code: true, name: true } } },
     orderBy: { createdAt: 'asc' },
   })
 
@@ -90,8 +91,9 @@ export async function POST(request: NextRequest) {
       currency: d.currency,
       openingBalance: Math.round((d.openingBalance ?? 0) * 100),
       openingBalanceDate: d.openingBalanceDate ?? null,
+      coaAccountId: d.coaAccountId ?? null,
     },
-    include: { _count: { select: { transactions: true } } },
+    include: { _count: { select: { transactions: true } }, coaAccount: { select: { code: true, name: true } } },
   })
 
   const res = NextResponse.json({ bankAccount: bankAccountFromDb(bankAccount) }, { status: 201 })

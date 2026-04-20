@@ -23,6 +23,7 @@ import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal
 import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 
 type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: AccountTaxCode; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
+type BankAccountTxnEntry = { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null }
 type SalesInvoiceEntry = {
   id: string
   invoiceId: string
@@ -42,6 +43,7 @@ type Entry =
   | { kind: 'journal'; date: string; entry: JournalEntry }
   | { kind: 'salesInvoice'; date: string; entry: SalesInvoiceEntry }
   | { kind: 'split'; date: string; entry: SplitEntry }
+  | { kind: 'bankAccountTxn'; date: string; entry: BankAccountTxnEntry }
 
 function fmtAud(cents: number) {
   const abs = Math.abs(cents)
@@ -69,6 +71,7 @@ function getEntryAmountExGst(row: Entry, accountType: Account['type'] | undefine
     return amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
   }
   if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).amountCents
+  if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).amountCents
 
   const s = row.entry as SplitEntry
   const exGst = amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent)
@@ -118,6 +121,7 @@ export default function AccountLedgerPage() {
       if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).accountName ?? account?.name ?? ''
       if (row.kind === 'journal') return (row.entry as JournalEntry).accountName ?? account?.name ?? ''
       if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).accountName
+      if (row.kind === 'bankAccountTxn') return account?.name ?? ''
       return (row.entry as SplitEntry).accountName
     }
     const getDesc = (row: Entry) => {
@@ -125,6 +129,7 @@ export default function AccountLedgerPage() {
       if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).description
       if (row.kind === 'journal') return (row.entry as JournalEntry).description
       if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return `${s.invoiceNumber} - ${s.description}` }
+      if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).description
       const s = row.entry as SplitEntry; return s.description || s.bankTransactionDescription
     }
     const getRef = (row: Entry) => {
@@ -132,6 +137,7 @@ export default function AccountLedgerPage() {
       if (row.kind === 'bankTransaction') return (row.entry as BankTransaction).reference ?? ''
       if (row.kind === 'journal') return (row.entry as JournalEntry).reference ?? ''
       if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return s.labelName ?? s.clientName ?? '' }
+      if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).reference ?? ''
       return (row.entry as SplitEntry).bankTransactionReference ?? ''
     }
     return [...entries].sort((a, b) => {
@@ -357,6 +363,7 @@ export default function AccountLedgerPage() {
                   if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '', amount] }
                   if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '', amount] }
                   if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', amount] }
+                  if (row.kind === 'bankAccountTxn') { const t = row.entry as BankAccountTxnEntry; return [row.date, 'Cash', account?.name ?? '', t.description, t.reference ?? '', amount] }
                   const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', amount]
                 }))
               }}
@@ -381,6 +388,7 @@ export default function AccountLedgerPage() {
                       if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return { cells: [formatDate(t.date), 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '—', amount] } }
                       if (row.kind === 'journal') { const j = row.entry as JournalEntry; return { cells: [formatDate(j.date), 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '—', amount] } }
                       if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return { cells: [formatDate(row.date), 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '—', amount] } }
+                      if (row.kind === 'bankAccountTxn') { const t = row.entry as BankAccountTxnEntry; return { cells: [formatDate(row.date), 'Cash', account?.name ?? '', t.description, t.reference ?? '—', amount] } }
                       const s = row.entry as SplitEntry; return { cells: [formatDate(s.bankTransactionDate), 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '—', amount] }
                     }),
                   }],
@@ -560,6 +568,25 @@ export default function AccountLedgerPage() {
                                 <Eye className="w-3.5 h-3.5" />
                               </AccountingTableActionButton>
                             )}
+                          </td>
+                        </tr>
+                      )
+                    } else if (row.kind === 'bankAccountTxn') {
+                      const t = row.entry as BankAccountTxnEntry
+                      return (
+                        <tr key={`batxn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                          <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(row.date)}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-400">Cash</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]">{account?.name ?? '—'}</td>
+                          <td className="px-4 py-2.5 truncate">{t.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{t.reference ?? '—'}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(t.amountCents)}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <AccountingTableActionButton onClick={() => void openLinkedTransaction(t.id)} title="View bank transaction" aria-label="View bank transaction">
+                              <Eye className="w-3.5 h-3.5" />
+                            </AccountingTableActionButton>
                           </td>
                         </tr>
                       )

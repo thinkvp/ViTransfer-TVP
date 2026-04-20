@@ -442,12 +442,20 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
         where: { date: { lte: asOf }, status: { not: 'EXCLUDED' } },
         select: { amountCents: true },
       },
+      coaAccount: { select: { id: true, code: true, name: true } },
     },
   })
 
   const assetLines: ReportLine[] = bankAccounts.map(ba => {
     const balance = ba.openingBalance + ba.transactions.reduce((s, t) => s + t.amountCents, 0)
-    return { accountId: ba.id, code: '1-0000', name: ba.name, amountCents: balance }
+    // coaAccount is available after the migration adds the relation; cast away until Prisma regenerates
+    const linked = (ba as unknown as { coaAccount?: { id: string; code: string; name: string } | null }).coaAccount
+    return {
+      accountId: linked?.id ?? ba.id,
+      code: linked?.code ?? '1-0000',
+      name: linked?.name ?? ba.name,
+      amountCents: balance,
+    }
   })
 
   // Accounts Receivable: unpaid / partially-paid invoices (accrue based on issue date)
@@ -492,14 +500,44 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   })
   const apCents = unpaidExpenses.reduce((s, e) => s + e.amountIncGst, 0)
 
-  // Accumulated net profit (all time up to asOf) as equity
-  const allExpenses = await prisma.expense.findMany({
-    where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] } },
-    select: { amountExGst: true },
-  })
-  const totalExpCents = allExpenses.reduce((s, e) => s + e.amountExGst, 0)
+  // Accumulated net profit (all time up to asOf) as equity.
+  // Use all four ledger sources (consistent with P&L report) and filter to EXPENSE/COGS accounts.
+  const [expensesForEquity, bankTxnsForEquity, journalsForEquity, splitsForEquity, allReceipts, gstExpenses, equityAccounts, accountingSettings] = await Promise.all([
+    prisma.expense.findMany({
+      where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
+      select: { amountExGst: true },
+    }),
+    prisma.bankTransaction.findMany({
+      where: { date: { lte: asOf }, status: 'MATCHED', matchType: { in: ['MANUAL'] }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
+      select: { amountCents: true, taxCode: true },
+    }),
+    prisma.journalEntry.findMany({
+      where: { date: { lte: asOf }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
+      select: { amountCents: true, taxCode: true },
+    }),
+    prisma.splitLine.findMany({
+      where: { bankTransaction: { date: { lte: asOf }, status: 'MATCHED' }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
+      select: { amountCents: true, taxCode: true },
+    }),
+    listSalesCashReceiptsUpTo(asOf),
+    prisma.expense.findMany({
+      where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, taxCode: 'GST' },
+      select: { gstAmount: true },
+    }),
+    prisma.account.findMany({
+      where: { type: 'EQUITY', isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+      select: { id: true, code: true, name: true },
+    }),
+    prisma.accountingSettings.findUnique({ where: { id: 'default' } }),
+  ])
 
-  const allReceipts = await listSalesCashReceiptsUpTo(asOf)
+  const totalExpCents =
+    expensesForEquity.reduce((s, e) => s + e.amountExGst, 0) +
+    bankTxnsForEquity.reduce((s, t) => s + (-amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent)), 0) +
+    journalsForEquity.reduce((s, j) => s + amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent), 0) +
+    splitsForEquity.reduce((s, l) => s + (-amountExcludingGst(l.amountCents, l.taxCode, taxRatePercent)), 0)
+
   const totalRevCents = allReceipts.reduce(
     (sum, receipt) => sum + cashReceiptReportingAmountCents(receipt.amountCents, receipt.invoice, taxRatePercent, false),
     0
@@ -512,10 +550,6 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   ]
 
   // GST liability: GST collected on sales minus GST credits on expenses (all time to asOf)
-  const gstExpenses = await prisma.expense.findMany({
-    where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, taxCode: 'GST' },
-    select: { gstAmount: true },
-  })
   const gstCreditsCents = gstExpenses.reduce((s, e) => s + e.gstAmount, 0)
 
   // GST collected: from all payments received to date (prorate GST)
@@ -524,7 +558,26 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
     gstCollectedCents += receipt.amountCents - cashReceiptReportingAmountCents(receipt.amountCents, receipt.invoice, taxRatePercent, false)
   }
 
-  const netGstCents = gstCollectedCents - gstCreditsCents
+  // Subtract BAS payment amounts already posted to the GST Payable CoA account.
+  // These are split lines and journal entries with negative amountCents (credits that reduce the liability).
+  let basGstPaymentsCents = 0
+  const basGstAccountId = accountingSettings?.basGstAccountId
+  if (basGstAccountId) {
+    const [paidSplits, paidJournals] = await Promise.all([
+      prisma.splitLine.aggregate({
+        where: { accountId: basGstAccountId, bankTransaction: { date: { lte: asOf }, status: 'MATCHED' } },
+        _sum: { amountCents: true },
+      }),
+      prisma.journalEntry.aggregate({
+        where: { accountId: basGstAccountId, date: { lte: asOf } },
+        _sum: { amountCents: true },
+      }),
+    ])
+    // These are negative (credits reduce the LIABILITY) — adding a negative reduces netGstCents
+    basGstPaymentsCents = (paidSplits._sum.amountCents ?? 0) + (paidJournals._sum.amountCents ?? 0)
+  }
+
+  const netGstCents = gstCollectedCents - gstCreditsCents + basGstPaymentsCents
   if (netGstCents > 0) {
     liabilityLines.push({ accountId: 'gst_payable', code: '2-2000', name: 'GST Payable', amountCents: netGstCents })
   } else if (netGstCents < 0) {
@@ -534,8 +587,16 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
 
   const totalLiabilitiesCents = liabilityLines.reduce((s, l) => s + l.amountCents, 0)
 
+  // Use the first active EQUITY account from the Chart of Accounts.
+  // Falls back to a generic label only if no equity accounts are configured.
+  const primaryEquityAccount = equityAccounts[0]
   const equityLines: ReportLine[] = [
-    { accountId: 'retained', code: '3-1000', name: 'Retained Earnings', amountCents: retainedEarningsCents },
+    {
+      accountId: primaryEquityAccount?.id ?? 'equity',
+      code: primaryEquityAccount?.code ?? '3-0000',
+      name: primaryEquityAccount?.name ?? 'Equity',
+      amountCents: retainedEarningsCents,
+    },
   ]
   const totalEquityCents = equityLines.reduce((s, l) => s + l.amountCents, 0)
 

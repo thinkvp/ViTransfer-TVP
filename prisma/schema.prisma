@@ -2076,6 +2076,7 @@ model Account {
   salesSettingsDefault SalesSettings[] @relation("SalesSettingsDefaultIncome")
   basPeriodsGst     BasPeriod[]   @relation("BasPeriodGstAccount")
   basPeriodsPayg    BasPeriod[]   @relation("BasPeriodPaygAccount")
+  linkedBankAccount BankAccount?  @relation("BankAccountCoaAccount")
 
   @@index([type])
   @@index([type, isActive])
@@ -2205,6 +2206,11 @@ model BankAccount {
   openingBalance     Int  @default(0)                   // cents
   openingBalanceDate String? // YYYY-MM-DD
   isActive      Boolean  @default(true)
+
+  // Optional link to a Chart of Accounts ASSET account so the bank balance
+  // appears in the CoA with the correct account code and name.
+  coaAccountId  String?  @unique
+  coaAccount    Account? @relation("BankAccountCoaAccount", fields: [coaAccountId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

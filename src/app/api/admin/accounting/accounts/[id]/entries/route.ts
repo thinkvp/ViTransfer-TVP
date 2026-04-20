@@ -50,7 +50,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (from) dateFilter.gte = from
   if (to) dateFilter.lte = to
 
-  const [expenses, bankTransactions, journalEntries, splitLines, salesInvoiceEntries, settings] = await Promise.all([
+  // For ASSET accounts linked to a bank account, fetch all non-excluded bank transactions
+  // coaAccountId column is added by a pending migration; cast to bypass stale Prisma client types
+  const linkedBankAccount = account.type === 'ASSET'
+    ? await prisma.bankAccount.findFirst({ where: { coaAccountId: account.id } as never })
+    : null
+
+  const [expenses, bankTransactions, journalEntries, splitLines, salesInvoiceEntries, settings, linkedBankAccountTxns] = await Promise.all([
     prisma.expense.findMany({
       where: { accountId: accountIdFilter, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) },
       include: { account: true },
@@ -87,6 +93,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }),
     listSalesInvoiceIncomeEntries({ from, to, accountIds }),
     prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }),
+    linkedBankAccount
+      ? prisma.bankTransaction.findMany({
+          where: {
+            bankAccountId: linkedBankAccount.id,
+            status: { not: 'EXCLUDED' },
+            ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
+          },
+          select: { id: true, date: true, description: true, reference: true, amountCents: true, status: true, matchType: true },
+          orderBy: { date: 'desc' },
+        })
+      : Promise.resolve([]),
   ])
 
   const taxRatePercent = settings?.taxRatePercent ?? 10
@@ -129,6 +146,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     | { kind: 'journal'; date: string; entry: ReturnType<typeof journalEntryFromDb> }
     | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string; linkedBankTransactions: { id: string; date: string; description: string; amountCents: number }[] } }
     | { kind: 'split'; date: string; entry: { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
+    | { kind: 'bankAccountTxn'; date: string; entry: { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null } }
 
   const combined: Entry[] = [
     ...expenses.map(e => ({ kind: 'expense' as const, date: e.date as string, entry: expenseFromDb(e) })),
@@ -166,6 +184,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         bankTransactionReference: s.bankTransaction?.reference ?? null,
       },
     })),
+    ...linkedBankAccountTxns.map(t => ({
+      kind: 'bankAccountTxn' as const,
+      date: t.date as string,
+      entry: {
+        id: t.id,
+        description: t.description,
+        reference: t.reference,
+        amountCents: Number(t.amountCents),
+        status: t.status,
+        matchType: t.matchType,
+      },
+    })),
   ].sort((a, b) => {
     if (b.date < a.date) return -1
     if (b.date > a.date) return 1
@@ -192,6 +222,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const exGst = amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent)
       return sum + (isDebitNormal ? -exGst : exGst)
     }
+    if (row.kind === 'bankAccountTxn') {
+      // Raw cash movement — ASSET account balance tracks actual cash (no GST strip, no sign flip)
+      return sum + (row.entry as { amountCents: number }).amountCents
+    }
     return sum + (row.entry as { amountCents: number }).amountCents
   }, 0)
 
@@ -205,6 +239,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         else if (entry.kind === 'bankTransaction') { const t = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(t.description, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
         else if (entry.kind === 'journal') { const j = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(j.description, j.reference, (Math.abs(j.amountCents) / 100).toFixed(2)) }
         else if (entry.kind === 'salesInvoice') { const s = entry.entry as { invoiceNumber: string; description: string; clientName?: string | null; amountCents: number }; fields.push(s.invoiceNumber, s.description, s.clientName, (Math.abs(s.amountCents) / 100).toFixed(2)) }
+        else if (entry.kind === 'bankAccountTxn') { const t = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(t.description, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
         else { const s = entry.entry as { description: string; bankTransactionDescription: string; bankTransactionReference?: string | null; amountCents: number }; fields.push(s.description, s.bankTransactionDescription, s.bankTransactionReference, (Math.abs(s.amountCents) / 100).toFixed(2)) }
         return fields.some(f => f?.toLowerCase().includes(qMatch))
       })

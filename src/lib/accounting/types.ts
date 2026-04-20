@@ -70,6 +70,10 @@ export interface BankAccount {
   pendingTransactionAmount: number
   openingBalanceDate: string | null
   isActive: boolean
+  /** Optional link to a Chart of Accounts ASSET account */
+  coaAccountId: string | null
+  coaAccountCode: string | null
+  coaAccountName: string | null
   createdAt: string
   updatedAt: string
 }

@@ -8,11 +8,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft } from 'lucide-react'
+import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import type { BankAccount } from '@/lib/accounting/types'
 
 const EMPTY_FORM = {
   name: '', bankName: '', bsb: '', accountNumber: '',
   currency: 'AUD', openingBalance: '0.00', openingBalanceDate: '', isActive: true,
+  coaAccountId: '' as string,
+  coaAccountSearch: '',
+  coaAccountOpen: false,
 }
 
 export default function BankAccountFormPage() {
@@ -25,6 +29,7 @@ export default function BankAccountFormPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [assetAccounts, setAssetAccounts] = useState<AccountOption[]>([])
 
   const loadAccount = useCallback(async () => {
     if (!accountId) return
@@ -43,12 +48,23 @@ export default function BankAccountFormPage() {
           openingBalance: (a.openingBalance / 100).toFixed(2),
           openingBalanceDate: a.openingBalanceDate ?? '',
           isActive: a.isActive,
+          coaAccountId: a.coaAccountId ?? '',
+          coaAccountSearch: '',
+          coaAccountOpen: false,
         })
       }
     } finally { setLoading(false) }
   }, [accountId])
 
-  useEffect(() => { void loadAccount() }, [loadAccount])
+  useEffect(() => {
+    void loadAccount()
+    apiFetch('/api/admin/accounting/accounts').then(async r => {
+      if (r.ok) {
+        const d = await r.json()
+        setAssetAccounts(buildAccountOptions((d.accounts ?? []).filter((a: { type: string }) => a.type === 'ASSET')))
+      }
+    })
+  }, [loadAccount])
 
   async function handleSave() {
     setError('')
@@ -65,6 +81,7 @@ export default function BankAccountFormPage() {
         openingBalance: balanceDollars,
         openingBalanceDate: form.openingBalanceDate || null,
         isActive: form.isActive,
+        coaAccountId: form.coaAccountId || null,
       }
       const url = accountId ? `/api/admin/accounting/bank-accounts/${accountId}` : '/api/admin/accounting/bank-accounts'
       const method = accountId ? 'PUT' : 'POST'
@@ -128,6 +145,44 @@ export default function BankAccountFormPage() {
           <div className="flex items-center gap-2">
             <input type="checkbox" id="ba-active" checked={form.isActive} onChange={e => setForm(f => ({ ...f, isActive: e.target.checked }))} className="rounded" />
             <Label htmlFor="ba-active">Active</Label>
+          </div>
+          <div className="space-y-1">
+            <Label>Chart of Accounts Link <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <p className="text-xs text-muted-foreground">Link to an ASSET account so this bank account&apos;s balance appears in the CoA with the correct account code.</p>
+            <div className="relative">
+              <Input
+                className="h-9 text-sm"
+                placeholder="Search asset accounts…"
+                value={form.coaAccountOpen ? form.coaAccountSearch : (assetAccounts.find(a => a.id === form.coaAccountId)?.label ?? '')}
+                onFocus={() => setForm(f => ({ ...f, coaAccountOpen: true, coaAccountSearch: '' }))}
+                onBlur={() => setTimeout(() => setForm(f => ({ ...f, coaAccountOpen: false })), 150)}
+                onChange={e => setForm(f => ({ ...f, coaAccountSearch: e.target.value }))}
+              />
+              {form.coaAccountOpen && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                  <button type="button"
+                    onMouseDown={() => setForm(f => ({ ...f, coaAccountId: '', coaAccountSearch: '', coaAccountOpen: false }))}
+                    className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic"
+                  >
+                    — No link
+                  </button>
+                  {assetAccounts
+                    .filter(a => {
+                      const q = form.coaAccountSearch.trim().toLowerCase()
+                      return !q || a.searchText.includes(q)
+                    })
+                    .map(a => (
+                      <button key={a.id} type="button"
+                        onMouseDown={() => setForm(f => ({ ...f, coaAccountId: a.id, coaAccountSearch: '', coaAccountOpen: false }))}
+                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors${form.coaAccountId === a.id ? ' bg-primary/10 font-medium' : ''}`}
+                      >
+                        {a.label}
+                      </button>
+                    ))
+                  }
+                </div>
+              )}
+            </div>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex gap-2 pt-2">

@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   const rows = await prisma.salesItem.findMany({
-    orderBy: [{ createdAt: 'asc' }],
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     include: { label: { select: { name: true, color: true } } },
   })
 
@@ -74,6 +74,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
   }
 
+  const lastItem = await prisma.salesItem.findFirst({
+    orderBy: [{ sortOrder: 'desc' }, { createdAt: 'desc' }],
+    select: { sortOrder: true },
+  })
+
   const item = await prisma.salesItem.create({
     data: {
       description: parsed.data.description,
@@ -83,6 +88,7 @@ export async function POST(request: NextRequest) {
       taxRatePercent: parsed.data.taxRatePercent,
       taxRateName: parsed.data.taxRateName ?? null,
       labelId: parsed.data.labelId ?? null,
+      sortOrder: (lastItem?.sortOrder ?? -1) + 1,
     },
     include: { label: { select: { name: true, color: true } } },
   })

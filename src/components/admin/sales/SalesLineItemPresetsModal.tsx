@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Tag, Trash2 } from 'lucide-react'
+import { GripVertical, Loader2, Pencil, Plus, Tag, Trash2 } from 'lucide-react'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
 import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
 import { dollarsToCents } from '@/lib/sales/money'
@@ -19,7 +19,9 @@ import {
   listSalesItems,
   listSalesLabels,
   listSalesPresets,
+  reorderSalesItems,
   saveSalesPreset,
+  updateSalesItem,
 } from '@/lib/sales/admin-api'
 import type { SalesItem, SalesLabel, SalesPreset } from '@/lib/sales/admin-api'
 import type { SalesLineItem, SalesTaxRate } from '@/lib/sales/types'
@@ -83,6 +85,19 @@ export function SalesLineItemPresetsModal({
   currencySymbol,
   onImport,
 }: SalesLineItemPresetsModalProps) {
+  function buildDefaultItemForm(): AddForm {
+    const def = taxRates.find((r) => r.isDefault)
+    return {
+      description: '',
+      details: '',
+      quantity: '1',
+      unitPrice: '',
+      taxRatePercent: defaultTaxRatePercent,
+      taxRateName: def?.name,
+      labelId: '',
+    }
+  }
+
   // Library & presets
   const [items, setItems] = useState<SalesItem[]>([])
   const [presets, setPresets] = useState<SalesPreset[]>([])
@@ -93,19 +108,17 @@ export function SalesLineItemPresetsModal({
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const [selectedPresetId, setSelectedPresetId] = useState<string>('')
 
-  // Add item form
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [addForm, setAddForm] = useState<AddForm>({
-    description: '',
-    details: '',
-    quantity: '1',
-    unitPrice: '',
-    taxRatePercent: defaultTaxRatePercent,
-    taxRateName: taxRates.find((r) => r.isDefault)?.name,
-    labelId: '',
-  })
-  const [addingItem, setAddingItem] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
+  // Item form
+  const [showItemForm, setShowItemForm] = useState(false)
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [itemForm, setItemForm] = useState<AddForm>(buildDefaultItemForm)
+  const [submittingItem, setSubmittingItem] = useState(false)
+  const [itemError, setItemError] = useState<string | null>(null)
+  const [reorderingItems, setReorderingItems] = useState(false)
+  const dragEnabledRef = useRef(false)
+  const dragIndexRef = useRef<number | null>(null)
+  const dragOverIndexRef = useRef<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   // Save preset
   const [showSaveName, setShowSaveName] = useState(false)
@@ -139,23 +152,29 @@ export function SalesLineItemPresetsModal({
     if (!open) {
       setCheckedIds(new Set())
       setSelectedPresetId('')
-      setShowAddForm(false)
+      setShowItemForm(false)
+      setEditingItemId(null)
       setShowSaveName(false)
       setSaveName('')
       setSaveError(null)
-      setAddError(null)
+      setItemError(null)
+      dragEnabledRef.current = false
+      dragIndexRef.current = null
+      dragOverIndexRef.current = null
+      setDragOverIndex(null)
     }
   }, [open])
 
-  // Sync default tax rate to add form when taxRates load
+  // Sync default tax rate to item form when the form is not active
   useEffect(() => {
+    if (showItemForm) return
     const def = taxRates.find((r) => r.isDefault)
-    setAddForm((prev) => ({
+    setItemForm((prev) => ({
       ...prev,
       taxRatePercent: defaultTaxRatePercent,
       taxRateName: def?.name,
     }))
-  }, [taxRates, defaultTaxRatePercent])
+  }, [taxRates, defaultTaxRatePercent, showItemForm])
 
   // Select preset -> tick its items
   function handleSelectPreset(id: string) {
@@ -188,52 +207,96 @@ export function SalesLineItemPresetsModal({
     }
   }
 
-  // Add item form helpers
-  function resetAddForm() {
-    const def = taxRates.find((r) => r.isDefault)
-    setAddForm({
-      description: '',
-      details: '',
-      quantity: '1',
-      unitPrice: '',
-      taxRatePercent: defaultTaxRatePercent,
-      taxRateName: def?.name,
-      labelId: '',
-    })
-    setAddError(null)
+  // Item form helpers
+  function resetItemForm() {
+    setItemForm(buildDefaultItemForm())
+    setItemError(null)
+    setEditingItemId(null)
   }
 
-  async function handleAddItem() {
-    const description = addForm.description.trim()
-    if (!description) return
-    const qty = parseFloat(addForm.quantity)
-    const quantity = Number.isFinite(qty) && qty >= 0 ? qty : 1
-    const unitPriceCents = dollarsToCents(addForm.unitPrice)
+  function handleStartAddItem() {
+    resetItemForm()
+    setShowItemForm(true)
+    setShowSaveName(false)
+  }
 
-    setAddingItem(true)
-    setAddError(null)
+  function handleStartEditItem(item: SalesItem) {
+    setEditingItemId(item.id)
+    setItemForm({
+      description: item.description,
+      details: item.details || '',
+      quantity: String(item.quantity),
+      unitPrice: (item.unitPriceCents / 100).toFixed(2),
+      taxRatePercent: item.taxRatePercent,
+      taxRateName: item.taxRateName ?? undefined,
+      labelId: item.labelId ?? '',
+    })
+    setItemError(null)
+    setShowItemForm(true)
+    setShowSaveName(false)
+  }
+
+  function handleCancelItemForm() {
+    setShowItemForm(false)
+    resetItemForm()
+  }
+
+  async function handleSubmitItem() {
+    const description = itemForm.description.trim()
+    if (!description) return
+    const qty = parseFloat(itemForm.quantity)
+    const quantity = Number.isFinite(qty) && qty >= 0 ? qty : 1
+    const unitPriceCents = dollarsToCents(itemForm.unitPrice)
+
+    setSubmittingItem(true)
+    setItemError(null)
     try {
-      const created = await createSalesItem({
-        description,
-        details: addForm.details,
-        quantity,
-        unitPriceCents,
-        taxRatePercent: addForm.taxRatePercent,
-        taxRateName: addForm.taxRateName ?? null,
-        labelId: addForm.labelId || null,
-      })
-      setItems((prev) => [...prev, created])
-      setCheckedIds((prev) => {
-        const next = new Set(prev)
-        next.add(created.id)
-        return next
-      })
-      resetAddForm()
-      setShowAddForm(false)
+      if (editingItemId) {
+        const updated = await updateSalesItem(editingItemId, {
+          description,
+          details: itemForm.details,
+          quantity,
+          unitPriceCents,
+          taxRatePercent: itemForm.taxRatePercent,
+          taxRateName: itemForm.taxRateName ?? null,
+          labelId: itemForm.labelId || null,
+        })
+        setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      } else {
+        const created = await createSalesItem({
+          description,
+          details: itemForm.details,
+          quantity,
+          unitPriceCents,
+          taxRatePercent: itemForm.taxRatePercent,
+          taxRateName: itemForm.taxRateName ?? null,
+          labelId: itemForm.labelId || null,
+        })
+        setItems((prev) => [...prev, created])
+        setCheckedIds((prev) => {
+          const next = new Set(prev)
+          next.add(created.id)
+          return next
+        })
+      }
+      handleCancelItemForm()
     } catch (e) {
-      setAddError(e instanceof Error ? e.message : 'Failed to create item.')
+      setItemError(e instanceof Error ? e.message : editingItemId ? 'Failed to update item.' : 'Failed to create item.')
     } finally {
-      setAddingItem(false)
+      setSubmittingItem(false)
+    }
+  }
+
+  async function persistItemOrder(nextItems: SalesItem[], previousItems: SalesItem[]) {
+    setReorderingItems(true)
+    try {
+      const reorderedItems = await reorderSalesItems(nextItems.map((item) => item.id))
+      setItems(reorderedItems)
+    } catch {
+      setItems(previousItems)
+      alert('Failed to save item order.')
+    } finally {
+      setReorderingItems(false)
     }
   }
 
@@ -250,6 +313,7 @@ export function SalesLineItemPresetsModal({
         next.delete(id)
         return next
       })
+      if (editingItemId === id) handleCancelItemForm()
     } catch {
       alert('Failed to delete item.')
     }
@@ -357,7 +421,8 @@ export function SalesLineItemPresetsModal({
               size="sm"
               onClick={() => {
                 setShowSaveName((v) => !v)
-                setShowAddForm(false)
+                setShowItemForm(false)
+                setEditingItemId(null)
                 setSaveError(null)
                 if (!showSaveName) setSaveName(selectedPreset?.name ?? '')
               }}
@@ -406,29 +471,31 @@ export function SalesLineItemPresetsModal({
 
           {/* Add item button + form */}
           <div>
-            {!showAddForm && (
+            {!showItemForm && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setShowAddForm(true); setShowSaveName(false) }}
+                onClick={handleStartAddItem}
               >
                 <Plus className="w-4 h-4 mr-1" />
                 Add item to library
               </Button>
             )}
 
-            {showAddForm && (
+            {showItemForm && (
               <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-xs">Item name <span className="text-destructive">*</span></Label>
+                    <Label className="text-xs">
+                      Item name <span className="text-destructive">*</span>
+                    </Label>
                     <Input
-                      value={addForm.description}
-                      onChange={(e) => setAddForm((prev) => ({ ...prev, description: e.target.value }))}
+                      value={itemForm.description}
+                      onChange={(e) => setItemForm((prev) => ({ ...prev, description: e.target.value }))}
                       placeholder="e.g. Video Editing (Day Rate)"
                       className="h-9"
                       autoFocus
-                      onKeyDown={(e) => { if (e.key === 'Enter') void handleAddItem() }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSubmitItem() }}
                     />
                   </div>
                   <div className="space-y-1">
@@ -436,16 +503,16 @@ export function SalesLineItemPresetsModal({
                     <Input
                       type="number"
                       min={0}
-                      value={addForm.quantity}
-                      onChange={(e) => setAddForm((prev) => ({ ...prev, quantity: e.target.value }))}
+                      value={itemForm.quantity}
+                      onChange={(e) => setItemForm((prev) => ({ ...prev, quantity: e.target.value }))}
                       className="h-9"
                     />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">Unit price ({currencySymbol})</Label>
                     <Input
-                      value={addForm.unitPrice}
-                      onChange={(e) => setAddForm((prev) => ({ ...prev, unitPrice: e.target.value }))}
+                      value={itemForm.unitPrice}
+                      onChange={(e) => setItemForm((prev) => ({ ...prev, unitPrice: e.target.value }))}
                       placeholder="0.00"
                       className="h-9"
                     />
@@ -455,8 +522,8 @@ export function SalesLineItemPresetsModal({
                       <Label className="text-xs">Tax</Label>
                     </div>
                     <TaxRateSelect
-                      value={addForm.taxRatePercent}
-                      onChange={(rate, name) => setAddForm((prev) => ({ ...prev, taxRatePercent: rate, taxRateName: name }))}
+                      value={itemForm.taxRatePercent}
+                      onChange={(rate, name) => setItemForm((prev) => ({ ...prev, taxRatePercent: rate, taxRateName: name }))}
                       taxRates={taxRates}
                       className="h-9"
                     />
@@ -468,29 +535,29 @@ export function SalesLineItemPresetsModal({
                       </Label>
                     </div>
                     <SearchableLabelSelect
-                      value={addForm.labelId || null}
+                      value={itemForm.labelId || null}
                       labels={labels}
-                      onChange={(labelId) => setAddForm((prev) => ({ ...prev, labelId: labelId ?? '' }))}
+                      onChange={(labelId) => setItemForm((prev) => ({ ...prev, labelId: labelId ?? '' }))}
                       triggerClassName="h-9 text-sm"
                     />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
                     <Label className="text-xs">Description (optional)</Label>
                     <Textarea
-                      value={addForm.details}
-                      onChange={(e) => setAddForm((prev) => ({ ...prev, details: e.target.value }))}
+                      value={itemForm.details}
+                      onChange={(e) => setItemForm((prev) => ({ ...prev, details: e.target.value }))}
                       placeholder="Optional paragraph description..."
                       className="min-h-[70px] text-sm"
                     />
                   </div>
                 </div>
-                {addError && <p className="text-xs text-destructive">{addError}</p>}
+                {itemError && <p className="text-xs text-destructive">{itemError}</p>}
                 <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => void handleAddItem()} disabled={addingItem || !addForm.description.trim()}>
-                    {addingItem ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-                    Add to library
+                  <Button size="sm" onClick={() => void handleSubmitItem()} disabled={submittingItem || !itemForm.description.trim()}>
+                    {submittingItem ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                    {editingItemId ? 'Save changes' : 'Add to library'}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setShowAddForm(false); resetAddForm() }}>
+                  <Button size="sm" variant="ghost" onClick={handleCancelItemForm}>
                     Cancel
                   </Button>
                 </div>
@@ -508,6 +575,7 @@ export function SalesLineItemPresetsModal({
               <table className="w-full min-w-[600px] text-sm border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
+                    <th className="w-9 px-2 py-2" aria-hidden />
                     <th className="w-9 px-2 py-2 text-center">
                       <Checkbox
                         checked={allChecked}
@@ -525,16 +593,72 @@ export function SalesLineItemPresetsModal({
                 <tbody>
                   {items.flatMap((it) => {
                     const isChecked = checkedIds.has(it.id)
+                    const index = items.findIndex((item) => item.id === it.id)
 
                     const mainRow = (
                       <tr
                         key={it.id}
+                        draggable={!reorderingItems}
+                        onDragStart={(e) => {
+                          if (!dragEnabledRef.current || reorderingItems) {
+                            e.preventDefault()
+                            return
+                          }
+                          dragIndexRef.current = index
+                          e.dataTransfer.effectAllowed = 'move'
+                        }}
+                        onDragEnd={() => {
+                          dragEnabledRef.current = false
+                          dragIndexRef.current = null
+                          dragOverIndexRef.current = null
+                          setDragOverIndex(null)
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          if (reorderingItems) return
+                          dragOverIndexRef.current = index
+                          setDragOverIndex(index)
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverIndexRef.current === index) setDragOverIndex(null)
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          if (reorderingItems) return
+                          const from = dragIndexRef.current
+                          const to = dragOverIndexRef.current
+                          dragEnabledRef.current = false
+                          dragIndexRef.current = null
+                          dragOverIndexRef.current = null
+                          setDragOverIndex(null)
+                          if (from === null || to === null || from === to) return
+                          const previousItems = [...items]
+                          const nextItems = [...items]
+                          const [moved] = nextItems.splice(from, 1)
+                          nextItems.splice(to, 0, moved)
+                          setItems(nextItems)
+                          void persistItemOrder(nextItems, previousItems)
+                        }}
                         className={[
                           'transition-colors group',
                           it.details ? '' : 'border-b border-border',
+                          dragOverIndex === index && dragIndexRef.current !== index ? 'bg-primary/10' : '',
                           isChecked ? 'bg-primary/5' : 'hover:bg-muted/30',
                         ].filter(Boolean).join(' ')}
                       >
+                        <td className="px-2 py-2.5 align-middle text-center">
+                          <div
+                            className={[
+                              'inline-flex items-center justify-center rounded p-1 text-muted-foreground transition-colors',
+                              reorderingItems ? 'cursor-not-allowed opacity-50' : 'cursor-grab active:cursor-grabbing hover:text-foreground',
+                            ].join(' ')}
+                            onMouseDown={() => { if (!reorderingItems) dragEnabledRef.current = true }}
+                            onMouseUp={() => { dragEnabledRef.current = false }}
+                            title={reorderingItems ? 'Saving order...' : 'Drag to reorder'}
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+                        </td>
                         <td className="px-2 py-2.5 align-middle text-center">
                           <Checkbox
                             checked={isChecked}
@@ -560,15 +684,26 @@ export function SalesLineItemPresetsModal({
                           {it.taxRateName ? `${it.taxRateName} (${it.taxRatePercent}%)` : `${it.taxRatePercent}%`}
                         </td>
                         <td className="px-2 py-2.5 align-middle text-center">
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteItem(it.id)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-destructive/10"
-                            aria-label="Remove item from library"
-                            title="Delete from library"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditItem(it)}
+                              className="rounded p-0.5 hover:bg-muted"
+                              aria-label={`Edit ${it.description}`}
+                              title="Edit item"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteItem(it.id)}
+                              className="rounded p-0.5 hover:bg-destructive/10"
+                              aria-label="Remove item from library"
+                              title="Delete from library"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -577,6 +712,7 @@ export function SalesLineItemPresetsModal({
 
                     const detailRow = (
                       <tr key={`${it.id}-details`} className="border-b border-border">
+                        <td className="bg-muted/40 px-2 py-1.5" />
                         <td className="bg-muted/40 px-2 py-1.5" />
                         <td colSpan={5} className="bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground italic leading-relaxed">
                           {it.details}

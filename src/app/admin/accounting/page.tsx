@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api-client'
 import { AlertTriangle, TrendingUp, TrendingDown, Landmark, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AccountingSettings } from '@/lib/accounting/types'
+import { AccountingDashboardCharts } from '@/components/admin/accounting/AccountingDashboardCharts'
 
 function fmtAud(cents: number) {
   const abs = (Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -31,28 +32,40 @@ interface DashboardStats {
   reportingBasis: 'CASH' | 'ACCRUAL'
 }
 
+interface ChartSettings {
+  fyStartMonth: number
+  currencyCode: string
+}
+
 export default function AccountingDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [chartSettings, setChartSettings] = useState<ChartSettings>({ fyStartMonth: 7, currencyCode: 'AUD' })
   const [loading, setLoading] = useState(true)
   const fy = getCurrentFY()
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [txnRes, expRes, bankRes, plRes] = await Promise.all([
+      const [txnRes, expRes, bankRes, plRes, salesSettingsRes] = await Promise.all([
         apiFetch('/api/admin/accounting/transactions?status=UNMATCHED&pageSize=1'),
         apiFetch('/api/admin/accounting/expenses?status=DRAFT&pageSize=1'),
         apiFetch('/api/admin/accounting/bank-accounts'),
         apiFetch('/api/admin/accounting/settings'),
+        apiFetch('/api/sales/settings'),
       ])
       const txnData = txnRes.ok ? await txnRes.json() : null
       const expData = expRes.ok ? await expRes.json() : null
       const bankData = bankRes.ok ? await bankRes.json() : null
       const settingsData: AccountingSettings | null = plRes.ok ? await plRes.json() : null
+      const salesSettings = salesSettingsRes.ok ? await salesSettingsRes.json() : null
       const reportingBasis = settingsData?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL'
       const reportRes = await apiFetch(`/api/admin/accounting/reports/profit-loss?from=${fy.from}&to=${fy.to}&basis=${reportingBasis}`)
       const plData = reportRes.ok ? await reportRes.json() : null
 
+      setChartSettings({
+        fyStartMonth: salesSettings?.fiscalYearStartMonth ?? 7,
+        currencyCode: salesSettings?.currencyCode ?? 'AUD',
+      })
       setStats({
         unmatchedCount: txnData?.total ?? 0,
         draftExpenseCount: expData?.pagination?.total ?? expData?.total ?? 0,
@@ -144,6 +157,15 @@ export default function AccountingDashboardPage() {
           </>
         )}
       </div>
+
+      {/* Charts */}
+      {stats && (
+        <AccountingDashboardCharts
+          reportingBasis={stats.reportingBasis}
+          fyStartMonth={chartSettings.fyStartMonth}
+          currencyCode={chartSettings.currencyCode}
+        />
+      )}
 
       {/* Bank accounts */}
       {(stats?.bankAccounts?.length ?? 0) > 0 && (

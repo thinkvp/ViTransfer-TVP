@@ -103,6 +103,32 @@ export async function GET(request: NextRequest) {
     balances[entry.accountId] = (balances[entry.accountId] ?? 0) + entry.amountCents
   }
 
+  // For ASSET accounts linked to a bank account (coaAccountId), sum all non-EXCLUDED
+  // bank transactions from that bank account as raw cash amounts for the CoA balance.
+  // coaAccountId column is added by a pending migration; cast to bypass stale Prisma client types.
+  const linkedBankAccounts = await (prisma.bankAccount.findMany as Function)({
+    where: { coaAccountId: { not: null } },
+    select: { coaAccountId: true, id: true },
+  }) as { coaAccountId: string; id: string }[]
+
+  if (linkedBankAccounts.length > 0) {
+    const bankAccountIds = linkedBankAccounts.map(ba => ba.id)
+    const linkedTxns = await prisma.bankTransaction.findMany({
+      select: { bankAccountId: true, amountCents: true },
+      where: {
+        bankAccountId: { in: bankAccountIds },
+        status: { not: 'EXCLUDED' },
+        ...(hasDateFilter ? { date: dateFilter } : {}),
+      },
+    })
+    const coaByBankAccountId = Object.fromEntries(linkedBankAccounts.map(ba => [ba.id, ba.coaAccountId]))
+    for (const txn of linkedTxns) {
+      const coaId = coaByBankAccountId[txn.bankAccountId]
+      if (!coaId) continue
+      balances[coaId] = (balances[coaId] ?? 0) + Number(txn.amountCents)
+    }
+  }
+
   const res = NextResponse.json({ balances })
   res.headers.set('Cache-Control', 'no-store')
   return res

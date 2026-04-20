@@ -5,6 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-04-20
+
+### Added
+- **Accounting Dashboard charts** — three new chart panels replace the static text-only dashboard with an interactive overview; all charts share the same period-selector pattern used by the Sales Dashboard (Financial year to date, Last financial year, Year to date, Last 12 months) and respect the configured reporting basis (Cash/Accrual) and fiscal year start month:
+  - **Profitability Trend** — full-width line chart showing monthly Income (emerald), Total Costs (red), and Net Profit (indigo dashed) for the selected period; a zero-reference line clearly marks the break-even point; the card header shows period totals and gross margin %; negative Net Profit values fall below the zero line in-place without special styling
+  - **Income Breakdown** — leaderboard-style card showing each active Income account's ex-GST contribution for the period, sorted by amount with a relative progress bar; the card header shows total income and gross margin %; account names link directly to the account ledger pre-filtered to the same date range
+  - **Expense Breakdown** — same leaderboard style combining COGS and Operating Expense accounts in a single ranked list; each row carries a coloured badge (amber for COGS, rose for Expense) so the two types are visually distinct; the card header shows total spend and the expense-to-income ratio %
+- **`GET /api/admin/accounting/reports/profit-loss-monthly`** — new authenticated, rate-limited endpoint that returns per-month income/COGS/expenses/netProfit totals for a date range and reporting basis; queries all four ledger sources (invoices or payments, MANUAL bank transactions, journal entries, split lines) in parallel and groups results by YYYY-MM in a single pass; used by the Profitability Trend chart to avoid multiple sequential P&L calls
+- **Bank Account → Chart of Accounts link** — each bank account can now be linked to an ASSET account in the Chart of Accounts via a new optional `coaAccountId` field; when linked, all non-excluded bank transactions from that account are rolled into the CoA balance for that asset account and appear in the account ledger as `Cash`-type entries; the Balance Sheet uses the linked account's code and name for the asset row so bank balances are reflected under the correct CoA line; backed by migration `20260420000000_bank_account_coa_link`; the bank account edit form gains a searchable ASSET account picker
+- **`POST /api/admin/sales/items/reorder`** — new authenticated, rate-limited endpoint that accepts an ordered array of item IDs and updates the `sortOrder` of each `SalesItem` in a single database transaction; returns the full refreshed list sorted by `sortOrder`; used by the drag-to-reorder handle in the Line Item Presets modal
+- **Drag-to-reorder in Sales Line Item Presets** — the Line Item Presets modal now renders a `GripVertical` drag handle on every item row; rows can be dragged into a new position using HTML5 drag events and the new order is persisted immediately via `POST /api/admin/sales/items/reorder`; a drop-target highlight and a loading state on the handle give clear visual feedback while the save is in flight
+
+### Changed
+- **Balance Sheet equity uses all four ledger sources** — the retained-earnings figure in `buildBalanceSheetReport` previously accumulated only `Expense` records; it now includes MANUAL-matched bank transactions, journal entries, and split lines posted to EXPENSE/COGS accounts (all ex-GST), consistent with the P&L report; the equity row now resolves its account code and name from the first active EQUITY account in the Chart of Accounts instead of using hardcoded placeholder values
+- **Balance Sheet asset rows respect the CoA account link** — bank account rows in the Assets section of the Balance Sheet report now use the code and name of the linked Chart of Accounts account (when one is configured) instead of the raw bank account name, so the report line matches the CoA hierarchy
+- **Account Ledger shows bank transactions for linked ASSET accounts** — when viewing a CoA account that has a bank account linked via `coaAccountId`, the ledger now fetches all non-excluded transactions from that bank account and displays them as `Cash`-type rows alongside the existing expense, journal, and split entries; each row has an eye-icon button to open the linked bank transaction viewer; CSV and PDF exports include these rows
+
 ## [1.5.9] - 2026-04-19
 
 ### Added

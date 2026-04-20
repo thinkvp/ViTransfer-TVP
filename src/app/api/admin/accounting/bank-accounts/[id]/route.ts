@@ -17,6 +17,7 @@ const updateSchema = z.object({
   openingBalance: z.number().min(0).optional(),
   openingBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   isActive: z.boolean().optional(),
+  coaAccountId: z.string().trim().min(1).optional().nullable(),
 })
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
   const account = await prisma.bankAccount.findUnique({
     where: { id },
-    include: { _count: { select: { transactions: true } } },
+    include: { _count: { select: { transactions: true } }, coaAccount: { select: { code: true, name: true } } },
   })
 
   if (!account) {
@@ -83,8 +84,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       ...(data.openingBalance !== undefined ? { openingBalance: Math.round(data.openingBalance * 100) } : {}),
       ...(data.openingBalanceDate !== undefined ? { openingBalanceDate: data.openingBalanceDate } : {}),
       ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+      ...(data.coaAccountId !== undefined ? { coaAccountId: data.coaAccountId } : {}),
     },
-    include: { _count: { select: { transactions: true } } },
+    include: { _count: { select: { transactions: true } }, coaAccount: { select: { code: true, name: true } } },
   })
 
   const res = NextResponse.json({ bankAccount: bankAccountFromDb(updated) })

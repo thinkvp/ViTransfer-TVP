@@ -226,7 +226,7 @@ export async function createSalesItem(
 
 export async function updateSalesItem(
   id: string,
-  data: Partial<Omit<SalesItem, 'id' | 'sortOrder' | 'createdAt' | 'updatedAt'>>
+  data: Partial<Omit<SalesItem, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<SalesItem> {
   const res = await apiPatch<{ ok: boolean; item: SalesItem }>(`/api/admin/sales/items/${encodeURIComponent(id)}`, data)
   return res.item
@@ -234,6 +234,11 @@ export async function updateSalesItem(
 
 export async function deleteSalesItem(id: string): Promise<void> {
   await apiDelete(`/api/admin/sales/items/${encodeURIComponent(id)}`)
+}
+
+export async function reorderSalesItems(itemIds: string[]): Promise<SalesItem[]> {
+  const res = await apiPost<{ ok: boolean; items: SalesItem[] }>('/api/admin/sales/items/reorder', { itemIds })
+  return Array.isArray(res.items) ? res.items : []
 }
 
 export async function listSalesPresets(): Promise<SalesPreset[]> {

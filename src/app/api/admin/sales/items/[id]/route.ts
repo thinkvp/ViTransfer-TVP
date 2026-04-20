@@ -15,6 +15,7 @@ const updateItemSchema = z.object({
   taxRatePercent: z.number().finite().min(0).max(100).optional(),
   taxRateName: z.string().max(200).optional().nullable(),
   labelId: z.string().trim().min(1).max(100).optional().nullable(),
+  sortOrder: z.number().int().min(0).optional(),
 })
 
 function mapItem(row: any) {
@@ -73,6 +74,7 @@ export async function PATCH(
       ...(data.taxRatePercent !== undefined ? { taxRatePercent: data.taxRatePercent } : {}),
       ...(data.taxRateName !== undefined ? { taxRateName: data.taxRateName ?? null } : {}),
       ...(data.labelId !== undefined ? { labelId: data.labelId ?? null } : {}),
+      ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
     },
     include: { label: { select: { name: true, color: true } } },
   })
