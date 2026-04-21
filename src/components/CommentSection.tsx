@@ -304,6 +304,7 @@ export function CommentSectionView({
   const [projectGuestLinkCopied, setProjectGuestLinkCopied] = useState(false)
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
+  const approvingRef = useRef(false)
   
   const [exportingSrt, setExportingSrt] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
@@ -1122,7 +1123,8 @@ export function CommentSectionView({
       alert('Approval is disabled for this version.')
       return
     }
-    if (approving) return
+    if (approvingRef.current) return
+    approvingRef.current = true
 
     setApproving(true)
     try {
@@ -1165,6 +1167,7 @@ export function CommentSectionView({
     } catch (error) {
       alert(`Approval failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
+      approvingRef.current = false
       setApproving(false)
     }
   }

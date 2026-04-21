@@ -202,6 +202,7 @@ export default function InvoiceDetailPage() {
         setItems(
           inv.items.map((it) => ({
             ...it,
+            id: it.id || (globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`),
             details: (it as any).details ?? '',
             taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
           }))
@@ -548,7 +549,7 @@ export default function InvoiceDetailPage() {
         dueDate: dueDate || null,
         notes,
         terms,
-        items: items.map((it) => ({
+        items: items.filter((it) => it.description.trim()).map((it) => ({
           ...it,
           description: it.description ?? '',
           details: it.details?.trim() ? it.details : undefined,
@@ -558,6 +559,12 @@ export default function InvoiceDetailPage() {
         })),
       })
       setInvoice(next)
+      setItems(next.items.map((it) => ({
+        ...it,
+        id: it.id || (globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`),
+        details: (it as any).details ?? '',
+        taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, settings.taxRatePercent),
+      })))
       setStatus(next.status)
       setSavedSnapshot(currentSnapshot)
       setSuccess(true)
@@ -982,6 +989,7 @@ export default function InvoiceDetailPage() {
                       type="number"
                       value={String(it.quantity)}
                       min={0}
+                      step="any"
                       onChange={(e) => {
                         const v = Number(e.target.value)
                         setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v >= 0 ? v : 0 } : x)))

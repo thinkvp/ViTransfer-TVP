@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] - 2026-04-21
+
+### Fixed
+- **Duplicate "Video Approved" emails and notifications no longer sent on rapid double-click** — the approval confirm button in `CommentSection` previously guarded against re-entry using a React state flag (`approving`), which is asynchronous; a rapid double-click could fire two POST requests to `/api/projects/[id]/approve` before the component re-rendered with the disabled state; a synchronous `useRef` guard (`approvingRef`) is now set at the start of `handleApproveSelected` and cleared in the `finally` block, ensuring any concurrent second click exits immediately regardless of React's render cycle
+- **Deleting a line item on a converted invoice no longer removes all items** — `onConvertToInvoice` previously mapped quote items without including the `id` field, so all items were stored in `itemsJson` with `id: undefined`; when the invoice page loaded those items, clicking the delete button ran `prev.filter((x) => x.id !== it.id)` which evaluated `undefined !== undefined` as `false` for every row and wiped the entire list; the conversion now passes `id` through for each item, and the invoice detail page also assigns a fresh UUID to any item loaded without one as a safety net for previously converted invoices already in the database
+
+### Changed
+- **Qty field on invoices and quotes now accepts decimal values** — the quantity `<Input type="number">` on all four line-item editors (invoice edit, invoice new, quote edit, quote new) previously had no `step` attribute, causing the browser to default to `step="1"` and show a "please enter a valid value" tooltip for entries like `1.5`; `step="any"` is now set on all four inputs so any positive decimal quantity is accepted without a browser validation error
+- **Convert Quote to Invoice pre-populates the Due Date from default settings** — clicking "Convert to Invoice" from a quote page previously created the invoice with a blank due date; the conversion now reads `settings.defaultInvoiceDueDays` (already loaded on the page) and sets the due date to today plus that many days, matching the behaviour of creating a new invoice directly
+- **Empty trailing line items are stripped on save/create** — after selecting a preset line item the editor automatically adds a new blank row for convenience; if that row was left empty (no item name) it would previously be saved as a line with no description; on save (quote and invoice edit) and on create (quote and invoice new) any line items with a blank description are now filtered out before sending to the API
+- **Items list updates immediately after save without requiring a page reload** — the quote and invoice edit pages now call `setItems` with the server-returned items after a successful save, so empty rows stripped by the filter above disappear from the UI immediately rather than persisting until the next page load
+
 ## [1.6.5] - 2026-04-21
 
 ### Changed

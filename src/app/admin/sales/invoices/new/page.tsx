@@ -241,7 +241,7 @@ export default function NewInvoicePage() {
         dueDate: dueDate || null,
         notes,
         terms,
-        items: items.map((it) => ({
+        items: items.filter((it) => it.description.trim()).map((it) => ({
           ...it,
           details: it.details?.trim() ? it.details : undefined,
           quantity: Number.isFinite(it.quantity) && it.quantity >= 0 ? it.quantity : 1,
@@ -425,6 +425,7 @@ export default function NewInvoicePage() {
                     type="number"
                     value={String(it.quantity)}
                     min={0}
+                    step="any"
                     onChange={(e) => {
                       const v = Number(e.target.value)
                       setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v >= 0 ? v : 0 } : x)))

@@ -363,7 +363,7 @@ export default function QuoteDetailPage() {
         validUntil: validUntil || null,
         notes,
         terms,
-        items: items.map((it) => ({
+        items: items.filter((it) => it.description.trim()).map((it) => ({
           ...it,
           description: it.description ?? '',
           details: it.details?.trim() ? it.details : undefined,
@@ -471,6 +471,11 @@ export default function QuoteDetailPage() {
     try {
       const today = new Date()
       const issueDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      const dueDaysOffset = Number.isFinite(settings.defaultInvoiceDueDays) && settings.defaultInvoiceDueDays > 0
+        ? settings.defaultInvoiceDueDays : 0
+      const dueDate = dueDaysOffset > 0
+        ? (() => { const d = new Date(today); d.setDate(d.getDate() + dueDaysOffset); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()
+        : undefined
       const res = await apiFetch('/api/admin/sales/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -478,9 +483,11 @@ export default function QuoteDetailPage() {
           clientId,
           projectId: projectId || undefined,
           issueDate,
+          dueDate,
           notes,
           terms,
           items: items.map(it => ({
+            id: it.id,
             description: it.description,
             details: it.details || undefined,
             quantity: it.quantity,
@@ -870,6 +877,7 @@ export default function QuoteDetailPage() {
                       type="number"
                       value={String(it.quantity)}
                       min={0}
+                      step="any"
                       onChange={(e) => {
                         const v = Number(e.target.value)
                         setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, quantity: Number.isFinite(v) && v >= 0 ? v : 0 } : x)))
