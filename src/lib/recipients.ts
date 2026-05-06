@@ -210,12 +210,13 @@ export async function addRecipient(
  */
 export async function updateRecipient(
   recipientId: string,
+  projectId: string,
   data: { name?: string | null; email?: string | null; displayColor?: string | null; isPrimary?: boolean; receiveNotifications?: boolean; clientRecipientId?: string | null }
 ): Promise<Recipient> {
   // If setting as primary, get projectId and unset other primaries
   if (data.isPrimary) {
     const existing = await prisma.projectRecipient.findUnique({
-      where: { id: recipientId },
+      where: { id: recipientId, projectId },
       select: { projectId: true }
     })
 
@@ -245,7 +246,7 @@ export async function updateRecipient(
   }
 
   const recipient = await prisma.projectRecipient.update({
-    where: { id: recipientId },
+    where: { id: recipientId, projectId },
     data: updateData
   })
 
@@ -346,10 +347,10 @@ export async function updateRecipient(
 /**
  * Delete a recipient
  */
-export async function deleteRecipient(recipientId: string): Promise<void> {
-  // Fetch recipient with isPrimary status BEFORE deleting
+export async function deleteRecipient(recipientId: string, projectId: string): Promise<void> {
+  // Fetch recipient with isPrimary status BEFORE deleting — scoped to projectId to prevent IDOR
   const recipient = await prisma.projectRecipient.findUnique({
-    where: { id: recipientId },
+    where: { id: recipientId, projectId },
     select: { projectId: true, isPrimary: true }
   })
 
@@ -359,7 +360,7 @@ export async function deleteRecipient(recipientId: string): Promise<void> {
 
   // Delete the recipient
   await prisma.projectRecipient.delete({
-    where: { id: recipientId }
+    where: { id: recipientId, projectId }
   })
 
   // If deleted recipient WAS primary, promote another recipient to primary

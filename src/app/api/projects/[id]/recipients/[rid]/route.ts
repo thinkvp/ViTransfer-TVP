@@ -64,7 +64,7 @@ export async function PATCH(
       )
     }
 
-    const recipient = await updateRecipient(recipientId, validation.data)
+    const recipient = await updateRecipient(recipientId, projectId, validation.data)
 
     return NextResponse.json({ recipient })
   } catch (error: any) {
@@ -111,7 +111,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    await deleteRecipient(recipientId)
+    await deleteRecipient(recipientId, projectId)
 
     return NextResponse.json({ success: true })
   } catch (error: any) {

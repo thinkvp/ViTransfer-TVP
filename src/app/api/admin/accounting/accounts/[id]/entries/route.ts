@@ -210,19 +210,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         r = a.kind.localeCompare(b.kind)
         break
       case 'description': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const getDesc = (row: typeof a) => { const e = row.entry as any; if (row.kind === 'salesInvoice') return `${e.invoiceNumber ?? ''} ${e.description ?? ''}`; return e.description ?? e.bankTransactionDescription ?? '' }
         r = getDesc(a).localeCompare(getDesc(b))
         break
       }
       case 'ref': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const getRef = (row: typeof a) => { const e = row.entry as any; if (row.kind === 'expense') return e.supplierName ?? ''; if (row.kind === 'salesInvoice') return e.labelName ?? e.clientName ?? ''; return e.reference ?? e.bankTransactionReference ?? '' }
         r = getRef(a).localeCompare(getRef(b))
         break
       }
       case 'amount': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const getAmt = (row: typeof a): number => { const e = row.entry as any; if (row.kind === 'expense') return e.amountExGst ?? 0; if (row.kind === 'bankTransaction') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } if (row.kind === 'journal') return amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); if (row.kind === 'split') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } return e.amountCents ?? 0 }
         r = getAmt(a) - getAmt(b)
         break

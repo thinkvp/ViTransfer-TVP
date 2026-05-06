@@ -272,7 +272,7 @@ export default function AdminSharePage() {
         return request
       })
     )
-  }, [id, project])
+  }, [id])
 
   // Load project data, settings, and admin user
   useEffect(() => {

@@ -141,6 +141,9 @@ export async function DELETE(request: NextRequest) {
   const forbiddenAction = requireActionAccess(authResult, 'manageSecurityEvents')
   if (forbiddenAction) return forbiddenAction
 
+  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 10 }, 'security-events-delete')
+  if (rateLimitResult) return rateLimitResult
+
   try {
     const body = await request.json()
     const { olderThan } = body // Days (0 = delete all)

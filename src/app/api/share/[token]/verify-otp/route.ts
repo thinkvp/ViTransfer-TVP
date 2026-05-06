@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { verifyOTP, verifyRecipientEmail } from '@/lib/otp'
+import { verifyOTP } from '@/lib/otp'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { getMaxAuthAttempts } from '@/lib/settings'
@@ -139,16 +139,11 @@ export async function POST(
       )
     }
 
-    // Verify email is a project recipient
-    const isRecipient = await verifyRecipientEmail(email, project.id)
-    if (!isRecipient) {
-      // SECURITY: Don't reveal if email is valid - return generic error
-      // This prevents email enumeration attacks
-      return NextResponse.json(
-        { error: 'Invalid or expired code' },
-        { status: 403 }
-      )
-    }
+    // SECURITY: No recipient pre-check here — doing so creates a timing oracle that
+    // leaks whether an email is a registered recipient (the pre-check returns early
+    // before the Redis OTP lookup, producing a measurably shorter response time).
+    // verifyOTP returns the same generic error with no side effects when no OTP key
+    // exists for the (email, project) pair, so both paths now have identical timing.
 
     // Verify OTP
     const result = await verifyOTP(email, project.id, code)

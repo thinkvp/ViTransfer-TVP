@@ -236,6 +236,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
 
           <div className="space-y-3">
             {capturedFile && previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- previewUrl is a local blob URL; Next.js Image cannot optimize blob URLs
               <img src={previewUrl} alt="Captured receipt preview" className="w-full rounded-md border border-border object-contain" />
             ) : (
               <div className="overflow-hidden rounded-md border border-border bg-black/90">

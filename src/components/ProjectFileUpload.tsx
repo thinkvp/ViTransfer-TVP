@@ -123,7 +123,7 @@ export function ProjectFileUpload({
         .join('')
       return `project-upload-${Date.now()}-${hex}`
     }
-    return `project-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return `project-upload-${Date.now()}-${crypto.randomUUID()}`
   }
 
   const activeCounts = useMemo(() => {

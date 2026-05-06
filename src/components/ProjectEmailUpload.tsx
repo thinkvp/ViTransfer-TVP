@@ -89,7 +89,7 @@ export function ProjectEmailUpload({
         .join('')
       return `project-email-upload-${Date.now()}-${hex}`
     }
-    return `project-email-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return `project-email-upload-${Date.now()}-${crypto.randomUUID()}`
   }
 
   const activeCounts = useMemo(() => {

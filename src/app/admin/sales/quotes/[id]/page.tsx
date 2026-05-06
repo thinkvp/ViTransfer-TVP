@@ -175,13 +175,13 @@ export default function QuoteDetailPage() {
         setValidUntil(q.validUntil ?? '')
         setNotes(q.notes)
         setTerms(q.terms ?? s.defaultTerms)
-        setItems(
-          q.items.map((it) => ({
-            ...it,
-            details: (it as any).details ?? '',
-            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
-          }))
-        )
+        const loadedItems = q.items.map((it) => ({
+          ...it,
+          id: it.id || (globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`),
+          details: (it as any).details ?? '',
+          taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
+        }))
+        setItems(loadedItems)
 
         setEditingClient(!Boolean(q.clientId))
         setEditingProject(!Boolean(q.projectId))
@@ -194,11 +194,7 @@ export default function QuoteDetailPage() {
           validUntil: q.validUntil ?? '',
           notes: q.notes,
           terms: q.terms ?? s.defaultTerms,
-          items: q.items.map((it) => ({
-            ...it,
-            details: (it as any).details ?? '',
-            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
-          })),
+          items: loadedItems,
         }))
       } catch {
         if (!cancelled) setQuote(null)

@@ -71,7 +71,7 @@ export function ClientFileUpload({ clientId, onUploadComplete, maxConcurrent = 3
       const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
       return `client-upload-${Date.now()}-${hex}`
     }
-    return `client-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return `client-upload-${Date.now()}-${crypto.randomUUID()}`
   }
 
   const activeCounts = useMemo(() => {

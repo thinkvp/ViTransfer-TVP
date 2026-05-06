@@ -70,7 +70,7 @@ export function UserFileUpload({ userId, onUploadComplete, maxConcurrent = 3 }: 
       const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
       return `user-upload-${Date.now()}-${hex}`
     }
-    return `user-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return `user-upload-${Date.now()}-${crypto.randomUUID()}`
   }
 
   const activeCounts = useMemo(() => {

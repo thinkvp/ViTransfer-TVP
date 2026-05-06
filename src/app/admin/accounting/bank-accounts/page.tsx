@@ -33,6 +33,7 @@ interface OpenInvoice {
   totalCents: number
   totalPaidCents: number
   outstandingBalanceCents: number
+  stripeReconcilable?: boolean
 }
 
 type TabKey = 'UNMATCHED' | 'MATCHED' | 'EXCLUDED'
@@ -149,6 +150,7 @@ export default function BankAccountsPage() {
   const [openInvoices, setOpenInvoices] = useState<OpenInvoice[]>([])
   const [loadingInvoices, setLoadingInvoices] = useState(false)
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
+  const [selectedInvoiceIsReconcile, setSelectedInvoiceIsReconcile] = useState(false)
   const [matchingInvoice, setMatchingInvoice] = useState(false)
 
   // Expense matching dialog
@@ -611,6 +613,7 @@ export default function BankAccountsPage() {
   function openMatchInvoiceDialog(txn: BankTransaction) {
     setMatchInvoiceTarget(txn)
     setSelectedInvoiceId(null)
+    setSelectedInvoiceIsReconcile(false)
     setInvoiceSearch('')
     setOpenInvoices([])
     void loadOpenInvoices('')
@@ -619,7 +622,7 @@ export default function BankAccountsPage() {
   const loadOpenInvoices = useCallback(async (q: string) => {
     setLoadingInvoices(true)
     try {
-      const params = new URLSearchParams()
+      const params = new URLSearchParams({ includeStripeReconcile: 'true' })
       if (q.trim()) params.set('q', q.trim())
       const res = await apiFetch(`/api/admin/accounting/open-invoices?${params}`)
       if (res.ok) { const d = await res.json(); setOpenInvoices(d.invoices ?? []) }
@@ -632,11 +635,12 @@ export default function BankAccountsPage() {
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${matchInvoiceTarget.id}/match-invoice`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId: selectedInvoiceId }),
+        body: JSON.stringify({ invoiceId: selectedInvoiceId, ...(selectedInvoiceIsReconcile ? { reconcile: true } : {}) }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
       const matchedId = matchInvoiceTarget.id
       setMatchInvoiceTarget(null)
+      setSelectedInvoiceIsReconcile(false)
       setTransactions(prev => prev.filter(t => t.id !== matchedId))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === matchedId ? null : prev)
@@ -1418,7 +1422,7 @@ export default function BankAccountsPage() {
       </Dialog>
 
       {/* Match Invoice Dialog */}
-      <Dialog open={!!matchInvoiceTarget} onOpenChange={open => { if (!open && !matchingInvoice) { setMatchInvoiceTarget(null) } }}>
+      <Dialog open={!!matchInvoiceTarget} onOpenChange={open => { if (!open && !matchingInvoice) { setMatchInvoiceTarget(null); setSelectedInvoiceIsReconcile(false) } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Match to Invoice — {matchInvoiceTarget ? fmtAmt(matchInvoiceTarget.amountCents) : ''}</DialogTitle>
@@ -1433,47 +1437,89 @@ export default function BankAccountsPage() {
             />
             {loadingInvoices ? (
               <div className="py-4 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading...</div>
-            ) : openInvoices.length === 0 ? (
-              <div className="py-4 text-center text-sm text-muted-foreground">No open invoices found.</div>
-            ) : (
-              <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
-                {openInvoices.map(inv => {
-                  const total = inv.totalCents
-                  const remaining = inv.outstandingBalanceCents
-                  const showRemaining = remaining < total
-                  return (
-                    <button key={inv.id} type="button"
-                      onClick={() => setSelectedInvoiceId(inv.id)}
-                      className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
-                        selectedInvoiceId === inv.id && 'bg-primary/10 border-l-2 border-primary'
+            ) : (() => {
+              const regularInvoices = openInvoices.filter(inv => !inv.stripeReconcilable)
+              const stripeInvoices = openInvoices.filter(inv => inv.stripeReconcilable)
+              return (
+                <div className="space-y-3">
+                  {regularInvoices.length === 0 && stripeInvoices.length === 0 ? (
+                    <div className="py-4 text-center text-sm text-muted-foreground">No open invoices found.</div>
+                  ) : (
+                    <>
+                      {regularInvoices.length > 0 && (
+                        <div className="max-h-60 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                          {regularInvoices.map(inv => {
+                            const total = inv.totalCents
+                            const remaining = inv.outstandingBalanceCents
+                            const showRemaining = remaining < total
+                            return (
+                              <button key={inv.id} type="button"
+                                onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(false) }}
+                                className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
+                                  selectedInvoiceId === inv.id && !selectedInvoiceIsReconcile && 'bg-primary/10 border-l-2 border-primary'
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium">{inv.invoiceNumber}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
+                                  <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  {showRemaining ? (
+                                    <>
+                                      <p className="text-sm font-medium tabular-nums">{fmtAud(remaining)} remaining</p>
+                                      <p className="text-xs text-muted-foreground tabular-nums">{fmtAud(total)} total</p>
+                                    </>
+                                  ) : (
+                                    <p className="text-sm font-medium tabular-nums">{fmtAud(total)}</p>
+                                  )}
+                                  <p className="text-xs text-muted-foreground capitalize">{inv.status.toLowerCase().replace(/_/g, ' ')}</p>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
                       )}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{inv.invoiceNumber}</p>
-                        <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        {showRemaining ? (
-                          <>
-                            <p className="text-sm font-medium tabular-nums">{fmtAud(remaining)} remaining</p>
-                            <p className="text-xs text-muted-foreground tabular-nums">{fmtAud(total)} total</p>
-                          </>
-                        ) : (
-                          <p className="text-sm font-medium tabular-nums">{fmtAud(total)}</p>
-                        )}
-                        <p className="text-xs text-muted-foreground capitalize">{inv.status.toLowerCase().replace(/_/g, ' ')}</p>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+                      {stripeInvoices.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reconcile Stripe bank deposit</p>
+                            <div className="flex-1 h-px bg-border" />
+                          </div>
+                          <p className="text-xs text-muted-foreground">These invoices were already paid via Stripe. Matching will link the bank deposit for reconciliation only — it won&apos;t change the invoice or affect revenue totals.</p>
+                          <div className="max-h-48 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                            {stripeInvoices.map(inv => (
+                              <button key={inv.id} type="button"
+                                onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(true) }}
+                                className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
+                                  selectedInvoiceId === inv.id && selectedInvoiceIsReconcile && 'bg-primary/10 border-l-2 border-primary'
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium">{inv.invoiceNumber}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
+                                  <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="text-sm font-medium tabular-nums">{fmtAud(inv.totalCents)}</p>
+                                  <p className="text-xs text-muted-foreground">Paid via Stripe</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })()}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMatchInvoiceTarget(null)} disabled={matchingInvoice}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setMatchInvoiceTarget(null); setSelectedInvoiceIsReconcile(false) }} disabled={matchingInvoice}>Cancel</Button>
             <Button onClick={() => void handleMatchInvoice()} disabled={!selectedInvoiceId || matchingInvoice}>
-              {matchingInvoice && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Match Invoice
+              {matchingInvoice && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              {selectedInvoiceIsReconcile ? 'Reconcile Deposit' : 'Match Invoice'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -341,6 +341,9 @@ export async function PATCH(
 
     // If approving this video, unapprove all other versions of the SAME video
     if (approved) {
+      // Collect IDs of currently-approved sibling versions for analytics logging below.
+      // The actual unapprove write is deferred and executed atomically with the approve
+      // write further down to prevent a concurrent approval leaving two versions approved.
       const autoUnapproved = await prisma.video.findMany({
         where: {
           projectId: video.projectId,
@@ -351,18 +354,6 @@ export async function PATCH(
         select: { id: true },
       })
       autoUnapprovedIds = autoUnapproved.map((row) => row.id)
-
-      await prisma.video.updateMany({
-        where: {
-          projectId: video.projectId,
-          name: video.name, // Same video name
-          id: { not: id }, // But different version
-        },
-        data: {
-          approved: false,
-          approvedAt: null,
-        },
-      })
     }
 
     // Build update data object
@@ -719,10 +710,26 @@ export async function PATCH(
         }
       })
     } else {
-      await prisma.video.update({
-        where: { id },
-        data: updateData
-      })
+      // SECURITY: wrap unapprove-siblings + approve-target in a single transaction
+      // to prevent concurrent approvals leaving two versions marked approved.
+      if (approved && autoUnapprovedIds.length > 0) {
+        await prisma.$transaction([
+          prisma.video.updateMany({
+            where: {
+              projectId: video.projectId,
+              name: video.name,
+              id: { not: id },
+            },
+            data: { approved: false, approvedAt: null },
+          }),
+          prisma.video.update({ where: { id }, data: updateData }),
+        ])
+      } else {
+        await prisma.video.update({
+          where: { id },
+          data: updateData,
+        })
+      }
     }
 
     // Enqueue Dropbox upload job if we just enabled it

@@ -154,7 +154,7 @@ export default function MultiVideoUploadModal({
         if (existingKeys.has(key)) continue
 
         next.push({
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          id: `${Date.now()}-${crypto.randomUUID()}`,
           file,
           videoName: stripExtension(file.name),
           versionLabel: '',

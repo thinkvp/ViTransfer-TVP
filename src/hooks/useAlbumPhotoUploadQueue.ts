@@ -69,7 +69,7 @@ export function useAlbumPhotoUploadQueue({
       return `upload-${Date.now()}-${hex}`
     }
 
-    return `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return `upload-${Date.now()}-${crypto.randomUUID()}`
   }, [])
 
   const addToQueue = useCallback(

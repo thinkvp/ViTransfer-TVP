@@ -199,14 +199,13 @@ export default function InvoiceDetailPage() {
         setDueDate(inv.dueDate ?? '')
         setNotes(inv.notes)
         setTerms(inv.terms ?? s.defaultTerms)
-        setItems(
-          inv.items.map((it) => ({
-            ...it,
-            id: it.id || (globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`),
-            details: (it as any).details ?? '',
-            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
-          }))
-        )
+        const loadedItems = inv.items.map((it) => ({
+          ...it,
+          id: it.id || (globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`),
+          details: (it as any).details ?? '',
+          taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
+        }))
+        setItems(loadedItems)
 
         setEditingClient(!Boolean(inv.clientId))
         setEditingProject(!Boolean(inv.projectId))
@@ -219,11 +218,7 @@ export default function InvoiceDetailPage() {
           dueDate: inv.dueDate ?? '',
           notes: inv.notes,
           terms: inv.terms ?? s.defaultTerms,
-          items: inv.items.map((it) => ({
-            ...it,
-            details: (it as any).details ?? '',
-            taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, s.taxRatePercent),
-          })),
+          items: loadedItems,
         }))
       } catch {
         if (!cancelled) {

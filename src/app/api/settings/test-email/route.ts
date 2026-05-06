@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
 import { testEmailConnection } from '@/lib/email'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
 
@@ -22,6 +23,14 @@ export async function POST(request: NextRequest) {
 
     const forbiddenAction = requireActionAccess(authResult, 'sendTestEmail')
     if (forbiddenAction) return forbiddenAction
+
+    // SECURITY: Rate-limit to prevent email-bomb relay (5 per minute per IP)
+    const rateLimitResult = await rateLimit(
+      request,
+      { windowMs: 60 * 1000, maxRequests: 5, message: 'Too many test email requests. Please slow down.' },
+      'settings-test-email'
+    )
+    if (rateLimitResult) return rateLimitResult
 
     const { testEmail, smtpConfig } = await request.json()
 

@@ -72,8 +72,8 @@ export function useAssetUploadQueue({
       return `upload-${Date.now()}-${hex}`
     }
 
-    // Fallback: non-crypto randomness (should be rare)
-    return `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    // Fallback: use UUID (should be rare — crypto.randomUUID is available in all supported environments)
+    return `upload-${Date.now()}-${crypto.randomUUID()}`
   }, [])
 
   // Add file to queue

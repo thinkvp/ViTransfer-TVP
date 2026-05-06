@@ -604,7 +604,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   const addUpload = useCallback(
     (config: StartUploadConfig): string => {
-      const id = `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const id = `upload-${Date.now()}-${crypto.randomUUID()}`
 
       storeUploadMetadata(config.file, {
         videoId: config.videoId,

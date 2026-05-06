@@ -278,6 +278,25 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         buildVideoThumbnailStoragePath(canonicalProjectStoragePath, canonicalVideoFolderName, video.versionLabel),
       )
     }
+
+    // Third fallback: derive the thumbnail location directly from originalStoragePath's
+    // parent directory. The original video file and thumbnail always reside in the same
+    // version root folder, so this covers edge cases where thumbnailPath is null/stale
+    // AND the storageFolderName-based canonical path doesn't match the physical folder
+    // name on disk (e.g. due to Unicode path differences like en-dash vs hyphen, or a
+    // partial rename where folder names diverged from DB fields).
+    const rawOriginalPath = normalizeStoredReferencePath(video.originalStoragePath)
+    if (rawOriginalPath) {
+      try {
+        const originalRelPath = normalizeRelativeStoragePath(toStorageRelative(getFilePath(rawOriginalPath)))
+        const versionRoot = path.posix.dirname(originalRelPath)
+        if (versionRoot && versionRoot !== '.') {
+          exactFilePaths.add(path.posix.join(versionRoot, 'thumbnail.jpg'))
+        }
+      } catch {
+        // Ignore; the canonical check above will still cover this video's thumbnail
+      }
+    }
   }
 
   for (const videoAsset of videoAssets) addResolvedFilePath(exactFilePaths, videoAsset.storagePath)

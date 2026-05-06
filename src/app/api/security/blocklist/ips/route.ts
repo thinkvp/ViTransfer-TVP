@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import { invalidateBlocklistCache, logSecurityEvent } from '@/lib/video-access'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getClientIpAddress } from '@/lib/utils'
+import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,9 @@ export async function GET(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'viewSecurityBlocklists')
   if (forbiddenAction) return forbiddenAction
+
+  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 60 }, 'security-blocklist-ips-read')
+  if (rateLimitResult) return rateLimitResult
 
   try {
     const blockedIPs = await prisma.blockedIP.findMany({
@@ -64,6 +68,9 @@ export async function POST(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'manageSecurityBlocklists')
   if (forbiddenAction) return forbiddenAction
+
+  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 30 }, 'security-blocklist-ips-write')
+  if (rateLimitResult) return rateLimitResult
 
   try {
     const body = await request.json()
@@ -153,6 +160,9 @@ export async function DELETE(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'manageSecurityBlocklists')
   if (forbiddenAction) return forbiddenAction
+
+  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 30 }, 'security-blocklist-ips-write')
+  if (rateLimitResult) return rateLimitResult
 
   try {
     const body = await request.json()

@@ -11,10 +11,16 @@ export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
   invoiceId: z.string().trim().min(1),
+  // When true, the invoice may already be PAID (via Stripe) and the bank deposit is being
+  // reconciled against it. The resulting SalesPayment will have excludeFromInvoiceBalance=true
+  // so it does not double-count revenue or alter the invoice balance/status.
+  reconcile: z.boolean().optional(),
 })
 
 // POST /api/admin/accounting/transactions/[id]/match-invoice
 // Matches a bank deposit to an open invoice by creating a SalesPayment and linking it.
+// When reconcile=true, also accepts PAID invoices (e.g. already paid via Stripe) and creates
+// an informational-only payment that won't affect invoice balance or sales totals.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenu(request, 'accounting')
   if (authResult instanceof Response) return authResult
@@ -42,33 +48,53 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const parsed = bodySchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 })
 
-  const invoice = await prisma.salesInvoice.findUnique({ where: { id: parsed.data.invoiceId } })
-  if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
-  if (!['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(invoice.status)) {
-    return NextResponse.json({ error: `Invoice status is ${invoice.status} — only open invoices can be matched` }, { status: 409 })
-  }
+  const { invoiceId, reconcile } = parsed.data
 
-  const invoiceBalance = await recomputeInvoiceStoredStatus(prisma as any, invoice.id, { createdByUserId: authResult.id })
-  if (invoiceBalance && invoiceBalance.totalCents > 0 && invoiceBalance.paidCents >= invoiceBalance.totalCents) {
-    return NextResponse.json({ error: 'Invoice is already fully paid' }, { status: 409 })
+  const invoice = await prisma.salesInvoice.findUnique({ where: { id: invoiceId } })
+  if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+
+  if (reconcile) {
+    // Reconcile mode: only PAID invoices are valid targets (the invoice was already settled via Stripe)
+    if (invoice.status !== 'PAID') {
+      return NextResponse.json({ error: `Invoice status is ${invoice.status} — reconcile mode only applies to fully paid invoices` }, { status: 409 })
+    }
+  } else {
+    // Normal mode: only open/unpaid invoices
+    if (!['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(invoice.status)) {
+      return NextResponse.json({ error: `Invoice status is ${invoice.status} — only open invoices can be matched` }, { status: 409 })
+    }
+
+    const invoiceBalance = await recomputeInvoiceStoredStatus(prisma as any, invoice.id, { createdByUserId: authResult.id })
+    if (invoiceBalance && invoiceBalance.totalCents > 0 && invoiceBalance.paidCents >= invoiceBalance.totalCents) {
+      return NextResponse.json({ error: 'Invoice is already fully paid' }, { status: 409 })
+    }
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Create a payment record for the full bank transaction amount
+    const reference = reconcile
+      ? `Bank reconciliation: ${txn.description ?? ''}`.trimEnd()
+      : (txn.description ?? '')
+
+    // Create a payment record for the full bank transaction amount.
+    // In reconcile mode, excludeFromInvoiceBalance=true prevents double-counting revenue.
     const payment = await tx.salesPayment.create({
       data: {
         source: 'MANUAL',
         paymentDate: txn.date,
         amountCents: txn.amountCents,
         method: 'Bank Transfer',
-        reference: txn.description ?? '',
+        reference,
         clientId: invoice.clientId,
         invoiceId: invoice.id,
+        ...(reconcile ? { excludeFromInvoiceBalance: true } : {}),
       } as any,
     })
 
-    // Recompute invoice status (may flip to PAID / PARTIALLY_PAID)
-    await recomputeInvoiceStoredStatus(tx as any, invoice.id, { createdByUserId: authResult.id })
+    // Only recompute invoice status for normal (non-reconcile) matches, since reconcile
+    // mode must not change a PAID invoice's status.
+    if (!reconcile) {
+      await recomputeInvoiceStoredStatus(tx as any, invoice.id, { createdByUserId: authResult.id })
+    }
 
     // Match the bank transaction to the payment
     const updatedTxn = await tx.bankTransaction.update({

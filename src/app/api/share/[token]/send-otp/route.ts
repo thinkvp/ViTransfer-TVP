@@ -13,6 +13,7 @@ import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { isSmtpConfigured } from '@/lib/email'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { rateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -22,6 +23,15 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
+    // SECURITY: Per-IP cap applied to ALL requests (including non-recipients) to prevent
+    // using this endpoint as a notification-flood vector by cycling through random emails.
+    const ipRateLimitResult = await rateLimit(
+      request,
+      { windowMs: 15 * 60 * 1000, maxRequests: 10, message: 'Too many requests. Please try again later.' },
+      'share-send-otp-ip'
+    )
+    if (ipRateLimitResult) return ipRateLimitResult
+
     const { token } = await params
     const body = await request.json()
     const { email } = body
