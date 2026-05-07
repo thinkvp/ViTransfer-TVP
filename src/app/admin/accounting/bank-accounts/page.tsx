@@ -1423,11 +1423,11 @@ export default function BankAccountsPage() {
 
       {/* Match Invoice Dialog */}
       <Dialog open={!!matchInvoiceTarget} onOpenChange={open => { if (!open && !matchingInvoice) { setMatchInvoiceTarget(null); setSelectedInvoiceIsReconcile(false) } }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl flex flex-col max-h-[85vh]">
           <DialogHeader>
             <DialogTitle>Match to Invoice — {matchInvoiceTarget ? fmtAmt(matchInvoiceTarget.amountCents) : ''}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 overflow-y-auto overflow-x-hidden min-h-0 flex-1">
             <Input
               placeholder="Search by invoice number, client, or project..."
               value={invoiceSearch}
@@ -1447,7 +1447,7 @@ export default function BankAccountsPage() {
                   ) : (
                     <>
                       {regularInvoices.length > 0 && (
-                        <div className="max-h-60 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                        <div className="border border-border rounded-md divide-y divide-border">
                           {regularInvoices.map(inv => {
                             const total = inv.totalCents
                             const remaining = inv.outstandingBalanceCents
@@ -1487,7 +1487,7 @@ export default function BankAccountsPage() {
                             <div className="flex-1 h-px bg-border" />
                           </div>
                           <p className="text-xs text-muted-foreground">These invoices were already paid via Stripe. Matching will link the bank deposit for reconciliation only — it won&apos;t change the invoice or affect revenue totals.</p>
-                          <div className="max-h-48 overflow-y-auto border border-border rounded-md divide-y divide-border">
+                          <div className="border border-border rounded-md divide-y divide-border">
                             {stripeInvoices.map(inv => (
                               <button key={inv.id} type="button"
                                 onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(true) }}

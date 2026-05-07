@@ -28,6 +28,8 @@ export interface PushNotificationPayload {
     | 'QUICKBOOKS_DAILY_PULL_FAILURE'
     | 'ORPHAN_PROJECT_FILES_SCAN'
     | 'DROPBOX_STORAGE_INCONSISTENCY'
+    | 'VEHICLE_ODOMETER_REMINDER'
+    | 'BAS_DUE_REMINDER'
   projectId?: string
   projectName?: string
   kanbanCardId?: string

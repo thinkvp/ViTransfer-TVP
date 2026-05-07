@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
 
@@ -48,6 +48,8 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const fullPath = searchParams?.toString() ? `${pathname}?${searchParams.toString()}` : (pathname || '/')
 
   async function checkAuth() {
     try {
@@ -85,9 +87,9 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
 
   useEffect(() => {
     if (requireAuth && !loading && !user) {
-      router.push(`/login?returnUrl=${encodeURIComponent(pathname || '/')}`)
+      router.push(`/login?returnUrl=${encodeURIComponent(fullPath)}`)
     }
-  }, [requireAuth, loading, user, pathname, router])
+  }, [requireAuth, loading, user, fullPath, router])
 
   async function refreshWithToken(refreshToken: string) {
     try {
@@ -215,7 +217,7 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
   }
 
   function login() {
-    router.push(`/login?returnUrl=${encodeURIComponent(pathname || '/')}`)
+    router.push(`/login?returnUrl=${encodeURIComponent(fullPath)}`)
   }
 
   // SECURITY: Show loading state while checking auth OR when unauthenticated (before redirect)

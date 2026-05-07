@@ -1,4 +1,4 @@
-import type { Account, AccountingAttachment, Expense, BankAccount, BankImportBatch, BankTransaction, BasPeriod, JournalEntry, SplitLine } from './types'
+import type { Account, AccountingAttachment, Expense, BankAccount, BankImportBatch, BankTransaction, BasPeriod, JournalEntry, SplitLine, Vehicle, VehicleLogbook, VehicleTrip, VehicleYearlyOdometer } from './types'
 
 export function accountingAttachmentFromDb(row: any): AccountingAttachment {
   return {
@@ -185,6 +185,97 @@ export function basPeriodFromDb(row: any): BasPeriod {
     paymentPaygAccountId: row.paymentPaygAccountId ?? null,
     bankTransactionId: row.bankTransaction?.id ?? null,
     attachments: row.accountingAttachments ? row.accountingAttachments.map((a: any) => accountingAttachmentFromDb(a)) : [],
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+  }
+}
+
+// ── Vehicle / Logbook mappers ────────────────────────────────────────────────
+
+export function vehicleTripFromDb(row: any): VehicleTrip {
+  return {
+    id: row.id,
+    logbookId: row.logbookId,
+    date: row.date,
+    tripType: row.tripType,
+    purpose: row.purpose,
+    odometerStart: row.odometerStart != null ? Number(row.odometerStart) : null,
+    odometerEnd: row.odometerEnd != null ? Number(row.odometerEnd) : null,
+    distanceKm: Number(row.distanceKm),
+    notes: row.notes ?? null,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+  }
+}
+
+export function vehicleLogbookFromDb(row: any): VehicleLogbook {
+  // Compute business-use stats from trip aggregates when available
+  const trips: Array<{ tripType: string; distanceKm: number }> = row.trips ?? []
+  const businessKm = trips.filter(t => t.tripType === 'BUSINESS').reduce((s, t) => s + Number(t.distanceKm), 0)
+  const privateKm = trips.filter(t => t.tripType === 'PRIVATE').reduce((s, t) => s + Number(t.distanceKm), 0)
+  const totalKm = businessKm + privateKm
+  const computedPercent = totalKm > 0 ? Math.round((businessKm / totalKm) * 10000) / 100 : 0
+
+  const tripDates = trips.map(t => (t as any).date as string).filter(Boolean).sort()
+  const lastTripDate = tripDates.length > 0 ? tripDates[tripDates.length - 1] : null
+
+  const startMs = new Date(row.startDate).getTime()
+  const nowMs = Date.now()
+  const daysElapsed = Math.max(0, Math.floor((nowMs - startMs) / 86400000))
+
+  return {
+    id: row.id,
+    vehicleId: row.vehicleId,
+    label: row.label,
+    startDate: row.startDate,
+    endDate: row.endDate ?? null,
+    odometerStart: Number(row.odometerStart),
+    odometerEnd: row.odometerEnd != null ? Number(row.odometerEnd) : null,
+    status: row.status,
+    businessUsePercentOverride: row.businessUsePercentOverride != null ? Number(row.businessUsePercentOverride) : null,
+    notes: row.notes ?? null,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+    totalKm,
+    businessKm,
+    privateKm,
+    businessUsePercent: row.businessUsePercentOverride != null ? Number(row.businessUsePercentOverride) : computedPercent,
+    tripCount: row._count?.trips ?? trips.length,
+    lastTripDate,
+    daysElapsed,
+  }
+}
+
+export function vehicleFromDb(row: any): Vehicle {
+  return {
+    id: row.id,
+    make: row.make,
+    model: row.model,
+    year: row.year != null ? Number(row.year) : null,
+    engineCapacityCc: row.engineCapacityCc != null ? Number(row.engineCapacityCc) : null,
+    registrationNumber: row.registrationNumber,
+    colour: row.colour ?? null,
+    notes: row.notes ?? null,
+    isActive: Boolean(row.isActive),
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+    logbooks: row.logbooks ? row.logbooks.map((l: any) => vehicleLogbookFromDb(l)) : undefined,
+    activeLogbook: row.logbooks
+      ? (row.logbooks.find((l: any) => l.status === 'ACTIVE')
+          ? vehicleLogbookFromDb(row.logbooks.find((l: any) => l.status === 'ACTIVE'))
+          : null)
+      : undefined,
+  }
+}
+
+export function vehicleYearlyOdometerFromDb(row: any): VehicleYearlyOdometer {
+  return {
+    id: row.id,
+    vehicleId: row.vehicleId,
+    financialYear: row.financialYear,
+    odometerStart: Number(row.odometerStart),
+    odometerEnd: row.odometerEnd != null ? Number(row.odometerEnd) : null,
+    notes: row.notes ?? null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
   }

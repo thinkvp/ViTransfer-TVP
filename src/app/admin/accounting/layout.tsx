@@ -10,6 +10,7 @@ const NAV = [
   { href: '/admin/accounting/chart-of-accounts', label: 'Chart of Accounts', exact: false },
   { href: '/admin/accounting/bas', label: 'BAS / GST', exact: false },
   { href: '/admin/accounting/reports', label: 'Reports', exact: false },
+  { href: '/admin/accounting/vehicles', label: 'Vehicles', exact: false },
   { href: '/admin/accounting/settings', label: 'Settings', exact: false },
 ] as const
 

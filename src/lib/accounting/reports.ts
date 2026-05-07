@@ -595,6 +595,12 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
       (account) => account.name.toLowerCase() === 'gst payable',
     ])
 
+  const paygPayableAccount = liabilityAccounts.find((account) => account.id === accountingSettings?.basPaygAccountId)
+    ?? findPreferredBalanceSheetAccount(liabilityAccounts, [
+      (account) => account.code === '2-3000',
+      (account) => account.name.toLowerCase().includes('payg income tax'),
+    ])
+
   const retainedEarningsAccount = findPreferredBalanceSheetAccount(equityAccounts, [
     (account) => account.code === '3-1000',
     (account) => account.subType === 'Retained Earnings',
@@ -684,7 +690,11 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
       where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, taxCode: 'GST' },
       select: { gstAmount: true },
     }),
-    buildPostedBalanceSheetLines(liabilityAccounts, asOf),
+    buildPostedBalanceSheetLines(
+      liabilityAccounts,
+      asOf,
+      new Set([gstPayableAccount?.id, paygPayableAccount?.id].filter((id): id is string => Boolean(id)))
+    ),
     buildPostedBalanceSheetLines(equityAccounts, asOf),
   ])
 
@@ -717,6 +727,31 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   }
 
   const netGstCents = gstCollectedCents - gstCreditsCents + basGstPaymentsCents
+
+  // PAYG Income Tax Instalment liability: sum of T7 amounts on lodged BAS periods minus payments made
+  let netPaygCents = 0
+  const effectivePaygAccountId = paygPayableAccount?.id
+  if (effectivePaygAccountId) {
+    const [lodgedPeriods, paygSplits, paygJournals] = await Promise.all([
+      prisma.basPeriod.findMany({
+        where: { status: 'LODGED', endDate: { lte: asOf }, paygInstalmentCents: { not: null } },
+        select: { paygInstalmentCents: true },
+      }),
+      prisma.splitLine.aggregate({
+        where: { accountId: effectivePaygAccountId, bankTransaction: { date: { lte: asOf }, status: 'MATCHED' } },
+        _sum: { amountCents: true },
+      }),
+      prisma.journalEntry.aggregate({
+        where: { accountId: effectivePaygAccountId, date: { lte: asOf } },
+        _sum: { amountCents: true },
+      }),
+    ])
+    // Instalments are positive (liability owed); split/journal payments are negative (reduce the liability)
+    const paygIncurredCents = lodgedPeriods.reduce((s, p) => s + (p.paygInstalmentCents ?? 0), 0)
+    const paygPaymentsCents = (paygSplits._sum.amountCents ?? 0) + (paygJournals._sum.amountCents ?? 0)
+    netPaygCents = paygIncurredCents + paygPaymentsCents
+  }
+
   const liabilityLines = mergeReportLines(
     postedLiabilityLines,
     apCents !== 0 ? [{
@@ -730,6 +765,12 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
       code: gstPayableAccount?.code ?? '',
       name: netGstCents < 0 ? 'GST Receivable' : (gstPayableAccount?.name ?? 'GST Payable'),
       amountCents: netGstCents,
+    }] : [],
+    netPaygCents !== 0 ? [{
+      accountId: paygPayableAccount?.id ?? 'payg_payable',
+      code: paygPayableAccount?.code ?? '',
+      name: paygPayableAccount?.name ?? 'PAYG Income Tax Instalment',
+      amountCents: netPaygCents,
     }] : []
   )
 

@@ -35,6 +35,7 @@ import { runDropboxStorageConsistencyScanAndSyncNotification } from '@/lib/dropb
 import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
+import { processAccountingReminders } from '@/lib/accounting-reminders'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -393,6 +394,7 @@ async function main() {
       if (job.name === 'dropbox-storage-consistency-scan') return true
       if (job.name === 'orphan-project-files-scan') return true
       if (job.name === 'notification-log-cleanup') return true
+      if (job.name === 'accounting-reminders') return true
       return false
     })
 
@@ -569,6 +571,20 @@ async function main() {
     }
   )
 
+  // Accounting reminders — vehicle odometer (1 Jul) and BAS due dates (daily @ 08:30)
+  await notificationQueue.add(
+    'accounting-reminders',
+    {},
+    {
+      repeat: {
+        pattern: '30 8 * * *',
+      },
+      jobId: 'accounting-reminders',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Add repeatable daily job to pull QuickBooks data (if enabled)
   // Note: Schedule is configurable via Sales > Settings > QuickBooks.
   // Runs at the configured HH:MM server/container time (see TZ env var).
@@ -726,6 +742,15 @@ async function main() {
           }
         } catch (e) {
           console.error('[NOTIF-CLEANUP] Notification log cleanup failed:', e instanceof Error ? e.message : e)
+        }
+        return
+      }
+
+      if (job.name === 'accounting-reminders') {
+        try {
+          await processAccountingReminders(new Date())
+        } catch (e) {
+          console.error('[ACCOUNTING] Accounting reminders failed:', e instanceof Error ? e.message : e)
         }
         return
       }

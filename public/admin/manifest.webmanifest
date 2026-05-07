@@ -31,5 +31,21 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add Trip",
+      "short_name": "Add Trip",
+      "description": "Record a new vehicle trip",
+      "url": "/admin/accounting/vehicles?addTrip=1",
+      "icons": [{ "src": "/admin/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "New Expense",
+      "short_name": "New Expense",
+      "description": "Record a new expense",
+      "url": "/admin/accounting/expenses/new",
+      "icons": [{ "src": "/admin/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
   ]
 }

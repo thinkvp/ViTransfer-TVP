@@ -385,3 +385,81 @@ export interface SplitLine {
   taxCode: AccountTaxCode
   createdAt: string
 }
+
+// ── Vehicles / Logbook ──────────────────────────────────────────────────────
+
+export type VehicleLogbookStatus = 'ACTIVE' | 'CLOSED'
+export type VehicleTripType = 'BUSINESS' | 'PRIVATE'
+
+export interface Vehicle {
+  id: string
+  make: string
+  model: string
+  year: number | null
+  engineCapacityCc: number | null
+  registrationNumber: string
+  colour: string | null
+  notes: string | null
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+  // Populated joins
+  logbooks?: VehicleLogbook[]
+  activeLogbook?: VehicleLogbook | null
+}
+
+export interface VehicleLogbook {
+  id: string
+  vehicleId: string
+  label: string
+  startDate: string
+  endDate: string | null
+  odometerStart: number
+  odometerEnd: number | null
+  status: VehicleLogbookStatus
+  /** Manually overridden business-use % (0–100). Null = compute live from trips. */
+  businessUsePercentOverride: number | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+  // Computed fields — populated by API
+  totalKm: number
+  businessKm: number
+  privateKm: number
+  businessUsePercent: number
+  tripCount: number
+  /** ISO date of most recent trip */
+  lastTripDate: string | null
+  /** Days elapsed since logbook started (capped at today) */
+  daysElapsed: number
+}
+
+export interface VehicleTrip {
+  id: string
+  logbookId: string
+  date: string
+  tripType: VehicleTripType
+  purpose: string
+  odometerStart: number | null
+  odometerEnd: number | null
+  distanceKm: number
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VehicleYearlyOdometer {
+  id: string
+  vehicleId: string
+  financialYear: string
+  odometerStart: number
+  odometerEnd: number | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export const TRIP_PURPOSE_PRESETS = [
+  'Filming',
+  'Meeting',
+] as const

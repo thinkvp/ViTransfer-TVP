@@ -2047,6 +2047,106 @@ enum BasPeriodStatus {
   LODGED
 }
 
+enum VehicleLogbookStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum VehicleTripType {
+  BUSINESS
+  PRIVATE
+}
+
+/// A business vehicle used for the ATO logbook method.
+model Vehicle {
+  id                  String   @id @default(cuid())
+  make                String   @db.VarChar(100)
+  model               String   @db.VarChar(100)
+  year                Int?
+  engineCapacityCc    Int?                             // Engine capacity in cubic centimetres
+  registrationNumber  String   @db.VarChar(30)
+  colour              String?  @db.VarChar(60)
+  notes               String?  @db.Text
+  isActive            Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logbooks        VehicleLogbook[]
+  yearlyOdometers VehicleYearlyOdometer[]
+
+  @@index([isActive])
+}
+
+/// A logbook period for a vehicle — must cover at least 12 continuous weeks; valid for 5 years.
+model VehicleLogbook {
+  id            String               @id @default(cuid())
+  vehicleId     String
+  vehicle       Vehicle              @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  label         String               @db.VarChar(200)   // e.g. "Logbook 2025–26"
+  startDate     String                                  // YYYY-MM-DD
+  endDate       String?                                 // YYYY-MM-DD — set when closed
+  odometerStart Int                                     // km at logbook start
+  odometerEnd   Int?                                    // km at logbook close
+  status        VehicleLogbookStatus @default(ACTIVE)
+
+  /// Manually overridden business-use percentage once logbook is finalised (0–100).
+  /// When null, percentage is computed live from trip records.
+  businessUsePercentOverride Float?
+
+  notes         String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trips VehicleTrip[]
+
+  @@index([vehicleId])
+  @@index([status])
+  @@index([startDate])
+}
+
+/// A single trip entry in a vehicle logbook.
+model VehicleTrip {
+  id          String          @id @default(cuid())
+  logbookId   String
+  logbook     VehicleLogbook  @relation(fields: [logbookId], references: [id], onDelete: Cascade)
+
+  date            String          // YYYY-MM-DD
+  tripType        VehicleTripType
+  purpose         String          @db.VarChar(500)   // Business reason or "Private"
+  odometerStart   Int?                               // km at trip start (optional — use distanceKm instead)
+  odometerEnd     Int?                               // km at trip end
+  distanceKm      Float                              // Kilometres travelled — computed from odometer when both are provided
+  notes           String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([logbookId])
+  @@index([date])
+  @@index([tripType])
+}
+
+/// Annual odometer readings required by the ATO for each income year a logbook is relied on.
+model VehicleYearlyOdometer {
+  id            String   @id @default(cuid())
+  vehicleId     String
+  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  financialYear String   @db.VarChar(20)   // e.g. "FY2026"
+  odometerStart Int                        // km at 1 July (or fiscal year start)
+  odometerEnd   Int?                       // km at 30 June (or fiscal year end) — set at year close
+  notes         String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([vehicleId, financialYear])
+  @@index([vehicleId])
+}
+
 /// Chart of Accounts — the master list of account codes used across expenses, reports, and BAS.
 model Account {
   id          String          @id @default(cuid())

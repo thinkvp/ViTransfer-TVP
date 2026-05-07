@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2 } from 'lucide-react'
+import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2, Car } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -35,6 +35,7 @@ const ACCOUNTING_SUBMENU = [
   { href: '/admin/accounting/chart-of-accounts', label: 'Chart of Accounts', icon: ListOrdered },
   { href: '/admin/accounting/bas', label: 'BAS / GST', icon: FileText },
   { href: '/admin/accounting/reports', label: 'Reports', icon: BarChart2 },
+  { href: '/admin/accounting/vehicles', label: 'Vehicles', icon: Car },
   { href: '/admin/accounting/settings', label: 'Settings', icon: Settings },
 ]
 

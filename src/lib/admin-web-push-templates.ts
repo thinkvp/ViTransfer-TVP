@@ -286,6 +286,24 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
       return { title, body: body || payload.message, url }
     }
 
+    case 'VEHICLE_ODOMETER_REMINDER': {
+      const fy = getDetail(payload.details, ['financialYear'])
+      const title = 'Annual Odometer Reading required'
+      const body = fy ? `Record opening odometer for ${fy} on the Vehicles page.` : payload.message
+      return { title, body, url: '/admin/accounting/vehicles' }
+    }
+
+    case 'BAS_DUE_REMINDER': {
+      const period = getDetail(payload.details, ['Period'])
+      const due = getDetail(payload.details, ['Due date', 'dueDate'])
+      const title = 'BAS due soon'
+      const body = joinParts([
+        period ? `Period: ${period}` : null,
+        due ? `Due: ${due}` : null,
+      ])
+      return { title, body: body || payload.message, url: '/admin/accounting/bas' }
+    }
+
     default: {
       // Fallback to the caller-provided copy.
       const title = asNonEmptyString(payload.title) || 'ViTransfer'

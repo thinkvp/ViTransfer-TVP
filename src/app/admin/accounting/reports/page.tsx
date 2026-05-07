@@ -10,8 +10,8 @@ import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/a
 import type { PdfSection, PdfRow } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
 import Link from 'next/link'
-import { BarChart2, Scale, Printer, FileText, Users } from 'lucide-react'
-import type { ProfitLossReport, BalanceSheetReport, ProfitLossSection, BalanceSheetSection, AccountingSettings, TrialBalanceReport, TrialBalanceRow, AgedReceivablesReport, AgedReceivablesRow } from '@/lib/accounting/types'
+import { BarChart2, Scale } from 'lucide-react'
+import type { ProfitLossReport, BalanceSheetReport, ProfitLossSection, BalanceSheetSection, AccountingSettings } from '@/lib/accounting/types'
 import { cn } from '@/lib/utils'
 
 function fmtAud(cents: number) {
@@ -20,7 +20,7 @@ function fmtAud(cents: number) {
 }
 
 export default function ReportsPage() {
-  const [tab, setTab] = useState<'pl' | 'bs' | 'tb' | 'ar'>('pl')
+  const [tab, setTab] = useState<'pl' | 'bs'>('pl')
 
   // P&L state
   const { from: defFrom, to: defTo } = getThisFinancialYearDates()
@@ -35,16 +35,6 @@ export default function ReportsPage() {
   const [bsAsOf, setBsAsOf] = useState(new Date().toISOString().slice(0, 10))
   const [bsReport, setBsReport] = useState<BalanceSheetReport | null>(null)
   const [bsLoading, setBsLoading] = useState(false)
-
-  // Trial Balance state
-  const [tbAsOf, setTbAsOf] = useState(new Date().toISOString().slice(0, 10))
-  const [tbReport, setTbReport] = useState<TrialBalanceReport | null>(null)
-  const [tbLoading, setTbLoading] = useState(false)
-
-  // Aged Receivables state
-  const [arAsOf, setArAsOf] = useState(new Date().toISOString().slice(0, 10))
-  const [arReport, setArReport] = useState<AgedReceivablesReport | null>(null)
-  const [arLoading, setArLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -81,24 +71,6 @@ export default function ReportsPage() {
       const res = await apiFetch(`/api/admin/accounting/reports/balance-sheet?asOf=${bsAsOf}`)
       if (res.ok) { const d = await res.json(); setBsReport(d.report) }
     } finally { setBsLoading(false) }
-  }
-
-  async function runTB() {
-    setTbLoading(true)
-    setTbReport(null)
-    try {
-      const res = await apiFetch(`/api/admin/accounting/reports/trial-balance?asOf=${tbAsOf}`)
-      if (res.ok) { const d = await res.json(); setTbReport(d.report) }
-    } finally { setTbLoading(false) }
-  }
-
-  async function runAR() {
-    setArLoading(true)
-    setArReport(null)
-    try {
-      const res = await apiFetch(`/api/admin/accounting/reports/aged-receivables?asOf=${arAsOf}`)
-      if (res.ok) { const d = await res.json(); setArReport(d.report) }
-    } finally { setArLoading(false) }
   }
 
   return (
@@ -138,14 +110,6 @@ export default function ReportsPage() {
               bsReport.equity.forEach(l => rows.push(['', l.label, (l.amountCents / 100).toFixed(2)]))
               rows.push(['Total Equity', '', (bsReport.totalEquityCents / 100).toFixed(2)])
               downloadCsv('balance-sheet.csv', ['Section', 'Account', 'Amount'], rows)
-            } else if (tab === 'tb' && tbReport) {
-              downloadCsv('trial-balance.csv', ['Code', 'Account', 'Type', 'Debit', 'Credit'],
-                tbReport.rows.map(r => [r.code, r.name, r.type, (r.debitCents / 100).toFixed(2), (r.creditCents / 100).toFixed(2)])
-                  .concat([['', 'TOTAL', '', (tbReport.totalDebitCents / 100).toFixed(2), (tbReport.totalCreditCents / 100).toFixed(2)]])
-              )
-            } else if (tab === 'ar' && arReport) {
-              downloadCsv('aged-receivables.csv', ['Client', 'Invoice', 'Issue Date', 'Due Date', 'Total', 'Paid', 'Outstanding', 'Aging'],
-                arReport.rows.map(r => [r.clientName, r.invoiceNumber, r.issueDate, r.dueDate ?? '', (r.totalCents / 100).toFixed(2), (r.paidCents / 100).toFixed(2), (r.outstandingCents / 100).toFixed(2), r.agingBucket === 'current' ? 'Current' : `${r.agingBucket}+ days`]))
             }
           }}
           onExportPdf={() => {
@@ -197,49 +161,9 @@ export default function ReportsPage() {
                 { columns: bsCols, rows: [{ cells: ['Net Assets', fmtAud(bsReport.totalAssetsCents - bsReport.totalLiabilitiesCents)], bold: true, doubleSeparator: true }] },
               ]
               generateReportPdf({ title: 'Balance Sheet', subtitle: `As at ${bsReport.asAt}`, sections })
-            } else if (tab === 'tb' && tbReport) {
-              const tbCols = [
-                { header: 'Code', nowrap: true },
-                { header: 'Account' },
-                { header: 'Type', nowrap: true },
-                { header: 'Debit', align: 'right' as const, nowrap: true },
-                { header: 'Credit', align: 'right' as const, nowrap: true },
-              ]
-              const rows: PdfRow[] = tbReport.rows.map(r => ({
-                cells: [r.code, r.name, r.type, r.debitCents > 0 ? fmtAud(r.debitCents) : '', r.creditCents > 0 ? fmtAud(r.creditCents) : ''],
-              }))
-              rows.push({ cells: ['', 'Total', '', fmtAud(tbReport.totalDebitCents), fmtAud(tbReport.totalCreditCents)], bold: true, doubleSeparator: true })
-              generateReportPdf({ title: 'Trial Balance', subtitle: `As at ${tbReport.asAt}`, sections: [{ columns: tbCols, rows }] })
-            } else if (tab === 'ar' && arReport) {
-              const summarySection: PdfSection = {
-                title: 'Summary',
-                columns: [{ header: 'Aging Bucket' }, { header: 'Amount', align: 'right' as const, nowrap: true }],
-                rows: [
-                  { cells: ['Current', fmtAud(arReport.currentCents)] },
-                  { cells: ['31–60 days', fmtAud(arReport.over30Cents)] },
-                  { cells: ['61–90 days', fmtAud(arReport.over60Cents)] },
-                  { cells: ['90+ days', fmtAud(arReport.over90Cents)] },
-                  { cells: ['Total Outstanding', fmtAud(arReport.totalOutstandingCents)], bold: true, separator: true },
-                ],
-              }
-              const detailCols = [
-                { header: 'Client' },
-                { header: 'Invoice', nowrap: true },
-                { header: 'Issue Date', nowrap: true },
-                { header: 'Due Date', nowrap: true },
-                { header: 'Total', align: 'right' as const, nowrap: true },
-                { header: 'Paid', align: 'right' as const, nowrap: true },
-                { header: 'Outstanding', align: 'right' as const, nowrap: true },
-                { header: 'Aging', nowrap: true },
-              ]
-              const detailRows: PdfRow[] = arReport.rows.map(r => ({
-                cells: [r.clientName, r.invoiceNumber, r.issueDate, r.dueDate ?? '—', fmtAud(r.totalCents), fmtAud(r.paidCents), fmtAud(r.outstandingCents), r.agingBucket === 'current' ? 'Current' : `${r.agingBucket}+ days`],
-              }))
-              detailRows.push({ cells: ['', '', '', '', '', 'Total Outstanding', fmtAud(arReport.totalOutstandingCents), ''], bold: true, doubleSeparator: true })
-              generateReportPdf({ title: 'Aged Receivables', subtitle: `As at ${arReport.asAt}`, sections: [summarySection, { title: 'Detail', columns: detailCols, rows: detailRows }] })
             }
           }}
-          disabled={tab === 'pl' ? !plReport : tab === 'bs' ? !bsReport : tab === 'tb' ? !tbReport : !arReport}
+          disabled={tab === 'pl' ? !plReport : !bsReport}
         />
       </div>
 
@@ -250,12 +174,6 @@ export default function ReportsPage() {
         </Button>
         <Button variant={tab === 'bs' ? 'default' : 'outline'} onClick={() => setTab('bs')}>
           <Scale className="w-4 h-4 mr-1.5" />Balance Sheet
-        </Button>
-        <Button variant={tab === 'tb' ? 'default' : 'outline'} onClick={() => setTab('tb')}>
-          <FileText className="w-4 h-4 mr-1.5" />Trial Balance
-        </Button>
-        <Button variant={tab === 'ar' ? 'default' : 'outline'} onClick={() => setTab('ar')}>
-          <Users className="w-4 h-4 mr-1.5" />Aged Receivables
         </Button>
       </div>
 
@@ -353,166 +271,6 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Trial Balance */}
-      {tab === 'tb' && (
-        <div className="space-y-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="space-y-1">
-                  <Label>As At</Label>
-                  <Input type="date" value={tbAsOf} onChange={e => setTbAsOf(e.target.value)} className="h-9 w-36" />
-                </div>
-                <Button onClick={runTB} disabled={tbLoading || !tbAsOf} className="self-end">
-                  {tbLoading ? 'Running…' : 'Run Report'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {tbReport && (
-            <Card className="print:shadow-none">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Trial Balance — As at {tbReport.asAt}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="border border-border rounded-md overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/40">
-                      <tr className="border-b border-border">
-                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Code</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Account</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Type</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Debit</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Credit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tbReport.rows.map((r) => (
-                        <tr key={r.accountId} className="border-b border-border last:border-0 hover:bg-muted/30">
-                          <td className="px-3 py-1.5 font-mono text-xs">{r.code}</td>
-                          <td className="px-3 py-1.5">{r.name}</td>
-                          <td className="px-3 py-1.5 text-muted-foreground text-xs">{r.type}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{r.debitCents > 0 ? fmtAud(r.debitCents) : ''}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{r.creditCents > 0 ? fmtAud(r.creditCents) : ''}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-muted/40 font-bold">
-                      <tr className="border-t-2 border-border">
-                        <td className="px-3 py-2" colSpan={3}>Total</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtAud(tbReport.totalDebitCents)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtAud(tbReport.totalCreditCents)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-                {tbReport.totalDebitCents !== tbReport.totalCreditCents && (
-                  <p className="mt-2 text-sm text-red-600 dark:text-red-400 font-medium">
-                    ⚠ Debits and credits are not balanced (difference: {fmtAud(Math.abs(tbReport.totalDebitCents - tbReport.totalCreditCents))})
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Aged Receivables */}
-      {tab === 'ar' && (
-        <div className="space-y-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="space-y-1">
-                  <Label>As At</Label>
-                  <Input type="date" value={arAsOf} onChange={e => setArAsOf(e.target.value)} className="h-9 w-36" />
-                </div>
-                <Button onClick={runAR} disabled={arLoading || !arAsOf} className="self-end">
-                  {arLoading ? 'Running…' : 'Run Report'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {arReport && (
-            <Card className="print:shadow-none">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Aged Receivables — As at {arReport.asAt}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {/* Summary buckets */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
-                  {([
-                    { label: 'Current', cents: arReport.currentCents },
-                    { label: '31–60 days', cents: arReport.over30Cents },
-                    { label: '61–90 days', cents: arReport.over60Cents },
-                    { label: '90+ days', cents: arReport.over90Cents },
-                    { label: 'Total', cents: arReport.totalOutstandingCents },
-                  ] as const).map((b) => (
-                    <div key={b.label} className="rounded-lg border border-border p-3 text-center">
-                      <p className="text-xs text-muted-foreground">{b.label}</p>
-                      <p className={cn('text-sm font-semibold tabular-nums mt-0.5', b.cents > 0 ? 'text-red-600 dark:text-red-400' : '')}>{fmtAud(b.cents)}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {arReport.rows.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-6">No outstanding receivables.</p>
-                ) : (
-                  <div className="border border-border rounded-md overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/40">
-                        <tr className="border-b border-border">
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Client</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue Date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Due Date</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Total</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Paid</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Outstanding</th>
-                          <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Aging</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {arReport.rows.map((r) => (
-                          <tr key={r.invoiceId} className="border-b border-border last:border-0 hover:bg-muted/30">
-                            <td className="px-3 py-1.5">{r.clientName}</td>
-                            <td className="px-3 py-1.5 font-mono text-xs">{r.invoiceNumber}</td>
-                            <td className="px-3 py-1.5 text-xs tabular-nums">{r.issueDate}</td>
-                            <td className="px-3 py-1.5 text-xs tabular-nums">{r.dueDate ?? '—'}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{fmtAud(r.totalCents)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{fmtAud(r.paidCents)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums font-medium text-red-600 dark:text-red-400">{fmtAud(r.outstandingCents)}</td>
-                            <td className="px-3 py-1.5 text-center">
-                              <span className={cn(
-                                'inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium',
-                                r.agingBucket === 'current' && 'bg-green-500/10 text-green-700 dark:text-green-400',
-                                r.agingBucket === '30' && 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400',
-                                r.agingBucket === '60' && 'bg-orange-500/10 text-orange-700 dark:text-orange-400',
-                                r.agingBucket === '90' && 'bg-red-500/10 text-red-700 dark:text-red-400',
-                              )}>
-                                {r.agingBucket === 'current' ? 'Current' : `${r.agingBucket}+ days`}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="bg-muted/40 font-bold">
-                        <tr className="border-t-2 border-border">
-                          <td className="px-3 py-2" colSpan={6}>Total Outstanding</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-red-600 dark:text-red-400">{fmtAud(arReport.totalOutstandingCents)}</td>
-                          <td></td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
     </div>
   )
 }
