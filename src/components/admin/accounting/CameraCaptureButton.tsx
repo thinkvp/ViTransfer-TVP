@@ -1,13 +1,27 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Camera, Loader2, RefreshCcw } from 'lucide-react'
+import { Camera, Loader2, RefreshCcw, SwitchCamera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 
 const MAX_CAPTURE_DIMENSION = 1800
 const JPEG_QUALITY = 0.85
+
+// Labels containing these words are deprioritised when selecting the default camera
+const DEPRIORITISED_LENS_LABELS = ['ultra', 'telephoto', 'macro']
+
+function sortCameraDevices(devices: MediaDeviceInfo[]): MediaDeviceInfo[] {
+  const videoDevices = devices.filter(d => d.kind === 'videoinput')
+  return [...videoDevices].sort((a, b) => {
+    const score = (label: string) => {
+      const l = label.toLowerCase()
+      return DEPRIORITISED_LENS_LABELS.some(w => l.includes(w)) ? 1 : 0
+    }
+    return score(a.label) - score(b.label)
+  })
+}
 
 interface CameraCaptureButtonProps {
   onCapture: (files: File[]) => void | Promise<void>
@@ -26,6 +40,9 @@ function getCameraErrorMessage(error: unknown) {
 export function CameraCaptureButton({ onCapture, disabled = false, className }: CameraCaptureButtonProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  // camerasRef holds the sorted device list (populated after permission is granted)
+  const camerasRef = useRef<MediaDeviceInfo[]>([])
+  const cameraIdxRef = useRef(0)
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(false)
@@ -33,6 +50,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
   const [submitting, setSubmitting] = useState(false)
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [cameraCount, setCameraCount] = useState(0)
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -50,8 +68,15 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
     })
   }, [])
 
-  const startCamera = useCallback(async () => {
-    if (!open) return
+  const openStream = useCallback(async (stream: MediaStream) => {
+    streamRef.current = stream
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream
+      await videoRef.current.play().catch(() => undefined)
+    }
+  }, [])
+
+  const startCameraWithDevice = useCallback(async (deviceId: string | null) => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('This browser does not support direct camera capture.')
       return
@@ -62,27 +87,58 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
     stopStream()
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      })
+      const video: MediaTrackConstraints = deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
 
-      streamRef.current = stream
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video })
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play().catch(() => undefined)
+      // On first open, enumerate devices (labels are available after permission is granted)
+      // and switch to the main rear camera if the browser didn't already select it.
+      if (camerasRef.current.length === 0) {
+        const allDevices = await navigator.mediaDevices.enumerateDevices()
+        const sorted = sortCameraDevices(allDevices)
+        camerasRef.current = sorted
+        setCameraCount(sorted.length)
+
+        if (sorted.length > 1) {
+          const activeDeviceId = stream.getVideoTracks()[0]?.getSettings()?.deviceId
+          const preferredDeviceId = sorted[0]?.deviceId
+          if (activeDeviceId && preferredDeviceId && activeDeviceId !== preferredDeviceId) {
+            // The browser opened an ultrawide/telephoto — switch to the main camera
+            for (const track of stream.getTracks()) track.stop()
+            const mainStream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { deviceId: { exact: preferredDeviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+            })
+            await openStream(mainStream)
+            return
+          }
+        }
       }
+
+      await openStream(stream)
     } catch (cameraError) {
       setError(getCameraErrorMessage(cameraError))
     } finally {
       setStarting(false)
     }
-  }, [open, stopStream])
+  }, [stopStream, openStream])
+
+  const startCamera = useCallback(async () => {
+    if (!open) return
+    const cameras = camerasRef.current
+    const deviceId = cameras.length > 0 ? (cameras[cameraIdxRef.current]?.deviceId ?? null) : null
+    await startCameraWithDevice(deviceId)
+  }, [open, startCameraWithDevice])
+
+  const cycleCamera = useCallback(async () => {
+    const cameras = camerasRef.current
+    if (cameras.length < 2) return
+    const nextIdx = (cameraIdxRef.current + 1) % cameras.length
+    cameraIdxRef.current = nextIdx
+    await startCameraWithDevice(cameras[nextIdx].deviceId)
+  }, [startCameraWithDevice])
 
   useEffect(() => {
     if (!open || capturedFile) return
@@ -157,8 +213,8 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
   }
 
   function handleRetake() {
+    // Resume on whichever camera was active when the photo was taken
     clearCaptured()
-    void startCamera()
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -170,6 +226,10 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
       setStarting(false)
       setCapturing(false)
       setSubmitting(false)
+      // Reset camera list so next open re-enumerates and picks the main camera
+      camerasRef.current = []
+      cameraIdxRef.current = 0
+      setCameraCount(0)
     }
   }
 
@@ -199,8 +259,22 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
               // eslint-disable-next-line @next/next/no-img-element
               <img src={previewUrl} alt="Captured receipt preview" className="w-full rounded-md border border-border object-contain" />
             ) : (
-              <div className="overflow-hidden rounded-md border border-border bg-black/90">
+              <div className="relative overflow-hidden rounded-md border border-border bg-black/90">
                 <video ref={videoRef} autoPlay muted playsInline className="aspect-[3/4] w-full object-cover" />
+                {cameraCount > 1 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="absolute bottom-2 left-2 opacity-80 hover:opacity-100"
+                    onClick={() => void cycleCamera()}
+                    disabled={starting}
+                    aria-label="Switch camera"
+                    title="Switch camera"
+                  >
+                    <SwitchCamera className="w-4 h-4" />
+                  </Button>
+                )}
               </div>
             )}
 

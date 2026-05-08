@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Send } from 'lucide-react'
+import { AlertTriangle, Loader2, Send } from 'lucide-react'
 import { apiPost } from '@/lib/api-client'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { fetchClientDetails } from '@/lib/sales/lookups'
@@ -50,9 +50,10 @@ export function SalesSendEmailDialog(props: {
   clientName?: string
   projectTitle?: string
   invoicePaidAt?: string | null
+  hasUnsavedChanges?: boolean
   onSent?: (result: { shareToken: string; toEmails: string[]; notes: string }) => void
 }) {
-  const { open, onOpenChange, type, doc, settings, clientName, projectTitle, invoicePaidAt, onSent } = props
+  const { open, onOpenChange, type, doc, settings, clientName, projectTitle, invoicePaidAt, hasUnsavedChanges, onSent } = props
 
   const clientId = (doc as any)?.clientId as string | null | undefined
 
@@ -283,6 +284,13 @@ export function SalesSendEmailDialog(props: {
           {message ? (
             <div className={message.type === 'error' ? 'text-sm text-red-600' : 'text-sm text-green-600'}>
               {message.text}
+            </div>
+          ) : null}
+
+          {hasUnsavedChanges ? (
+            <div className="flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>You have unsaved changes to this {type === 'QUOTE' ? 'quote' : 'invoice'}. Only saved information will be sent.</span>
             </div>
           ) : null}
 

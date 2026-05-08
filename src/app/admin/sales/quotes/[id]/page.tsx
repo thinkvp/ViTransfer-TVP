@@ -1043,12 +1043,16 @@ export default function QuoteDetailPage() {
         settings={settings}
         clientName={clientId ? clientNameById[clientId] : undefined}
         projectTitle={projectId ? projectTitleById[projectId] : undefined}
+        hasUnsavedChanges={hasUnsavedChanges}
         onSent={({ shareToken: token }) => {
           ;(async () => {
             try {
               const next = await fetchSalesQuote(quote.id)
               setQuote(next)
               setStatus(next.status)
+              setSavedSnapshot((prev) => {
+                try { return JSON.stringify({ ...JSON.parse(prev), status: next.status }) } catch { return prev }
+              })
               setShareToken(token)
               setTrackingRefreshKey((v) => v + 1)
             } catch (e) {

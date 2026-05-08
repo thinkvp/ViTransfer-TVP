@@ -117,6 +117,7 @@ export interface BankTransaction {
   // Populated joins
   expense?: Expense | null
   invoicePayment?: { id: string; amountCents: number; paymentDate: string; invoiceId: string | null; invoiceNumber?: string | null; clientName?: string | null } | null
+  invoicePayments?: { id: string; amountCents: number; paymentDate: string; invoiceId: string | null; invoiceNumber?: string | null; clientName?: string | null }[]
   splitLines?: SplitLine[]
   // Populated when matchType=BAS_PAYMENT
   basPeriodId?: string | null
@@ -161,6 +162,7 @@ export interface AccountingSettings {
   basGstAccountId: string | null
   basPaygAccountId: string | null
   basPaygInstalmentDefaultCents: number | null
+  stripeRoundingAccountId: string | null
   updatedAt: string
 }
 

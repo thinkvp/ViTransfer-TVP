@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { fetchSalesSettings } from '@/lib/sales/admin-api'
 
@@ -17,6 +17,14 @@ const NAV = [
 export default function SalesLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [currencySymbol, setCurrencySymbol] = useState('$')
+  const navRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const nav = navRef.current
+    if (!nav) return
+    const activeLink = nav.querySelector<HTMLElement>('[data-active="true"]')
+    activeLink?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [pathname])
 
   useEffect(() => {
     let cancelled = false
@@ -40,15 +48,16 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
             </p>
           </div>
 
-          <nav className="flex flex-wrap gap-2">
+          <nav ref={navRef} className="flex gap-2 overflow-x-auto scrollbar-hide">
             {NAV.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/admin/sales' && pathname?.startsWith(item.href))
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  data-active={isActive ? 'true' : undefined}
                   className={
-                    `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ` +
+                    `flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ` +
                     (isActive
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-muted/40 text-muted-foreground hover:bg-accent hover:text-accent-foreground')

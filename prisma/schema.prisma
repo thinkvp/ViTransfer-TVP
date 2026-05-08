@@ -1382,15 +1382,22 @@ model SalesPayment {
 
   qboId String? @unique
 
+  // Link back to the bank transaction that settled this payment.
+  // Set for all new invoice-match payments; for multi-invoice matches this is the only link
+  // (BankTransaction.invoicePaymentId is null).
+  bankTransactionId String?
+  bankTransactionRef BankTransaction? @relation("SalesPaymentBankTransactionRef", fields: [bankTransactionId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  bankTransaction BankTransaction? // Back-relation: BankTransaction.invoicePaymentId
+  bankTransaction BankTransaction? @relation("BankTransactionPrimaryPayment") // Back-relation: BankTransaction.invoicePaymentId
 
   @@index([paymentDate])
   @@index([clientId])
   @@index([invoiceId])
   @@index([source])
+  @@index([bankTransactionId])
 }
 
 model SalesNativeStore {
@@ -2364,7 +2371,10 @@ model BankTransaction {
 
   // Link to an invoice payment (matched to invoice)
   invoicePaymentId String? @unique
-  invoicePayment   SalesPayment? @relation(fields: [invoicePaymentId], references: [id], onDelete: SetNull)
+  invoicePayment   SalesPayment? @relation("BankTransactionPrimaryPayment", fields: [invoicePaymentId], references: [id], onDelete: SetNull)
+
+  // All invoice payments linked to this transaction (primary for single-invoice, all for multi-invoice)
+  invoicePayments  SalesPayment[] @relation("SalesPaymentBankTransactionRef")
 
   // Link to an expense (matched to expense)
   expense       Expense?                                 // Back-relation: Expense.bankTransactionId
@@ -2455,6 +2465,10 @@ model AccountingSettings {
   basGstAccountId                String?   // Account for the GST net component (1A − 1B)
   basPaygAccountId               String?   // Account for the PAYG Income Tax Instalment (T7)
   basPaygInstalmentDefaultCents  Int?      // Default T7 amount for new/editable BAS periods
+
+  // Stripe bank-deposit rounding: small differences (≤ $1.00) between the bank deposit and
+  // the original Stripe invoice amount are auto-posted to this account as a bank charge.
+  stripeRoundingAccountId        String?   // Account for rounding differences (e.g. Bank Charges)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

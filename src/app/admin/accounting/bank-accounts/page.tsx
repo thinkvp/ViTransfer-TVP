@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { apiFetch } from '@/lib/api-client'
-import { Plus, Upload, ChevronDown, ChevronRight, Landmark, Pencil, Trash2, Paperclip, X, Loader2, EyeOff, RotateCcw, Link2, AlertTriangle, ArrowUp, ArrowDown, ChevronLeft, ChevronsLeft, ChevronsRight, Scissors } from 'lucide-react'
+import { Plus, Upload, ChevronDown, ChevronRight, Landmark, Pencil, Trash2, Paperclip, X, Loader2, EyeOff, RotateCcw, Link2, AlertTriangle, ArrowUp, ArrowDown, ChevronLeft, ChevronsLeft, ChevronsRight, Scissors, Check } from 'lucide-react'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import type { AccountingAttachment } from '@/lib/accounting/types'
 import type { BankAccount, BankTransaction } from '@/lib/accounting/types'
@@ -149,7 +149,8 @@ export default function BankAccountsPage() {
   const [invoiceSearch, setInvoiceSearch] = useState('')
   const [openInvoices, setOpenInvoices] = useState<OpenInvoice[]>([])
   const [loadingInvoices, setLoadingInvoices] = useState(false)
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set()) // regular multi-select
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null) // Stripe reconcile single-select
   const [selectedInvoiceIsReconcile, setSelectedInvoiceIsReconcile] = useState(false)
   const [matchingInvoice, setMatchingInvoice] = useState(false)
 
@@ -323,7 +324,7 @@ export default function BankAccountsPage() {
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/match-invoice`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId }),
+        body: JSON.stringify({ invoiceIds: [invoiceId] }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
@@ -612,6 +613,7 @@ export default function BankAccountsPage() {
 
   function openMatchInvoiceDialog(txn: BankTransaction) {
     setMatchInvoiceTarget(txn)
+    setSelectedInvoiceIds(new Set())
     setSelectedInvoiceId(null)
     setSelectedInvoiceIsReconcile(false)
     setInvoiceSearch('')
@@ -630,12 +632,15 @@ export default function BankAccountsPage() {
   }, [])
 
   async function handleMatchInvoice() {
-    if (!matchInvoiceTarget || !selectedInvoiceId) return
+    if (!matchInvoiceTarget) return
+    const isReconcile = selectedInvoiceIsReconcile && !!selectedInvoiceId
+    const invoiceIds = isReconcile ? [selectedInvoiceId!] : [...selectedInvoiceIds]
+    if (invoiceIds.length === 0) return
     setMatchingInvoice(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${matchInvoiceTarget.id}/match-invoice`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId: selectedInvoiceId, ...(selectedInvoiceIsReconcile ? { reconcile: true } : {}) }),
+        body: JSON.stringify({ invoiceIds, ...(isReconcile ? { reconcile: true } : {}) }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
       const matchedId = matchInvoiceTarget.id
@@ -1250,6 +1255,19 @@ export default function BankAccountsPage() {
                                     {t.matchType === 'BAS_PAYMENT' && t.basPeriod && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">BAS Period</p><p>{t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}</p></div>}
                                     {t.taxCode && <div><p className="text-xs text-muted-foreground">GST</p><p>{taxRates.find(r => r.code === t.taxCode)?.name ?? t.taxCode}</p></div>}
                                     {t.invoicePayment?.invoiceId && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Invoice</p><Link href={`/admin/sales/invoices/${t.invoicePayment.invoiceId}`} className="text-sm text-primary hover:underline underline-offset-2">{t.invoicePayment.invoiceNumber ?? t.invoicePayment.invoiceId}{t.invoicePayment.clientName ? ` — ${t.invoicePayment.clientName}` : ''}</Link></div>}
+                                    {!t.invoicePayment && t.invoicePayments && t.invoicePayments.length > 0 && (
+                                      <div className="col-span-2 sm:col-span-3">
+                                        <p className="text-xs text-muted-foreground">Invoices</p>
+                                        <div className="space-y-0.5">
+                                          {t.invoicePayments.map(p => p.invoiceId ? (
+                                            <div key={p.id} className="flex items-center gap-2">
+                                              <Link href={`/admin/sales/invoices/${p.invoiceId}`} className="text-sm text-primary hover:underline underline-offset-2">{p.invoiceNumber ?? p.invoiceId}{p.clientName ? ` — ${p.clientName}` : ''}</Link>
+                                              <span className="text-xs text-muted-foreground tabular-nums">{fmtAud(p.amountCents)}</span>
+                                            </div>
+                                          ) : null)}
+                                        </div>
+                                      </div>
+                                    )}
                                     {t.memo && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Memo</p><p>{t.memo}</p></div>}
                                     {t.expense && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Expense</p><p>{t.expense.supplierName ? `${t.expense.supplierName} · ` : ''}{fmtAud(t.expense.amountIncGst)}</p></div>}
                                   </div>
@@ -1447,37 +1465,84 @@ export default function BankAccountsPage() {
                   ) : (
                     <>
                       {regularInvoices.length > 0 && (
-                        <div className="border border-border rounded-md divide-y divide-border">
-                          {regularInvoices.map(inv => {
-                            const total = inv.totalCents
-                            const remaining = inv.outstandingBalanceCents
-                            const showRemaining = remaining < total
-                            return (
-                              <button key={inv.id} type="button"
-                                onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(false) }}
-                                className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
-                                  selectedInvoiceId === inv.id && !selectedInvoiceIsReconcile && 'bg-primary/10 border-l-2 border-primary'
-                                )}
-                              >
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium">{inv.invoiceNumber}</p>
-                                  <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
-                                  <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  {showRemaining ? (
-                                    <>
-                                      <p className="text-sm font-medium tabular-nums">{fmtAud(remaining)} remaining</p>
-                                      <p className="text-xs text-muted-foreground tabular-nums">{fmtAud(total)} total</p>
-                                    </>
-                                  ) : (
-                                    <p className="text-sm font-medium tabular-nums">{fmtAud(total)}</p>
+                        <div>
+                          <div className="border border-border rounded-md divide-y divide-border">
+                            {regularInvoices.map(inv => {
+                              const total = inv.totalCents
+                              const remaining = inv.outstandingBalanceCents
+                              const showRemaining = remaining < total
+                              const isChecked = selectedInvoiceIds.has(inv.id)
+                              return (
+                                <button key={inv.id} type="button"
+                                  onClick={() => {
+                                    setSelectedInvoiceId(null)
+                                    setSelectedInvoiceIsReconcile(false)
+                                    setSelectedInvoiceIds(prev => {
+                                      const next = new Set(prev)
+                                      if (next.has(inv.id)) next.delete(inv.id)
+                                      else next.add(inv.id)
+                                      return next
+                                    })
+                                  }}
+                                  className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start gap-3',
+                                    isChecked && 'bg-primary/10 border-l-2 border-primary'
                                   )}
-                                  <p className="text-xs text-muted-foreground capitalize">{inv.status.toLowerCase().replace(/_/g, ' ')}</p>
-                                </div>
-                              </button>
+                                >
+                                  <div className="mt-0.5 shrink-0">
+                                    <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center transition-colors',
+                                      isChecked ? 'bg-primary border-primary' : 'border-border bg-background'
+                                    )}>
+                                      {isChecked && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium">{inv.invoiceNumber}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
+                                      <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      {showRemaining ? (
+                                        <>
+                                          <p className="text-sm font-medium tabular-nums">{fmtAud(remaining)} remaining</p>
+                                          <p className="text-xs text-muted-foreground tabular-nums">{fmtAud(total)} total</p>
+                                        </>
+                                      ) : (
+                                        <p className="text-sm font-medium tabular-nums">{fmtAud(total)}</p>
+                                      )}
+                                      <p className="text-xs text-muted-foreground capitalize">{inv.status.toLowerCase().replace(/_/g, ' ')}</p>
+                                    </div>
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          {/* Balance indicator for multi-select */}
+                          {selectedInvoiceIds.size > 0 && (() => {
+                            const selectedTotal = regularInvoices
+                              .filter(inv => selectedInvoiceIds.has(inv.id))
+                              .reduce((s, inv) => s + inv.outstandingBalanceCents, 0)
+                            const depositAmount = matchInvoiceTarget?.amountCents ?? 0
+                            const diff = depositAmount - selectedTotal
+                            const diffAbs = Math.abs(diff)
+                            const balanced = diff === 0
+                            const nearlyBalanced = diffAbs > 0 && diffAbs <= 100
+                            return (
+                              <div className={cn('mt-1.5 px-3 py-2 rounded-md text-xs flex items-center justify-between gap-2',
+                                balanced ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400' :
+                                nearlyBalanced ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-500' :
+                                'bg-destructive/10 text-destructive'
+                              )}>
+                                <span>
+                                  {selectedInvoiceIds.size === 1 ? '1 invoice selected' : `${selectedInvoiceIds.size} invoices selected`}
+                                  {' · '}Total: {fmtAud(selectedTotal)}
+                                </span>
+                                <span className="font-medium tabular-nums">
+                                  {balanced ? '✓ Balanced' : diff > 0 ? `${fmtAud(diffAbs)} short` : `${fmtAud(diffAbs)} over`}
+                                </span>
+                              </div>
                             )
-                          })}
+                          })()}
                         </div>
                       )}
                       {stripeInvoices.length > 0 && (
@@ -1490,7 +1555,7 @@ export default function BankAccountsPage() {
                           <div className="border border-border rounded-md divide-y divide-border">
                             {stripeInvoices.map(inv => (
                               <button key={inv.id} type="button"
-                                onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(true) }}
+                                onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(true); setSelectedInvoiceIds(new Set()) }}
                                 className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
                                   selectedInvoiceId === inv.id && selectedInvoiceIsReconcile && 'bg-primary/10 border-l-2 border-primary'
                                 )}
@@ -1516,10 +1581,38 @@ export default function BankAccountsPage() {
             })()}
           </div>
           <DialogFooter>
+            {(() => {
+              if (!selectedInvoiceIsReconcile || !selectedInvoiceId || !matchInvoiceTarget) return null
+              const selInv = openInvoices.find(i => i.id === selectedInvoiceId)
+              if (!selInv) return null
+              const diff = matchInvoiceTarget.amountCents - selInv.totalPaidCents
+              if (diff === 0 || Math.abs(diff) > 100) return null
+              return (
+                <p className="text-xs text-muted-foreground mr-auto">
+                  {fmtAud(Math.abs(diff))} rounding difference will be automatically posted to your rounding account.
+                </p>
+              )
+            })()}
             <Button variant="outline" onClick={() => { setMatchInvoiceTarget(null); setSelectedInvoiceIsReconcile(false) }} disabled={matchingInvoice}>Cancel</Button>
-            <Button onClick={() => void handleMatchInvoice()} disabled={!selectedInvoiceId || matchingInvoice}>
+            <Button
+              onClick={() => void handleMatchInvoice()}
+              disabled={(() => {
+                if (matchingInvoice) return true
+                if (selectedInvoiceIsReconcile) return !selectedInvoiceId
+                if (selectedInvoiceIds.size === 0) return true
+                // For multi-invoice, require balanced total (within $1.00)
+                if (selectedInvoiceIds.size > 1) {
+                  const selectedTotal = openInvoices
+                    .filter(inv => !inv.stripeReconcilable && selectedInvoiceIds.has(inv.id))
+                    .reduce((s, inv) => s + inv.outstandingBalanceCents, 0)
+                  const diff = Math.abs((matchInvoiceTarget?.amountCents ?? 0) - selectedTotal)
+                  if (diff > 100) return true
+                }
+                return false
+              })()}
+            >
               {matchingInvoice && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              {selectedInvoiceIsReconcile ? 'Reconcile Deposit' : 'Match Invoice'}
+              {selectedInvoiceIsReconcile ? 'Reconcile Deposit' : selectedInvoiceIds.size > 1 ? 'Match Invoices' : 'Match Invoice'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -51,6 +51,16 @@ input.no-picker-icon::-webkit-inner-spin-button {
   scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
 }
 
+/* Hide scrollbar while preserving scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 @layer base {
   /* Light Mode Theme */
   :root {

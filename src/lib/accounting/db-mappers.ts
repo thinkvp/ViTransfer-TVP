@@ -119,6 +119,9 @@ export function bankTransactionFromDb(row: any): BankTransaction {
     invoicePayment: row.invoicePayment
       ? { id: row.invoicePayment.id, amountCents: Number(row.invoicePayment.amountCents), paymentDate: row.invoicePayment.paymentDate, invoiceId: row.invoicePayment.invoiceId ?? null, invoiceNumber: row.invoicePayment.invoice?.invoiceNumber ?? null, clientName: row.invoicePayment.invoice?.client?.name ?? null }
       : null,
+    invoicePayments: row.invoicePayments
+      ? row.invoicePayments.map((p: any) => ({ id: p.id, amountCents: Number(p.amountCents), paymentDate: p.paymentDate, invoiceId: p.invoiceId ?? null, invoiceNumber: p.invoice?.invoiceNumber ?? null, clientName: p.invoice?.client?.name ?? null }))
+      : [],
     splitLines: row.splitLines ? row.splitLines.map((s: any) => splitLineFromDb(s)) : undefined,
     basPeriodId: row.basPeriodId ?? null,
     basPeriod: row.basPeriod ? { id: row.basPeriod.id, label: row.basPeriod.label, quarter: Number(row.basPeriod.quarter), financialYear: row.basPeriod.financialYear } : null,

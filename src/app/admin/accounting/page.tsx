@@ -24,6 +24,21 @@ function getCurrentFY(): { from: string; to: string; label: string } {
   }
 }
 
+function computeProjectedNetProfit(netProfitCents: number, fyStartMonth: number): number | null {
+  const now = new Date()
+  const fyStartM = Math.max(1, Math.min(12, fyStartMonth)) - 1 // 0-indexed
+  const fyStartYear = now.getMonth() >= fyStartM ? now.getFullYear() : now.getFullYear() - 1
+  const fyStart = new Date(fyStartYear, fyStartM, 1)
+  const monthCount =
+    (now.getFullYear() - fyStart.getFullYear()) * 12 +
+    (now.getMonth() - fyStart.getMonth()) + 1
+  const daysInCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const currentMonthFraction = now.getDate() / daysInCurrentMonth
+  const elapsedMonths = Math.max(monthCount - 1 + currentMonthFraction, currentMonthFraction)
+  if (elapsedMonths <= 0) return null
+  return Math.round(netProfitCents / elapsedMonths) * 12
+}
+
 interface DashboardStats {
   unmatchedCount: number
   draftExpenseCount: number
@@ -150,7 +165,19 @@ export default function AccountingDashboardPage() {
                   <p className={cn('text-3xl font-bold', stats.pl.netProfitCents >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive')}>
                     {fmtAud(stats.pl.netProfitCents)}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">income minus expenses</p>
+                  {(() => {
+                    const proj = computeProjectedNetProfit(stats.pl.netProfitCents, chartSettings.fyStartMonth)
+                    return proj !== null ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Projected {fy.label}:{' '}
+                        <span className={proj >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>
+                          {fmtAud(proj)}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground mt-1">income minus expenses</p>
+                    )
+                  })()}
                 </CardContent>
               </Card>
             </Link>

@@ -8,6 +8,7 @@ function defaultAccountingSettingsRow() {
     basGstAccountId: null as string | null,
     basPaygAccountId: null as string | null,
     basPaygInstalmentDefaultCents: null as number | null,
+    stripeRoundingAccountId: null as string | null,
   }
 }
 
@@ -17,6 +18,7 @@ export function accountingSettingsFromDb(row: any): AccountingSettings {
     basGstAccountId: row?.basGstAccountId ?? null,
     basPaygAccountId: row?.basPaygAccountId ?? null,
     basPaygInstalmentDefaultCents: row?.basPaygInstalmentDefaultCents != null ? Number(row.basPaygInstalmentDefaultCents) : null,
+    stripeRoundingAccountId: row?.stripeRoundingAccountId ?? null,
     updatedAt: row?.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row?.updatedAt ?? new Date(0).toISOString()),
   }
 }
@@ -41,6 +43,7 @@ export async function saveAccountingSettings(input: {
   basGstAccountId?: string | null
   basPaygAccountId?: string | null
   basPaygInstalmentDefaultCents?: number | null
+  stripeRoundingAccountId?: string | null
 }): Promise<AccountingSettings> {
   const row = await prisma.accountingSettings.upsert({
     where: { id: 'default' },
@@ -50,12 +53,14 @@ export async function saveAccountingSettings(input: {
       basGstAccountId: input.basGstAccountId ?? null,
       basPaygAccountId: input.basPaygAccountId ?? null,
       basPaygInstalmentDefaultCents: input.basPaygInstalmentDefaultCents ?? null,
+      stripeRoundingAccountId: input.stripeRoundingAccountId ?? null,
     },
     update: {
       reportingBasis: input.reportingBasis,
       basGstAccountId: input.basGstAccountId ?? null,
       basPaygAccountId: input.basPaygAccountId ?? null,
       basPaygInstalmentDefaultCents: input.basPaygInstalmentDefaultCents ?? null,
+      stripeRoundingAccountId: input.stripeRoundingAccountId ?? null,
     },
   })
 

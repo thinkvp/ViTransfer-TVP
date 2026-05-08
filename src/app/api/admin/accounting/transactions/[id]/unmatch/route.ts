@@ -28,6 +28,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     include: {
       expense: { select: { id: true, accountingAttachments: { select: { storagePath: true } } } },
       invoicePayment: { select: { id: true, invoiceId: true } },
+      // Also load multi-invoice payments linked via bankTransactionId
+      invoicePayments: { select: { id: true, invoiceId: true } },
       accountingAttachments: { select: { id: true, storagePath: true } },
       basPeriod: { select: { id: true } },
     },
@@ -43,7 +45,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   await prisma.$transaction(async (tx) => {
     // If matched via split or BAS payment: delete all split lines
-    if (txn.matchType === 'SPLIT' || (txn.matchType as string | null) === 'BAS_PAYMENT') {
+    // Also covers INVOICE_PAYMENT reconcile mode, which may have a rounding split line.
+    if (txn.matchType === 'SPLIT' || (txn.matchType as string | null) === 'BAS_PAYMENT' || txn.matchType === 'INVOICE_PAYMENT') {
       await tx.splitLine.deleteMany({ where: { bankTransactionId: id } })
     }
 
@@ -52,11 +55,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await tx.expense.delete({ where: { id: txn.expense.id } })
     }
 
-    // If matched to invoice payment: delete the SalesPayment and recompute invoice status
-    if (txn.matchType === 'INVOICE_PAYMENT' && txn.invoicePayment) {
-      const invoiceId = txn.invoicePayment.invoiceId
-      await tx.salesPayment.delete({ where: { id: txn.invoicePayment.id } })
-      if (invoiceId) {
+    // If matched to invoice payment: delete the SalesPayment(s) and recompute invoice status.
+    // Handles both single-invoice (txn.invoicePayment) and multi-invoice (txn.invoicePayments).
+    if (txn.matchType === 'INVOICE_PAYMENT') {
+      // Collect all linked payment IDs and invoice IDs to recompute
+      const paymentsToDelete = [
+        ...(txn.invoicePayment ? [txn.invoicePayment] : []),
+        // For multi-invoice: invoicePayments linked via bankTransactionId
+        ...(txn.invoicePayments ?? []).filter(p => !txn.invoicePayment || p.id !== txn.invoicePayment.id),
+      ]
+      const invoiceIdsToRecompute = new Set<string>()
+      for (const payment of paymentsToDelete) {
+        await tx.salesPayment.delete({ where: { id: payment.id } })
+        if (payment.invoiceId) invoiceIdsToRecompute.add(payment.invoiceId)
+      }
+      for (const invoiceId of invoiceIdsToRecompute) {
         await recomputeInvoiceStoredStatus(tx as any, invoiceId, { createdByUserId: authResult.id })
       }
     }
@@ -99,6 +112,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true, invoice: { select: { invoiceNumber: true, clientId: true, client: { select: { name: true } } } } } },
+      invoicePayments: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true, invoice: { select: { invoiceNumber: true, clientId: true, client: { select: { name: true } } } } } },
       splitLines: { include: { account: true } },
       accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
       basPeriod: { select: { id: true, label: true, quarter: true, financialYear: true } },

@@ -75,6 +75,10 @@ export default function AccountingSettingsPage() {
   const [basGstOpen, setBasGstOpen] = useState(false)
   const [basPaygSearch, setBasPaygSearch] = useState('')
   const [basPaygOpen, setBasPaygOpen] = useState(false)
+  // Stripe rounding account
+  const [stripeRoundingAccountId, setStripeRoundingAccountId] = useState('')
+  const [stripeRoundingSearch, setStripeRoundingSearch] = useState('')
+  const [stripeRoundingOpen, setStripeRoundingOpen] = useState(false)
   interface CoaOption { id: string; code: string; name: string; type: string }
   const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
 
@@ -107,6 +111,7 @@ export default function AccountingSettingsPage() {
           setBasGstAccountId(data?.basGstAccountId ?? '')
           setBasPaygAccountId(data?.basPaygAccountId ?? '')
           setBasPaygInstalmentDefault(data?.basPaygInstalmentDefaultCents != null ? (data.basPaygInstalmentDefaultCents / 100).toFixed(2) : '')
+          setStripeRoundingAccountId(data?.stripeRoundingAccountId ?? '')
         }
       } finally {
         if (!cancelled) setSettingsLoading(false)
@@ -149,6 +154,7 @@ export default function AccountingSettingsPage() {
           basGstAccountId: basGstAccountId || null,
           basPaygAccountId: basPaygAccountId || null,
           basPaygInstalmentDefaultCents: paygInstalmentDefaultCents,
+          stripeRoundingAccountId: stripeRoundingAccountId || null,
         }),
       })
       if (!res.ok) {
@@ -354,6 +360,51 @@ export default function AccountingSettingsPage() {
                 placeholder="0.00"
                 disabled={settingsLoading || settingsSaving}
               />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Bank Reconciliation */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Bank Reconciliation</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            When reconciling a Stripe bank deposit, small differences between the bank deposit amount and the original Stripe invoice amount (up to $1.00) are automatically posted as a split to the account below. Typically a &ldquo;Bank Charges&rdquo; or &ldquo;Rounding&rdquo; expense account.
+          </p>
+          <div className="max-w-sm space-y-1">
+            <Label>Stripe Rounding Account</Label>
+            <p className="text-xs text-muted-foreground">Receives any rounding difference on Stripe bank-deposit reconciliations (e.g. Bank Charges, Rounding).</p>
+            <div className="relative">
+              <Input
+                placeholder="Search account…"
+                value={stripeRoundingOpen ? stripeRoundingSearch : selectedAccountLabel(stripeRoundingAccountId)}
+                onFocus={() => { setStripeRoundingOpen(true); setStripeRoundingSearch('') }}
+                onBlur={() => setTimeout(() => setStripeRoundingOpen(false), 150)}
+                onChange={e => setStripeRoundingSearch(e.target.value)}
+                disabled={settingsLoading || settingsSaving}
+              />
+              {stripeRoundingOpen && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                  {stripeRoundingAccountId && (
+                    <button type="button" onMouseDown={() => { setStripeRoundingAccountId(''); setStripeRoundingOpen(false) }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/50 italic">
+                      Clear selection
+                    </button>
+                  )}
+                  {coaAccounts.filter(a => {
+                    const q = stripeRoundingSearch.toLowerCase()
+                    return !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)
+                  }).map(a => (
+                    <button key={a.id} type="button"
+                      onMouseDown={() => { setStripeRoundingAccountId(a.id); setStripeRoundingOpen(false); setStripeRoundingSearch('') }}
+                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', stripeRoundingAccountId === a.id && 'bg-primary/10 font-medium')}
+                    >{a.code} — {a.name} <span className="text-xs text-muted-foreground ml-1">({a.type})</span></button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
