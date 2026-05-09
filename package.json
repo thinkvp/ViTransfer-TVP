@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "1.6.9",
+  "version": "1.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15,6 +15,8 @@
     "preview:emails": "tsx scripts/render-email-previews.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@aws-sdk/s3-request-presigner": "^3.1045.0",
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -79,7 +81,7 @@
       "postcss": ">=8.5.10"
     },
     "uuid": ">=11.1.1",
-    "fast-xml-parser": "5.3.4",
+    "fast-xml-parser": "5.7.3",
     "esbuild": "0.27.0",
     "glob": "13.0.6",
     "jsdom": "28.1.0",
