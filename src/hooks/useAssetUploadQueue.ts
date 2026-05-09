@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import * as tus from 'tus-js-client'
-import { apiPost, apiDelete, attemptRefresh } from '@/lib/api-client'
+import { apiPost, apiDelete, apiFetch, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { useTransferTuning } from '@/lib/transfer-tuning-client'
 import {
@@ -11,6 +11,7 @@ import {
   clearUploadMetadata,
   clearTUSFingerprint,
 } from '@/lib/tus-context'
+import { isS3Mode } from '@/lib/storage-provider-client'
 
 export interface QueuedUpload {
   id: string
@@ -25,8 +26,11 @@ export interface QueuedUpload {
   uploadSpeed: number
   error: string | null
 
-  // TUS upload reference
+  // TUS upload reference (local/TUS mode only)
   tusUpload: tus.Upload | null
+
+  // S3 abort controller (S3 mode only)
+  s3AbortController?: AbortController
 
   // Timestamps
   createdAt: number
@@ -48,6 +52,7 @@ export function useAssetUploadQueue({
   const { uploadChunkSizeBytes } = useTransferTuning()
   const [queue, setQueue] = useState<QueuedUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
+  const s3AbortControllersMap = useRef<Map<string, AbortController>>(new Map())
   const assetIdsMap = useRef<Map<string, string>>(new Map())
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queueRef = useRef(queue)
@@ -151,6 +156,165 @@ export function useAssetUploadQueue({
           category: upload.category,
         })
       }
+
+      // -----------------------------------------------------------------------
+      // S3 mode: browser-direct multipart upload
+      // -----------------------------------------------------------------------
+      if (await isS3Mode()) {
+        const abortController = new AbortController()
+        s3AbortControllersMap.current.set(uploadId, abortController)
+        const signal = abortController.signal
+
+        let s3UploadId: string | null = null
+        let s3Key: string | null = null
+
+        try {
+          // Step 1: Presign
+          const presignRes = await apiFetch('/api/uploads/s3/presign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              assetId,
+              fileSize: upload.file.size,
+              fileName: upload.file.name,
+              contentType: upload.file.type || 'application/octet-stream',
+            }),
+            signal,
+          })
+
+          if (!presignRes.ok) {
+            const errBody = await presignRes.json().catch(() => ({ error: 'Presign failed' }))
+            throw new Error(errBody.error ?? 'Presign failed')
+          }
+
+          const { uploadId: uid, key: k, parts, partSize } = await presignRes.json()
+          s3UploadId = uid
+          s3Key = k
+
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+          // Step 2: Upload all parts directly to R2
+          const uploadFile = upload.file
+          const totalBytes = uploadFile.size
+          const completedParts: Array<{ partNumber: number; etag: string }> = new Array(parts.length)
+
+          const MAX_CONCURRENT = 4
+          let nextPartIdx = 0
+          let totalSentBytes = 0
+          let speedWindowStartTime = Date.now()
+          let speedWindowStartBytes = 0
+          let displaySpeedMBps = 0
+
+          const patchProgress = () => {
+            const progress = Math.floor((totalSentBytes / totalBytes) * 100)
+            setQueue(prev => prev.map(u =>
+              u.id === uploadId
+                ? { ...u, progress: Math.min(progress, 99), uploadSpeed: displaySpeedMBps > 0.05 ? Math.round(displaySpeedMBps * 10) / 10 : u.uploadSpeed }
+                : u
+            ))
+          }
+
+          async function uploadWorker() {
+            while (nextPartIdx < parts.length) {
+              const i = nextPartIdx++
+              const part = parts[i]
+              const start = i * partSize
+              const end = Math.min(start + partSize, uploadFile.size)
+              const slice = uploadFile.slice(start, end)
+              const partBytes = end - start
+
+              const etag = await new Promise<string>((resolve, reject) => {
+                if (signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return }
+                const xhr = new XMLHttpRequest()
+                xhr.open('PUT', part.url)
+                let lastLoaded = 0
+                xhr.upload.addEventListener('progress', (e) => {
+                  const delta = e.loaded - lastLoaded
+                  if (delta <= 0) return
+                  lastLoaded = e.loaded
+                  totalSentBytes = Math.min(totalSentBytes + delta, totalBytes)
+                  const now = Date.now()
+                  const timeDiff = (now - speedWindowStartTime) / 1000
+                  if (timeDiff >= 0.5) {
+                    const bytesDiff = totalSentBytes - speedWindowStartBytes
+                    displaySpeedMBps = bytesDiff / timeDiff / (1024 * 1024)
+                    speedWindowStartTime = now
+                    speedWindowStartBytes = totalSentBytes
+                  }
+                  patchProgress()
+                })
+                xhr.addEventListener('load', () => {
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    const trailingDelta = partBytes - lastLoaded
+                    if (trailingDelta > 0) {
+                      totalSentBytes = Math.min(totalSentBytes + trailingDelta, totalBytes)
+                      patchProgress()
+                    }
+                    const etag = xhr.getResponseHeader('ETag') ?? xhr.getResponseHeader('etag')
+                    etag ? resolve(etag) : reject(new Error('No ETag in response'))
+                  } else {
+                    reject(new Error(`Part upload failed: ${xhr.status}`))
+                  }
+                })
+                xhr.addEventListener('error', () => reject(new Error('Network error during part upload')))
+                xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+                const onAbort = () => xhr.abort()
+                signal.addEventListener('abort', onAbort, { once: true })
+                xhr.addEventListener('loadend', () => signal.removeEventListener('abort', onAbort))
+                xhr.send(slice)
+              })
+
+              completedParts[i] = { partNumber: part.partNumber, etag }
+            }
+          }
+
+          await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, parts.length) }, uploadWorker))
+
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+          // Step 3: Complete
+          const completeRes = await apiFetch('/api/uploads/s3/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assetId, uploadId: s3UploadId, key: s3Key, parts: completedParts }),
+          })
+
+          if (!completeRes.ok) {
+            const errBody = await completeRes.json().catch(() => ({ error: 'Complete failed' }))
+            throw new Error(errBody.error ?? 'Complete failed')
+          }
+
+          setQueue(prev => prev.map(u =>
+            u.id === uploadId ? { ...u, status: 'completed' as const, progress: 100, uploadSpeed: 0, completedAt: Date.now() } : u
+          ))
+          s3AbortControllersMap.current.delete(uploadId)
+          assetIdsMap.current.delete(uploadId)
+          onUploadComplete?.()
+        } catch (err: any) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            // Cancelled — clean up R2 partial upload
+            if (s3UploadId && s3Key) {
+              apiFetch('/api/uploads/s3/abort', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId, uploadId: s3UploadId, key: s3Key }),
+              }).catch(() => undefined)
+            }
+            return
+          }
+          const errorMessage = err?.message ?? 'Upload failed'
+          setQueue(prev => prev.map(u =>
+            u.id === uploadId ? { ...u, status: 'error' as const, error: errorMessage } : u
+          ))
+          s3AbortControllersMap.current.delete(uploadId)
+          assetIdsMap.current.delete(uploadId)
+        }
+        return
+      }
+
+      // -----------------------------------------------------------------------
+      // TUS mode: local/Dropbox storage — upload via TUS protocol
+      // -----------------------------------------------------------------------
 
       // Start TUS upload
       const startTime = Date.now()
@@ -361,8 +525,9 @@ export function useAssetUploadQueue({
     }
   }, [queue])
 
-  // Pause an upload
+  // Pause an upload (TUS only; S3 mode uploads cannot be paused)
   const pauseUpload = useCallback((uploadId: string) => {
+    if (s3AbortControllersMap.current.has(uploadId)) return
     const tusUpload = uploadRefsMap.current.get(uploadId)
     if (tusUpload) {
       tusUpload.abort()
@@ -372,8 +537,9 @@ export function useAssetUploadQueue({
     }
   }, [])
 
-  // Resume an upload
+  // Resume an upload (TUS only)
   const resumeUpload = useCallback((uploadId: string) => {
+    if (s3AbortControllersMap.current.has(uploadId)) return
     const tusUpload = uploadRefsMap.current.get(uploadId)
     if (tusUpload) {
       tusUpload.start()
@@ -385,9 +551,16 @@ export function useAssetUploadQueue({
 
   // Cancel an upload
   const cancelUpload = useCallback(async (uploadId: string) => {
-    const tusUpload = uploadRefsMap.current.get(uploadId)
-    if (tusUpload) {
-      tusUpload.abort(true)
+    const s3Controller = s3AbortControllersMap.current.get(uploadId)
+    if (s3Controller) {
+      s3Controller.abort()
+      s3AbortControllersMap.current.delete(uploadId)
+    } else {
+      const tusUpload = uploadRefsMap.current.get(uploadId)
+      if (tusUpload) {
+        tusUpload.abort(true)
+      }
+      uploadRefsMap.current.delete(uploadId)
     }
 
     // Clean up asset record
@@ -398,7 +571,6 @@ export function useAssetUploadQueue({
       } catch {}
     }
 
-    uploadRefsMap.current.delete(uploadId)
     assetIdsMap.current.delete(uploadId)
     refreshAttemptsRef.current.delete(uploadId)
 

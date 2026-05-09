@@ -115,8 +115,8 @@ export async function GET(
     variant: 'social',
   })
 
-  const fullZipReady = photos.length === 0 ? false : albumZipExists(fullZipStoragePath)
-  const socialZipReady = !album.socialCopiesEnabled ? false : (photos.length === 0 ? false : albumZipExists(socialZipStoragePath))
+  const fullZipReady = photos.length === 0 ? false : await albumZipExists(fullZipStoragePath)
+  const socialZipReady = !album.socialCopiesEnabled ? false : (photos.length === 0 ? false : await albumZipExists(socialZipStoragePath))
 
   // Best-effort: if ZIPs are missing, enqueue generation so they can become available without manual admin action.
   if (photos.length > 0 && (!fullZipReady || (album.socialCopiesEnabled && !socialZipReady))) {

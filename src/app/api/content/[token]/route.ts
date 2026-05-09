@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync, ReadStream } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
+import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import {
   buildVideoAssetStoragePath,
   buildVideoOriginalStoragePath,
@@ -366,6 +367,7 @@ export async function GET(
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
         filePath = video.thumbnailPath
+        contentType = 'image/jpeg'
       } else if (verifiedToken.quality === 'timeline-vtt') {
         if (!video.project.timelinePreviewsEnabled || !video.timelinePreviewsReady) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 })
@@ -440,6 +442,65 @@ export async function GET(
 
     if (isDownload && (isThumbnail || isTimelineAsset)) {
       return NextResponse.json({ error: 'Thumbnails cannot be downloaded directly' }, { status: 403 })
+    }
+
+    // ---------------------------------------------------------------------------
+    // S3 mode: redirect to presigned R2 URL — no local file access needed
+    // ---------------------------------------------------------------------------
+    if (isS3Mode()) {
+      const fileExists = await s3FileExists(filePath)
+      if (!fileExists) {
+        // Try canonical fallback path (e.g. legacy project paths that were migrated)
+        const fallback = buildCanonicalFallbackPath({
+          video,
+          quality: verifiedToken.quality,
+          asset: selectedAsset,
+          spriteFile: searchParams.get('file'),
+        })
+        if (!fallback || fallback === filePath || !(await s3FileExists(fallback))) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+        }
+        filePath = fallback
+      }
+
+      let presignedUrl: string
+      if (isDownload) {
+        const rawFilename = filename
+          || video.originalFileName
+          || `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
+        const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
+        const dlContentType = isThumbnail ? 'image/jpeg' : contentType
+        presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, dlContentType)
+      } else if (isThumbnail || isTimelineAsset) {
+        // Short-lived URL for thumbnails and sprites
+        presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, contentType)
+      } else {
+        // Long-lived URL for video streaming — allows browser to seek/scrub via range requests directly on R2
+        presignedUrl = await s3GetPresignedStreamUrl(filePath, 14400, contentType)
+      }
+
+      // Record analytics for S3 downloads (presigned redirect — cannot track transfer progress)
+      if (isDownload && !isAdminRequest && !isProbe && securitySettings.trackAnalytics) {
+        await prisma.videoAnalytics.create({
+          data: {
+            videoId: video.id,
+            projectId: video.projectId,
+            eventType: 'DOWNLOAD_SUCCEEDED',
+            assetId: assetId || undefined,
+            ipAddress: getClientIpAddress(request) || undefined,
+            sessionId,
+            details: { source: 'S3' },
+          },
+        }).catch(() => undefined)
+      }
+
+      return NextResponse.redirect(presignedUrl, {
+        status: 302,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+      })
     }
 
     const forceLocal = searchParams.get('forceLocal') === 'true'

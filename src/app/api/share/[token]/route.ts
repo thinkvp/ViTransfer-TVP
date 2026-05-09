@@ -38,7 +38,6 @@ export async function GET(
       select: {
         id: true,
         guestMode: true,
-        guestLatestOnly: true,
         sharePassword: true,
         authMode: true,
       },
@@ -73,8 +72,6 @@ export async function GET(
 
     const project = await fetchProjectWithVideos(
       token,
-      isGuest,
-      projectMeta.guestLatestOnly || false,
       projectMeta.id
     )
 

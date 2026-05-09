@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { albumZipExists, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getActiveDropboxStorageIssueEntities } from '@/lib/dropbox-storage-inconsistency-log'
+import { getAlbumPhotoZipQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -105,8 +106,38 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     variant: 'social',
   })
 
-  const fullReady = albumZipExists(fullZipStoragePath)
-  const socialReady = albumZipExists(socialZipStoragePath)
+  const [fullExists, socialExists] = await Promise.all([
+    albumZipExists(fullZipStoragePath),
+    albumZipExists(socialZipStoragePath),
+  ])
+
+  let fullZipQueuedOrActive = false
+  let socialZipQueuedOrActive = false
+  try {
+    const zipQueue = getAlbumPhotoZipQueue()
+    const fullJobId = getAlbumZipJobId({ albumId, variant: 'full' })
+    const socialJobId = getAlbumZipJobId({ albumId, variant: 'social' })
+
+    const [fullJob, socialJob] = await Promise.all([
+      zipQueue.getJob(fullJobId),
+      zipQueue.getJob(socialJobId),
+    ])
+
+    const pendingStates = new Set(['active', 'waiting', 'delayed', 'prioritized', 'waiting-children'])
+
+    const [fullState, socialState] = await Promise.all([
+      fullJob ? fullJob.getState().catch(() => null) : Promise.resolve(null),
+      socialJob ? socialJob.getState().catch(() => null) : Promise.resolve(null),
+    ])
+
+    fullZipQueuedOrActive = Boolean(fullState && pendingStates.has(fullState))
+    socialZipQueuedOrActive = Boolean(socialState && pendingStates.has(socialState))
+  } catch {
+    // If queue state cannot be read, fall back to file-existence readiness only.
+  }
+
+  const fullReady = fullExists && !fullZipQueuedOrActive
+  const socialReady = socialExists && !socialZipQueuedOrActive
 
   // Self-healing: if the album is stuck in a non-READY state but all work is actually
   // done, correct the status. This catches albums that were stuck before the worker
@@ -117,6 +148,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const allDone =
       uploadingCount === 0 &&
       (album.socialCopiesEnabled ? socialPendingCount === 0 : true) &&
+      !fullZipQueuedOrActive &&
+      (!socialZipRequired || !socialZipQueuedOrActive) &&
       (readyCount === 0 || fullReady) &&
       (!socialZipRequired || socialReady)
     if (allDone) {

@@ -892,7 +892,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className={`grid gap-4 ${dropboxConfigured ? 'grid-cols-2' : 'grid-cols-1'}`}>
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Allow social media downloads</div>
                     <div className="flex items-center gap-2 h-10">
@@ -908,21 +908,23 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Upload to Dropbox</div>
-                    <div className="flex items-center gap-2 h-10">
-                      <Checkbox
-                        checked={newAlbumDropbox}
-                        onCheckedChange={(v) => setNewAlbumDropbox(Boolean(v))}
-                        disabled={creating || !dropboxConfigured}
-                        aria-label="Upload to Dropbox"
-                      />
-                      <Cloud className={`w-4 h-4 ${newAlbumDropbox && dropboxConfigured ? 'text-primary' : 'text-muted-foreground/50'}`} />
-                      <span className={newAlbumDropbox && dropboxConfigured ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
-                        {!dropboxConfigured ? 'Dropbox not configured' : newAlbumDropbox ? 'ZIPs uploaded to Dropbox' : 'Local storage only'}
-                      </span>
+                  {dropboxConfigured && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Upload to Dropbox</div>
+                      <div className="flex items-center gap-2 h-10">
+                        <Checkbox
+                          checked={newAlbumDropbox}
+                          onCheckedChange={(v) => setNewAlbumDropbox(Boolean(v))}
+                          disabled={creating}
+                          aria-label="Upload to Dropbox"
+                        />
+                        <Cloud className={`w-4 h-4 ${newAlbumDropbox ? 'text-primary' : 'text-muted-foreground/50'}`} />
+                        <span className={newAlbumDropbox ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                          {newAlbumDropbox ? 'ZIPs uploaded to Dropbox' : 'Local storage only'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end">

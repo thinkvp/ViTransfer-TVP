@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
 import { Readable } from 'stream'
@@ -11,6 +11,7 @@ import { getSecuritySettings } from '@/lib/video-access'
 import { createTemporaryDropboxLink } from '@/lib/storage-provider-dropbox'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -118,9 +119,17 @@ export async function GET(
       albumName: album.name,
       variant,
     })
-    const zipFullPath = getFilePath(zipStoragePath)
-    if (!existsSync(zipFullPath)) {
-      return NextResponse.json({ error: 'ZIP not ready yet' }, { status: 409 })
+
+    if (isS3Mode()) {
+      const exists = await s3FileExists(zipStoragePath)
+      if (!exists) {
+        return NextResponse.json({ error: 'ZIP not ready yet' }, { status: 409 })
+      }
+    } else {
+      const zipFullPath = getFilePath(zipStoragePath)
+      if (!existsSync(zipFullPath)) {
+        return NextResponse.json({ error: 'ZIP not ready yet' }, { status: 409 })
+      }
     }
 
     const settings = await getSecuritySettings()
@@ -137,12 +146,28 @@ export async function GET(
       }).catch(() => {})
     }
 
+    const zipFilename = sanitizeFilenameForHeader(getAlbumZipFileName({ albumName: album.name, variant }))
+
+    if (isS3Mode()) {
+      const fileSize = await s3GetFileSize(zipStoragePath)
+      const fileStream = await downloadFile(zipStoragePath)
+      const readableStream = Readable.toWeb(fileStream as any) as ReadableStream
+      return new NextResponse(readableStream, {
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${zipFilename}"`,
+          ...(fileSize != null ? { 'Content-Length': fileSize.toString() } : {}),
+          'Cache-Control': 'private, no-cache',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    }
+
+    const zipFullPath = getFilePath(zipStoragePath)
     const stat = statSync(zipFullPath)
     const { downloadChunkSizeBytes } = await getTransferTuningSettings()
     const fileStream = createReadStream(zipFullPath, { highWaterMark: downloadChunkSizeBytes })
     const readableStream = Readable.toWeb(fileStream as any) as ReadableStream
-
-    const zipFilename = sanitizeFilenameForHeader(getAlbumZipFileName({ albumName: album.name, variant }))
 
     return new NextResponse(readableStream, {
       headers: {

@@ -310,8 +310,12 @@ export default function SharePage() {
         }
         setProject(projectData)
 
-        // Clear token cache to force re-fetch of video tokens with updated approval status
+        // Clear all video caches to force re-fetch with updated approval status
         tokenCacheRef.current.clear()
+        sidebarVideoCacheRef.current.clear()
+        sidebarThumbnailRequestCacheRef.current.clear()
+        // Reset so sidebar immediately falls back to the freshly-fetched project.videosByName
+        setAllVideosByName({})
 
         // Fetch comments after project loads (if not hidden)
         if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
@@ -476,7 +480,13 @@ export default function SharePage() {
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
-    const handleApprovalChanged = () => {
+    const handleApprovalChanged = (e: Event) => {
+      // Optimistically mark the approved video immediately so banner/modal show without
+      // waiting for the full async token-fetch chain to complete.
+      const videoId = (e as CustomEvent).detail?.videoId
+      if (videoId) {
+        setActiveVideos(prev => prev.map((v: any) => v.id === videoId ? { ...v, approved: true } : v))
+      }
       // Use the latest persisted token; fall back to current in-memory token.
       const persisted = loadShareToken(storageKey)
       fetchProjectData(persisted || shareToken)

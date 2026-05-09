@@ -4,11 +4,12 @@ import { getRedis } from '@/lib/redis'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { createReadStream, existsSync, statSync } from 'fs'
-import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
 import { getAuthContext } from '@/lib/auth'
 import { getSecuritySettings } from '@/lib/video-access'
 import { verifyAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { getTransferTuningSettings } from '@/lib/settings'
+import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -94,33 +95,54 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // otherwise fall through to the original so the viewer is never broken.
   if (variant === 'preview') {
     if (photo.socialStatus === 'READY' && photo.socialStoragePath) {
-      const previewFullPath = getFilePath(photo.socialStoragePath)
-      if (existsSync(previewFullPath)) {
-        const previewStat = statSync(previewFullPath)
+      const previewExists = isS3Mode()
+        ? await s3FileExists(photo.socialStoragePath)
+        : existsSync(getFilePath(photo.socialStoragePath))
+
+      if (previewExists) {
         const { downloadChunkSizeBytes } = await getTransferTuningSettings()
-        const previewStream = createReadStream(previewFullPath, { highWaterMark: downloadChunkSizeBytes })
-        return new NextResponse(createWebReadableStream(previewStream), {
-          headers: {
-            'Content-Type': 'image/jpeg',
-            'Content-Length': previewStat.size.toString(),
-            'Cache-Control': 'private, max-age=86400, immutable',
-            'X-Content-Type-Options': 'nosniff',
-            'Referrer-Policy': 'strict-origin-when-cross-origin',
-          },
-        })
+
+        if (isS3Mode()) {
+          const previewSize = await s3GetFileSize(photo.socialStoragePath)
+          const previewStream = await downloadFile(photo.socialStoragePath)
+          return new NextResponse(createWebReadableStream(previewStream), {
+            headers: {
+              'Content-Type': 'image/jpeg',
+              ...(previewSize != null ? { 'Content-Length': previewSize.toString() } : {}),
+              'Cache-Control': 'private, max-age=86400, immutable',
+              'X-Content-Type-Options': 'nosniff',
+              'Referrer-Policy': 'strict-origin-when-cross-origin',
+            },
+          })
+        } else {
+          const previewFullPath = getFilePath(photo.socialStoragePath)
+          const previewStat = statSync(previewFullPath)
+          const previewStream = createReadStream(previewFullPath, { highWaterMark: downloadChunkSizeBytes })
+          return new NextResponse(createWebReadableStream(previewStream), {
+            headers: {
+              'Content-Type': 'image/jpeg',
+              'Content-Length': previewStat.size.toString(),
+              'Cache-Control': 'private, max-age=86400, immutable',
+              'X-Content-Type-Options': 'nosniff',
+              'Referrer-Policy': 'strict-origin-when-cross-origin',
+            },
+          })
+        }
       }
     }
     // Social derivative not ready yet — fall through and serve the original as a graceful fallback.
   }
 
-  const fullPath = getFilePath(storagePath)
-  if (!existsSync(fullPath)) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+  // Check the target file exists before streaming.
+  if (isS3Mode()) {
+    const exists = await s3FileExists(storagePath)
+    if (!exists) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+  } else {
+    const fullPath = getFilePath(storagePath)
+    if (!existsSync(fullPath)) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+  }
 
-  const stat = statSync(fullPath)
   const { downloadChunkSizeBytes } = await getTransferTuningSettings()
-  const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
-  const readableStream = createWebReadableStream(fileStream)
-
   const filename = sanitizeFilenameForHeader(photo.fileName || 'photo.jpg')
 
   if (isDownload) {
@@ -141,12 +163,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
+  if (isS3Mode()) {
+    const fileSize = await s3GetFileSize(storagePath)
+    const fileStream = await downloadFile(storagePath)
+    const readableStream = createWebReadableStream(fileStream)
+    return new NextResponse(readableStream, {
+      headers: {
+        'Content-Type': 'image/jpeg',
+        ...(fileSize != null ? { 'Content-Length': fileSize.toString() } : {}),
+        'Cache-Control': isDownload
+          ? 'private, no-store, must-revalidate'
+          : 'private, max-age=3600, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        ...(isDownload ? { 'Content-Disposition': `attachment; filename="${filename}"` } : {}),
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+      },
+    })
+  }
+
+  const fullPath = getFilePath(storagePath)
+  const stat = statSync(fullPath)
+  const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
+  const readableStream = createWebReadableStream(fileStream)
+
   return new NextResponse(readableStream, {
     headers: {
       'Content-Type': 'image/jpeg',
       'Content-Length': stat.size.toString(),
-      // For album grids, allow the browser to cache images to avoid re-fetching during scroll/back/forward.
-      // Tokens are already unguessable and scoped; keep caching private to the user agent.
       'Cache-Control': isDownload
         ? 'private, no-store, must-revalidate'
         : 'private, max-age=3600, immutable',

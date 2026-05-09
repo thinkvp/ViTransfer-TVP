@@ -1,13 +1,15 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { downloadFile, getFilePath } from '../lib/storage'
+import { downloadFile, getFilePath, uploadFile, deleteFile } from '../lib/storage'
 import type { AlbumPhotoZipJob } from '../lib/queue'
 import { getAlbumZipJobId, getAlbumZipStoragePath, getAlbumZipDropboxPath } from '../lib/album-photo-zip'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
 import archiver from 'archiver'
 import { buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
 
 const ZIP_RETRY_DELAY_MS = 30_000
 
@@ -19,8 +21,14 @@ async function writeZipFile(params: {
 }) {
   const { outputStoragePath, entries } = params
 
-  const outputPath = getFilePath(outputStoragePath)
-  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
+  // In S3 mode, write to a temp file first, then upload to R2.
+  let outputPath: string
+  if (isS3Mode()) {
+    outputPath = path.join(os.tmpdir(), `album-zip-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`)
+  } else {
+    outputPath = getFilePath(outputStoragePath)
+    await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
+  }
 
   const tmpPath = `${outputPath}.tmp`
   await fs.promises.unlink(tmpPath).catch(() => {})
@@ -38,13 +46,24 @@ async function writeZipFile(params: {
 
   for (const entry of entries) {
     try {
-      const entryPath = getFilePath(entry.storagePath)
-      const stats = await fs.promises.stat(entryPath).catch(() => null)
-      if (!stats?.isFile()) {
-        if (DEBUG) {
-          console.warn('[WORKER DEBUG] Skipping missing ZIP entry:', entry)
+      // Check that the source file exists before appending.
+      if (isS3Mode()) {
+        const exists = await s3FileExists(entry.storagePath)
+        if (!exists) {
+          if (DEBUG) {
+            console.warn('[WORKER DEBUG] Skipping missing ZIP entry:', entry)
+          }
+          continue
         }
-        continue
+      } else {
+        const entryPath = getFilePath(entry.storagePath)
+        const stats = await fs.promises.stat(entryPath).catch(() => null)
+        if (!stats?.isFile()) {
+          if (DEBUG) {
+            console.warn('[WORKER DEBUG] Skipping missing ZIP entry:', entry)
+          }
+          continue
+        }
       }
 
       const stream = await downloadFile(entry.storagePath)
@@ -65,6 +84,14 @@ async function writeZipFile(params: {
   await done
 
   await fs.promises.rename(tmpPath, outputPath)
+
+  // In S3 mode, upload the locally-generated ZIP to R2 then remove the temp file.
+  if (isS3Mode()) {
+    const stats = await fs.promises.stat(outputPath)
+    const readStream = fs.createReadStream(outputPath)
+    await uploadFile(outputStoragePath, readStream, stats.size, 'application/zip')
+    await fs.promises.unlink(outputPath).catch(() => {})
+  }
 }
 
 export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
@@ -138,15 +165,20 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       // Social derivatives are always generated (used as previews); wait for them.
       if (pendingSocialCount > 0) return
 
-      const zipFullPath = getFilePath(
-        getAlbumZipStoragePath({ ...zipArgs, variant: 'full' })
-      )
-      const zipSocialPath = getFilePath(
-        getAlbumZipStoragePath({ ...zipArgs, variant: 'social' })
-      )
+      const fullZipStoragePath = getAlbumZipStoragePath({ ...zipArgs, variant: 'full' })
+      const socialZipStoragePath = getAlbumZipStoragePath({ ...zipArgs, variant: 'social' })
 
-      const fullExists = fs.existsSync(zipFullPath)
-      const socialExists = fs.existsSync(zipSocialPath)
+      let fullExists: boolean
+      let socialExists: boolean
+      if (isS3Mode()) {
+        ;[fullExists, socialExists] = await Promise.all([
+          s3FileExists(fullZipStoragePath),
+          s3FileExists(socialZipStoragePath),
+        ])
+      } else {
+        fullExists = fs.existsSync(getFilePath(fullZipStoragePath))
+        socialExists = fs.existsSync(getFilePath(socialZipStoragePath))
+      }
 
       // Consider an empty album READY even if zips do not exist.
       const anyReadyPhotos = await prisma.albumPhoto.count({ where: { albumId, status: 'READY' } })
@@ -214,7 +246,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       ...zipArgs,
       variant,
     })
-    await fs.promises.unlink(getFilePath(zipStoragePath)).catch(() => {})
+    await deleteFile(zipStoragePath).catch(() => {})
 
     const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
     if (prevSize > BigInt(0)) {
@@ -287,9 +319,16 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
 
   // Persist ZIP size and adjust project totals by the delta.
   try {
-    const zipFullPath = getFilePath(zipStoragePath)
-    const zipStats = await fs.promises.stat(zipFullPath)
-    const newSize = BigInt(zipStats.size)
+    let newSize = BigInt(0)
+    if (isS3Mode()) {
+      const size = await s3GetFileSize(zipStoragePath)
+      newSize = BigInt(Math.max(0, Number(size || 0)))
+    } else {
+      const zipFullPath = getFilePath(zipStoragePath)
+      const zipStats = await fs.promises.stat(zipFullPath)
+      newSize = BigInt(zipStats.size)
+    }
+
     const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
 
     await prisma.album.update({

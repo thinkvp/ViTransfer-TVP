@@ -11,13 +11,17 @@ const JPEG_QUALITY = 0.85
 
 // Labels containing these words are deprioritised when selecting the default camera
 const DEPRIORITISED_LENS_LABELS = ['ultra', 'telephoto', 'macro']
+// Labels containing these words indicate a front/selfie camera — strongly deprioritised
+const FRONT_CAMERA_LABELS = ['front', 'selfie', 'facetime', 'user']
 
 function sortCameraDevices(devices: MediaDeviceInfo[]): MediaDeviceInfo[] {
   const videoDevices = devices.filter(d => d.kind === 'videoinput')
   return [...videoDevices].sort((a, b) => {
     const score = (label: string) => {
       const l = label.toLowerCase()
-      return DEPRIORITISED_LENS_LABELS.some(w => l.includes(w)) ? 1 : 0
+      if (FRONT_CAMERA_LABELS.some(w => l.includes(w))) return 10
+      if (DEPRIORITISED_LENS_LABELS.some(w => l.includes(w))) return 1
+      return 0
     }
     return score(a.label) - score(b.label)
   })

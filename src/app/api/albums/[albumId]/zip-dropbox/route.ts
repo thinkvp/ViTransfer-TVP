@@ -127,15 +127,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title)
   const albumFolderName = album.storageFolderName || album.name
 
-  const variants = (['full', 'social'] as const).filter((variant) => {
-    const storagePath = getAlbumZipStoragePath({
-      projectStoragePath,
-      albumFolderName,
-      albumName: album.name,
-      variant,
+  const allVariants = ['full', 'social'] as const
+  const variantExists = await Promise.all(
+    allVariants.map((variant) => {
+      const storagePath = getAlbumZipStoragePath({
+        projectStoragePath,
+        albumFolderName,
+        albumName: album.name,
+        variant,
+      })
+      return albumZipExists(storagePath)
     })
-    return albumZipExists(storagePath)
-  })
+  )
+  const variants = allVariants.filter((_, i) => variantExists[i])
 
   if (variants.length > 0) {
     try {

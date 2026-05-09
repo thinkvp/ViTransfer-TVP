@@ -1,4 +1,8 @@
 import { existsSync, statSync } from 'fs'
+import path from 'path'
+import fs from 'fs'
+import { Transform } from 'stream'
+import { pipeline } from 'stream/promises'
 import { getFilePath } from '@/lib/storage'
 import {
   createTemporaryDropboxLink,
@@ -6,12 +10,22 @@ import {
   materializeDropboxPathToTempFile,
   stripDropboxStoragePrefix,
 } from '@/lib/storage-provider-dropbox'
+import {
+  isS3Mode,
+  s3DownloadFile,
+  s3GetPresignedStreamUrl,
+  s3GetPresignedDownloadUrl,
+} from '@/lib/s3-storage'
 
 export class DropboxPreferredDownloadError extends Error {
   constructor(message: string = 'Dropbox download is unavailable') {
     super(message)
     this.name = 'DropboxPreferredDownloadError'
   }
+}
+
+function sanitizeTempFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'file.bin'
 }
 
 const DROPBOX_LINK_RETRY_ATTEMPTS = 3
@@ -73,10 +87,24 @@ async function createTemporaryDropboxLinkWithRetry(rawPath: string, dropboxPath?
   throw lastError instanceof Error ? lastError : new Error('Failed to create Dropbox download link')
 }
 
-export async function resolveStorageDownloadTarget(rawPath: string, options?: { preferDropbox?: boolean; dropboxPath?: string | null }): Promise<
+export async function resolveStorageDownloadTarget(rawPath: string, options?: { preferDropbox?: boolean; dropboxPath?: string | null; isDownload?: boolean; filename?: string; contentType?: string }): Promise<
   | { kind: 'local-file'; absolutePath: string }
   | { kind: 'redirect'; url: string }
 > {
+  // S3 mode: always redirect to a presigned URL (never serve from local disk)
+  if (isS3Mode()) {
+    if (options?.isDownload && options.filename) {
+      return {
+        kind: 'redirect',
+        url: await s3GetPresignedDownloadUrl(rawPath, 3600, options.filename, options.contentType),
+      }
+    }
+    return {
+      kind: 'redirect',
+      url: await s3GetPresignedStreamUrl(rawPath, 14400, options?.contentType),
+    }
+  }
+
   const location = parseStorageLocation(rawPath)
 
   if (location.provider === 'local' && options?.preferDropbox && options.dropboxPath) {
@@ -127,7 +155,30 @@ export async function materializeStoragePathToLocalFile(params: {
   rawPath: string
   tempDir: string
   suggestedName: string
+  onProgress?: (transferred: number, total: number) => void
 }): Promise<{ localPath: string; isTemporary: boolean }> {
+  // S3 mode: download from R2 to a temp file for local processing (e.g. FFmpeg)
+  if (isS3Mode()) {
+    const tempPath = path.join(params.tempDir, sanitizeTempFileName(params.suggestedName))
+    const { stream, contentLength } = await s3DownloadFile(params.rawPath)
+    const writeStream = fs.createWriteStream(tempPath)
+    if (params.onProgress && contentLength > 0) {
+      let transferred = 0
+      const onProgress = params.onProgress
+      const tracker = new Transform({
+        transform(chunk, _enc, cb) {
+          transferred += chunk.length
+          onProgress(transferred, contentLength)
+          cb(null, chunk)
+        },
+      })
+      await pipeline(stream as any, tracker, writeStream)
+    } else {
+      await pipeline(stream as any, writeStream)
+    }
+    return { localPath: tempPath, isTemporary: true }
+  }
+
   const location = parseStorageLocation(params.rawPath)
 
   if (location.provider === 'local') {

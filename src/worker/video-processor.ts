@@ -21,9 +21,34 @@ import {
   PreviewResolutionCancelledError,
   type Resolution,
 } from './video-processor-helpers'
-import { getPreviewProcessingPhase } from '@/lib/video-processing-phase'
+import { getPreviewProcessingPhase, PROCESSING_PHASES } from '@/lib/video-processing-phase'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
+import { isS3Mode } from '@/lib/s3-storage'
+
+/**
+ * Returns a throttled progress callback (max 1 DB write per 500 ms) for tracking
+ * S3→local download progress in the Running Jobs UI.
+ */
+function makeDownloadProgressCallback(videoId: string) {
+  let lastUpdate = 0
+  return (transferred: number, total: number) => {
+    if (total <= 0) return
+
+    const now = Date.now()
+    const isFinal = transferred >= total
+    if (!isFinal && now - lastUpdate < 500) return
+    lastUpdate = now
+
+    const progress = Math.min(transferred / total, 1)
+    // Fire-and-forget — progress is best-effort; don't block the download stream
+    updateVideoRecord(
+      videoId,
+      { processingProgress: progress },
+      { context: 'download-progress', ignoreMissing: true }
+    ).catch(() => {})
+  }
+}
 
 /**
  * Main video processing orchestrator
@@ -93,7 +118,21 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     await updateVideoStatus(videoId, 'PROCESSING', 0, null)
 
     // Stage 2: Download and validate video
-    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+    // In S3 mode the original file must be downloaded from R2 first — show a phase label so
+    // the Running Jobs UI doesn't sit silently at 0% while the download is in progress.
+    if (isS3Mode()) {
+      await updateVideoRecord(
+        videoId,
+        { processingPhase: PROCESSING_PHASES.downloading, processingProgress: 0 },
+        { context: 'download-from-s3', ignoreMissing: true }
+      )
+    }
+    const videoInfo = await downloadAndValidateVideo(
+      videoId,
+      originalStoragePath,
+      tempFiles,
+      isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
+    )
 
     // Stage 4+5: Process previews for each selected resolution
     const previewResults: { resolution: string; path: string }[] = []
@@ -258,7 +297,19 @@ async function processPreviewOnly(
       { context: 'starting preview-only generation', ignoreMissing: true }
     )
 
-    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+    if (isS3Mode()) {
+      await updateVideoRecord(
+        videoId,
+        { processingPhase: PROCESSING_PHASES.downloading, processingProgress: 0 },
+        { context: 'download-from-s3', ignoreMissing: true }
+      )
+    }
+    const videoInfo = await downloadAndValidateVideo(
+      videoId,
+      originalStoragePath,
+      tempFiles,
+      isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
+    )
 
     const previewResults: { resolution: string; path: string }[] = []
     const completedResolutions = new Set<Resolution>()
@@ -362,7 +413,19 @@ async function processThumbnailOnly(
       { context: 'starting thumbnail-only generation', ignoreMissing: true }
     )
 
-    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+    if (isS3Mode()) {
+      await updateVideoRecord(
+        videoId,
+        { processingPhase: PROCESSING_PHASES.downloading, processingProgress: 0 },
+        { context: 'download-from-s3', ignoreMissing: true }
+      )
+    }
+    const videoInfo = await downloadAndValidateVideo(
+      videoId,
+      originalStoragePath,
+      tempFiles,
+      isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
+    )
     const thumbnailPath = await processThumbnail(
       videoId,
       projectId,

@@ -99,7 +99,7 @@ export async function POST(
       albumName: album.name,
       variant,
     })
-    const zipReady = albumZipExists(zipStoragePath)
+    const zipReady = await albumZipExists(zipStoragePath)
 
     if (!zipReady) {
       // Best-effort: enqueue ZIP generation and tell the client to retry.

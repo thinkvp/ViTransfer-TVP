@@ -1,5 +1,6 @@
 import { getFilePath } from '@/lib/storage'
 import { buildAlbumZipDropboxPath as buildCanonicalAlbumZipDropboxPath, buildAlbumZipStoragePath as buildCanonicalAlbumZipStoragePath } from '@/lib/project-storage-paths'
+import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
 import fs from 'fs'
 
 export type AlbumZipVariant = 'full' | 'social'
@@ -53,8 +54,11 @@ export function getAlbumZipDropboxPath(params: {
   return buildCanonicalAlbumZipDropboxPath(clientName, projectFolderName, albumFolderName, albumName, variant)
 }
 
-export function albumZipExists(storagePath: string): boolean {
+export async function albumZipExists(storagePath: string): Promise<boolean> {
   try {
+    if (isS3Mode()) {
+      return await s3FileExists(storagePath)
+    }
     const fullPath = getFilePath(storagePath)
     return fs.existsSync(fullPath)
   } catch {

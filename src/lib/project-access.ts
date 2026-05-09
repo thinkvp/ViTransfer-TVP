@@ -197,42 +197,8 @@ export async function verifyProjectAccess(
 
 export async function fetchProjectWithVideos(
   token: string,
-  isGuest: boolean,
-  guestLatestOnly: boolean,
   projectId: string
 ) {
-  if (isGuest && guestLatestOnly) {
-    const allVideos = await prisma.video.findMany({
-      where: {
-        projectId,
-        status: 'READY',
-      },
-      orderBy: { version: 'desc' },
-    })
-
-    const latestVideoIds: string[] = []
-    const seenNames = new Set<string>()
-    for (const video of allVideos) {
-      if (!seenNames.has(video.name)) {
-        latestVideoIds.push(video.id)
-        seenNames.add(video.name)
-      }
-    }
-
-    return prisma.project.findUnique({
-      where: { slug: token },
-      include: {
-        videos: {
-          where: {
-            id: { in: latestVideoIds },
-            status: 'READY',
-          },
-          orderBy: { version: 'desc' },
-        },
-      },
-    })
-  }
-
   return prisma.project.findUnique({
     where: { slug: token },
     include: {

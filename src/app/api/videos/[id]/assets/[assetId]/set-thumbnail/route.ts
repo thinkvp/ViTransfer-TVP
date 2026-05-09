@@ -110,9 +110,24 @@ export async function POST(
       )
     }
 
-    // Verify asset is an image (fileType is now properly set after TUS upload)
+    // Verify asset is an image.
+    // The fileType starts as 'application/octet-stream' and is updated asynchronously by the
+    // asset-processor worker after magic-byte validation.  To avoid a race where the user
+    // clicks "set as thumbnail" before the worker has run, we also accept assets whose
+    // filename has a known image extension — matching the same logic in canSetAsThumbnail()
+    // on the frontend.  We still reject any asset the worker explicitly flagged as INVALID.
     const imageTypes = ['image/jpeg', 'image/png', 'image/jpg']
-    if (!imageTypes.includes(asset.fileType.toLowerCase())) {
+    const imageExtensions = ['.jpg', '.jpeg', '.png']
+    const assetFilenameLower = asset.fileName.toLowerCase()
+    const assetExt = assetFilenameLower.includes('.')
+      ? assetFilenameLower.slice(assetFilenameLower.lastIndexOf('.'))
+      : ''
+
+    const validByMime = imageTypes.includes(asset.fileType.toLowerCase())
+    const validByExt = imageExtensions.includes(assetExt)
+    const markedInvalid = asset.fileType.startsWith('INVALID')
+
+    if ((!validByMime && !validByExt) || markedInvalid) {
       return NextResponse.json(
         { error: 'Only JPG and PNG images can be set as thumbnails' },
         { status: 400 }

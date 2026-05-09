@@ -422,9 +422,10 @@ export default function CommentInput({
                   type="button"
                   onClick={() => setNamePickerOpen(true)}
                   className={cn(
-                    'h-9 w-full flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background',
+                    'h-9 w-full flex-1 rounded-md border bg-background px-3 py-2 text-sm ring-offset-background',
                     'flex items-center justify-between gap-2',
-                    'hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                    'hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                    authorName.trim() ? 'border-input' : 'border-destructive ring-1 ring-destructive bg-destructive/10'
                   )}
                   aria-label="Your name"
                 >

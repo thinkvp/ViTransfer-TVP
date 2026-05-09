@@ -80,6 +80,9 @@ export async function dropboxPathExists(relPath: string): Promise<boolean> {
 }
 
 export function isDropboxStorageConfigured(): boolean {
+  // S3 mode takes precedence — Dropbox is disabled when S3 is the active provider
+  if (process.env.STORAGE_PROVIDER === 's3') return false
+
   return Boolean(
     process.env.DROPBOX_APP_KEY?.trim()
     && process.env.DROPBOX_APP_SECRET?.trim()

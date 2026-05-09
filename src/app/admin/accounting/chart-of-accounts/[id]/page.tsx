@@ -127,7 +127,7 @@ export default function AccountLedgerPage() {
   const [jeNotes, setJeNotes] = useState('')
   const [jeSaving, setJeSaving] = useState(false)
 
-  const PAGE_SIZE = 50
+  const [pageSize, setPageSize] = useState<50 | 100 | 150 | 200>(50)
 
   const fetchAllEntriesForExport = useCallback(async (): Promise<Entry[]> => {
     const params = new URLSearchParams({ page: '1', pageSize: '100000', download: 'true' })
@@ -145,7 +145,7 @@ export default function AccountLedgerPage() {
   const load = useCallback(async (p: number, fromDate: string, toDate: string, q: string) => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(p), pageSize: String(PAGE_SIZE) })
+      const params = new URLSearchParams({ page: String(p), pageSize: String(pageSize) })
       if (fromDate) params.set('from', fromDate)
       if (toDate) params.set('to', toDate)
       if (q.trim()) params.set('q', q.trim())
@@ -164,7 +164,7 @@ export default function AccountLedgerPage() {
     } finally {
       setLoading(false)
     }
-  }, [id, router, sortKey, sortDir])
+  }, [id, router, sortKey, sortDir, pageSize])
 
   useEffect(() => { void load(1, from, to, search) }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -318,6 +318,26 @@ export default function AccountLedgerPage() {
             {hasChildAccounts && <span className="text-xs text-muted-foreground border border-border px-2 py-0.5 rounded-full">Includes sub-accounts</span>}
           </div>
           <div className="flex items-center gap-2">
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                const parsed = Number(v)
+                if (parsed === 50 || parsed === 100 || parsed === 150 || parsed === 200) {
+                  setPage(1)
+                  setPageSize(parsed)
+                }
+              }}
+            >
+              <SelectTrigger className="h-9 w-[88px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+                <SelectItem value="150">150</SelectItem>
+                <SelectItem value="200">200</SelectItem>
+              </SelectContent>
+            </Select>
             <ExportMenu
               onExportCsv={async () => {
                 const all = await fetchAllEntriesForExport()

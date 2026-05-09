@@ -13,6 +13,7 @@ import {
   getAlbumPhotoUploadMetadata,
   storeAlbumPhotoUploadMetadata,
 } from '@/lib/tus-album-photo-metadata'
+import { isS3Mode } from '@/lib/storage-provider-client'
 
 export interface QueuedAlbumPhotoUpload {
   id: string
@@ -26,6 +27,9 @@ export interface QueuedAlbumPhotoUpload {
   error: string | null
 
   tusUpload: tus.Upload | null
+
+  // S3 abort controller (S3 mode only)
+  s3AbortController?: AbortController
 
   createdAt: number
   startedAt: number | null
@@ -46,6 +50,7 @@ export function useAlbumPhotoUploadQueue({
   const { uploadChunkSizeBytes } = useTransferTuning()
   const [queue, setQueue] = useState<QueuedAlbumPhotoUpload[]>([])
   const uploadRefsMap = useRef<Map<string, tus.Upload>>(new Map())
+  const s3AbortControllersMap = useRef<Map<string, AbortController>>(new Map())
   const photoIdsMap = useRef<Map<string, string>>(new Map())
   const refreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queueRef = useRef(queue)
@@ -150,6 +155,165 @@ export function useAlbumPhotoUploadQueue({
         }
 
         setQueue((prev) => prev.map((u) => (u.id === uploadId ? { ...u, photoId } : u)))
+
+        // -----------------------------------------------------------------------
+        // S3 mode: browser-direct multipart upload
+        // -----------------------------------------------------------------------
+        if (await isS3Mode()) {
+          const abortController = new AbortController()
+          s3AbortControllersMap.current.set(uploadId, abortController)
+          const signal = abortController.signal
+
+          let s3UploadId: string | null = null
+          let s3Key: string | null = null
+
+          try {
+            const presignRes = await apiFetch('/api/uploads/s3/presign', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                photoId,
+                fileSize: upload.file.size,
+                fileName: upload.file.name,
+                contentType: upload.file.type || 'image/jpeg',
+              }),
+              signal,
+            })
+
+            if (!presignRes.ok) {
+              const errBody = await presignRes.json().catch(() => ({ error: 'Presign failed' }))
+              throw new Error(errBody.error ?? 'Presign failed')
+            }
+
+            const { uploadId: uid, key: k, parts, partSize } = await presignRes.json()
+            s3UploadId = uid
+            s3Key = k
+
+            if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+            const uploadFile = upload.file
+            const totalBytes = uploadFile.size
+            const completedParts: Array<{ partNumber: number; etag: string }> = new Array(parts.length)
+
+            const MAX_CONCURRENT = 4
+            let nextPartIdx = 0
+            let totalSentBytes = 0
+            let speedWindowStartTime = Date.now()
+            let speedWindowStartBytes = 0
+            let displaySpeedMBps = 0
+
+            const patchProgress = () => {
+              const progress = Math.floor((totalSentBytes / totalBytes) * 100)
+              setQueue((prev) =>
+                prev.map((u) =>
+                  u.id === uploadId
+                    ? { ...u, progress: Math.min(progress, 99), uploadSpeed: displaySpeedMBps > 0.05 ? Math.round(displaySpeedMBps * 10) / 10 : u.uploadSpeed }
+                    : u
+                )
+              )
+            }
+
+            async function uploadWorker() {
+              while (nextPartIdx < parts.length) {
+                const i = nextPartIdx++
+                const part = parts[i]
+                const start = i * partSize
+                const end = Math.min(start + partSize, uploadFile.size)
+                const slice = uploadFile.slice(start, end)
+                const partBytes = end - start
+
+                const etag = await new Promise<string>((resolve, reject) => {
+                  if (signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return }
+                  const xhr = new XMLHttpRequest()
+                  xhr.open('PUT', part.url)
+                  let lastLoaded = 0
+                  xhr.upload.addEventListener('progress', (e) => {
+                    const delta = e.loaded - lastLoaded
+                    if (delta <= 0) return
+                    lastLoaded = e.loaded
+                    totalSentBytes = Math.min(totalSentBytes + delta, totalBytes)
+                    const now = Date.now()
+                    const timeDiff = (now - speedWindowStartTime) / 1000
+                    if (timeDiff >= 0.5) {
+                      const bytesDiff = totalSentBytes - speedWindowStartBytes
+                      displaySpeedMBps = bytesDiff / timeDiff / (1024 * 1024)
+                      speedWindowStartTime = now
+                      speedWindowStartBytes = totalSentBytes
+                    }
+                    patchProgress()
+                  })
+                  xhr.addEventListener('load', () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                      const trailingDelta = partBytes - lastLoaded
+                      if (trailingDelta > 0) {
+                        totalSentBytes = Math.min(totalSentBytes + trailingDelta, totalBytes)
+                        patchProgress()
+                      }
+                      const etag = xhr.getResponseHeader('ETag') ?? xhr.getResponseHeader('etag')
+                      etag ? resolve(etag) : reject(new Error('No ETag in response'))
+                    } else {
+                      reject(new Error(`Part upload failed: ${xhr.status}`))
+                    }
+                  })
+                  xhr.addEventListener('error', () => reject(new Error('Network error during part upload')))
+                  xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+                  const onAbort = () => xhr.abort()
+                  signal.addEventListener('abort', onAbort, { once: true })
+                  xhr.addEventListener('loadend', () => signal.removeEventListener('abort', onAbort))
+                  xhr.send(slice)
+                })
+
+                completedParts[i] = { partNumber: part.partNumber, etag }
+              }
+            }
+
+            await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, parts.length) }, uploadWorker))
+
+            if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+            const completeRes = await apiFetch('/api/uploads/s3/complete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ photoId, uploadId: s3UploadId, key: s3Key, parts: completedParts }),
+            })
+
+            if (!completeRes.ok) {
+              const errBody = await completeRes.json().catch(() => ({ error: 'Complete failed' }))
+              throw new Error(errBody.error ?? 'Complete failed')
+            }
+
+            setQueue((prev) =>
+              prev.map((u) =>
+                u.id === uploadId ? { ...u, status: 'completed' as const, progress: 100, uploadSpeed: 0, completedAt: Date.now() } : u
+              )
+            )
+            s3AbortControllersMap.current.delete(uploadId)
+            photoIdsMap.current.delete(uploadId)
+            clearFileContext(upload.file)
+            clearAlbumPhotoUploadMetadata(upload.file)
+            onUploadComplete?.()
+          } catch (err: any) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+              if (s3UploadId && s3Key) {
+                apiFetch('/api/uploads/s3/abort', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ photoId, uploadId: s3UploadId, key: s3Key }),
+                }).catch(() => undefined)
+              }
+              return
+            }
+            const errorMessage = err?.message ?? 'Upload failed'
+            setQueue((prev) => prev.map((u) => (u.id === uploadId ? { ...u, status: 'error' as const, error: errorMessage } : u)))
+            s3AbortControllersMap.current.delete(uploadId)
+            photoIdsMap.current.delete(uploadId)
+          }
+          return
+        }
+
+        // -----------------------------------------------------------------------
+        // TUS mode: local/Dropbox storage
+        // -----------------------------------------------------------------------
 
         const startTime = Date.now()
         let lastLoaded = 0
@@ -290,6 +454,7 @@ export function useAlbumPhotoUploadQueue({
   }, [queue])
 
   const pauseUpload = useCallback((uploadId: string) => {
+    if (s3AbortControllersMap.current.has(uploadId)) return
     const tusUpload = uploadRefsMap.current.get(uploadId)
     if (!tusUpload) return
     tusUpload.abort()
@@ -298,6 +463,7 @@ export function useAlbumPhotoUploadQueue({
 
   const resumeUpload = useCallback(
     (uploadId: string) => {
+      if (s3AbortControllersMap.current.has(uploadId)) return
       const tusUpload = uploadRefsMap.current.get(uploadId)
       if (tusUpload) {
         tusUpload.start()
@@ -314,10 +480,16 @@ export function useAlbumPhotoUploadQueue({
 
   const cancelUpload = useCallback(
     async (uploadId: string) => {
-      const tusUpload = uploadRefsMap.current.get(uploadId)
-      if (tusUpload) tusUpload.abort(true)
+      const s3Controller = s3AbortControllersMap.current.get(uploadId)
+      if (s3Controller) {
+        s3Controller.abort()
+        s3AbortControllersMap.current.delete(uploadId)
+      } else {
+        const tusUpload = uploadRefsMap.current.get(uploadId)
+        if (tusUpload) tusUpload.abort(true)
+        uploadRefsMap.current.delete(uploadId)
+      }
 
-      uploadRefsMap.current.delete(uploadId)
       photoIdsMap.current.delete(uploadId)
       refreshAttemptsRef.current.delete(uploadId)
 

@@ -5,6 +5,7 @@ import * as tus from 'tus-js-client'
 import { getAccessToken } from '@/lib/token-store'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { useTransferTuning } from '@/lib/transfer-tuning-client'
+import { isS3Mode } from '@/lib/storage-provider-client'
 import {
   clearFileContext,
   clearTUSFingerprint,
@@ -157,6 +158,8 @@ type UploadManagerActionsContextType = Pick<
 type InternalJob = UploadJob & {
   file: File
   tusUpload: tus.Upload | null
+  /** AbortController for S3 multipart uploads (set in S3 mode instead of tusUpload). */
+  s3AbortController?: AbortController
   onComplete?: () => void
   cancelled?: boolean
   /** Speed-calculation scratch */
@@ -282,115 +285,308 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     next._lastLoaded = 0
     next._lastTime = startTime
 
-    const upload = new tus.Upload(next.file, {
-      endpoint: `${window.location.origin}/api/uploads`,
-      retryDelays: [0, 1000, 3000, 5000, 10000],
-      chunkSize: uploadChunkSizeBytes,
-      storeFingerprintForResuming: true,
-      removeFingerprintOnSuccess: true,
-      metadata: {
-        filename: next.file.name,
-        filetype: next.file.type || 'video/mp4',
-        videoId: next.videoId,
-      },
-      onBeforeRequest: (req) => {
-        const xhr = req.getUnderlyingObject()
-        const token = getAccessToken()
-        if (token) {
-          if (xhr?.setRequestHeader) {
-            xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-          } else {
-            req.setHeader('Authorization', `Bearer ${token}`)
+    // -----------------------------------------------------------------------
+    // Route to S3 (browser-direct) or TUS (through server).
+    // isS3Mode() fetches the provider once from the server and caches it.
+    // -----------------------------------------------------------------------
+    ;(async () => {
+      if (await isS3Mode()) {
+        // ── S3 path: browser uploads directly to R2 ──────────────────────
+        const abortController = new AbortController()
+        next.s3AbortController = abortController
+        const currentJob = next
+
+        let uploadId: string | null = null
+        let key: string | null = null
+
+        const abortS3 = () => {
+          abortController.abort()
+          if (uploadId && key) {
+            apiFetch('/api/uploads/s3/abort', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoId: currentJob.videoId, uploadId, key }),
+            }).catch(() => undefined)
           }
         }
-      },
-      onProgress: (bytesUploaded, bytesTotal) => {
-        if (next.cancelled) return
-        const percentage = Math.round((bytesUploaded / bytesTotal) * 100)
-        const now = Date.now()
-        const job = jobsRef.current.find((j) => j.id === next.id)
-        if (!job) return
-        const timeDiff = (now - job._lastTime) / 1000
-        const bytesDiff = bytesUploaded - job._lastLoaded
-        if (timeDiff > 0.5) {
-          const speedMBps = bytesDiff / timeDiff / (1024 * 1024)
-          const stableSpeed = speedMBps > 0.05 ? Math.round(speedMBps * 10) / 10 : 0
-          patchJob(next.id, { progress: percentage, speed: stableSpeed, _lastLoaded: bytesUploaded, _lastTime: now })
-        } else {
-          patchJob(next.id, { progress: percentage })
-        }
-      },
-      onSuccess: () => {
-        if (next.cancelled) {
-          activeIdsRef.current.delete(next.id)
-          processNextRef.current()
-          return
-        }
-        clearFileContext(next.file)
-        clearUploadMetadata(next.file)
-        clearTUSFingerprint(next.file)
-        patchJob(next.id, { status: 'success', progress: 100, speed: 0, completedAt: Date.now() })
-        activeIdsRef.current.delete(next.id)
 
-        // Notify listeners (project pages, etc.)
-        next.onComplete?.()
         try {
-          window.dispatchEvent(
-            new CustomEvent('upload-complete', { detail: { projectId: next.projectId, videoId: next.videoId } }),
-          )
-        } catch {}
+          // Step 1: Presign
+          const presignRes = await apiFetch('/api/uploads/s3/presign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoId: currentJob.videoId,
+              fileSize: currentJob.file.size,
+              fileName: currentJob.file.name,
+              contentType: currentJob.file.type || 'video/mp4',
+            }),
+            signal: abortController.signal,
+          })
 
-        // Auto-remove successful jobs after 30 minutes.
-        const jobId = next.id
-        setTimeout(() => removeJob(jobId), 1_800_000)
-
-        processNextRef.current()
-      },
-      onError: async (error) => {
-        if (next.cancelled) {
-          activeIdsRef.current.delete(next.id)
-          processNextRef.current()
-          return
-        }
-
-        let errorMessage = error.message || 'Upload failed'
-        if (error.message?.includes('NetworkError') || error.message?.includes('Failed to fetch')) {
-          errorMessage = 'Network error — check your connection.'
-        } else if (error.message?.includes('413')) {
-          errorMessage = 'File too large.'
-        } else if (error.message?.includes('401') || error.message?.includes('403')) {
-          errorMessage = 'Auth failed — please log in again.'
-        }
-
-        // Clean up server-side record.
-        if (next.videoId) {
-          try {
-            await apiDelete(`/api/videos/${next.videoId}`)
-          } catch {
-            try {
-              await apiPost(`/api/videos/${next.videoId}/cancel-upload`, {})
-            } catch {}
+          if (!presignRes.ok) {
+            const errBody = await presignRes.json().catch(() => ({ error: 'Presign failed' }))
+            throw new Error(errBody.error ?? 'Presign failed')
           }
+
+          const { uploadId: uid, key: k, parts, partSize } = await presignRes.json()
+          uploadId = uid
+          key = k
+
+          if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+          // Step 2: Upload all parts directly to R2
+          const totalBytes = currentJob.file.size
+          const completedParts: Array<{ partNumber: number; etag: string }> = new Array(parts.length)
+
+          const MAX_CONCURRENT = 4
+          let nextPartIdx = 0
+
+          // Track the bytes the browser has sent into active upload requests for smooth progress,
+          // but keep the displayed value below 100 until the multipart upload is fully completed.
+          let totalSentBytes = 0
+          let speedWindowStartTime = Date.now()
+          let speedWindowStartBytes = 0
+          let displaySpeedMBps = 0
+
+          const patchDisplayedUploadState = () => {
+            const progress = Math.floor((totalSentBytes / totalBytes) * 100)
+            patchJob(currentJob.id, {
+              progress: Math.min(progress, 99),
+              speed: displaySpeedMBps > 0.05 ? Math.round(displaySpeedMBps * 10) / 10 : 0,
+            })
+          }
+
+          async function uploadWorker() {
+            while (nextPartIdx < parts.length) {
+              const i = nextPartIdx++
+              const part = parts[i]
+              const start = i * partSize
+              const end = Math.min(start + partSize, currentJob.file.size)
+              const slice = currentJob.file.slice(start, end)
+              const partBytes = end - start
+
+              const etag = await new Promise<string>((resolve, reject) => {
+                if (abortController.signal.aborted) {
+                  reject(new DOMException('Aborted', 'AbortError'))
+                  return
+                }
+                const xhr = new XMLHttpRequest()
+                xhr.open('PUT', part.url)
+                let lastLoaded = 0
+                xhr.upload.addEventListener('progress', (e) => {
+                  const delta = e.loaded - lastLoaded
+                  if (delta <= 0) return
+
+                  lastLoaded = e.loaded
+                  totalSentBytes = Math.min(totalSentBytes + delta, totalBytes)
+
+                  const now = Date.now()
+                  const timeDiff = (now - speedWindowStartTime) / 1000
+                  if (timeDiff >= 0.5) {
+                    const bytesDiff = totalSentBytes - speedWindowStartBytes
+                    displaySpeedMBps = bytesDiff / timeDiff / (1024 * 1024)
+                    speedWindowStartTime = now
+                    speedWindowStartBytes = totalSentBytes
+                  }
+
+                  patchDisplayedUploadState()
+                })
+                xhr.addEventListener('load', () => {
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    const trailingDelta = partBytes - lastLoaded
+                    if (trailingDelta > 0) {
+                      totalSentBytes = Math.min(totalSentBytes + trailingDelta, totalBytes)
+                      patchDisplayedUploadState()
+                    }
+                    const etag = xhr.getResponseHeader('ETag') ?? xhr.getResponseHeader('etag')
+                    etag ? resolve(etag) : reject(new Error('No ETag in response'))
+                  } else {
+                    reject(new Error(`Part upload failed: ${xhr.status}`))
+                  }
+                })
+                xhr.addEventListener('error', () => reject(new Error('Network error during part upload')))
+                xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+                const onAbort = () => xhr.abort()
+                abortController.signal.addEventListener('abort', onAbort, { once: true })
+                xhr.addEventListener('loadend', () => abortController.signal.removeEventListener('abort', onAbort))
+                xhr.send(slice)
+              })
+
+              completedParts[i] = { partNumber: part.partNumber, etag }
+            }
+          }
+
+          await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, parts.length) }, uploadWorker))
+
+          if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+          // Step 3: Complete
+          const completeRes = await apiFetch('/api/uploads/s3/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ videoId: currentJob.videoId, uploadId, key, parts: completedParts }),
+          })
+
+          if (!completeRes.ok) {
+            const errBody = await completeRes.json().catch(() => ({ error: 'Complete failed' }))
+            throw new Error(errBody.error ?? 'Complete failed')
+          }
+
+          if (currentJob.cancelled) {
+            activeIdsRef.current.delete(currentJob.id)
+            processNextRef.current()
+            return
+          }
+
+          patchJob(currentJob.id, { status: 'success', progress: 100, speed: 0, completedAt: Date.now() })
+          activeIdsRef.current.delete(currentJob.id)
+          currentJob.onComplete?.()
+          try {
+            window.dispatchEvent(new CustomEvent('upload-complete', { detail: { projectId: currentJob.projectId, videoId: currentJob.videoId } }))
+          } catch {}
+          const jobId = currentJob.id
+          setTimeout(() => removeJob(jobId), 1_800_000)
+          processNextRef.current()
+        } catch (error: any) {
+          if (abortController.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+            activeIdsRef.current.delete(currentJob.id)
+            processNextRef.current()
+            return
+          }
+
+          let errorMessage = error?.message ?? 'Upload failed'
+          if (errorMessage.includes('NetworkError') || errorMessage.includes('Failed to fetch')) {
+            errorMessage = 'Network error — check your connection.'
+          } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+            errorMessage = 'Auth failed — please log in again.'
+          }
+
+          abortS3()
+
+          try { await apiDelete(`/api/videos/${currentJob.videoId}`) } catch {
+            try { await apiPost(`/api/videos/${currentJob.videoId}/cancel-upload`, {}) } catch {}
+          }
+
+          patchJob(currentJob.id, { status: 'error', error: errorMessage, speed: 0, completedAt: Date.now() })
+          activeIdsRef.current.delete(currentJob.id)
+          processNextRef.current()
+        }
+
+        return // S3 path done
+      }
+
+      // ── TUS path: upload through server ──────────────────────────────────
+      const upload = new tus.Upload(next.file, {
+        endpoint: `${window.location.origin}/api/uploads`,
+        retryDelays: [0, 1000, 3000, 5000, 10000],
+        chunkSize: uploadChunkSizeBytes,
+        storeFingerprintForResuming: true,
+        removeFingerprintOnSuccess: true,
+        metadata: {
+          filename: next.file.name,
+          filetype: next.file.type || 'video/mp4',
+          videoId: next.videoId,
+        },
+        onBeforeRequest: (req) => {
+          const xhr = req.getUnderlyingObject()
+          const token = getAccessToken()
+          if (token) {
+            if (xhr?.setRequestHeader) {
+              xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+            } else {
+              req.setHeader('Authorization', `Bearer ${token}`)
+            }
+          }
+        },
+        onProgress: (bytesUploaded, bytesTotal) => {
+          if (next.cancelled) return
+          const percentage = Math.round((bytesUploaded / bytesTotal) * 100)
+          const now = Date.now()
+          const job = jobsRef.current.find((j) => j.id === next.id)
+          if (!job) return
+          const timeDiff = (now - job._lastTime) / 1000
+          const bytesDiff = bytesUploaded - job._lastLoaded
+          if (timeDiff > 0.5) {
+            const speedMBps = bytesDiff / timeDiff / (1024 * 1024)
+            const stableSpeed = speedMBps > 0.05 ? Math.round(speedMBps * 10) / 10 : 0
+            patchJob(next.id, { progress: percentage, speed: stableSpeed, _lastLoaded: bytesUploaded, _lastTime: now })
+          } else {
+            patchJob(next.id, { progress: percentage })
+          }
+        },
+        onSuccess: () => {
+          if (next.cancelled) {
+            activeIdsRef.current.delete(next.id)
+            processNextRef.current()
+            return
+          }
+          clearFileContext(next.file)
           clearUploadMetadata(next.file)
           clearTUSFingerprint(next.file)
-        }
+          patchJob(next.id, { status: 'success', progress: 100, speed: 0, completedAt: Date.now() })
+          activeIdsRef.current.delete(next.id)
 
-        patchJob(next.id, { status: 'error', error: errorMessage, speed: 0, completedAt: Date.now() })
-        activeIdsRef.current.delete(next.id)
-        processNextRef.current()
-      },
-    })
+          // Notify listeners (project pages, etc.)
+          next.onComplete?.()
+          try {
+            window.dispatchEvent(
+              new CustomEvent('upload-complete', { detail: { projectId: next.projectId, videoId: next.videoId } }),
+            )
+          } catch {}
 
-    // Attempt resume.
-    upload
-      .findPreviousUploads()
-      .then((prev) => {
-        if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0])
-        upload.start()
+          // Auto-remove successful jobs after 30 minutes.
+          const jobId = next.id
+          setTimeout(() => removeJob(jobId), 1_800_000)
+
+          processNextRef.current()
+        },
+        onError: async (error) => {
+          if (next.cancelled) {
+            activeIdsRef.current.delete(next.id)
+            processNextRef.current()
+            return
+          }
+
+          let errorMessage = error.message || 'Upload failed'
+          if (error.message?.includes('NetworkError') || error.message?.includes('Failed to fetch')) {
+            errorMessage = 'Network error — check your connection.'
+          } else if (error.message?.includes('413')) {
+            errorMessage = 'File too large.'
+          } else if (error.message?.includes('401') || error.message?.includes('403')) {
+            errorMessage = 'Auth failed — please log in again.'
+          }
+
+          // Clean up server-side record.
+          if (next.videoId) {
+            try {
+              await apiDelete(`/api/videos/${next.videoId}`)
+            } catch {
+              try {
+                await apiPost(`/api/videos/${next.videoId}/cancel-upload`, {})
+              } catch {}
+            }
+            clearUploadMetadata(next.file)
+            clearTUSFingerprint(next.file)
+          }
+
+          patchJob(next.id, { status: 'error', error: errorMessage, speed: 0, completedAt: Date.now() })
+          activeIdsRef.current.delete(next.id)
+          processNextRef.current()
+        },
       })
-      .catch(() => upload.start())
 
-    next.tusUpload = upload
+      // Attempt resume.
+      upload
+        .findPreviousUploads()
+        .then((prev) => {
+          if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0])
+          upload.start()
+        })
+        .catch(() => upload.start())
+
+      next.tusUpload = upload
+    })()
   }, [patchJob, removeJob, uploadChunkSizeBytes])
 
   // Keep ref in sync so callbacks can call processNext without stale closure.
@@ -654,7 +850,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
        job.cancelled = true
 
-      if (job.tusUpload) {
+      if (job.s3AbortController) {
+        job.s3AbortController.abort()
+      } else if (job.tusUpload) {
         try {
           job.tusUpload.abort(true)
         } catch {}
@@ -685,7 +883,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       if (!job) return
 
       job.cancelled = true
-      if (job.tusUpload) {
+      if (job.s3AbortController) {
+        job.s3AbortController.abort()
+      } else if (job.tusUpload) {
         try {
           job.tusUpload.abort(true)
         } catch {}
@@ -707,6 +907,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     (id: string) => {
       const job = jobsRef.current.find((j) => j.id === id)
       if (!job || job.status !== 'uploading') return
+      // S3 multipart uploads cannot be paused (no resume support in this implementation)
+      // S3 multipart uploads cannot be paused in this implementation
+      if (job.s3AbortController) return
       if (job.tusUpload) {
         try {
           job.tusUpload.abort()

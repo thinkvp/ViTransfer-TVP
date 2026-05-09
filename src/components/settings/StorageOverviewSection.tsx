@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 
 type StorageOverview = {
+  provider?: 'local' | 'dropbox' | 's3'
   totalBytes: number
   capacityBytes: number | null
   availableBytes: number | null
@@ -170,6 +171,13 @@ export function StorageOverviewSection({
     return formatFileSize(v)
   }, [data])
 
+  const providerLabel = useMemo(() => {
+    const provider = data?.provider
+    if (provider === 's3') return 'S3 tracked data'
+    if (provider === 'dropbox') return 'Local tracked data (Dropbox mirrored)'
+    return 'Local tracked data'
+  }, [data])
+
   return (
     <Card className="border-border">
       <CardHeader
@@ -180,7 +188,7 @@ export function StorageOverviewSection({
           <div>
             <CardTitle>Storage Overview</CardTitle>
             <CardDescription>
-              System-wide storage usage and preview management
+              System-wide storage usage and data tracking
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
@@ -225,6 +233,10 @@ export function StorageOverviewSection({
                       </Button>
                       <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
                     </div>
+                  </div>
+                  <div className="mt-1 flex items-baseline justify-between gap-3">
+                    <div className="text-xs text-muted-foreground">Source</div>
+                    <div className="text-xs text-muted-foreground tabular-nums">{providerLabel}</div>
                   </div>
                   {capacityLabel && (
                     <div className="mt-1 flex items-baseline justify-between gap-3">

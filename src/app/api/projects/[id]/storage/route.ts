@@ -7,6 +7,7 @@ import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isDropboxStorageConfigured, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -126,7 +127,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { id: projectId } = await params
 
     const url = new URL(request.url)
-    const includeDisk = url.searchParams.get('includeDisk') === '1'
+    const storageProvider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase()
+    const isS3Provider = storageProvider === 's3'
+    const includeDisk = !isS3Provider && url.searchParams.get('includeDisk') === '1'
 
     const storageRoot = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
     const includeDropbox = includeDisk && isDropboxStorageConfigured()
@@ -143,6 +146,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       projectEmailAttachmentAgg,
       albumPhotoAgg,
       albumAgg,
+      s3Albums,
+      s3VideoPreviews,
       dropboxVideos,
       dropboxAssets,
       dropboxAlbums,
@@ -165,6 +170,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
       prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true } }),
       prisma.album.aggregate({ where: { projectId }, _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
+      isS3Provider
+        ? prisma.album.findMany({
+            where: { projectId },
+            select: {
+              name: true,
+              storageFolderName: true,
+            },
+          })
+        : Promise.resolve([]),
+      isS3Provider
+        ? prisma.video.findMany({
+            where: { projectId },
+            select: {
+              preview480Path: true,
+              preview720Path: true,
+              preview1080Path: true,
+              thumbnailPath: true,
+              timelinePreviewVttPath: true,
+              timelinePreviewSpritesPath: true,
+            },
+          })
+        : Promise.resolve([]),
       includeDropbox
         ? prisma.video.findMany({
             where: { projectId, dropboxEnabled: true },
@@ -212,17 +239,87 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const photosOriginalBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
     const socialPhotosBytes = asNumberBigInt(albumPhotoAgg._sum.socialFileSize)
 
-    const albumZipFullBytes = asNumberBigInt(albumAgg._sum.fullZipFileSize)
-    const albumZipSocialBytes = asNumberBigInt(albumAgg._sum.socialZipFileSize)
+    let s3VideoPreviewsBytes = 0
+    if (isS3Provider && s3VideoPreviews.length > 0) {
+      const previewFilePaths = new Set<string>()
+      const spritePrefixes = new Set<string>()
+
+      for (const video of s3VideoPreviews) {
+        if (video.preview480Path) previewFilePaths.add(video.preview480Path)
+        if (video.preview720Path) previewFilePaths.add(video.preview720Path)
+        if (video.preview1080Path) previewFilePaths.add(video.preview1080Path)
+        if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
+          previewFilePaths.add(video.thumbnailPath)
+        }
+        if (video.timelinePreviewVttPath) previewFilePaths.add(video.timelinePreviewVttPath)
+        if (video.timelinePreviewSpritesPath) spritePrefixes.add(video.timelinePreviewSpritesPath)
+      }
+
+      const [fileSizes, prefixSizes] = await Promise.all([
+        Promise.all([...previewFilePaths].map((p) => s3GetFileSize(p))),
+        Promise.all([...spritePrefixes].map((p) => s3SumPrefixSize(p))),
+      ])
+
+      const filesTotal = fileSizes.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0)
+      const prefixesTotal = prefixSizes.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0)
+      s3VideoPreviewsBytes = Math.max(0, filesTotal + prefixesTotal)
+    }
+
+    const storedAlbumZipFullBytes = asNumberBigInt(albumAgg._sum.fullZipFileSize)
+    const storedAlbumZipSocialBytes = asNumberBigInt(albumAgg._sum.socialZipFileSize)
+    let albumZipFullBytes = storedAlbumZipFullBytes
+    let albumZipSocialBytes = storedAlbumZipSocialBytes
+
+    // In S3 mode, derive ZIP sizes from live object metadata so stale DB size fields
+    // (from older worker runs) don't under-report Photo ZIP usage.
+    if (isS3Provider && s3Albums.length > 0) {
+      const projectStoragePath = project?.storagePath
+        || buildProjectStorageRoot(project?.client?.name || 'Client', project?.title || projectId)
+
+      const zipSizes = await Promise.all(
+        s3Albums.flatMap((album) => {
+          const albumFolderName = album.storageFolderName || album.name
+          const fullPath = getAlbumZipStoragePath({
+            projectStoragePath,
+            albumFolderName,
+            albumName: album.name,
+            variant: 'full',
+          })
+          const socialPath = getAlbumZipStoragePath({
+            projectStoragePath,
+            albumFolderName,
+            albumName: album.name,
+            variant: 'social',
+          })
+          return [s3GetFileSize(fullPath), s3GetFileSize(socialPath)]
+        })
+      )
+
+      let liveFull = 0
+      let liveSocial = 0
+      for (let i = 0; i < zipSizes.length; i += 2) {
+        liveFull += Math.max(0, Number(zipSizes[i] || 0))
+        liveSocial += Math.max(0, Number(zipSizes[i + 1] || 0))
+      }
+
+      albumZipFullBytes = liveFull
+      albumZipSocialBytes = liveSocial
+    }
+
     const originalVideosBytes = videosBytes
     const originalPhotosBytes = photosOriginalBytes
     const photoZipBytes = socialPhotosBytes + albumZipFullBytes + albumZipSocialBytes
 
     // Fold sub-categories into the existing breakdown rows used by the UI.
     const photosBytes = originalPhotosBytes + photoZipBytes
-    let videoPreviewsBytes = 0
+    let videoPreviewsBytes = isS3Provider ? s3VideoPreviewsBytes : 0
 
-    const totalBytes = asNumberBigInt(project?.totalBytes)
+    const totalBytesStored = asNumberBigInt(project?.totalBytes)
+    const zipBytesDelta =
+      (albumZipFullBytes + albumZipSocialBytes) -
+      (storedAlbumZipFullBytes + storedAlbumZipSocialBytes)
+    const previewBytesDelta = isS3Provider ? s3VideoPreviewsBytes : 0
+    const totalBytes = Math.max(0, totalBytesStored + zipBytesDelta + previewBytesDelta)
     const storedDiskBytes = asNumberBigInt(project?.diskBytes)
     const dropboxBytes = includeDropbox
       ? dropboxVideos.reduce((total, video) => {
@@ -249,7 +346,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // This matches the bytes you see in the volume (including derived/transcoded files
     // such as previews, thumbnails, timeline sprites/VTT, etc. that may not be tracked
     // in DB size fields).
-    let diskTotalBytes: number | null = project?.diskBytes == null ? null : Math.max(0, storedDiskBytes)
+    let diskTotalBytes: number | null = isS3Provider
+      ? null
+      : project?.diskBytes == null
+        ? null
+        : Math.max(0, storedDiskBytes)
     let diskOtherBytes: number | null = null
     let diskBreakdown:
       | {
@@ -405,23 +506,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // In Docker this is typically the volume backing your uploads directory.
     let capacityBytes: number | null = null
     let availableBytes: number | null = null
-    try {
-      const s = await statfs(storageRoot)
-      const bsize = asNumberBigInt(s.bsize)
-      const blocks = asNumberBigInt(s.blocks)
-      const bavail = asNumberBigInt(s.bavail)
-      if (bsize > 0 && blocks > 0) {
-        capacityBytes = Math.max(0, blocks * bsize)
-        availableBytes = Math.max(0, bavail * bsize)
+    if (!isS3Provider) {
+      try {
+        const s = await statfs(storageRoot)
+        const bsize = asNumberBigInt(s.bsize)
+        const blocks = asNumberBigInt(s.blocks)
+        const bavail = asNumberBigInt(s.bavail)
+        if (bsize > 0 && blocks > 0) {
+          capacityBytes = Math.max(0, blocks * bsize)
+          availableBytes = Math.max(0, bavail * bsize)
+        }
+      } catch {
+        // Not supported on all platforms / runtimes; omit values.
+        capacityBytes = null
+        availableBytes = null
       }
-    } catch {
-      // Not supported on all platforms / runtimes; omit values.
-      capacityBytes = null
-      availableBytes = null
     }
 
     return NextResponse.json({
       projectId,
+      provider: isS3Provider ? 's3' : includeDropbox ? 'dropbox' : 'local',
       totalBytes,
       diskTotalBytes,
       diskOtherBytes,

@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
-import { join } from 'path'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { uploadFile } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const STORAGE_ROOT = process.env.STORAGE_ROOT || '/app/uploads'
 
 export async function POST(
   request: NextRequest,
@@ -159,15 +155,10 @@ export async function POST(
     const projectStoragePath = projectStorage?.storagePath
       || buildProjectStorageRoot(projectStorage?.client?.name || projectStorage?.companyName || 'Client', projectStorage?.title || 'Untitled')
     const storagePath = generateCommentFilePath(projectStoragePath, commentId, fileName)
-    const fullPath = join(STORAGE_ROOT, storagePath)
-    const directory = fullPath.substring(0, fullPath.lastIndexOf('/'))
 
-    // Create directory if it doesn't exist
-    await mkdir(directory, { recursive: true })
-
-    // Write file to disk
-    const buffer = await file.arrayBuffer()
-    await writeFile(fullPath, Buffer.from(buffer))
+    // Upload to storage (local disk or R2 depending on STORAGE_PROVIDER)
+    const buffer = Buffer.from(await file.arrayBuffer())
+    await uploadFile(storagePath, buffer, fileSize, mimeType)
 
     // Save file metadata to database
     const commentFile = await prisma.commentFile.create({

@@ -1,6 +1,7 @@
 import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
+import { isS3Mode, s3FileExists } from '../lib/s3-storage'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus } from '@prisma/client'
 import {
@@ -138,6 +139,11 @@ export interface VideoInfo {
 }
 
 async function resolveExistingVideoOriginalPath(videoId: string, storagePath: string): Promise<string> {
+  // In S3 mode the storagePath IS the S3 key — no local filesystem resolution needed
+  if (isS3Mode()) {
+    return storagePath
+  }
+
   const video = await prisma.video.findUnique({
     where: { id: videoId },
     select: {
@@ -261,7 +267,8 @@ async function moveTempFileToLogicalStorage(srcPath: string, destLogicalPath: st
 export async function downloadAndValidateVideo(
   videoId: string,
   storagePath: string,
-  tempFiles: TempFiles
+  tempFiles: TempFiles,
+  onDownloadProgress?: (transferred: number, total: number) => void
 ): Promise<VideoInfo> {
   debugLog('Starting validation...')
 
@@ -271,6 +278,7 @@ export async function downloadAndValidateVideo(
     rawPath: resolvedStoragePath,
     tempDir: TEMP_DIR,
     suggestedName: `${videoId}-source.bin`,
+    onProgress: onDownloadProgress,
   })
   const inputPath = resolvedInput.localPath
 

@@ -56,6 +56,7 @@ function VideoNameWithLabel({
 function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projectId: string) => void }) {
   const { cancelUpload, pauseUpload, resumeUpload, dismissUpload } = useUploadManager()
   const eta = formatEta(job)
+  const visibleProgress = job.status === 'success' ? 100 : Math.min(job.progress, 99)
 
   return (
     <div
@@ -122,7 +123,7 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
                 'h-full rounded-full transition-all',
                 job.status === 'paused' ? 'bg-warning' : 'bg-primary',
               )}
-              style={{ width: `${Math.max(job.progress, job.status === 'queued' ? 0 : 1)}%` }}
+              style={{ width: `${Math.max(visibleProgress, job.status === 'queued' ? 0 : 1)}%` }}
             />
           </div>
           <div className="flex justify-between text-[11px] text-muted-foreground">
@@ -136,7 +137,7 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
                     : 'Starting…'}
             </span>
             <span>
-              {job.status === 'queued' ? '' : `${job.progress}%`}
+              {job.status === 'queued' ? '' : `${visibleProgress}%`}
               {eta ? ` · ${eta}` : ''}
             </span>
           </div>
@@ -161,7 +162,11 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
 }
 
 function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate: (projectId: string) => void }) {
-  const progressPercent = Math.min(Math.round((job.processingProgress ?? 0) * 100), 100)
+  const rawProgress = job.processingProgress ?? 0
+  const progressPercent = Math.min(
+    Math.round(rawProgress <= 1 ? rawProgress * 100 : rawProgress),
+    100,
+  )
   const phaseLabel = getProcessingPhaseLabel(job.processingPhase)
 
   // Thread allocation badge: e.g. "(4/8 threads)"

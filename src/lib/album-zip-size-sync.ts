@@ -4,9 +4,20 @@ import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { isS3Mode, s3GetFileSize } from '@/lib/s3-storage'
 
-function readFileSizeIfExists(storagePath: string): bigint {
+async function readFileSizeIfExists(storagePath: string): Promise<bigint> {
   const ZERO = BigInt(0)
+  if (isS3Mode()) {
+    try {
+      const size = await s3GetFileSize(storagePath)
+      if (size == null) return ZERO
+      return BigInt(Math.max(0, Number(size)))
+    } catch {
+      return ZERO
+    }
+  }
+
   try {
     const fullPath = getFilePath(storagePath)
     if (!fs.existsSync(fullPath)) return ZERO
@@ -56,8 +67,10 @@ export async function syncAlbumZipSizes(params: { albumId: string; projectId: st
     variant: 'social',
   })
 
-  const actualFull = readFileSizeIfExists(fullZipStoragePath)
-  const actualSocial = readFileSizeIfExists(socialZipStoragePath)
+  const [actualFull, actualSocial] = await Promise.all([
+    readFileSizeIfExists(fullZipStoragePath),
+    readFileSizeIfExists(socialZipStoragePath),
+  ])
 
   const deltaFull = actualFull - album.fullZipFileSize
   const deltaSocial = actualSocial - album.socialZipFileSize

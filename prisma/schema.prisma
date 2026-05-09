@@ -185,7 +185,6 @@ model Project {
   sharePassword   String?
   authMode        String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
   guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
-  guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
   allowAuthenticatedProjectSwitching Boolean @default(true) // Allow password/OTP recipients to switch to other current client projects and back
 
   // Project Type

@@ -5,6 +5,41 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-05-09
+
+### Fixed
+- **CI workflow updated for Node.js 24 compatibility** — upgraded `actions/checkout` from `v4.2.2` to `v4.3.1` and `actions/setup-node` from `v4.4.0` to `v5.0.0`, both of which natively target Node.js 24; removed the `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` env workaround that was causing the `rbac-lint-tsc` job to exit with code 1 on GitHub Actions runners.
+
+## [1.7.0] - 2026-05-09
+
+### Added
+- **S3-compatible storage provider (Cloudflare R2)** — new `STORAGE_PROVIDER=s3` mode with browser-direct multipart uploads, presigned delivery URLs, and server-side S3 helpers (`src/lib/s3-storage.ts`); Docker and env templates now include full S3/R2 configuration (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, keys, and path-style toggle), and build/runtime provider values are wired through `Dockerfile` and compose files.
+- **Runtime storage-provider API for the client** — added `GET /api/meta/storage-provider` plus client helper `src/lib/storage-provider-client.ts` so frontend upload flows can reliably branch at runtime between TUS and S3 in prebuilt Docker images.
+- **Comment-file S3 multipart endpoints** — added `POST /api/comments/[id]/files/s3/presign`, `/complete`, and `/abort` to support direct-to-R2 comment attachment uploads with auth checks, completion metadata write, and best-effort abort cleanup.
+- **Developer Tools local-to-S3 migration utility** — added admin settings endpoints and UI controls to validate one-time S3 credentials, run a dry-run inventory of database-referenced local files, start a background local-to-S3 copy, poll live migration progress (percent, bytes, files, speed, ETA), and cancel in-flight migration jobs. This workflow intentionally does not switch runtime provider; cutover still occurs later by updating `.env` and restarting services.
+
+### Changed
+- **Core storage layer is now provider-aware** — `src/lib/storage.ts` and `src/lib/storage-provider.ts` now route upload/download/delete and materialization logic through S3 when enabled, including temp-file handling for worker processing and presigned stream/download redirects for content delivery.
+- **Video, asset, album-photo, and comment upload queues support S3 mode** — `UploadManagerProvider`, `useAssetUploadQueue`, `useAlbumPhotoUploadQueue`, and `useCommentManagement` now use browser-direct multipart uploads in S3 mode (with abort support and progress tracking) while preserving TUS behavior in local mode.
+- **Content and photo delivery paths updated for S3** — tokenized content routes now support S3 existence checks and streaming/download behavior in S3 mode; main video content route redirects to presigned R2 URLs for stream/download.
+- **Album ZIP and social-photo workers now support S3** — ZIP/social processors can read/write via S3-backed storage; ZIP existence checks were converted to async and updated across API/share routes.
+- **Project guest access model simplified** — removed `guestLatestOnly` from schema, API, project settings UI, and share project fetch logic; includes migration `20260509000000_remove_guest_latest_only`.
+- **Upload/processing dependency and config updates** — added `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`; updated `fast-xml-parser` override.
+- **Account Ledger page now has page-size selection** — chart-of-accounts ledger page adds selectable page sizes (`50`, `100`, `150`, `200`).
+
+### Fixed
+- **Album ZIP readiness checks now await async existence checks** — fixed false/missed ZIP-ready states by awaiting `albumZipExists` in all affected routes.
+- **Set-thumbnail race for newly uploaded image assets** — `set-thumbnail` now accepts valid image filename extensions while MIME is still `application/octet-stream` before worker classification, and still rejects assets explicitly marked invalid.
+- **Client approval UX now updates immediately** — share/comment flows now optimistically update approved state, clear stale sidebar/token caches, and open download UI without waiting for full async refetch.
+- **Running jobs progress accuracy improvements** — upload rows cap in-flight progress display below 100 until completion; processing progress now handles both `0..1` and `0..100` formats; S3 download phase is surfaced as `Downloading from cloud...` with throttled progress updates.
+- **Comment author-name input now visually flags missing name** — name picker trigger now shows destructive styling when empty.
+- **Album manager Dropbox option visibility** — create-album form now hides Dropbox upload controls when Dropbox is not configured.
+- **Camera default-device selection improved** — front/selfie camera labels are now strongly deprioritized when choosing default camera.
+- **Video sidebar thumbnail rendering and labels** — switched thumbnail rendering to native `img` with fallback hide-on-error and improved version label display when approval grouping is hidden.
+
+### Removed
+- **`Project.guestLatestOnly` column and settings UI toggle**.
+
 ## [1.6.9] - 2026-05-08
 
 ### Added

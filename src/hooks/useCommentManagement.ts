@@ -7,6 +7,7 @@ import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
 import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
 import { getAccessToken } from '@/lib/token-store'
+import { isS3Mode } from '@/lib/storage-provider-client'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -102,11 +103,14 @@ export function useCommentManagement({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, allowClientUploadFiles])
 
-  const uploadCommentFileWithProgress = (
+  const uploadCommentFileWithProgress = async (
     commentId: string,
     file: File,
     onProgress: (loaded: number, total: number) => void
   ): Promise<void> => {
+    if (await isS3Mode()) {
+      return uploadCommentFileS3(commentId, file, onProgress)
+    }
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `/api/comments/${commentId}/files`)
@@ -142,6 +146,109 @@ export function useCommentManagement({
       formData.append('file', file)
       xhr.send(formData)
     })
+  }
+
+  /**
+   * Browser-direct S3 multipart upload for comment files.
+   * Tracks real upload progress to S3 via XHR upload events.
+   */
+  const uploadCommentFileS3 = async (
+    commentId: string,
+    file: File,
+    onProgress: (loaded: number, total: number) => void
+  ): Promise<void> => {
+    const token = shareToken ? shareToken : (useAdminAuth ? getAccessToken() : null)
+
+    const presignHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) presignHeaders['Authorization'] = `Bearer ${token}`
+
+    const presignRes = await fetch(`/api/comments/${commentId}/files/s3/presign`, {
+      method: 'POST',
+      headers: presignHeaders,
+      body: JSON.stringify({
+        fileSize: file.size,
+        fileName: file.name,
+        contentType: file.type || 'application/octet-stream',
+      }),
+    })
+
+    if (!presignRes.ok) {
+      const err = await presignRes.json().catch(() => ({ error: 'Presign failed' }))
+      throw new Error(err.error ?? 'Presign failed')
+    }
+
+    const { uploadId, key, parts, partSize } = await presignRes.json()
+
+    const totalBytes = file.size
+    let totalSentBytes = 0
+    const completedParts: Array<{ partNumber: number; etag: string }> = new Array(parts.length)
+
+    // Upload parts sequentially (comment files are typically single-part or small)
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const start = i * partSize
+      const end = Math.min(start + partSize, file.size)
+      const slice = file.slice(start, end)
+      const partBytes = end - start
+
+      const etag = await new Promise<string>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', part.url)
+        let lastLoaded = 0
+        xhr.upload.addEventListener('progress', (e) => {
+          const delta = e.loaded - lastLoaded
+          if (delta <= 0) return
+          lastLoaded = e.loaded
+          totalSentBytes = Math.min(totalSentBytes + delta, totalBytes)
+          onProgress(totalSentBytes, totalBytes)
+        })
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const trailingDelta = partBytes - lastLoaded
+            if (trailingDelta > 0) {
+              totalSentBytes = Math.min(totalSentBytes + trailingDelta, totalBytes)
+              onProgress(totalSentBytes, totalBytes)
+            }
+            const etag = xhr.getResponseHeader('ETag') ?? xhr.getResponseHeader('etag')
+            etag ? resolve(etag) : reject(new Error('No ETag in response'))
+          } else {
+            reject(new Error(`Part upload failed: ${xhr.status}`))
+          }
+        })
+        xhr.addEventListener('error', () => reject(new Error('Network error during part upload')))
+        xhr.send(slice)
+      })
+
+      completedParts[i] = { partNumber: part.partNumber, etag }
+    }
+
+    // Complete the multipart upload and create DB record
+    const completeHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) completeHeaders['Authorization'] = `Bearer ${token}`
+
+    const completeRes = await fetch(`/api/comments/${commentId}/files/s3/complete`, {
+      method: 'POST',
+      headers: completeHeaders,
+      body: JSON.stringify({
+        uploadId,
+        key,
+        parts: completedParts,
+        fileSize: file.size,
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+      }),
+    })
+
+    if (!completeRes.ok) {
+      // Attempt best-effort abort on failure
+      fetch(`/api/comments/${commentId}/files/s3/abort`, {
+        method: 'POST',
+        headers: completeHeaders,
+        body: JSON.stringify({ uploadId, key }),
+      }).catch(() => undefined)
+      const err = await completeRes.json().catch(() => ({ error: 'Complete failed' }))
+      throw new Error(err.error ?? 'Complete failed')
+    }
   }
 
   // Author name management

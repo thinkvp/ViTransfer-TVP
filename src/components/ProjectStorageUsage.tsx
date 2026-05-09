@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 type StorageSummary = {
+  provider?: 'local' | 'dropbox' | 's3'
   totalBytes: number
   diskTotalBytes?: number | null
   diskOtherBytes?: number | null
@@ -67,7 +68,6 @@ export function ProjectStorageUsage({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
-  const [hasLoadedDiskDetails, setHasLoadedDiskDetails] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -82,16 +82,7 @@ export function ProjectStorageUsage({
         }
         const json = (await res.json()) as StorageSummary
         if (!cancelled) {
-          setData((prev) => ({
-            ...(prev || {}),
-            ...json,
-            diskTotalBytes: prev?.diskTotalBytes ?? json.diskTotalBytes ?? null,
-            diskOtherBytes: prev?.diskOtherBytes ?? json.diskOtherBytes ?? null,
-            capacityBytes: prev?.capacityBytes ?? json.capacityBytes,
-            availableBytes: prev?.availableBytes ?? json.availableBytes,
-            diskBreakdown: prev?.diskBreakdown ?? json.diskBreakdown ?? null,
-          }))
-          setHasLoadedDiskDetails(true)
+          setData(json)
         }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Failed to load storage usage')
@@ -106,40 +97,16 @@ export function ProjectStorageUsage({
     }
   }, [projectId, refreshTrigger])
 
-  useEffect(() => {
-    if (!expanded || hasLoadedDiskDetails) return
-
-    let cancelled = false
-    async function loadDiskDetails() {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await apiFetch(`/api/projects/${projectId}/storage?includeDisk=1`)
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}))
-          throw new Error(body?.error || 'Failed to load storage usage')
-        }
-        const json = (await res.json()) as StorageSummary
-        if (!cancelled) {
-          setData((prev) => (prev ? { ...prev, ...json } : json))
-          setHasLoadedDiskDetails(true)
-        }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load storage usage')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    void loadDiskDetails()
-    return () => {
-      cancelled = true
-    }
-  }, [expanded, hasLoadedDiskDetails, projectId])
-
   const rows: Row[] = useMemo(() => {
-    const effectiveTotal = Math.max(0, Number((data?.diskTotalBytes ?? data?.totalBytes) || 0))
-    const b = (data?.diskBreakdown ?? data?.breakdown) as StorageSummary['breakdown'] | null | undefined
+    const useDiskBreakdown = data?.provider !== 's3' && typeof data?.diskTotalBytes === 'number'
+    const effectiveTotal = Math.max(
+      0,
+      Number((useDiskBreakdown ? data?.diskTotalBytes : data?.totalBytes) || 0)
+    )
+    const b = (useDiskBreakdown ? data?.diskBreakdown : data?.breakdown) as
+      | StorageSummary['breakdown']
+      | null
+      | undefined
     if (!b) return []
 
     const baseBreakdown = data?.breakdown
@@ -178,7 +145,7 @@ export function ProjectStorageUsage({
           { key: 'photoZipBytes', label: 'Photo ZIP files & previews', bytes: photoZipBytes },
           { key: 'communicationsBytes', label: 'External Communication', bytes: communicationsBytes },
           { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
-          { key: 'diskOtherBytes', label: 'Other files', bytes: diskOtherBytes },
+          ...(useDiskBreakdown ? [{ key: 'diskOtherBytes' as const, label: 'Other files', bytes: diskOtherBytes }] : []),
         ]
       : [
           {
@@ -199,7 +166,7 @@ export function ProjectStorageUsage({
           },
           { key: 'communicationsBytes', label: 'External Communication', bytes: communicationsBytes },
           { key: 'projectFilesBytes', label: 'Project Files', bytes: projectFilesBytes },
-          { key: 'diskOtherBytes', label: 'Other files', bytes: diskOtherBytes },
+          ...(useDiskBreakdown ? [{ key: 'diskOtherBytes' as const, label: 'Other files', bytes: diskOtherBytes }] : []),
         ]
 
     return items.filter((it) => Math.max(0, it.bytes) > 0).map((it) => {
@@ -210,14 +177,22 @@ export function ProjectStorageUsage({
   }, [data])
 
   const totalLabel = useMemo(() => {
-    const total = Number((data?.diskTotalBytes ?? data?.totalBytes) || 0)
+    const useDiskTotal = data?.provider !== 's3' && typeof data?.diskTotalBytes === 'number'
+    const total = Number((useDiskTotal ? data?.diskTotalBytes : data?.totalBytes) || 0)
     return formatFileSize(total)
   }, [data])
 
   const availableLabel = useMemo(() => {
+    if (data?.provider === 's3') return null
     const available = Number(data?.availableBytes ?? NaN)
     if (!Number.isFinite(available) || available < 0) return null
     return formatFileSize(available)
+  }, [data])
+
+  const sourceLabel = useMemo(() => {
+    if (data?.provider === 's3') return 'S3 tracked data'
+    if (typeof data?.diskTotalBytes === 'number') return 'On disk'
+    return 'Tracked data'
   }, [data])
 
   const dropboxLabel = useMemo(() => {
@@ -269,14 +244,10 @@ export function ProjectStorageUsage({
                   <div className="text-sm text-muted-foreground">Total</div>
                   <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
                 </div>
-                {typeof data.diskTotalBytes === 'number' && (
-                  <div className="mt-1 flex items-baseline justify-between gap-3">
-                    <div className="text-xs text-muted-foreground">Source</div>
-                    <div className="text-xs text-muted-foreground tabular-nums">
-                      On disk
-                    </div>
-                  </div>
-                )}
+                <div className="mt-1 flex items-baseline justify-between gap-3">
+                  <div className="text-xs text-muted-foreground">Source</div>
+                  <div className="text-xs text-muted-foreground tabular-nums">{sourceLabel}</div>
+                </div>
                 {data.dropboxConfigured && dropboxLabel && (
                   <div className="mt-1 flex items-baseline justify-between gap-3">
                     <div className="text-xs text-muted-foreground">Dropbox (not counted in totals)</div>
@@ -297,7 +268,10 @@ export function ProjectStorageUsage({
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-medium">{r.label}</div>
                       <div className="text-xs text-muted-foreground tabular-nums">
-                        {formatFileSize(r.bytes)}{((data.diskTotalBytes ?? data.totalBytes) || 0) > 0 ? ` • ${r.pct}%` : ''}
+                        {formatFileSize(r.bytes)}
+                        {((data.provider !== 's3' && typeof data.diskTotalBytes === 'number'
+                          ? data.diskTotalBytes
+                          : data.totalBytes) || 0) > 0 ? ` • ${r.pct}%` : ''}
                       </div>
                     </div>
                     <div className="h-2 w-full rounded-full bg-muted overflow-hidden">

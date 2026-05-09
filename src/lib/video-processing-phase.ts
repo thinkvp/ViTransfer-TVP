@@ -2,6 +2,7 @@ export const VALID_PREVIEW_RESOLUTIONS = ['480p', '720p', '1080p'] as const
 export type PreviewResolution = typeof VALID_PREVIEW_RESOLUTIONS[number]
 
 export const PROCESSING_PHASES = {
+  downloading: 'downloading',
   transcode: 'transcode',
   thumbnail: 'thumbnail',
   timeline: 'timeline',
@@ -33,6 +34,8 @@ export function getProcessingPhaseLabel(phase: string | null | undefined): strin
   if (resolution) return `Processing ${resolution} previews...`
 
   switch (phase) {
+    case PROCESSING_PHASES.downloading:
+      return 'Downloading from cloud...'
     case PROCESSING_PHASES.transcode:
       return 'Processing previews...'
     case PROCESSING_PHASES.thumbnail:

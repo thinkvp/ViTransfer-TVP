@@ -4,6 +4,7 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
 import { deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -471,6 +472,16 @@ function resolveRedirectedProjectPath(
 }
 
 export async function initStorage() {
+  if (isS3Mode()) {
+    if (process.env.DROPBOX_APP_KEY?.trim() || process.env.DROPBOX_REFRESH_TOKEN?.trim()) {
+      console.warn(
+        '[STORAGE] WARNING: Both STORAGE_PROVIDER=s3 and Dropbox credentials are set. ' +
+        'Dropbox integration is disabled when S3 mode is active.'
+      )
+    }
+    console.log('[STORAGE] S3 mode active — using Cloudflare R2 for file storage.')
+    return
+  }
   await mkdir(STORAGE_ROOT, { recursive: true })
 }
 
@@ -480,6 +491,12 @@ export async function uploadFile(
   size: number,
   contentType: string = 'application/octet-stream'
 ): Promise<void> {
+  if (isS3Mode()) {
+    const body = Buffer.isBuffer(stream) ? stream : stream
+    await s3UploadFile(filePath, body as any, contentType, size)
+    return
+  }
+
   await ensureProjectStorageLayoutForPath(filePath)
   const fullPath = validatePathForWrite(filePath)
   const dir = path.dirname(fullPath)
@@ -525,6 +542,23 @@ export async function moveUploadedFile(
   destLogicalPath: string,
   expectedSize: number,
 ): Promise<void> {
+  // In S3 mode: stream the local temp file to R2 then delete the temp file.
+  if (isS3Mode()) {
+    const stat = await fs.promises.stat(srcAbsPath)
+    if (stat.size !== expectedSize) {
+      await fs.promises.unlink(srcAbsPath).catch(() => {})
+      throw new Error(
+        `File size mismatch before S3 upload: expected ${expectedSize} bytes, got ${stat.size} bytes.`
+      )
+    }
+    const readStream = fs.createReadStream(srcAbsPath)
+    await s3UploadFile(destLogicalPath, readStream, 'application/octet-stream', expectedSize)
+    await fs.promises.unlink(srcAbsPath).catch(() => {})
+    await fs.promises.unlink(`${srcAbsPath}.json`).catch(() => {})
+    console.log(`[STORAGE] Uploaded TUS temp file to S3: ${destLogicalPath}`)
+    return
+  }
+
   if (isDropboxStoragePath(destLogicalPath)) {
     // For Dropbox-destined files, store locally first (fast same-filesystem rename).
     // The Dropbox upload is handled asynchronously by the dropbox-upload worker queue.
@@ -601,6 +635,10 @@ export async function moveUploadedFile(
 }
 
 export async function downloadFile(filePath: string): Promise<Readable> {
+  if (isS3Mode()) {
+    const { stream } = await s3DownloadFile(filePath)
+    return stream
+  }
   // For Dropbox-stored files, resolve to the local copy (local-first model keeps files on disk)
   const resolvedPath = isDropboxStoragePath(filePath)
     ? stripDropboxStoragePrefix(filePath)
@@ -610,6 +648,11 @@ export async function downloadFile(filePath: string): Promise<Readable> {
 }
 
 export async function deleteFile(filePath: string): Promise<void> {
+  if (isS3Mode()) {
+    await s3DeleteFile(filePath)
+    return
+  }
+
   const resolvedPath = isDropboxStoragePath(filePath)
     ? stripDropboxStoragePrefix(filePath)
     : filePath
@@ -635,6 +678,11 @@ export async function deleteFile(filePath: string): Promise<void> {
 }
 
 export async function deleteDirectory(dirPath: string): Promise<void> {
+  if (isS3Mode()) {
+    await s3DeleteDirectory(dirPath)
+    return
+  }
+
   const base = validatePathBase(dirPath)
   const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath)
   const fullPath = redirected || base.fullPath

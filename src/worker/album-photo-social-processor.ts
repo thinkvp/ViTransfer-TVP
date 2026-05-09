@@ -1,13 +1,16 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { getFilePath } from '../lib/storage'
+import { getFilePath, downloadFile, uploadFile, deleteFile } from '../lib/storage'
 import type { AlbumPhotoSocialJob } from '../lib/queue'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
+import { pipeline } from 'stream/promises'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
+import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -48,11 +51,13 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
 
   const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
 
-  // If already generated and exists on disk, treat as done.
+  // If already generated and exists on disk/S3, treat as done.
   try {
     if (photo.socialStatus === 'READY' && socialStoragePath) {
-      const existingPath = getFilePath(socialStoragePath)
-      if (fs.existsSync(existingPath)) {
+      const exists = isS3Mode()
+        ? await s3FileExists(socialStoragePath)
+        : fs.existsSync(getFilePath(socialStoragePath))
+      if (exists) {
         return
       }
     }
@@ -75,29 +80,62 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
     data: { status: 'PROCESSING' },
   }).catch(() => {})
 
+  let tmpInputPath: string | null = null
+  let tmpOutputPath: string | null = null
+
   try {
-    const inputPath = getFilePath(photo.storagePath)
-    const outputPath = getFilePath(socialStoragePath)
-
-    await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
-
     const sharpModule = await import('sharp')
     const sharp = sharpModule.default
 
-    await sharp(inputPath)
-      .rotate()
-      .resize({
-        width: SOCIAL_LONG_EDGE_PX,
-        height: SOCIAL_LONG_EDGE_PX,
-        fit: 'inside',
-        withoutEnlargement: true,
-      })
-      .jpeg({ quality: SOCIAL_JPEG_QUALITY })
-      .withMetadata()
-      .toFile(outputPath)
+    let newSocialFileSize: bigint
 
-    const outStats = await fs.promises.stat(outputPath)
-    const newSocialFileSize = BigInt(outStats.size)
+    if (isS3Mode()) {
+      // In S3 mode, files live in R2 — download to temp, process, upload back.
+      const tmpDir = os.tmpdir()
+      tmpInputPath = path.join(tmpDir, `photo-input-${photoId}-${Date.now()}`)
+      tmpOutputPath = path.join(tmpDir, `photo-social-${photoId}-${Date.now()}.jpg`)
+
+      const srcStream = await downloadFile(photo.storagePath)
+      await pipeline(srcStream, fs.createWriteStream(tmpInputPath))
+
+      await sharp(tmpInputPath)
+        .rotate()
+        .resize({
+          width: SOCIAL_LONG_EDGE_PX,
+          height: SOCIAL_LONG_EDGE_PX,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: SOCIAL_JPEG_QUALITY })
+        .withMetadata()
+        .toFile(tmpOutputPath)
+
+      const outStats = await fs.promises.stat(tmpOutputPath)
+      newSocialFileSize = BigInt(outStats.size)
+
+      const uploadStream = fs.createReadStream(tmpOutputPath)
+      await uploadFile(socialStoragePath, uploadStream, outStats.size, 'image/jpeg')
+    } else {
+      const inputPath = getFilePath(photo.storagePath)
+      const outputPath = getFilePath(socialStoragePath)
+
+      await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
+
+      await sharp(inputPath)
+        .rotate()
+        .resize({
+          width: SOCIAL_LONG_EDGE_PX,
+          height: SOCIAL_LONG_EDGE_PX,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: SOCIAL_JPEG_QUALITY })
+        .withMetadata()
+        .toFile(outputPath)
+
+      const outStats = await fs.promises.stat(outputPath)
+      newSocialFileSize = BigInt(outStats.size)
+    }
 
     // Update DB first so we have a stored baseline, then adjust Project.totalBytes by the delta.
     const prevSocialFileSize = photo.socialFileSize
@@ -158,7 +196,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
           albumName: album.name,
           variant: 'social',
         })
-        await fs.promises.unlink(getFilePath(zipStoragePath)).catch(() => {})
+        await deleteFile(zipStoragePath).catch(() => {})
 
         await syncAlbumZipSizes({ albumId: photo.albumId, projectId: album.projectId }).catch(() => {})
 
@@ -177,6 +215,11 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
 
     console.log(`[WORKER] Generated social photo derivative: ${photoId}`)
   } catch (error) {
+    // Clean up any temp files on error
+    if (tmpInputPath) await fs.promises.unlink(tmpInputPath).catch(() => {})
+    if (tmpOutputPath) await fs.promises.unlink(tmpOutputPath).catch(() => {})
+    tmpInputPath = null
+    tmpOutputPath = null
     const message = error instanceof Error ? error.message : String(error)
 
     await prisma.albumPhoto.update({
@@ -208,5 +251,9 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
 
     console.error(`[WORKER ERROR] Social derivative failed for ${photoId}:`, error)
     throw error
+  } finally {
+    // Always clean up temp files
+    if (tmpInputPath) await fs.promises.unlink(tmpInputPath).catch(() => {})
+    if (tmpOutputPath) await fs.promises.unlink(tmpOutputPath).catch(() => {})
   }
 }

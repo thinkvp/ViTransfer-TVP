@@ -4,9 +4,11 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
-import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
+import { isS3Mode } from '@/lib/s3-storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
+import type { Readable } from 'stream'
 
 export const runtime = 'nodejs'
 function isValidMimeType(value: unknown): value is string {
@@ -124,30 +126,6 @@ export async function GET(
       return rateLimitResult
     }
 
-    // Resolve and validate file path (prevents path traversal)
-    let fullPath: string
-    try {
-      fullPath = getFilePath(commentFile.storagePath)
-    } catch (err) {
-      console.error('[COMMENT_FILE_DOWNLOAD] Invalid storage path', { fileId, storagePath: commentFile.storagePath })
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
-    }
-
-    // Verify file exists and is a file
-    let stat: fs.Stats
-    try {
-      stat = await fs.promises.stat(fullPath)
-      if (!stat.isFile()) {
-        return NextResponse.json({ error: 'File not found on disk' }, { status: 404 })
-      }
-    } catch (err) {
-      console.error(`File not found at path: ${fullPath}`, err)
-      return NextResponse.json(
-        { error: 'File not found on disk' },
-        { status: 404 }
-      )
-    }
-
     // Determine MIME type
     const ext = extname(commentFile.fileName).toLowerCase()
     const mimeType = MIME_TYPES[ext] || (isValidMimeType(commentFile.fileType)
@@ -156,26 +134,63 @@ export async function GET(
 
     const safeFilename = sanitizeFilenameForHeader(commentFile.fileName)
 
-    // Stream file to avoid loading into memory
-    const { downloadChunkSizeBytes } = await getTransferTuningSettings()
-    const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
+    let fileReadable: Readable
+    let contentLength: number
+
+    if (isS3Mode()) {
+      // In S3 mode, stream directly from R2
+      try {
+        fileReadable = await downloadFile(commentFile.storagePath)
+      } catch (err) {
+        console.error(`[COMMENT_FILE_DOWNLOAD] S3 download failed: ${commentFile.storagePath}`, err)
+        return NextResponse.json({ error: 'File not found' }, { status: 404 })
+      }
+      contentLength = Number(commentFile.fileSize)
+    } else {
+      // In local mode, resolve path and stream from disk
+      let fullPath: string
+      try {
+        fullPath = getFilePath(commentFile.storagePath)
+      } catch (err) {
+        console.error('[COMMENT_FILE_DOWNLOAD] Invalid storage path', { fileId, storagePath: commentFile.storagePath })
+        return NextResponse.json({ error: 'File not found' }, { status: 404 })
+      }
+
+      let stat: fs.Stats
+      try {
+        stat = await fs.promises.stat(fullPath)
+        if (!stat.isFile()) {
+          return NextResponse.json({ error: 'File not found on disk' }, { status: 404 })
+        }
+      } catch (err) {
+        console.error(`File not found at path: ${fullPath}`, err)
+        return NextResponse.json(
+          { error: 'File not found on disk' },
+          { status: 404 }
+        )
+      }
+
+      const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+      fileReadable = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
+      contentLength = stat.size
+    }
 
     let closed = false
     const readableStream = new ReadableStream({
       start(controller) {
-        fileStream.on('data', (chunk) => {
+        fileReadable.on('data', (chunk) => {
           if (!closed) controller.enqueue(chunk)
         })
-        fileStream.on('end', () => {
+        fileReadable.on('end', () => {
           if (!closed) { closed = true; controller.close() }
         })
-        fileStream.on('error', (err) => {
+        fileReadable.on('error', (err) => {
           if (!closed) { closed = true; controller.error(err) }
         })
       },
       cancel() {
         closed = true
-        fileStream.destroy()
+        fileReadable.destroy()
       },
     })
 
@@ -184,7 +199,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': mimeType,
-        'Content-Length': stat.size.toString(),
+        'Content-Length': contentLength.toString(),
         'Content-Disposition': `attachment; filename="${safeFilename}"`,
         'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'no-cache, no-store, must-revalidate',

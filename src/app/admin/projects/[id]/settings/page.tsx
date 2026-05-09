@@ -97,7 +97,6 @@ interface Project {
   sharePasswordDecrypted: string | null
   authMode: string
   guestMode: boolean
-  guestLatestOnly: boolean
   globalAllowAuthenticatedProjectSwitching?: boolean
   previewResolutions: string
   watermarkEnabled: boolean
@@ -146,7 +145,6 @@ export default function ProjectSettingsPage() {
   const [sharePassword, setSharePassword] = useState('')
   const [authMode, setAuthMode] = useState('PASSWORD')
   const [guestMode, setGuestMode] = useState(false)
-  const [guestLatestOnly, setGuestLatestOnly] = useState(true)
   const [useCustomSlug, setUseCustomSlug] = useState(false) // Toggle for custom slug
   const [customSlugValue, setCustomSlugValue] = useState('') // Store custom slug value
   const [previewResolutions, setPreviewResolutions] = useState<string[]>(['720p'])
@@ -172,7 +170,7 @@ export default function ProjectSettingsPage() {
     enableRevisions, maxRevisions, restrictCommentsToLatestVersion, hideFeedback,
     useFullTimecode, allowClientDeleteComments, allowClientUploadFiles,
     allowAuthenticatedProjectSwitching, maxClientUploadAllocationMB, sharePassword,
-    authMode, guestMode, guestLatestOnly, useCustomSlug, customSlugValue,
+    authMode, guestMode, useCustomSlug, customSlugValue,
     previewResolutions, watermarkEnabled, watermarkText, useCustomWatermark,
     timelinePreviewsEnabled, clientNotificationSchedule, clientNotificationTime,
     clientNotificationDay,
@@ -267,7 +265,6 @@ export default function ProjectSettingsPage() {
         setTimelinePreviewsEnabled(data.timelinePreviewsEnabled ?? false)
         setAuthMode(data.authMode || 'PASSWORD')
         setGuestMode(data.guestMode || false)
-        setGuestLatestOnly(data.guestLatestOnly ?? true)
         setSharePassword(data.sharePassword || '')
 
         // Store original processing settings
@@ -453,7 +450,6 @@ export default function ProjectSettingsPage() {
         sharePassword: sharePassword || null,
         authMode,
         guestMode,
-        guestLatestOnly,
         clientNotificationSchedule,
         clientNotificationTime: clientNotificationSchedule === 'DAILY' ? clientNotificationTime : null,
         clientNotificationDay: null,
@@ -1361,22 +1357,6 @@ export default function ProjectSettingsPage() {
                   </div>
                 )}
 
-                {guestMode && (
-                  <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
-                    <div className="space-y-0.5 flex-1">
-                      <Label htmlFor="guestLatestOnly">Restrict to Latest Version</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Guests can only view the latest version of each video
-                      </p>
-                    </div>
-                    <Switch
-                      id="guestLatestOnly"
-                      checked={guestLatestOnly}
-                      onCheckedChange={setGuestLatestOnly}
-                    />
-                  </div>
-                )}
-
                 <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowAuthenticatedProjectSwitching">Allow authenticated clients to switch current projects</Label>
@@ -1810,15 +1790,6 @@ export default function ProjectSettingsPage() {
                       <div className="flex items-start gap-2 p-3 bg-primary-visible border border-primary-visible rounded-md">
                         <span className="text-primary text-sm font-bold">i</span>
                         <p className="text-sm text-primary"><strong>Recommended:</strong> Enable Guest Mode for better security. Without it, anyone with the link can comment and approve videos.</p>
-                      </div>
-                    )}
-                    {guestMode && (
-                      <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
-                        <div className="space-y-0.5 flex-1">
-                          <Label htmlFor="guestLatestOnly-d">Restrict to Latest Version</Label>
-                          <p className="text-xs text-muted-foreground">Guests can only view the latest version of each video</p>
-                        </div>
-                        <Switch id="guestLatestOnly-d" checked={guestLatestOnly} onCheckedChange={setGuestLatestOnly} />
                       </div>
                     )}
                     <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">

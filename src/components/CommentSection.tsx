@@ -309,6 +309,8 @@ export function CommentSectionView({
   const [exportingSrt, setExportingSrt] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [openDownloadAfterApprove, setOpenDownloadAfterApprove] = useState(false)
+  // Optimistic local flag: true immediately after the client approves, before server data propagates
+  const [localApproved, setLocalApproved] = useState(false)
   const [videoNotesOpen, setVideoNotesOpen] = useState(true)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
@@ -624,7 +626,7 @@ export function CommentSectionView({
   // Check if ANY video in the group is approved (for admin view with multiple versions)
   const hasAnyApprovedVideo = videos.some(v => (v as any).approved === true)
   const approvedVideo = videos.find(v => (v as any).approved === true)
-  const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo
+  const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || localApproved
 
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
@@ -896,11 +898,11 @@ export function CommentSectionView({
     }
 
     if (!headerVideo) return
-    if (!(headerVideo as any).approved) return
+    if (!(headerVideo as any).approved && !isApproved) return
 
     setShowDownloadOptions(true)
     setOpenDownloadAfterApprove(false)
-  }, [openDownloadAfterApprove, headerVideo, isAdminView])
+  }, [openDownloadAfterApprove, headerVideo, isAdminView, isApproved])
 
   useEffect(() => {
     if (!showVideoInfo || !speedTestStorageKey) {
@@ -947,7 +949,7 @@ export function CommentSectionView({
   const handleDownloadSelected = () => {
     const video = headerVideo
     if (!video) return
-    if (!(video as any).approved) return
+    if (!(video as any).approved && !isApproved && !localApproved) return
     setShowDownloadOptions(true)
   }
 
@@ -1155,13 +1157,14 @@ export function CommentSectionView({
         throw new Error(err.error || 'Failed to approve video')
       }
 
-      // After approve, open the download modal (share/client view).
-      // router.refresh() will deliver updated approved state; the effect above waits for it.
+      // After approve, immediately update local state so the banner and download modal
+      // appear without waiting for the async prop-refresh chain.
       if (!isAdminView) {
-        setOpenDownloadAfterApprove(true)
+        setLocalApproved(true)
+        setShowDownloadOptions(true)
       }
 
-      window.dispatchEvent(new CustomEvent('videoApprovalChanged'))
+      window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: { videoId: video.id } }))
       setShowApproveConfirm(false)
       router.refresh()
     } catch (error) {
@@ -1587,7 +1590,7 @@ export function CommentSectionView({
         </CardHeader>
 
       <CardContent className="flex-1 flex flex-col !p-0 overflow-hidden min-h-0">
-        {headerVideo && (headerVideo as any)?.approved ? (
+        {headerVideo && ((headerVideo as any)?.approved || isApproved || localApproved) ? (
           <VideoAssetDownloadModal
             videoId={headerVideo.id}
             videoName={headerVideoName}
@@ -1621,7 +1624,7 @@ export function CommentSectionView({
                 </div>
               </div>
 
-              {showVideoActions && (headerVideo as any)?.approved ? (
+              {showVideoActions && headerVideo && ((headerVideo as any)?.approved || isApproved || localApproved) ? (
                 <div className="flex-shrink-0">
                   <Button
                     variant="default"
@@ -1686,7 +1689,7 @@ export function CommentSectionView({
 
               {showVideoActions && (
                 <>
-                  {showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup ? (
+                  {showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !localApproved ? (
                     <Button
                       variant="success"
                       size="sm"
@@ -1725,28 +1728,41 @@ export function CommentSectionView({
             </div>
           </div>
 
-          {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && showApproveConfirm && (
-            <div className="mt-2 border border-border rounded-lg p-3 bg-accent/30">
-              <div className="text-sm text-foreground font-semibold">Approve this video?</div>
-              <div className="text-xs text-muted-foreground mt-1">
-                Version: <span className="font-medium text-foreground">{(headerVideo as any)?.versionLabel}</span>
-              </div>
-              <div className="mt-3 flex gap-2">
+          {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !localApproved ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              If no changes are needed, click Approve Video to download this version.
+            </p>
+          ) : null}
+
+          <Dialog open={showApproveConfirm} onOpenChange={(open) => { if (!approving) setShowApproveConfirm(open) }}>
+            <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Approve this video?</DialogTitle>
+                <DialogDescription asChild>
+                  <div className="space-y-2 text-sm text-muted-foreground">
+                    <p>Approve this video to download.  You will no longer be able to leave comments/feedback or access other versions of this video.</p>
+                    <p>If there are multiple versions of this video, make sure you&apos;re approving the correct version.</p>
+                    {(headerVideo as any)?.versionLabel ? (
+                      <p className="text-foreground font-medium">Version: {(headerVideo as any).versionLabel}</p>
+                    ) : null}
+                  </div>
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-2 mt-2 justify-end">
+                <Button variant="outline" onClick={() => setShowApproveConfirm(false)} disabled={approving}>
+                  Cancel
+                </Button>
                 <Button
                   variant="success"
-                  size="sm"
                   onClick={handleApproveSelected}
                   disabled={approving}
                   className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
                 >
-                  {approving ? 'Approving...' : 'Yes, Approve'}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setShowApproveConfirm(false)} disabled={approving}>
-                  Cancel
+                  {approving ? 'Approving…' : 'Approve'}
                 </Button>
               </div>
-            </div>
-          )}
+            </DialogContent>
+          </Dialog>
         </div>
 
         {/* Messages Area - Threaded Conversations */}

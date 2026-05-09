@@ -314,8 +314,8 @@ export default function VideoSidebar({
                           alt={group.name}
                           fill
                           className="object-cover"
-                          sizes={`${containerWidth}px`}
-                          priority={isActive}
+                          unoptimized
+                          onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
                         />
                       </div>
                     </div>
@@ -327,7 +327,9 @@ export default function VideoSidebar({
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
+                          {hideApprovalGrouping && latestVideo?.versionLabel
+                            ? latestVideo.versionLabel
+                            : `${group.versionCount} ${group.versionCount === 1 ? 'version' : 'versions'}`}
                         </p>
                       </div>
                     </div>
@@ -616,8 +618,8 @@ export default function VideoSidebar({
                             alt={group.name}
                             fill
                             className="object-cover"
-                            sizes={`${mobileThumbSize}px`}
-                            priority={isActive}
+                            unoptimized
+                            onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
                           />
                         </div>
 
@@ -635,7 +637,9 @@ export default function VideoSidebar({
                         {group.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {group.versionCount} {group.versionCount === 1 ? 'version' : 'versions'}
+                        {hideApprovalGrouping && group.videos[0]?.versionLabel
+                          ? group.videos[0].versionLabel
+                          : `${group.versionCount} ${group.versionCount === 1 ? 'version' : 'versions'}`}
                       </p>
                     </div>
                   </button>
