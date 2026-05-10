@@ -368,8 +368,8 @@ export async function PATCH(
       const trimmedName = name.trim()
       updateData.name = trimmedName
 
-      // Rename Dropbox video folder if the video has Dropbox enabled
-      if (video.dropboxEnabled && video.dropboxPath && trimmedName !== video.name) {
+      // Rename Dropbox video folder if the video has Dropbox enabled and Dropbox is configured
+      if (video.dropboxEnabled && isDropboxStorageConfigured() && video.dropboxPath && trimmedName !== video.name) {
         const clientName = video.project.client?.name || video.project.companyName || 'Client'
         const projectFolderName = getStoragePathBasename(video.project.storagePath) || video.project.title
         const oldVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, video.name)

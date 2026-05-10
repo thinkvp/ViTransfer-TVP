@@ -36,6 +36,7 @@ import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-clean
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 import { processAccountingReminders } from '@/lib/accounting-reminders'
+import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -530,18 +531,22 @@ async function main() {
   )
 
   // Dropbox storage consistency scan (hourly at :15, offset from notifications at :00)
-  await notificationQueue.add(
-    'dropbox-storage-consistency-scan',
-    {},
-    {
-      repeat: {
-        pattern: '15 * * * *',
-      },
-      jobId: 'dropbox-storage-consistency-scan',
-      removeOnComplete: true,
-      removeOnFail: true,
-    }
-  )
+  // Only schedule if Dropbox is configured; the scan itself also checks isDropboxStorageConfigured()
+  // to handle cases where Dropbox is disabled after the worker started
+  if (isDropboxStorageConfigured()) {
+    await notificationQueue.add(
+      'dropbox-storage-consistency-scan',
+      {},
+      {
+        repeat: {
+          pattern: '15 * * * *',
+        },
+        jobId: 'dropbox-storage-consistency-scan',
+        removeOnComplete: true,
+        removeOnFail: true,
+      }
+    )
+  }
 
   // Orphan project files scan (weekly on Sunday at 03:00 server/container time)
   await notificationQueue.add(
@@ -702,9 +707,12 @@ async function main() {
 
       if (job.name === 'dropbox-storage-consistency-scan') {
         try {
-          console.log('[CONSISTENCY] Running scheduled Dropbox storage consistency scan...')
           const result = await runDropboxStorageConsistencyScanAndSyncNotification()
-          console.log(`[CONSISTENCY] Dropbox scan completed (checked=${result.checkedCount}, issues=${result.inconsistencyCount})`)
+          if (result.skippedReason) {
+            console.log(`[CONSISTENCY] Dropbox scan skipped: ${result.skippedReason}`)
+          } else {
+            console.log(`[CONSISTENCY] Dropbox scan completed (checked=${result.checkedCount}, issues=${result.inconsistencyCount})`)
+          }
         } catch (e) {
           console.error('[CONSISTENCY] Dropbox storage consistency scan failed:', e)
         }

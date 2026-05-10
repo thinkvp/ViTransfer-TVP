@@ -8,7 +8,7 @@ import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib
 import { getProjectRecipients } from '@/lib/recipients'
 import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
-import { sanitizeDropboxName, moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import { sanitizeDropboxName, moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import {
   allocateUniqueStorageName,
   buildProjectDropboxRoot,
@@ -1258,6 +1258,7 @@ export async function PATCH(
     }
 
     if (
+      isDropboxStorageConfigured() &&
       projectStorageRename
       && projectStorageRename.oldProjectDropboxRoot !== projectStorageRename.newProjectDropboxRoot
     ) {
@@ -1551,6 +1552,7 @@ export async function PATCH(
     return NextResponse.json({
       ...project,
       totalBytes: asNumberBigInt((project as any).totalBytes),
+      previewBytes: (project as any).previewBytes == null ? null : asNumberBigInt((project as any).previewBytes),
       diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
     })
   } catch (error) {

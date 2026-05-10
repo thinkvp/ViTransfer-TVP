@@ -12,7 +12,7 @@ import {
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
-import { moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import { moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 export const runtime = 'nodejs'
 
 
@@ -80,7 +80,7 @@ export async function PATCH(request: NextRequest) {
       const projectFolderName = getStoragePathBasename(v.project.storagePath) || v.project.title
       const oldVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, v.name)
       const newVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, trimmedName)
-      if (oldVideoFolder !== newVideoFolder) {
+      if (oldVideoFolder !== newVideoFolder && isDropboxStorageConfigured()) {
         void moveDropboxPath(oldVideoFolder, newVideoFolder).catch(() => {})
         // Update dropboxPath for this video and its sibling versions
         const siblings = await prisma.video.findMany({

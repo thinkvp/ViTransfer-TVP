@@ -10,6 +10,7 @@ import archiver from 'archiver'
 import { buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
+import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 
 const ZIP_RETRY_DELAY_MS = 30_000
 
@@ -353,7 +354,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       where: { id: albumRowId },
       select: { dropboxEnabled: true },
     })
-    if (freshAlbum?.dropboxEnabled) {
+    if (freshAlbum?.dropboxEnabled && isDropboxStorageConfigured()) {
       const { getAlbumZipDropboxUploadQueue } = await import('../lib/queue')
       const q = getAlbumZipDropboxUploadQueue()
       const dropboxJobId = `album-zip-dropbox-${variant}-${albumRowId}`

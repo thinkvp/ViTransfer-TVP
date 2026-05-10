@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.4] - 2026-05-10
+
+### Fixed
+- **Dropbox album ZIP upload jobs no longer retry infinitely when Dropbox is disabled** — the album ZIP Dropbox upload worker now calls `isDropboxStorageConfigured()` at the start of each job; if Dropbox is not configured (e.g., after migrating to S3), the worker clears pending DB status fields and returns gracefully instead of throwing an error, preventing BullMQ from retrying the job indefinitely; also added the same guard to new ZIP generations so future enqueueing checks system configuration, not just database flags.
+- **Custom video thumbnails now resolve correctly in S3 mode** — video assets and thumbnails set while Dropbox was active carry a `dropbox:` prefix in the database; the content delivery route now strips this prefix before checking S3 file existence, allowing legacy custom thumbnails to be found and served via presigned URLs.
+- **Download modal no longer shows Dropbox toggle for legacy videos** — the share token endpoint and video-statuses admin route now mask `dropboxEnabled` to `false` when `isDropboxStorageConfigured()` returns false, so the Dropbox/Local Server toggle does not appear in the download modal for videos that were previously Dropbox-enabled but Dropbox is no longer configured.
+- **Project settings save no longer fails with "Operation Failed"** — the PATCH response was missing the `previewBytes` BigInt field conversion, causing `JSON.stringify` to fail with "Do not know how to serialize a BigInt"; added conversion of `previewBytes` alongside `totalBytes` and `diskBytes` using the existing `asNumberBigInt()` helper.
+- **Dropbox folder move operations now guarded when Dropbox is disabled** — project rename, album rename, video rename, client rename, and batch video-name-update operations now check `isDropboxStorageConfigured()` before calling `moveDropboxPath`, preventing attempts to rename Dropbox folders when Dropbox integration is not active; this applies to all 5 rename routes and eliminates spurious console messages.
+- **Dropbox storage consistency scan no longer runs when Dropbox is disabled** — the periodic consistency scan job (hourly at :15) is now only scheduled if Dropbox is configured at worker startup; the job handler also now logs "Dropbox scan skipped" instead of "Running" when the scan returns a skipped result, eliminating confusing log spam when Dropbox is not enabled.
+
 ## [1.7.3] - 2026-05-10
 
 ### Fixed

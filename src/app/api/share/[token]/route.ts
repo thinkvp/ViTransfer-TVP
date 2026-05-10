@@ -8,6 +8,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { trackSharePageAccess } from '@/lib/share-access-tracking'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
 import { getRedis } from '@/lib/redis'
+import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { getClientIpAddress } from '@/lib/utils'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
@@ -162,6 +163,7 @@ export async function GET(
       }, { status: 401 })
     }
 
+    const dropboxConfigured = isDropboxStorageConfigured()
     const videosSanitizedBase = project.videos.map((video: any) => ({
       ...video,
       originalFileSize: video.originalFileSize.toString(),
@@ -171,6 +173,7 @@ export async function GET(
       downloadUrl: null,
       thumbnailUrl: null,
       hasThumbnail: !!video.thumbnailPath,
+      dropboxEnabled: dropboxConfigured ? video.dropboxEnabled : false,
       preview480Path: !!video.preview480Path,
       preview720Path: !!video.preview720Path,
       preview1080Path: !!video.preview1080Path,

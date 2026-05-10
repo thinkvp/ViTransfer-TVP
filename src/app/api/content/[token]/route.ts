@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync, ReadStream } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import {
   buildVideoAssetStoragePath,
@@ -448,6 +449,12 @@ export async function GET(
     // S3 mode: redirect to presigned R2 URL — no local file access needed
     // ---------------------------------------------------------------------------
     if (isS3Mode()) {
+      // Storage paths for assets/thumbnails set while Dropbox was active may have a
+      // 'dropbox:' prefix stored in the DB.  Strip it before looking up the S3 key.
+      if (isDropboxStoragePath(filePath)) {
+        filePath = stripDropboxStoragePrefix(filePath)
+      }
+
       const fileExists = await s3FileExists(filePath)
       if (!fileExists) {
         // Try canonical fallback path (e.g. legacy project paths that were migrated)

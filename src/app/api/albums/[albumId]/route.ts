@@ -13,7 +13,7 @@ import {
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
-import { moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import { moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -166,7 +166,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   })
 
   // Rename Dropbox folder when album name changes
-  if (data.name && data.name !== album.name && album.dropboxEnabled) {
+  if (data.name && data.name !== album.name && album.dropboxEnabled && isDropboxStorageConfigured()) {
     const clientName = album.project.client?.name || album.project.companyName || 'Client'
     const projectFolderName = getStoragePathBasename(album.project.storagePath) || album.project.title
     const oldAlbumFolder = buildAlbumDropboxRoot(clientName, projectFolderName, album.name)

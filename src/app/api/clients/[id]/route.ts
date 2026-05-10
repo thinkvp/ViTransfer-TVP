@@ -476,7 +476,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       throw error
     }
 
-    if (clientRenamePlanned) {
+    if (clientRenamePlanned && isDropboxStorageConfigured()) {
       void moveDropboxPath(oldClientStorageRoot, newClientStorageRoot).catch(() => {})
     }
 

@@ -1,7 +1,7 @@
 import { Job } from 'bullmq'
 import { AlbumZipDropboxUploadJob } from '../lib/queue'
 import { prisma } from '../lib/db'
-import { uploadLocalFileToDropboxPathWithProgress } from '../lib/storage-provider-dropbox'
+import { uploadLocalFileToDropboxPathWithProgress, isDropboxStorageConfigured } from '../lib/storage-provider-dropbox'
 import { getFilePath } from '../lib/storage'
 import { clearResolvedDropboxStorageIssueEntities } from '../lib/dropbox-storage-inconsistency-log'
 import fs from 'fs'
@@ -23,6 +23,21 @@ export async function processAlbumZipDropboxUpload(job: Job<AlbumZipDropboxUploa
 
   console.log(`[DROPBOX-WORKER] Starting Dropbox upload for album ${albumId} ${variant} ZIP`)
   console.log(`[DROPBOX-WORKER] Local: ${localPath} → Dropbox: ${dropboxPath} (${(fileSizeBytes / 1024 / 1024).toFixed(1)} MB)`)
+
+  // Guard: if Dropbox is no longer configured (e.g. migrated to S3), abort gracefully
+  // so BullMQ marks the job complete and stops retrying.
+  if (!isDropboxStorageConfigured()) {
+    console.warn(`[DROPBOX-WORKER] Dropbox is not configured — skipping upload for album ${albumId} ${variant} ZIP and clearing pending status`)
+    await prisma.album.update({
+      where: { id: albumId },
+      data: {
+        [fields.status]: null,
+        [fields.progress]: 0,
+        [fields.error]: null,
+      },
+    }).catch(() => {})
+    return
+  }
 
   try {
     const album = await prisma.album.findUnique({ where: { id: albumId } })
