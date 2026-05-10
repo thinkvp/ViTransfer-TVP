@@ -5,6 +5,13 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2026-05-10
+
+### Fixed
+- **Project storage totals are now consistent across Dashboard, Project Data, and Storage Overview** — added a new `Project.previewBytes` field (migration `20260510000000_add_project_preview_bytes`) so S3 preview storage is persisted in the database and reused across all views; the Projects dashboard now reads `totalBytes + previewBytes` in S3 mode, the per-project storage endpoint uses stored `previewBytes`, and Storage Overview aggregates `SUM(totalBytes)` plus `SUM(previewBytes)` for consistent totals.
+- **Project Data and Storage Overview no longer perform live S3 fan-out checks on page load** — removed per-request S3 object-size scans for video previews and album ZIP files from the project storage and settings storage-overview APIs; totals now rely on worker-maintained DB fields, avoiding socket-pool pressure and dashboard slowdowns from repeated `HeadObject`/prefix-size calls during routine page loads.
+- **Storage totals refresh immediately after video processing instead of waiting for nightly reconcile** — all video worker completion paths (`full`, `preview-only`, `thumbnail-only`, and `timeline-only`) now recalculate and store `totalBytes`, `previewBytes` (S3 mode), and `diskBytes` (local mode) in parallel after each job, so the Projects list and Project Data panel reflect updated usage as soon as processing finishes.
+
 ## [1.7.2] - 2026-05-10
 
 ### Changed

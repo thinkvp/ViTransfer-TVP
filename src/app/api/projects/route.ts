@@ -11,8 +11,6 @@ import { getRawStoragePath } from '@/lib/storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { parseProjectStartDateInput } from '@/lib/project-start-date'
 import { sendPushNotification } from '@/lib/push-notifications'
-import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -32,10 +30,6 @@ function asNumberBigInt(v: unknown): number {
     return Number.isFinite(n) ? n : 0
   }
   return 0
-}
-
-function sumKnownObjectSizes(values: Array<number | null>): number {
-  return values.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0)
 }
 
 // GET /api/projects - List all projects
@@ -58,8 +52,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const storageProvider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase()
-    const isS3Provider = storageProvider === 's3'
+    const isS3Provider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase() === 's3'
     const permissions = getUserPermissions(authResult)
     const allowedStatuses = permissions.projectVisibility.statuses
     const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
@@ -87,6 +80,7 @@ export async function GET(request: NextRequest) {
         createdAt: true,
         updatedAt: true,
         totalBytes: true,
+        previewBytes: true,
         diskBytes: true,
         storagePath: true,
         watermarkEnabled: true,
@@ -148,7 +142,6 @@ export async function GET(request: NextRequest) {
 
     const projectIds = projects.map((p) => p.id)
     const photoCountByProjectId = new Map<string, number>()
-    const adjustedS3TotalByProjectId = new Map<string, number>()
 
     if (projectIds.length > 0) {
       const albumRows = await prisma.album.findMany({
@@ -163,126 +156,18 @@ export async function GET(request: NextRequest) {
         const prev = photoCountByProjectId.get(row.projectId) ?? 0
         photoCountByProjectId.set(row.projectId, prev + (row._count?.photos ?? 0))
       }
-
-      if (isS3Provider) {
-        const projectById = new Map(projects.map((p) => [p.id, p]))
-
-        const [albumsForZip, videosForPreview, storedZipByProject] = await Promise.all([
-          prisma.album.findMany({
-            where: { projectId: { in: projectIds } },
-            select: {
-              projectId: true,
-              name: true,
-              storageFolderName: true,
-            },
-          }),
-          prisma.video.findMany({
-            where: { projectId: { in: projectIds } },
-            select: {
-              projectId: true,
-              preview480Path: true,
-              preview720Path: true,
-              preview1080Path: true,
-              thumbnailPath: true,
-              timelinePreviewVttPath: true,
-              timelinePreviewSpritesPath: true,
-            },
-          }),
-          prisma.album.groupBy({
-            by: ['projectId'],
-            where: { projectId: { in: projectIds } },
-            _sum: { fullZipFileSize: true, socialZipFileSize: true },
-          }),
-        ])
-
-        const storedZipTotalByProject = new Map<string, number>()
-        for (const row of storedZipByProject) {
-          storedZipTotalByProject.set(
-            row.projectId,
-            asNumberBigInt(row._sum.fullZipFileSize) + asNumberBigInt(row._sum.socialZipFileSize)
-          )
-        }
-
-        const zipObjectPathsByProject = new Map<string, string[]>()
-        for (const album of albumsForZip) {
-          const project = projectById.get(album.projectId)
-          if (!project) continue
-
-          const projectStoragePath = project.storagePath
-            || buildProjectStorageRoot(
-              project.client?.name || project.companyName || 'Client',
-              project.title || 'Untitled'
-            )
-          const albumFolderName = album.storageFolderName || album.name
-
-          const fullPath = getAlbumZipStoragePath({
-            projectStoragePath,
-            albumFolderName,
-            albumName: album.name,
-            variant: 'full',
-          })
-          const socialPath = getAlbumZipStoragePath({
-            projectStoragePath,
-            albumFolderName,
-            albumName: album.name,
-            variant: 'social',
-          })
-
-          const paths = zipObjectPathsByProject.get(album.projectId) || []
-          paths.push(fullPath, socialPath)
-          zipObjectPathsByProject.set(album.projectId, paths)
-        }
-
-        const previewObjectPathsByProject = new Map<string, Set<string>>()
-        const previewSpritePrefixesByProject = new Map<string, Set<string>>()
-        for (const video of videosForPreview) {
-          const projectId = video.projectId
-          const fileSet = previewObjectPathsByProject.get(projectId) || new Set<string>()
-          const prefixSet = previewSpritePrefixesByProject.get(projectId) || new Set<string>()
-
-          if (video.preview480Path) fileSet.add(video.preview480Path)
-          if (video.preview720Path) fileSet.add(video.preview720Path)
-          if (video.preview1080Path) fileSet.add(video.preview1080Path)
-          if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
-            fileSet.add(video.thumbnailPath)
-          }
-          if (video.timelinePreviewVttPath) fileSet.add(video.timelinePreviewVttPath)
-          if (video.timelinePreviewSpritesPath) prefixSet.add(video.timelinePreviewSpritesPath)
-
-          previewObjectPathsByProject.set(projectId, fileSet)
-          previewSpritePrefixesByProject.set(projectId, prefixSet)
-        }
-
-        const adjustedTotals = await Promise.all(
-          projectIds.map(async (projectId) => {
-            const [zipSizes, previewFileSizes, previewPrefixSizes] = await Promise.all([
-              Promise.all((zipObjectPathsByProject.get(projectId) || []).map((p) => s3GetFileSize(p))),
-              Promise.all([...(previewObjectPathsByProject.get(projectId) || new Set<string>())].map((p) => s3GetFileSize(p))),
-              Promise.all([...(previewSpritePrefixesByProject.get(projectId) || new Set<string>())].map((p) => s3SumPrefixSize(p))),
-            ])
-
-            const liveZipTotal = sumKnownObjectSizes(zipSizes)
-            const storedZipTotal = storedZipTotalByProject.get(projectId) || 0
-            const zipDelta = liveZipTotal - storedZipTotal
-            const previewDelta = sumKnownObjectSizes(previewFileSizes) + sumKnownObjectSizes(previewPrefixSizes)
-
-            const project = projectById.get(projectId)
-            const storedTotal = asNumberBigInt((project as any)?.totalBytes)
-            return [projectId, Math.max(0, storedTotal + zipDelta + previewDelta)] as const
-          })
-        )
-
-        for (const [projectId, adjustedTotal] of adjustedTotals) {
-          adjustedS3TotalByProjectId.set(projectId, adjustedTotal)
-        }
-      }
     }
 
     const projectsWithPhotoCounts = projects.map((p) => ({
       ...p,
       photoCount: photoCountByProjectId.get(p.id) ?? 0,
+      previewBytes: asNumberBigInt((p as any).previewBytes),
+      // Keep list API fast: rely on DB-tracked totals (plus background reconciliation)
+      // instead of synchronous per-request S3 object scans.
+      // In S3 mode, combine originalFiles + previewBytes so the dashboard total matches
+      // what the project detail page shows.
       totalBytes: isS3Provider
-        ? (adjustedS3TotalByProjectId.get(p.id) ?? asNumberBigInt((p as any).totalBytes))
+        ? asNumberBigInt((p as any).totalBytes) + asNumberBigInt((p as any).previewBytes)
         : asNumberBigInt((p as any).totalBytes),
       diskBytes: isS3Provider
         ? null

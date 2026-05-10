@@ -4,9 +4,6 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import * as path from 'path'
 import { statfs } from 'fs/promises'
-import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
 
 export const runtime = 'nodejs'
 
@@ -44,8 +41,6 @@ export async function GET(request: NextRequest) {
       projectEmailAttachmentAgg,
       albumPhotoAgg,
       albumAgg,
-      s3Albums,
-      s3Videos,
       clientFileAgg,
       userFileAgg,
       projectTotals,
@@ -59,38 +54,11 @@ export async function GET(request: NextRequest) {
       prisma.projectEmailAttachment.aggregate({ _sum: { fileSize: true } }),
       prisma.albumPhoto.aggregate({ _sum: { fileSize: true, socialFileSize: true } }),
       prisma.album.aggregate({ _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
-      isS3Provider
-        ? prisma.album.findMany({
-            select: {
-              name: true,
-              storageFolderName: true,
-              project: {
-                select: {
-                  storagePath: true,
-                  title: true,
-                  companyName: true,
-                  client: { select: { name: true } },
-                },
-              },
-            },
-          })
-        : Promise.resolve([]),
-      isS3Provider
-        ? prisma.video.findMany({
-            select: {
-              preview480Path: true,
-              preview720Path: true,
-              preview1080Path: true,
-              thumbnailPath: true,
-              timelinePreviewVttPath: true,
-              timelinePreviewSpritesPath: true,
-            },
-          })
-        : Promise.resolve([]),
       prisma.clientFile.aggregate({ _sum: { fileSize: true } }),
       prisma.userFile.aggregate({ _sum: { fileSize: true } }),
-      prisma.project.aggregate({ _sum: { totalBytes: true } }),
-      // For estimating preview bytes: compare disk vs. DB-tracked for the same set of projects
+      // Aggregate both totalBytes and previewBytes in one query.
+      prisma.project.aggregate({ _sum: { totalBytes: true, previewBytes: true } }),
+      // For estimating preview bytes in local mode: compare disk vs. DB-tracked.
       isS3Provider
         ? Promise.resolve({ _sum: { totalBytes: 0, diskBytes: 0 } } as any)
         : prisma.project.aggregate({
@@ -107,48 +75,10 @@ export async function GET(request: NextRequest) {
       asNumber(projectEmailAttachmentAgg._sum.fileSize)
     const projectFilesBytes = asNumber(projectFileAgg._sum.fileSize)
     const originalPhotosBytes = asNumber(albumPhotoAgg._sum.fileSize)
-    const storedAlbumZipFullBytes = asNumber(albumAgg._sum.fullZipFileSize)
-    const storedAlbumZipSocialBytes = asNumber(albumAgg._sum.socialZipFileSize)
-    let albumZipFullBytes = storedAlbumZipFullBytes
-    let albumZipSocialBytes = storedAlbumZipSocialBytes
-
-    if (isS3Provider && s3Albums.length > 0) {
-      const zipSizes = await Promise.all(
-        s3Albums.flatMap((album) => {
-          const projectStoragePath = album.project.storagePath
-            || buildProjectStorageRoot(
-              album.project.client?.name || album.project.companyName || 'Client',
-              album.project.title || 'Untitled'
-            )
-          const albumFolderName = album.storageFolderName || album.name
-
-          const fullPath = getAlbumZipStoragePath({
-            projectStoragePath,
-            albumFolderName,
-            albumName: album.name,
-            variant: 'full',
-          })
-          const socialPath = getAlbumZipStoragePath({
-            projectStoragePath,
-            albumFolderName,
-            albumName: album.name,
-            variant: 'social',
-          })
-          return [s3GetFileSize(fullPath), s3GetFileSize(socialPath)]
-        })
-      )
-
-      let liveFull = 0
-      let liveSocial = 0
-      for (let i = 0; i < zipSizes.length; i += 2) {
-        liveFull += Math.max(0, Number(zipSizes[i] || 0))
-        liveSocial += Math.max(0, Number(zipSizes[i + 1] || 0))
-      }
-
-      albumZipFullBytes = liveFull
-      albumZipSocialBytes = liveSocial
-    }
-
+    // ZIP sizes are written back to Album.fullZipFileSize / socialZipFileSize by the worker
+    // whenever a ZIP is generated or deleted, so the DB values are reliable.
+    const albumZipFullBytes = asNumber(albumAgg._sum.fullZipFileSize)
+    const albumZipSocialBytes = asNumber(albumAgg._sum.socialZipFileSize)
     const photoZipBytes =
       asNumber(albumPhotoAgg._sum.socialFileSize) +
       albumZipFullBytes +
@@ -156,32 +86,11 @@ export async function GET(request: NextRequest) {
     const clientFilesBytes = asNumber(clientFileAgg._sum.fileSize)
     const userFilesBytes = asNumber(userFileAgg._sum.fileSize)
 
-    // In S3 mode, derive preview bytes from live preview objects.
-    // In local mode, preserve the existing disk-vs-tracked estimate.
+    // In S3 mode, use DB-backed previewBytes (reconciled daily) instead of a live S3 scan.
+    // In local mode, estimate preview bytes as the difference between disk total and DB-tracked total.
     let videoPreviewsBytes = 0
     if (isS3Provider) {
-      const previewFilePaths = new Set<string>()
-      const spritePrefixes = new Set<string>()
-
-      for (const video of s3Videos) {
-        if (video.preview480Path) previewFilePaths.add(video.preview480Path)
-        if (video.preview720Path) previewFilePaths.add(video.preview720Path)
-        if (video.preview1080Path) previewFilePaths.add(video.preview1080Path)
-        if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
-          previewFilePaths.add(video.thumbnailPath)
-        }
-        if (video.timelinePreviewVttPath) previewFilePaths.add(video.timelinePreviewVttPath)
-        if (video.timelinePreviewSpritesPath) spritePrefixes.add(video.timelinePreviewSpritesPath)
-      }
-
-      const [fileSizes, prefixSizes] = await Promise.all([
-        Promise.all([...previewFilePaths].map((p) => s3GetFileSize(p))),
-        Promise.all([...spritePrefixes].map((p) => s3SumPrefixSize(p))),
-      ])
-
-      const filesTotal = fileSizes.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0)
-      const prefixesTotal = prefixSizes.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0)
-      videoPreviewsBytes = Math.max(0, filesTotal + prefixesTotal)
+      videoPreviewsBytes = asNumber(projectTotals._sum.previewBytes)
     } else {
       const diskBytesForProjects = asNumber(projectsWithDisk._sum.diskBytes)
       const totalBytesForProjectsWithDisk = asNumber(projectsWithDisk._sum.totalBytes)
@@ -189,11 +98,8 @@ export async function GET(request: NextRequest) {
     }
 
     const allProjectTotalBytes = asNumber(projectTotals._sum.totalBytes)
-    const zipBytesDelta =
-      (albumZipFullBytes + albumZipSocialBytes) -
-      (storedAlbumZipFullBytes + storedAlbumZipSocialBytes)
     const totalBytes =
-      allProjectTotalBytes + zipBytesDelta + videoPreviewsBytes + clientFilesBytes + userFilesBytes
+      allProjectTotalBytes + videoPreviewsBytes + clientFilesBytes + userFilesBytes
 
     let capacityBytes: number | null = null
     let availableBytes: number | null = null

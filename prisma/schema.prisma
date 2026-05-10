@@ -207,6 +207,11 @@ model Project {
   // Updated incrementally when related files are added/removed, and reconciled daily by the worker.
   totalBytes BigInt @default(0)
 
+  // Precomputed size of transcoded preview files (bytes) for S3 mode.
+  // Tracks 480p/720p/1080p previews, thumbnails, timeline sprites/VTT.
+  // Reconciled daily by the worker; not tracked incrementally.
+  previewBytes BigInt @default(0)
+
   // On-disk storage total (bytes) for the project volume folder.
   // This includes derived/transcoded artifacts (previews, thumbnails, timeline sprites/VTT, etc)
   // and any other files present under projects/{projectId}.

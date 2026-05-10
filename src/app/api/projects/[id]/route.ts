@@ -314,6 +314,7 @@ export async function GET(
       commentAttachmentsCount,
       emailAttachmentsCount,
       totalBytes: asNumberBigInt((project as any).totalBytes),
+      previewBytes: asNumberBigInt((project as any).previewBytes),
       diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
       videos: project.videos.map((video: any) => ({
         ...video,

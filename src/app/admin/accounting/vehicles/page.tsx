@@ -936,6 +936,8 @@ export default function VehiclesPage() {
       setTripsTotal(prev => Math.max(0, prev - 1))
       // Refresh logbook stats
       void loadLogbooks(selectedVehicleId)
+      // Refresh vehicle cards (tips/business %) at the top
+      void loadVehicles()
     }
   }
 
@@ -1286,6 +1288,8 @@ export default function VehiclesPage() {
             setEditingTrip(null)
             // Reload logbook to refresh computed stats
             if (selectedVehicleId) void loadLogbooks(selectedVehicleId)
+            // Reload vehicles so top cards reflect latest logbook stats
+            void loadVehicles()
           }}
         />
       )}

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { getFilePath } from '@/lib/storage'
+import { isS3Mode, s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -210,6 +211,26 @@ export async function recalculateAndStoreProjectTotalBytes(
   return totalBytes
 }
 
+/**
+ * Recompute and persist previewBytes for a single project.
+ * No-ops in local/disk mode (previewBytes stays 0).
+ * Call this after video processing completes so the dashboard reflects
+ * preview storage immediately without waiting for the nightly reconcile.
+ */
+export async function recalculateAndStoreProjectPreviewBytes(
+  projectId: string,
+  prismaClient: typeof prisma = prisma
+): Promise<bigint> {
+  const previewBytes = await computeProjectPreviewBytes(projectId, prismaClient)
+  if (isS3Mode()) {
+    await prismaClient.project.update({
+      where: { id: projectId },
+      data: { previewBytes },
+    })
+  }
+  return previewBytes
+}
+
 export async function reconcileAllProjectsTotalBytes(
   prismaClient: typeof prisma = prisma
 ): Promise<{ checkedCount: number; updatedCount: number }> {
@@ -289,16 +310,99 @@ export async function reconcileAllProjectsDiskBytes(
   return { checkedCount: projects.length, updatedCount }
 }
 
+/**
+ * Compute the total bytes used by S3-stored video preview files for a project.
+ * Reads preview path fields from the Video DB records and queries S3 for their sizes.
+ * Returns 0 in local/disk storage mode.
+ */
+export async function computeProjectPreviewBytes(
+  projectId: string,
+  prismaClient: typeof prisma = prisma
+): Promise<bigint> {
+  const ZERO = BigInt(0)
+  if (!projectId || !isS3Mode()) return ZERO
+
+  const videos = await prismaClient.video.findMany({
+    where: { projectId },
+    select: {
+      preview480Path: true,
+      preview720Path: true,
+      preview1080Path: true,
+      thumbnailPath: true,
+      timelinePreviewVttPath: true,
+      timelinePreviewSpritesPath: true,
+    },
+  })
+
+  if (videos.length === 0) return ZERO
+
+  const previewFilePaths = new Set<string>()
+  const spritePrefixes = new Set<string>()
+
+  for (const video of videos) {
+    if (video.preview480Path) previewFilePaths.add(video.preview480Path)
+    if (video.preview720Path) previewFilePaths.add(video.preview720Path)
+    if (video.preview1080Path) previewFilePaths.add(video.preview1080Path)
+    if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
+      previewFilePaths.add(video.thumbnailPath)
+    }
+    if (video.timelinePreviewVttPath) previewFilePaths.add(video.timelinePreviewVttPath)
+    if (video.timelinePreviewSpritesPath) spritePrefixes.add(video.timelinePreviewSpritesPath)
+  }
+
+  const [fileSizes, prefixSizes] = await Promise.all([
+    Promise.all([...previewFilePaths].map((p) => s3GetFileSize(p))),
+    Promise.all([...spritePrefixes].map((p) => s3SumPrefixSize(p))),
+  ])
+
+  const total =
+    fileSizes.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0) +
+    prefixSizes.reduce<number>((sum, size) => sum + Math.max(0, Number(size || 0)), 0)
+
+  return total > 0 ? BigInt(Math.round(total)) : ZERO
+}
+
+export async function reconcileAllProjectsPreviewBytes(
+  prismaClient: typeof prisma = prisma
+): Promise<{ checkedCount: number; updatedCount: number }> {
+  // Only meaningful in S3 mode; in local mode keep previewBytes = 0.
+  if (!isS3Mode()) {
+    return { checkedCount: 0, updatedCount: 0 }
+  }
+
+  const projects = await prismaClient.project.findMany({
+    select: { id: true, previewBytes: true },
+  })
+
+  let updatedCount = 0
+  // Use a concurrency pool to avoid overwhelming S3 with parallel requests.
+  await asyncPool(2, projects, async (p) => {
+    const computed = await computeProjectPreviewBytes(p.id, prismaClient)
+    const stored = toBigIntSafe((p as any).previewBytes)
+    if (computed !== stored) {
+      await prismaClient.project.update({
+        where: { id: p.id },
+        data: { previewBytes: computed },
+      })
+      updatedCount++
+    }
+  })
+
+  return { checkedCount: projects.length, updatedCount }
+}
+
 export async function reconcileAllProjectsStorageTotals(
   prismaClient: typeof prisma = prisma
 ): Promise<{
   totalBytes: { checkedCount: number; updatedCount: number }
   diskBytes: { checkedCount: number; updatedCount: number }
+  previewBytes: { checkedCount: number; updatedCount: number }
 }> {
-  const [totalBytes, diskBytes] = await Promise.all([
+  const [totalBytes, diskBytes, previewBytes] = await Promise.all([
     reconcileAllProjectsTotalBytes(prismaClient),
     reconcileAllProjectsDiskBytes(prismaClient),
+    reconcileAllProjectsPreviewBytes(prismaClient),
   ])
 
-  return { totalBytes, diskBytes }
+  return { totalBytes, diskBytes, previewBytes }
 }

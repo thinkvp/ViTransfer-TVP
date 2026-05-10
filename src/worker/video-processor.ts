@@ -22,7 +22,7 @@ import {
   type Resolution,
 } from './video-processor-helpers'
 import { getPreviewProcessingPhase, PROCESSING_PHASES } from '@/lib/video-processing-phase'
-import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { recalculateAndStoreProjectTotalBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectDiskBytes } from '@/lib/project-total-bytes'
 import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
 import { isS3Mode } from '@/lib/s3-storage'
 
@@ -255,7 +255,11 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       if (!updated) return
     }
 
-    await recalculateAndStoreProjectTotalBytes(projectId)
+    await Promise.all([
+      recalculateAndStoreProjectTotalBytes(projectId),
+      recalculateAndStoreProjectPreviewBytes(projectId),
+      recalculateAndStoreProjectDiskBytes(projectId),
+    ])
 
     // Success!
     const totalTime = Date.now() - processingStart
@@ -378,7 +382,11 @@ async function processPreviewOnly(
       )
     }
 
-    await recalculateAndStoreProjectTotalBytes(projectId)
+    await Promise.all([
+      recalculateAndStoreProjectTotalBytes(projectId),
+      recalculateAndStoreProjectPreviewBytes(projectId),
+      recalculateAndStoreProjectDiskBytes(projectId),
+    ])
 
     const totalTime = Date.now() - processingStart
     console.log(`[WORKER] Preview-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
@@ -435,7 +443,11 @@ async function processThumbnailOnly(
     )
 
     await finalizeVideoWithoutPreview(videoId, thumbnailPath, videoInfo.metadata)
-    await recalculateAndStoreProjectTotalBytes(projectId)
+    await Promise.all([
+      recalculateAndStoreProjectTotalBytes(projectId),
+      recalculateAndStoreProjectPreviewBytes(projectId),
+      recalculateAndStoreProjectDiskBytes(projectId),
+    ])
 
     const totalTime = Date.now() - processingStart
     console.log(`[WORKER] Thumbnail-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
@@ -504,7 +516,11 @@ async function processTimelineOnly(
       console.warn(`[WORKER] Timeline preview generation returned no result for ${videoId}`)
     }
 
-    await recalculateAndStoreProjectTotalBytes(projectId)
+    await Promise.all([
+      recalculateAndStoreProjectTotalBytes(projectId),
+      recalculateAndStoreProjectPreviewBytes(projectId),
+      recalculateAndStoreProjectDiskBytes(projectId),
+    ])
 
     const totalTime = Date.now() - processingStart
     console.log(`[WORKER] Timeline-only completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
