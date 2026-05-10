@@ -9,6 +9,7 @@ import { LinkedBankTransactionDialog } from '@/components/admin/accounting/Linke
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
@@ -39,9 +40,9 @@ export default function ExpensesPage() {
   const [fromDate, setFromDate] = useState(() => getThisFinancialYearDates().from)
   const [toDate, setToDate] = useState(() => getThisFinancialYearDates().to)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<25 | 50 | 100 | 150 | 200>(25)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
-  const pageSize = 25
   const [exportLoading, setExportLoading] = useState(false)
 
   const [sortKey, setSortKey] = useState<SortKey>('date')
@@ -94,7 +95,7 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search, fromDate, toDate, sortKey, sortDir])
+  }, [page, pageSize, search, fromDate, toDate, sortKey, sortDir])
 
   useEffect(() => { void load() }, [load])
 
@@ -144,7 +145,28 @@ export default function ExpensesPage() {
           <h2 className="text-xl font-semibold">Expenses</h2>
           <p className="text-sm text-muted-foreground">Track and manage business expenses.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => {
+              const parsed = Number(v)
+              if (parsed === 25 || parsed === 50 || parsed === 100 || parsed === 150 || parsed === 200) {
+                setPage(1)
+                setPageSize(parsed)
+              }
+            }}
+          >
+            <SelectTrigger className="h-9 w-[88px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="25">25</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+              <SelectItem value="150">150</SelectItem>
+              <SelectItem value="200">200</SelectItem>
+            </SelectContent>
+          </Select>
           <ExportMenu
             onExportCsv={async () => {
               setExportLoading(true)
@@ -315,11 +337,11 @@ export default function ExpensesPage() {
         <div className="flex items-center justify-between text-sm print:hidden">
           <span className="text-muted-foreground">{total} total</span>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
-            <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
             <span className="px-3 text-muted-foreground">Page {page} of {totalPages}</span>
-            <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
-            <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
           </div>
         </div>
       )}

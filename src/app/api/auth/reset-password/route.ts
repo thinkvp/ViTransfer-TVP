@@ -33,8 +33,8 @@ const resetPasswordSchema = z.object({
     .string()
     .min(1, 'Reset token is required')
     .max(256, 'Invalid token'), // Base64url encoded 48 bytes = ~64 chars
-  password: z.string().min(1, 'Password is required'),
-  confirmPassword: z.string().min(1, 'Password confirmation is required'),
+  password: z.string().min(1, 'Password is required').max(128, 'Password must not exceed 128 characters'),
+  confirmPassword: z.string().min(1, 'Password confirmation is required').max(128, 'Password must not exceed 128 characters'),
 })
 
 export async function POST(request: NextRequest) {

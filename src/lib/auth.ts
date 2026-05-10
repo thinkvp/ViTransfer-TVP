@@ -206,8 +206,22 @@ export async function refreshAdminTokens(params: {
   fingerprintHash?: string
 }) {
   const { refreshToken, fingerprintHash } = params
-  const payload = await verifyAdminRefreshToken(refreshToken)
-  if (!payload) return null
+  let payload: AdminRefreshPayload
+  try {
+    if (!ADMIN_REFRESH_SECRET) return null
+    const decoded = jwt.verify(refreshToken, ADMIN_REFRESH_SECRET, { algorithms: ['HS256'] }) as AdminRefreshPayload
+    if (decoded.type !== 'admin_refresh') return null
+    payload = decoded
+  } catch {
+    return null
+  }
+
+  if (await isTokenRevoked(refreshToken)) {
+    await revokeTokenFamily(payload.userId)
+    return null
+  }
+
+  if (await isUserTokensRevoked(payload.userId, payload.iat)) return null
 
   if (fingerprintHash) {
     const storedFingerprint = await getTokenFingerprint(payload.userId, refreshToken)

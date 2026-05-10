@@ -33,6 +33,7 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'DEV_ONLY_INSECURE_KEY_32BY
 const ALGORITHM = 'aes-256-gcm'
 const IV_LENGTH = 16
 const AUTH_TAG_LENGTH = 16
+const MAX_PASSWORD_LENGTH = 128
 
 /**
  * Validate that encryption key is configured properly (runtime check)
@@ -147,6 +148,10 @@ export function decrypt(encryptedText: string): string {
  * @returns Hashed password
  */
 export async function hashPassword(password: string): Promise<string> {
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password must not exceed ${MAX_PASSWORD_LENGTH} characters`)
+  }
+
   const bcrypt = require('bcryptjs')
   const salt = await bcrypt.genSalt(14)
   return bcrypt.hash(password, salt)
@@ -159,6 +164,10 @@ export async function hashPassword(password: string): Promise<string> {
  * @returns True if password matches
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD_LENGTH) {
+    return false
+  }
+
   const bcrypt = require('bcryptjs')
   return bcrypt.compare(password, hash)
 }
@@ -173,6 +182,14 @@ export function validatePassword(password: string): {
   errors: string[]
   strength: 'weak' | 'medium' | 'strong'
 } {
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD_LENGTH) {
+    return {
+      isValid: false,
+      errors: [`Password must not exceed ${MAX_PASSWORD_LENGTH} characters`],
+      strength: 'weak',
+    }
+  }
+
   const errors: string[] = []
   
   // Length check (increased from 8 to 12)

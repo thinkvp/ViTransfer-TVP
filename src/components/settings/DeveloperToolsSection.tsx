@@ -103,6 +103,9 @@ type LocalToS3StatusResult = {
     progressPercent: number
     overwriteExisting: boolean
     concurrency: number
+    multipartThresholdMB: number
+    multipartPartSizeMB: number
+    multipartQueueSize: number
   } | null
 }
 
@@ -174,6 +177,9 @@ export function DeveloperToolsSection({
   const [s3ForcePathStyle, setS3ForcePathStyle] = useState(true)
   const [s3Concurrency, setS3Concurrency] = useState<number | ''>(3)
   const [s3OverwriteExisting, setS3OverwriteExisting] = useState(false)
+  const [s3MultipartThresholdMB, setS3MultipartThresholdMB] = useState<number | ''>(64)
+  const [s3MultipartPartSizeMB, setS3MultipartPartSizeMB] = useState<number | ''>(64)
+  const [s3MultipartQueueSize, setS3MultipartQueueSize] = useState<number | ''>(4)
 
   const [s3ValidateLoading, setS3ValidateLoading] = useState(false)
   const [s3ValidateMessage, setS3ValidateMessage] = useState<string | null>(null)
@@ -255,6 +261,9 @@ export function DeveloperToolsSection({
         forcePathStyle: s3ForcePathStyle,
         concurrency: typeof s3Concurrency === 'number' ? s3Concurrency : 3,
         overwriteExisting: s3OverwriteExisting,
+        multipartThresholdMB: typeof s3MultipartThresholdMB === 'number' ? s3MultipartThresholdMB : 64,
+        multipartPartSizeMB: typeof s3MultipartPartSizeMB === 'number' ? s3MultipartPartSizeMB : 64,
+        multipartQueueSize: typeof s3MultipartQueueSize === 'number' ? s3MultipartQueueSize : 4,
       })
       setS3Status(result as LocalToS3StatusResult)
       setS3MigrationMessage('Migration started.')
@@ -403,7 +412,55 @@ export function DeveloperToolsSection({
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/40 px-3 py-2 md:col-span-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="s3MultipartThresholdMB">Multipart threshold (MB)</Label>
+                <Input
+                  id="s3MultipartThresholdMB"
+                  type="number"
+                  min={5}
+                  max={10240}
+                  step={1}
+                  value={s3MultipartThresholdMB}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    setS3MultipartThresholdMB(next === '' ? '' : Number(next))
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="s3MultipartPartSizeMB">Multipart part size (MB)</Label>
+                <Input
+                  id="s3MultipartPartSizeMB"
+                  type="number"
+                  min={5}
+                  max={512}
+                  step={1}
+                  value={s3MultipartPartSizeMB}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    setS3MultipartPartSizeMB(next === '' ? '' : Number(next))
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="s3MultipartQueueSize">Multipart queue size</Label>
+                <Input
+                  id="s3MultipartQueueSize"
+                  type="number"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={s3MultipartQueueSize}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    setS3MultipartQueueSize(next === '' ? '' : Number(next))
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/40 px-3 py-2 md:col-span-3">
                 <div>
                   <div className="text-xs font-medium">Force path style</div>
                   <div className="text-[11px] text-muted-foreground">Recommended for Cloudflare R2.</div>
@@ -490,6 +547,9 @@ export function DeveloperToolsSection({
                   <div>Speed: {formatBytes(s3Status.run.speedBytesPerSecond)}/s</div>
                   <div>ETA: {formatDuration(s3Status.run.etaSeconds)}</div>
                   <div>Started: {new Date(s3Status.run.startedAt).toLocaleString()}</div>
+                  <div>Multipart threshold: {s3Status.run.multipartThresholdMB} MB</div>
+                  <div>Multipart part size: {s3Status.run.multipartPartSizeMB} MB</div>
+                  <div>Multipart queue: {s3Status.run.multipartQueueSize}</div>
                 </div>
                 {s3Status.run.errors?.length ? (
                   <details className="mt-1">

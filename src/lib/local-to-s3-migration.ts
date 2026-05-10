@@ -4,6 +4,19 @@ import { prisma } from '@/lib/db'
 import { getFilePath } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
+import { Upload } from '@aws-sdk/lib-storage'
+
+const MB = 1024 * 1024
+const MAX_SINGLE_PUT_OBJECT_BYTES = 5 * 1024 * 1024 * 1024
+const DEFAULT_MULTIPART_THRESHOLD_MB = 64
+const DEFAULT_MULTIPART_PART_SIZE_MB = 64
+const DEFAULT_MULTIPART_QUEUE_SIZE = 4
+const MIN_MULTIPART_THRESHOLD_MB = 5
+const MAX_MULTIPART_THRESHOLD_MB = 10240
+const MIN_MULTIPART_PART_SIZE_MB = 5
+const MAX_MULTIPART_PART_SIZE_MB = 512
+const MIN_MULTIPART_QUEUE_SIZE = 1
+const MAX_MULTIPART_QUEUE_SIZE = 8
 
 export type S3MigrationConfig = {
   endpoint: string
@@ -46,6 +59,9 @@ export type S3MigrationStatus = {
     progressPercent: number
     overwriteExisting: boolean
     concurrency: number
+    multipartThresholdMB: number
+    multipartPartSizeMB: number
+    multipartQueueSize: number
   } | null
 }
 
@@ -72,6 +88,11 @@ type MigrationRun = {
   cancelRequested: boolean
   overwriteExisting: boolean
   concurrency: number
+  multipartThresholdMB: number
+  multipartPartSizeMB: number
+  multipartQueueSize: number
+  activeAbortControllers: Set<AbortController>
+  activeMultipartUploads: Set<Upload>
 }
 
 type MigrationState = {
@@ -91,6 +112,25 @@ function getState(): MigrationState {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(n)))
+}
+
+function isAbortError(error: any): boolean {
+  const name = String(error?.name || '')
+  const message = String(error?.message || '').toLowerCase()
+  return (
+    name === 'AbortError' ||
+    name === 'RequestAbortedError' ||
+    message.includes('abort') ||
+    message.includes('aborted') ||
+    message.includes('canceled') ||
+    message.includes('cancelled')
+  )
 }
 
 function normalizeKey(rawPath: string): string | null {
@@ -349,6 +389,9 @@ function makeStatus(run: MigrationRun | null): S3MigrationStatus {
       progressPercent,
       overwriteExisting: run.overwriteExisting,
       concurrency: run.concurrency,
+      multipartThresholdMB: run.multipartThresholdMB,
+      multipartPartSizeMB: run.multipartPartSizeMB,
+      multipartQueueSize: run.multipartQueueSize,
     },
   }
 }
@@ -389,6 +432,9 @@ export async function startLocalToS3Migration(input: {
   config: Partial<S3MigrationConfig>
   overwriteExisting?: boolean
   concurrency?: number
+  multipartThresholdMB?: number
+  multipartPartSizeMB?: number
+  multipartQueueSize?: number
 }) {
   const state = getState()
   if (state.run && (state.run.status === 'PREPARING' || state.run.status === 'RUNNING')) {
@@ -398,6 +444,24 @@ export async function startLocalToS3Migration(input: {
   const config = getConfig(input.config)
   const overwriteExisting = input.overwriteExisting === true
   const concurrency = Math.max(1, Math.min(8, Number(input.concurrency || 3)))
+  const multipartThresholdMB = clampInt(
+    input.multipartThresholdMB,
+    MIN_MULTIPART_THRESHOLD_MB,
+    MAX_MULTIPART_THRESHOLD_MB,
+    DEFAULT_MULTIPART_THRESHOLD_MB,
+  )
+  const multipartPartSizeMB = clampInt(
+    input.multipartPartSizeMB,
+    MIN_MULTIPART_PART_SIZE_MB,
+    MAX_MULTIPART_PART_SIZE_MB,
+    DEFAULT_MULTIPART_PART_SIZE_MB,
+  )
+  const multipartQueueSize = clampInt(
+    input.multipartQueueSize,
+    MIN_MULTIPART_QUEUE_SIZE,
+    MAX_MULTIPART_QUEUE_SIZE,
+    DEFAULT_MULTIPART_QUEUE_SIZE,
+  )
 
   const run: MigrationRun = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
@@ -416,6 +480,11 @@ export async function startLocalToS3Migration(input: {
     cancelRequested: false,
     overwriteExisting,
     concurrency,
+    multipartThresholdMB,
+    multipartPartSizeMB,
+    multipartQueueSize,
+    activeAbortControllers: new Set(),
+    activeMultipartUploads: new Set(),
   }
 
   state.run = run
@@ -450,18 +519,65 @@ export async function startLocalToS3Migration(input: {
             }
 
             const body = fs.createReadStream(next.absPath)
-            await client.send(new PutObjectCommand({
-              Bucket: config.bucket,
-              Key: next.key,
-              Body: body,
-              ContentLength: next.size,
-              ContentType: 'application/octet-stream',
-            }))
+            const shouldUseMultipart =
+              next.size > MAX_SINGLE_PUT_OBJECT_BYTES ||
+              next.size >= run.multipartThresholdMB * MB
+
+            if (shouldUseMultipart) {
+              const upload = new Upload({
+                client,
+                params: {
+                  Bucket: config.bucket,
+                  Key: next.key,
+                  Body: body,
+                  ContentType: 'application/octet-stream',
+                },
+                partSize: run.multipartPartSizeMB * MB,
+                queueSize: run.multipartQueueSize,
+                leavePartsOnError: false,
+              })
+
+              run.activeMultipartUploads.add(upload)
+              try {
+                if (run.cancelRequested) {
+                  await upload.abort()
+                  return
+                }
+                await upload.done()
+              } finally {
+                run.activeMultipartUploads.delete(upload)
+              }
+            } else {
+              const abortController = new AbortController()
+              run.activeAbortControllers.add(abortController)
+              try {
+                if (run.cancelRequested) {
+                  abortController.abort()
+                  return
+                }
+                await client.send(
+                  new PutObjectCommand({
+                    Bucket: config.bucket,
+                    Key: next.key,
+                    Body: body,
+                    ContentLength: next.size,
+                    ContentType: 'application/octet-stream',
+                  }),
+                  { abortSignal: abortController.signal },
+                )
+              } finally {
+                run.activeAbortControllers.delete(abortController)
+              }
+            }
 
             run.filesCopied++
             run.bytesCopied += next.size
             run.filesProcessed++
           } catch (error: any) {
+            if (run.cancelRequested && isAbortError(error)) {
+              run.filesProcessed++
+              continue
+            }
             run.filesFailed++
             run.filesProcessed++
             if (run.errors.length < 50) {
@@ -504,6 +620,12 @@ export function cancelLocalToS3Migration() {
   }
 
   run.cancelRequested = true
+  for (const abortController of run.activeAbortControllers) {
+    abortController.abort()
+  }
+  for (const upload of run.activeMultipartUploads) {
+    void upload.abort()
+  }
   return { ok: true, message: 'Cancellation requested' }
 }
 

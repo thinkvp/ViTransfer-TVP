@@ -311,11 +311,14 @@ export async function generatePasskeyAuthenticationOptions(
       },
     })
 
-    if (!user || user.passkeys.length === 0) {
-      throw new Error('No passkeys registered for this account')
+    if (user && user.passkeys.length > 0) {
+      challengeKey = user.id
+    } else {
+      // Keep response shape/timing similar so callers cannot infer account/passkey existence.
+      user = null
+      sessionId = `usernameless:${Date.now()}:${crypto.randomUUID()}`
+      challengeKey = sessionId
     }
-
-    challengeKey = user.id
   } else {
     // Usernameless authentication (discoverable credentials)
     // Generate secure session ID for challenge storage

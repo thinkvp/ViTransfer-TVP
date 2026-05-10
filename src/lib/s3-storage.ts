@@ -42,7 +42,7 @@ export function isS3Mode(): boolean {
   return process.env.STORAGE_PROVIDER === 's3'
 }
 
-function getS3Client(): S3Client {
+export function getS3Client(): S3Client {
   if (g.__s3Client) return g.__s3Client
 
   const endpoint = process.env.S3_ENDPOINT?.trim()

@@ -614,7 +614,7 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
             No closed projects for this period
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={220} minWidth={0}>
             <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap="30%">
               <defs>
                 <linearGradient id="projectBarGradient" x1="0" y1="0" x2="0" y2="1">

@@ -617,14 +617,15 @@ export default function AccountLedgerPage() {
 
       {entries.length > 0 && (
         <div className="flex items-center justify-between text-sm print:hidden">
-          <span className="text-muted-foreground">{total} entr{total !== 1 ? 'ies' : 'y'}</span>
+          <span className="text-muted-foreground">{total} total</span>
           {pageCount > 1 && (
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => changePage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => changePage(page - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
-              <span className="px-3 text-muted-foreground">Page {page} of {pageCount}</span>
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => changePage(page + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => changePage(pageCount)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => changePage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => changePage(page - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
+              <span className="hidden px-3 text-muted-foreground sm:inline">Page {page} of {pageCount}</span>
+              <span className="px-2 text-xs text-muted-foreground sm:hidden">{page} / {pageCount}</span>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => changePage(page + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => changePage(pageCount)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
             </div>
           )}
         </div>

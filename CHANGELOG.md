@@ -5,6 +5,21 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-05-10
+
+### Changed
+- **Inter font preload disabled** — root layout now sets `preload: false` for `next/font/google` Inter to reduce repeated browser warnings about preloaded font files not being used immediately after page load.
+- **Accounting pages UI tweaks** - several small UI tweaks for both desktop and responsive designs.
+
+### Fixed
+- **Orphan file scan now storage-provider-aware** — the weekly orphan-file cleanup scan was not detecting whether files resided in S3 or local storage, causing false-positive orphan reports when running in S3 mode; the scan now branches on `isS3Mode()` and when S3 mode is active, lists all S3 bucket objects, compares them against database references, and deletes unreferenced files from S3; in local mode it continues using the existing filesystem walk; S3 mode respects the same protected/ignored file patterns as local mode.
+- **User and client file uploads are now storage-provider-aware** — `UserFileUpload` and `ClientFileUpload` previously always used TUS regardless of the active storage provider; both components now check `isS3Mode()` at upload time and, when S3 is active, perform browser-direct multipart uploads to R2 via new `POST /api/users/[id]/files/s3/presign`, `/complete`, and `/abort` endpoints (and equivalent `/api/clients/[id]/files/s3/` routes); the DB record and processing queue job are now created in the `/complete` handler after R2 confirms the upload; cancellation aborts any in-flight multipart upload synchronously; TUS behaviour is unchanged in local/Dropbox mode.
+- **Authentication hardening for token, passkey, and password flows** — refresh-token reuse after rotation now revokes the full token family; `/api/auth/logout` now fails closed with `503` when token revocation cannot be completed; passkey authenticate-options no longer leaks account/passkey existence; and password length is now capped at 128 characters in hash/verify/validate paths (with matching reset-password input limits).
+- **Local-to-S3 migration now supports files larger than 5 GiB** — the migration worker previously used a single `PutObject` request per file, which S3-compatible providers reject above 5 GiB; files at or above the configurable multipart threshold (default 64 MB) are now uploaded via `@aws-sdk/lib-storage` multipart upload; part size (5–512 MB) and parallel queue size (1–8) are also configurable from the Developer Tools UI and are reported in the live status panel.
+- **Local-to-S3 migration cancel now aborts in-flight transfers immediately** — clicking Cancel previously only set a flag checked between files, so a large active upload would continue until it finished or errored; the worker now tracks active `AbortController` instances for single-part uploads and `Upload` handles for multipart uploads, and `cancelLocalToS3Migration` aborts all of them synchronously so transfers stop as quickly as the SDK allows; abort errors are treated as cancellation rather than failures and do not increment the error counter.
+- **Accounting dashboard sales settings endpoint mismatch** — corrected the Sales settings fetch path from `GET /api/sales/settings` to `GET /api/admin/sales/settings`, eliminating recurring 404s and ensuring fiscal-year/currency values are sourced from the admin route.
+- **Sales Dashboard Recharts container warning** — Projects Overview now renders its chart in a stable, explicit-height container (`height={220}` with `minWidth={0}`) instead of `height="100%"`, preventing the warning about invalid chart dimensions (`width(-1)` / `height(100%)`) during initial layout measurement.
+
 ## [1.7.1] - 2026-05-09
 
 ### Fixed

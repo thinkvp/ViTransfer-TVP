@@ -74,15 +74,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[PASSKEY] Authentication options error:', error)
 
-    // Return user-friendly error
-    const errorMessage =
-      error instanceof Error
-        ? error.message
-        : 'Failed to generate PassKey authentication options'
-
     return NextResponse.json(
       {
-        error: errorMessage,
+        error: 'PassKey authentication is not available.',
       },
       { status: 500 }
     )

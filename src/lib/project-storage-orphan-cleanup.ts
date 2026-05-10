@@ -11,6 +11,8 @@ import {
   STORAGE_ROOT,
 } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isS3Mode, s3DeleteFile, getS3Bucket, getS3Client } from '@/lib/s3-storage'
+import { ListObjectsV2Command } from '@aws-sdk/client-s3'
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 
@@ -434,18 +436,106 @@ async function pruneEmptyDirectories(dirRels: string[], dryRun: boolean): Promis
   return emptyDirsPruned
 }
 
+type S3ObjectEntry = {
+  key: string
+  bytes: number
+}
+
+/**
+ * List all objects in the S3 bucket (no pagination limit — loads entire bucket).
+ * Used for orphan detection when in S3 mode.
+ */
+async function listS3Objects(): Promise<S3ObjectEntry[]> {
+  let objects: S3ObjectEntry[] = []
+
+  try {
+    const client = getS3Client()
+    const bucket = getS3Bucket()
+    let continuationToken: string | undefined
+
+    do {
+      const listResponse = await client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        })
+      )
+
+      for (const obj of listResponse.Contents ?? []) {
+        if (obj.Key) {
+          objects.push({
+            key: obj.Key,
+            bytes: obj.Size ?? 0,
+          })
+        }
+      }
+
+      continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+    } while (continuationToken)
+  } catch (error: any) {
+    // If S3 listing fails, return empty and let the scan continue on local filesystem
+    console.warn('[orphan-cleanup] S3 listing failed:', error?.message || error)
+  }
+
+  return objects
+}
+
+/**
+ * Scan S3 bucket for orphaned files (when in S3 mode).
+ * Compares S3 object keys against database references to find unreferenced files.
+ */
+async function scanS3ForOrphans(
+  s3Objects: S3ObjectEntry[],
+  refs: ProjectStorageReferences,
+  errors: Array<{ path: string; error: string }>,
+  stats: { scannedFiles: number }
+): Promise<OrphanFileEntry[]> {
+  const orphanFiles: OrphanFileEntry[] = []
+
+  for (const s3Object of s3Objects) {
+    stats.scannedFiles++
+
+    // Skip protected metadata files
+    if (isProtectedMetadataFile(s3Object.key)) continue
+    if (isIgnoredStoragePath(s3Object.key)) continue
+
+    // Check if this S3 key is referenced in the database
+    if (!isReferencedPath(s3Object.key, refs)) {
+      orphanFiles.push({
+        absPath: `s3://${getS3Bucket()}/${s3Object.key}`, // Mark as S3 path for reporting
+        relPath: normalizeRelativeStoragePath(s3Object.key),
+        bytes: s3Object.bytes,
+      })
+    }
+  }
+
+  return orphanFiles
+}
+
 export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<ProjectStorageOrphanCleanupResult> {
-  const [refs, roots, projectRootIndex] = await Promise.all([
+  const [refs, projectRootIndex] = await Promise.all([
     buildProjectStorageReferences(),
-    listPhysicalProjectRoots(),
     buildProjectRootIndex(),
   ])
   const errors: Array<{ path: string; error: string }> = []
   const orphanFiles: OrphanFileEntry[] = []
   const stats = { scannedFiles: 0 }
 
-  for (const root of roots) {
-    await walkProjectFiles(root.absPath, root.relPath, orphanFiles, refs, errors, stats)
+  let roots: Array<{ absPath: string; relPath: string }> = []
+
+  // Scan storage based on configured provider
+  if (isS3Mode()) {
+    // S3 mode: list S3 bucket objects
+    const s3Objects = await listS3Objects()
+    const s3Orphans = await scanS3ForOrphans(s3Objects, refs, errors, stats)
+    orphanFiles.push(...s3Orphans)
+  } else {
+    // Local mode: walk filesystem as before
+    roots = await listPhysicalProjectRoots()
+    for (const root of roots) {
+      await walkProjectFiles(root.absPath, root.relPath, orphanFiles, refs, errors, stats)
+    }
   }
 
   const orphanFileBytes = orphanFiles.reduce((total, file) => total + file.bytes, 0)
@@ -476,18 +566,56 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
 
   let filesDeleted = 0
   let filesFailed = 0
-  for (const orphanFile of orphanFiles) {
-    try {
-      await fs.promises.unlink(orphanFile.absPath)
-      filesDeleted++
-    } catch (error: any) {
-      filesFailed++
-      errors.push({ path: orphanFile.relPath, error: String(error?.message || error) })
+
+  if (isS3Mode()) {
+    // Delete from S3
+    for (const orphanFile of orphanFiles) {
+      try {
+        // Extract S3 key from the relPath (which is the key when from S3 scan)
+        await s3DeleteFile(orphanFile.relPath)
+        filesDeleted++
+      } catch (error: any) {
+        filesFailed++
+        errors.push({ path: orphanFile.relPath, error: String(error?.message || error) })
+      }
+    }
+  } else {
+    // Delete from local filesystem
+    for (const orphanFile of orphanFiles) {
+      try {
+        await fs.promises.unlink(orphanFile.absPath)
+        filesDeleted++
+      } catch (error: any) {
+        filesFailed++
+        errors.push({ path: orphanFile.relPath, error: String(error?.message || error) })
+      }
+    }
+
+    // Prune empty directories (local only — S3 has no directory concept)
+    const emptyDirsPruned = await pruneEmptyDirectories(buildDirPruneCandidates(orphanFiles), false)
+
+    return {
+      ok: true,
+      dryRun: false,
+      scannedDirectories: roots.length,
+      scannedProjects: projectRootIndex.size,
+      scannedFiles: stats.scannedFiles,
+      orphanFiles: orphanFiles.length,
+      orphanFileBytes,
+      sample: {
+        orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
+        projectIds: sampleProjectIds,
+      },
+      deleted: {
+        filesDeleted,
+        filesFailed,
+        emptyDirsPruned,
+      },
+      errors: errors.length ? errors.slice(0, 50) : undefined,
     }
   }
 
-  const emptyDirsPruned = await pruneEmptyDirectories(buildDirPruneCandidates(orphanFiles), false)
-
+  // For S3 mode, no empty dir pruning needed
   return {
     ok: true,
     dryRun: false,
@@ -503,7 +631,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     deleted: {
       filesDeleted,
       filesFailed,
-      emptyDirsPruned,
+      emptyDirsPruned: 0,
     },
     errors: errors.length ? errors.slice(0, 50) : undefined,
   }

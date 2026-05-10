@@ -66,7 +66,7 @@ export default function AccountingDashboardPage() {
         apiFetch('/api/admin/accounting/expenses?status=DRAFT&pageSize=1'),
         apiFetch('/api/admin/accounting/bank-accounts'),
         apiFetch('/api/admin/accounting/settings'),
-        apiFetch('/api/sales/settings'),
+        apiFetch('/api/admin/sales/settings'),
       ])
       const txnData = txnRes.ok ? await txnRes.json() : null
       const expData = expRes.ok ? await expRes.json() : null

@@ -32,6 +32,9 @@ export async function POST(request: NextRequest) {
       },
       overwriteExisting: body?.overwriteExisting === true,
       concurrency: Number(body?.concurrency || 3),
+      multipartThresholdMB: Number(body?.multipartThresholdMB || 64),
+      multipartPartSizeMB: Number(body?.multipartPartSizeMB || 64),
+      multipartQueueSize: Number(body?.multipartQueueSize || 4),
     })
 
     return NextResponse.json(result)

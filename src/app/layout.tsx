@@ -8,6 +8,7 @@ const inter = Inter({
   subsets: ['latin'],
   variable: '--font-sans',
   display: 'swap',
+  preload: false,
 })
 
 // Force Node.js runtime across the app to allow use of Node APIs (e.g., crypto).

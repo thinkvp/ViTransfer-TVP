@@ -237,7 +237,7 @@ export default function ChartOfAccountsPage() {
           <h2 className="text-xl font-semibold">Chart of Accounts</h2>
           <p className="text-sm text-muted-foreground">Manage your account codes for expenses, income, and balance sheet items.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
           <ExportMenu
             onExportCsv={() => {
               downloadCsv('chart-of-accounts.csv', ['Code', 'Name', 'Type', 'Tax Code', 'Active'], filtered.map(({ account: a }) => [
@@ -276,8 +276,7 @@ export default function ChartOfAccountsPage() {
                 className="h-9 max-w-xs"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">Balance period:</span>
+            <div className="flex w-full items-center justify-end sm:w-auto">
               <DateRangePreset
                 from={balanceFrom}
                 to={balanceTo}
@@ -298,7 +297,7 @@ export default function ChartOfAccountsPage() {
                 <thead className="bg-muted/40">
                   <tr className="border-b border-border">
                     {([
-                      { key: 'code', label: 'Code', cls: 'w-28' },
+                      { key: 'code', label: 'Code', cls: 'min-w-[9ch]' },
                       { key: 'name', label: 'Name', cls: '' },
                       { key: 'type', label: 'Type', cls: 'min-w-[100px]' },
                       { key: 'taxCode', label: 'Tax Code', cls: 'min-w-[100px]' },

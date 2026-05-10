@@ -1028,9 +1028,11 @@ export default function VehiclesPage() {
             <h2 className="text-xl font-semibold">Vehicles</h2>
             <p className="text-sm text-muted-foreground">Select a vehicle to manage its ATO logbook.</p>
           </div>
-          <Button size="sm" onClick={() => { setEditingVehicle(null); setVehicleModalOpen(true) }}>
-            <Plus className="w-4 h-4 mr-1.5" />Add Vehicle
-          </Button>
+          <div className="flex w-full justify-end sm:w-auto">
+            <Button size="sm" onClick={() => { setEditingVehicle(null); setVehicleModalOpen(true) }}>
+              <Plus className="w-4 h-4 mr-1.5" />Add Vehicle
+            </Button>
+          </div>
         </div>
 
         {loading ? (
@@ -1063,7 +1065,7 @@ export default function VehiclesPage() {
               {selectedVehicle.year ? `${selectedVehicle.year} ` : ''}{selectedVehicle.make} {selectedVehicle.model}
               <span className="text-muted-foreground font-normal text-base ml-2">{selectedVehicle.registrationNumber}</span>
             </h2>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex w-full justify-end gap-2 sm:w-auto">
               <ExportMenu
                 onExportCsv={handleExportCsv}
                 onExportPdf={handleExportPdf}

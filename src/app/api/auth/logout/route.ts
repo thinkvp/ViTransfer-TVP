@@ -30,7 +30,15 @@ export async function POST(request: NextRequest) {
     const accessToken = parseBearerToken(request)
     const refreshToken = await extractRefreshToken(request)
 
-    await revokePresentedTokens({ accessToken, refreshToken })
+    try {
+      await revokePresentedTokens({ accessToken, refreshToken })
+    } catch (revokeError) {
+      console.error('Logout token revocation failed:', revokeError)
+      return NextResponse.json(
+        { error: 'Logout failed. Please try again.' },
+        { status: 503 }
+      )
+    }
 
     logSecurityEvent({
       type: 'ADMIN_SESSION_LOGOUT',
@@ -45,7 +53,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Logout error:', error)
-    return NextResponse.json({ success: true })
+    return NextResponse.json(
+      { error: 'Logout failed. Please try again.' },
+      { status: 503 }
+    )
   }
 }
 

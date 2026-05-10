@@ -85,22 +85,24 @@ export function DateRangePreset({ from, to, onFromChange, onToChange }: DateRang
   }
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <Input
-        type="date"
-        value={from}
-        onChange={e => handleFromChange(e.target.value)}
-        className="h-9 w-36"
-        title="Start date"
-      />
-      <span className="text-muted-foreground text-sm leading-none select-none">→</span>
-      <Input
-        type="date"
-        value={to}
-        onChange={e => handleToChange(e.target.value)}
-        className="h-9 w-36"
-        title="End date"
-      />
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2 flex-nowrap min-w-0">
+        <Input
+          type="date"
+          value={from}
+          onChange={e => handleFromChange(e.target.value)}
+          className="h-9 w-[7.5rem] sm:w-36"
+          title="Start date"
+        />
+        <span className="text-muted-foreground text-sm leading-none select-none">→</span>
+        <Input
+          type="date"
+          value={to}
+          onChange={e => handleToChange(e.target.value)}
+          className="h-9 w-[7.5rem] sm:w-36"
+          title="End date"
+        />
+      </div>
       <Select value={preset} onValueChange={v => handlePresetChange(v as DatePreset)}>
         <SelectTrigger className="h-9 w-[200px]">
           <SelectValue />

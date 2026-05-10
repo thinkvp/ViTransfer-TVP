@@ -733,9 +733,11 @@ export default function BankAccountsPage() {
             <h2 className="text-xl font-semibold">Bank Accounts</h2>
             <p className="text-sm text-muted-foreground">Select an account to view and post transactions.</p>
           </div>
-          <Button size="sm" onClick={() => router.push('/admin/accounting/bank-accounts/new')}>
-            <Plus className="w-4 h-4 mr-1.5" />New Account
-          </Button>
+          <div className="flex w-full justify-end sm:w-auto">
+            <Button size="sm" onClick={() => router.push('/admin/accounting/bank-accounts/new')}>
+              <Plus className="w-4 h-4 mr-1.5" />New Account
+            </Button>
+          </div>
         </div>
 
         {loadingAccounts ? (
@@ -789,7 +791,7 @@ export default function BankAccountsPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-xl font-semibold">{selectedAccount.name}</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full justify-end gap-2 sm:w-auto">
               <ExportMenu
                 onExportCsv={async () => {
                   setTxnExportLoading(true)
@@ -1328,14 +1330,14 @@ export default function BankAccountsPage() {
                   </div>
 
                   <div className="flex items-center justify-between px-3 py-2 border-t border-border text-sm print:hidden">
-                    <span className="text-muted-foreground text-xs">{txnTotal} transaction{txnTotal !== 1 ? 's' : ''}</span>
+                    <span className="text-muted-foreground text-xs">{txnTotal} total</span>
                     {txnPageCount > 1 && (
                       <div className="flex items-center gap-1">
-                        <Button variant="outline" size="icon" className="h-8 w-8" disabled={txnPage === 1} onClick={() => setTxnPage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
-                        <Button variant="outline" size="icon" className="h-8 w-8" disabled={txnPage === 1} onClick={() => setTxnPage(p => p - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={txnPage === 1} onClick={() => setTxnPage(1)}><ChevronsLeft className="w-3.5 h-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={txnPage === 1} onClick={() => setTxnPage(p => p - 1)}><ChevronLeft className="w-3.5 h-3.5" /></Button>
                         <span className="px-2 text-xs text-muted-foreground">{txnPage} / {txnPageCount}</span>
-                        <Button variant="outline" size="icon" className="h-8 w-8" disabled={txnPage === txnPageCount} onClick={() => setTxnPage(p => p + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
-                        <Button variant="outline" size="icon" className="h-8 w-8" disabled={txnPage === txnPageCount} onClick={() => setTxnPage(txnPageCount)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={txnPage === txnPageCount} onClick={() => setTxnPage(p => p + 1)}><ChevronRight className="w-3.5 h-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={txnPage === txnPageCount} onClick={() => setTxnPage(txnPageCount)}><ChevronsRight className="w-3.5 h-3.5" /></Button>
                       </div>
                     )}
                   </div>
