@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Accounting attachment `move` is now S3-aware** — `moveAccountingFile()` in S3 mode performs a `CopyObject` + `DeleteObject` to the target S3 key and returns the new relative path; the local filesystem move path is unchanged.
 - **Accounting attachment existence check is now S3-aware** — `accountingFileExists()` checks S3 via `GetObject` head-check instead of `fs.access` when in S3 mode.
 
+### Security
+- **`next` upgraded 16.2.3 → 16.2.6** — resolves 13 high-severity CVEs including DoS via server components and cache components, XSS in App Router CSP nonces and `beforeInteractive` scripts, cache poisoning via RSC cache-busting and RSC responses, SSRF via WebSocket upgrades, and multiple middleware/proxy bypass issues (GHSA-8h8q-6873-q5fj, GHSA-ffhc-5mcf-pf4q, GHSA-vfv6-92ff-j949, GHSA-gx5p-jg67-6x7h, GHSA-mg66-mrh9-m8jx, GHSA-h64f-5h5j-jqjh, GHSA-c4j6-fc7j-m34r, GHSA-492v-c6pp-mqqv, GHSA-wfc6-r584-vfw7, GHSA-267c-6grr-h53f, GHSA-36qx-fr4f-26g5, GHSA-3g8h-86w9-wvmq, GHSA-26hh-7cqf-hhc6).
+- **Nested `postcss` 8.4.31 → 8.5.14** — the `postcss` version bundled inside `next/node_modules` is now resolved to 8.5.14 via the `overrides` configuration, removing the patched copy and resolving a moderate XSS vulnerability where unescaped `</style>` sequences in CSS stringify output could break out of an HTML `<style>` context (GHSA-qx2v-qp2m-jg93).
+
 ## [1.7.5] - 2026-05-11
 
 ### Added
