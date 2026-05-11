@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteDirectory, deleteFile, moveDirectory } from '@/lib/storage'
+import { isS3Mode } from '@/lib/s3-storage'
+import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import {
@@ -85,6 +87,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let albumRenamePlan: null | {
     oldAlbumStorageRoot: string
     newAlbumStorageRoot: string
+    newAlbumFolderName: string
   } = null
 
   if (typeof parsed.data.name === 'string') {
@@ -113,13 +116,30 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       data.storageFolderName = newAlbumFolderName
 
       if (oldAlbumStorageRoot !== newAlbumStorageRoot) {
-        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot }
+        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot, newAlbumFolderName }
       }
     }
   }
 
   if (albumRenamePlan) {
-    await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
+    if (isS3Mode()) {
+      // In S3 mode, schedule a background job; paths will be updated by the worker.
+      // Clear storageFolderName from the inline data update — the worker sets it via raw SQL.
+      delete data.storageFolderName
+      const folderRenameJob = await prisma.folderRenameJob.create({
+        data: {
+          entityType: 'ALBUM',
+          entityId: albumId,
+          entityName: albumRenamePlan.newAlbumFolderName,
+          oldPrefix: albumRenamePlan.oldAlbumStorageRoot,
+          newPrefix: albumRenamePlan.newAlbumStorageRoot,
+          status: 'PENDING',
+        },
+      })
+      await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
+    } else {
+      await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
+    }
   }
 
   // Return a JSON-safe subset (some Album fields are BigInt and would break JSON serialization)
@@ -138,7 +158,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       },
     })
 
-    if (albumRenamePlan) {
+    if (albumRenamePlan && !isS3Mode()) {
       const photos = await tx.albumPhoto.findMany({
         where: { albumId },
         select: { id: true, storagePath: true, socialStoragePath: true },

@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob, DropboxUploadJob, AlbumZipDropboxUploadJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob, DropboxUploadJob, AlbumZipDropboxUploadJob, FolderRenameJobPayload } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -16,13 +16,14 @@ import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processDropboxUpload } from './dropbox-upload-processor'
 import { processAlbumZipDropboxUpload } from './album-zip-dropbox-upload-processor'
+import { processFolderRename } from './folder-rename-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processInternalCommentNotifications } from './internal-comment-notifications'
 import { processTaskCommentNotifications } from './task-comment-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { cleanupStaleTrackedDownloads } from '@/lib/download-tracking'
-import { refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
+import { getQuickBooksConfig, refreshQuickBooksAccessToken } from '@/lib/quickbooks/qbo'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
 import { processUserKeyDateReminders } from './user-key-date-reminders'
@@ -37,6 +38,7 @@ import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNo
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 import { processAccountingReminders } from '@/lib/accounting-reminders'
 import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
+import { isS3Mode, s3AbortIncompleteMultipartUploadsOlderThan } from '@/lib/s3-storage'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -369,6 +371,27 @@ async function main() {
 
   console.log('[WORKER] Album ZIP Dropbox upload worker started')
 
+  // Create folder rename worker (S3 copy + delete for project/client renames)
+  const folderRenameWorker = new Worker<FolderRenameJobPayload>('folder-rename', processFolderRename, {
+    connection: getRedisForQueue(),
+    // Run one rename at a time to avoid saturating S3 bandwidth
+    concurrency: 1,
+    // Large renames can take many minutes — generous lock duration with auto-renewal
+    lockDuration: 10 * 60 * 1000,
+    stalledInterval: 5 * 60 * 1000,
+    maxStalledCount: 1,
+  })
+
+  folderRenameWorker.on('completed', (job) => {
+    console.log(`[WORKER] Folder rename job ${job.id} completed successfully`)
+  })
+
+  folderRenameWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Folder rename job ${job?.id} failed:`, err)
+  })
+
+  console.log('[WORKER] Folder rename worker started')
+
   // Create notification processing queue with repeatable job
   console.log('Setting up notification processing...')
   const notificationQueue = new Queue('notification-processing', {
@@ -396,6 +419,8 @@ async function main() {
       if (job.name === 'orphan-project-files-scan') return true
       if (job.name === 'notification-log-cleanup') return true
       if (job.name === 'accounting-reminders') return true
+      if (job.name === 'quickbooks-refresh-token') return true
+      if (job.name === 's3-multipart-cleanup') return true
       return false
     })
 
@@ -515,20 +540,30 @@ async function main() {
     }
   )
 
-  // Add repeatable daily job to refresh QuickBooks token (if configured)
+  // Add repeatable daily job to refresh QuickBooks token only when configured.
   // Runs at 03:15 server/container time (see TZ env var)
-  await notificationQueue.add(
-    'quickbooks-refresh-token',
-    {},
-    {
-      repeat: {
-        pattern: '15 3 * * *',
-      },
-      jobId: 'quickbooks-refresh-token',
-      removeOnComplete: true,
-      removeOnFail: true,
+  try {
+    const qboConfig = await getQuickBooksConfig()
+    if (qboConfig.configured) {
+      await notificationQueue.add(
+        'quickbooks-refresh-token',
+        {},
+        {
+          repeat: {
+            pattern: '15 3 * * *',
+          },
+          jobId: 'quickbooks-refresh-token',
+          removeOnComplete: true,
+          removeOnFail: true,
+        }
+      )
+      console.log('[QBO] Scheduled token refresh job', { pattern: '15 3 * * *' })
+    } else {
+      console.log('[QBO] Token refresh disabled; QuickBooks is not configured', { missing: qboConfig.missing })
     }
-  )
+  } catch (e) {
+    console.warn('[QBO] Failed to evaluate token refresh schedule (continuing):', e instanceof Error ? e.message : e)
+  }
 
   // Dropbox storage consistency scan (hourly at :15, offset from notifications at :00)
   // Only schedule if Dropbox is configured; the scan itself also checks isDropboxStorageConfigured()
@@ -542,6 +577,23 @@ async function main() {
           pattern: '15 * * * *',
         },
         jobId: 'dropbox-storage-consistency-scan',
+        removeOnComplete: true,
+        removeOnFail: true,
+      }
+    )
+  }
+
+  // S3 multipart upload cleanup — abort incomplete uploads older than 24 hours (daily @ 05:00)
+  // Prevents orphaned multipart parts from accumulating storage costs on R2/S3.
+  if (isS3Mode()) {
+    await notificationQueue.add(
+      's3-multipart-cleanup',
+      {},
+      {
+        repeat: {
+          pattern: '0 5 * * *',
+        },
+        jobId: 's3-multipart-cleanup',
         removeOnComplete: true,
         removeOnFail: true,
       }
@@ -750,6 +802,20 @@ async function main() {
           }
         } catch (e) {
           console.error('[NOTIF-CLEANUP] Notification log cleanup failed:', e instanceof Error ? e.message : e)
+        }
+        return
+      }
+
+      if (job.name === 's3-multipart-cleanup') {
+        try {
+          const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
+          // Abort any upload older than 24 h across the whole bucket (empty prefix)
+          const aborted = await s3AbortIncompleteMultipartUploadsOlderThan('', TWENTY_FOUR_HOURS_MS)
+          if (aborted > 0) {
+            console.log(`[S3-CLEANUP] Aborted ${aborted} incomplete multipart upload(s) older than 24 h`)
+          }
+        } catch (e) {
+          console.error('[S3-CLEANUP] Multipart upload cleanup failed:', e instanceof Error ? e.message : e)
         }
         return
       }

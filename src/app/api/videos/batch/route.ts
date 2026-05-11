@@ -4,6 +4,8 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { moveDirectory } from '@/lib/storage'
+import { isS3Mode } from '@/lib/s3-storage'
+import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
   buildProjectStorageRoot,
@@ -167,13 +169,33 @@ export async function PATCH(request: NextRequest) {
       const newVideoStorageRoot = buildVideoStorageRoot(projectStoragePath, nextFolderName)
 
       if (oldVideoStorageRoot !== newVideoStorageRoot) {
-        await moveDirectory(oldVideoStorageRoot, newVideoStorageRoot)
+        if (isS3Mode()) {
+          // In S3 mode, schedule a background job to move the folder.
+          // The DB name fields are updated below; path fields will be updated by the worker.
+          const folderRenameJob = await prisma.folderRenameJob.create({
+            data: {
+              entityType: 'VIDEO_GROUP',
+              entityId: sampleVideo.projectId,
+              entityName: nextFolderName,
+              oldPrefix: oldVideoStorageRoot,
+              newPrefix: newVideoStorageRoot,
+              status: 'PENDING',
+            },
+          })
+          await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
+        } else {
+          await moveDirectory(oldVideoStorageRoot, newVideoStorageRoot)
+        }
       }
 
-      const groupAssets = await prisma.videoAsset.findMany({
-        where: { videoId: { in: group.map((video) => video.id) } },
-        select: { id: true, storagePath: true },
-      })
+      const needsPathRebase = oldVideoStorageRoot !== newVideoStorageRoot && !isS3Mode()
+
+      const groupAssets = needsPathRebase
+        ? await prisma.videoAsset.findMany({
+            where: { videoId: { in: group.map((video) => video.id) } },
+            select: { id: true, storagePath: true },
+          })
+        : []
 
       await prisma.$transaction(async (tx) => {
         for (const video of group) {
@@ -182,24 +204,28 @@ export async function PATCH(request: NextRequest) {
             data: {
               name: trimmedName,
               storageFolderName: nextFolderName,
-              originalStoragePath: replaceStoredStoragePathPrefix(video.originalStoragePath, oldVideoStorageRoot, newVideoStorageRoot)!,
-              preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldVideoStorageRoot, newVideoStorageRoot),
-              preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldVideoStorageRoot, newVideoStorageRoot),
-              preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldVideoStorageRoot, newVideoStorageRoot),
-              thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldVideoStorageRoot, newVideoStorageRoot),
-              timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldVideoStorageRoot, newVideoStorageRoot),
-              timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldVideoStorageRoot, newVideoStorageRoot),
+              ...(needsPathRebase ? {
+                originalStoragePath: replaceStoredStoragePathPrefix(video.originalStoragePath, oldVideoStorageRoot, newVideoStorageRoot)!,
+                preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldVideoStorageRoot, newVideoStorageRoot),
+                preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldVideoStorageRoot, newVideoStorageRoot),
+                preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldVideoStorageRoot, newVideoStorageRoot),
+                thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldVideoStorageRoot, newVideoStorageRoot),
+                timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldVideoStorageRoot, newVideoStorageRoot),
+                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldVideoStorageRoot, newVideoStorageRoot),
+              } : {}),
             },
           })
         }
 
-        for (const asset of groupAssets) {
-          await tx.videoAsset.update({
-            where: { id: asset.id },
-            data: {
-              storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldVideoStorageRoot, newVideoStorageRoot)!,
-            },
-          })
+        if (needsPathRebase) {
+          for (const asset of groupAssets) {
+            await tx.videoAsset.update({
+              where: { id: asset.id },
+              data: {
+                storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldVideoStorageRoot, newVideoStorageRoot)!,
+              },
+            })
+          }
         }
       })
     }

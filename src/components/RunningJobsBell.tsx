@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Activity, CheckCircle2, Cloud, FileArchive, Loader2, Pause, Play, X, XCircle } from 'lucide-react'
+import { Activity, CheckCircle2, Cloud, FileArchive, FolderSync, Loader2, Pause, Play, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
-import { useUploadManager, type UploadJob, type ProcessingJob, type DropboxUploadJob, type AlbumZipJob, type AlbumZipDropboxJob, type CompletedServerJob } from '@/components/UploadManagerProvider'
+import { useUploadManager, type UploadJob, type ProcessingJob, type DropboxUploadJob, type AlbumZipJob, type AlbumZipDropboxJob, type CompletedServerJob, type FolderRenameJob } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
@@ -367,6 +367,55 @@ function AlbumZipDropboxJobRow({ job, onNavigate }: { job: AlbumZipDropboxJob; o
   )
 }
 
+function FolderRenameJobRow({ job }: { job: FolderRenameJob }) {
+  const isPending = job.status === 'PENDING'
+  const totalBytes = Number(job.totalBytes)
+  const copiedBytes = Number(job.copiedBytes)
+  const progress = totalBytes > 0 ? Math.min(100, Math.round((copiedBytes / totalBytes) * 100)) : 0
+  const typeLabel = job.entityType === 'PROJECT' ? 'Project'
+    : job.entityType === 'CLIENT' ? 'Client'
+    : job.entityType === 'VIDEO_GROUP' ? 'Video'
+    : 'Album'
+
+  return (
+    <div className="px-4 py-3 space-y-2">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.entityName}</div>
+          <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">{typeLabel}</div>
+        </div>
+        <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
+          <FolderSync className="w-3 h-3 flex-shrink-0" />
+          {isPending ? 'Queued for rename…' : 'Copying files…'}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all',
+              isPending ? 'bg-warning' : 'bg-primary',
+            )}
+            style={{ width: isPending ? '100%' : `${Math.max(progress, 1)}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            {isPending ? null : (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {formatSize(copiedBytes)} / {totalBytes > 0 ? formatSize(totalBytes) : `${job.copiedObjects}/${job.totalObjects} files`}
+              </>
+            )}
+          </span>
+          {!isPending && progress > 0 && <span>{progress}%</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CompletedServerJobRow({
   job,
   onNavigate,
@@ -385,17 +434,24 @@ function CompletedServerJobRow({
         ? 'Dropbox upload failed'
         : job.type === 'albumZip'
           ? 'ZIP build failed'
-          : 'Album Dropbox upload failed'
+          : job.type === 'folderRename'
+            ? 'Folder rename failed'
+            : 'Album Dropbox upload failed'
     : job.type === 'processing'
       ? 'Processing complete'
       : job.type === 'dropbox'
         ? 'Dropbox upload complete'
         : job.type === 'albumZip'
           ? 'ZIP build complete'
-          : 'Album Dropbox upload complete'
+          : job.type === 'folderRename'
+            ? 'Folder rename complete'
+            : 'Album Dropbox upload complete'
 
   const TypeIcon =
-    job.type === 'dropbox' || job.type === 'albumZipDropbox' ? Cloud : job.type === 'albumZip' ? FileArchive : Activity
+    job.type === 'dropbox' || job.type === 'albumZipDropbox' ? Cloud
+    : job.type === 'albumZip' ? FileArchive
+    : job.type === 'folderRename' ? FolderSync
+    : Activity
 
   return (
     <div
@@ -439,7 +495,7 @@ function CompletedServerJobRow({
 }
 
 export default function RunningJobsBell() {
-  const { uploads, processingJobs, dropboxJobs, albumZipJobs, albumZipDropboxJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
+  const { uploads, processingJobs, dropboxJobs, albumZipJobs, albumZipDropboxJobs, folderRenameJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const router = useRouter()
@@ -477,7 +533,8 @@ export default function RunningJobsBell() {
     processingJobs.length > 0 ||
     dropboxJobs.length > 0 ||
     albumZipJobs.length > 0 ||
-    albumZipDropboxJobs.length > 0
+    albumZipDropboxJobs.length > 0 ||
+    folderRenameJobs.length > 0
 
   return (
     <DropdownMenu
@@ -593,6 +650,20 @@ export default function RunningJobsBell() {
                     <div className="divide-y divide-border">
                       {albumZipDropboxJobs.map((job) => (
                         <AlbumZipDropboxJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Folder rename jobs */}
+                {folderRenameJobs.length > 0 && (
+                  <div>
+                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                      Folder Renames ({folderRenameJobs.length})
+                    </div>
+                    <div className="divide-y divide-border">
+                      {folderRenameJobs.map((job) => (
+                        <FolderRenameJobRow key={job.id} job={job} />
                       ))}
                     </div>
                   </div>

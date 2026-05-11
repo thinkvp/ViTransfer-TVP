@@ -9,6 +9,7 @@ import { getProjectRecipients } from '@/lib/recipients'
 import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
 import { sanitizeDropboxName, moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
+import { isS3Mode } from '@/lib/s3-storage'
 import {
   allocateUniqueStorageName,
   buildProjectDropboxRoot,
@@ -947,6 +948,32 @@ export async function PATCH(
           (await prisma.projectUser.findMany({ where: { projectId: id }, select: { userId: true } })).map((r) => r.userId)
         )
       : null
+
+    // In S3 mode, a folder rename is a heavy background operation (copy + delete).
+    // Return 202 to tell the client to show the confirmation modal instead of
+    // doing the move inline.
+    if (projectStorageRename && isS3Mode()) {
+      // Check for an in-progress rename job first
+      const activeRenameJob = await prisma.folderRenameJob.findFirst({
+        where: { entityType: 'PROJECT', entityId: id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      })
+      if (activeRenameJob) {
+        return NextResponse.json(
+          { error: 'A folder rename is already in progress for this project. Please wait for it to complete.' },
+          { status: 423 },
+        )
+      }
+
+      return NextResponse.json(
+        {
+          requiresJobConfirmation: true,
+          proposedTitle: nextProjectTitle,
+          oldStoragePath: projectStorageRename.oldProjectStoragePath,
+          newStoragePath: projectStorageRename.newProjectStoragePath,
+        },
+        { status: 202 },
+      )
+    }
 
     let movedProjectStorage = false
     if (projectStorageRename && currentProject.storagePath) {

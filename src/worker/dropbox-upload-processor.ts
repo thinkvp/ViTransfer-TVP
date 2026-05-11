@@ -1,7 +1,7 @@
 import { Job } from 'bullmq'
 import { DropboxUploadJob } from '../lib/queue'
 import { prisma } from '../lib/db'
-import { uploadLocalFileToDropboxPathWithProgress } from '../lib/storage-provider-dropbox'
+import { isDropboxStorageConfigured, uploadLocalFileToDropboxPathWithProgress } from '../lib/storage-provider-dropbox'
 import { getFilePath } from '../lib/storage'
 import { clearResolvedDropboxStorageIssueEntities } from '../lib/dropbox-storage-inconsistency-log'
 import fs from 'fs'
@@ -23,6 +23,32 @@ type WithOptionalDropboxPath = {
  */
 export async function processDropboxUpload(job: Job<DropboxUploadJob>) {
   const { videoId, localPath, dropboxPath, fileSizeBytes, assetId, dropboxRelPath } = job.data
+
+  if (!isDropboxStorageConfigured()) {
+    if (assetId) {
+      await prisma.videoAsset.update({
+        where: { id: assetId },
+        data: {
+          dropboxUploadStatus: null,
+          dropboxUploadProgress: 0,
+          dropboxUploadError: null,
+        },
+      }).catch(() => {})
+      console.warn(`[DROPBOX-WORKER] Dropbox is not configured — skipping upload for asset ${assetId} and clearing pending status`)
+      return
+    }
+
+    await prisma.video.update({
+      where: { id: videoId },
+      data: {
+        dropboxUploadStatus: null,
+        dropboxUploadProgress: 0,
+        dropboxUploadError: null,
+      },
+    }).catch(() => {})
+    console.warn(`[DROPBOX-WORKER] Dropbox is not configured — skipping upload for video ${videoId} and clearing pending status`)
+    return
+  }
 
   if (assetId) {
     return processAssetDropboxUpload(job)

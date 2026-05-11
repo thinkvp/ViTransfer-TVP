@@ -4,7 +4,7 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
 import { deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
-import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory } from '@/lib/s3-storage'
+import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -780,6 +780,11 @@ export async function moveDirectory(
   toDirPath: string,
   options?: { merge?: boolean },
 ): Promise<void> {
+  if (isS3Mode()) {
+    await s3MoveDirectory(fromDirPath, toDirPath, options)
+    return
+  }
+
   const fromFullPath = getRawStoragePath(fromDirPath)
   const toFullPath = getRawStoragePath(toDirPath)
 

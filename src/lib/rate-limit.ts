@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { prisma } from './db'
 import { getClientIpAddress } from './utils'
-import { getRedis } from './redis'
+import { ensureRedisReady, getRedis } from './redis'
 import { logSecurityEvent } from './video-access'
 import { upsertRateLimitAlertNotification } from './rate-limit-notifications'
 
@@ -57,10 +57,7 @@ function getIdentifier(request: NextRequest, prefix: string = '', customKey?: st
 
 async function getRateLimitEntry(identifier: string): Promise<RateLimitEntry | null> {
   const redis = getRedis()
-  
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
   
   const data = await redis.get(identifier)
   if (!data) return null
@@ -79,10 +76,7 @@ async function setRateLimitEntry(
   ttlMs: number
 ): Promise<void> {
   const redis = getRedis()
-  
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
   
   const ttlSeconds = Math.ceil(ttlMs / 1000)
   await redis.setex(identifier, ttlSeconds, JSON.stringify(entry))
@@ -90,10 +84,7 @@ async function setRateLimitEntry(
 
 async function deleteRateLimitEntry(identifier: string): Promise<void> {
   const redis = getRedis()
-  
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
   
   await redis.del(identifier)
 }
@@ -309,10 +300,7 @@ export async function clearRateLimit(
 export async function unblockIpAddress(ipAddress: string): Promise<number> {
   try {
     const redis = getRedis()
-
-    if (redis.status !== 'ready') {
-      await redis.connect()
-    }
+    await ensureRedisReady(redis)
 
     // Find all rate limit keys for this IP
     const keys = await redis.keys(`ratelimit:*`)
@@ -358,10 +346,7 @@ export async function getRateLimitedEntries(): Promise<Array<{
 }>> {
   try {
     const redis = getRedis()
-
-    if (redis.status !== 'ready') {
-      await redis.connect()
-    }
+    await ensureRedisReady(redis)
 
     const keys = await redis.keys(`ratelimit:*`)
     const lockedEntries: Array<{
@@ -412,10 +397,7 @@ export async function getRateLimitedEntries(): Promise<Array<{
 export async function clearRateLimitByKey(key: string): Promise<boolean> {
   try {
     const redis = getRedis()
-
-    if (redis.status !== 'ready') {
-      await redis.connect()
-    }
+    await ensureRedisReady(redis)
 
     await redis.del(key)
     return true

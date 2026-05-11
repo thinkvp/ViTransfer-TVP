@@ -656,9 +656,70 @@ export async function GET(request: NextRequest) {
       albumZipJobs,
       albumZipDropboxJobs,
       erroredAlbumZipDropboxJobs,
+      folderRenameJobs: await buildFolderRenameJobs(),
     })
   } catch (err: any) {
     console.error('[running-jobs]', err)
     return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })
   }
+}
+
+// ---------------------------------------------------------------------------
+// Folder rename jobs helper
+// ---------------------------------------------------------------------------
+
+async function buildFolderRenameJobs() {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+  const [activeJobs, completedJobs, failedJobs] = await Promise.all([
+    // Active: PENDING or IN_PROGRESS
+    prisma.folderRenameJob.findMany({
+      where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      orderBy: { createdAt: 'asc' },
+    }),
+    // Recently completed (within 30 min)
+    prisma.folderRenameJob.findMany({
+      where: { status: 'COMPLETED', completedAt: { gte: cutoff } },
+      orderBy: { completedAt: 'desc' },
+    }),
+    // Failed (no time cutoff — persist until manually dismissed)
+    prisma.folderRenameJob.findMany({
+      where: { status: 'FAILED' },
+      orderBy: { completedAt: 'desc' },
+    }),
+  ])
+
+  const active = activeJobs.map((j) => ({
+    id: j.id,
+    entityType: j.entityType,
+    entityId: j.entityId,
+    entityName: j.entityName,
+    status: j.status,
+    totalObjects: j.totalObjects,
+    copiedObjects: j.copiedObjects,
+    totalBytes: j.totalBytes.toString(),
+    copiedBytes: j.copiedBytes.toString(),
+  }))
+
+  const completed = [
+    ...completedJobs.map((j) => ({
+      id: j.id,
+      type: 'folderRename' as const,
+      label: j.entityName,
+      sublabel: j.entityType === 'PROJECT' ? 'Project rename complete' : 'Client rename complete',
+      projectId: j.entityType === 'PROJECT' ? j.entityId : '',
+      completedAt: (j.completedAt ?? j.updatedAt).getTime(),
+    })),
+    ...failedJobs.map((j) => ({
+      id: j.id,
+      type: 'folderRename' as const,
+      label: j.entityName,
+      sublabel: j.entityType === 'PROJECT' ? 'Project rename failed' : 'Client rename failed',
+      projectId: j.entityType === 'PROJECT' ? j.entityId : '',
+      completedAt: (j.completedAt ?? j.updatedAt).getTime(),
+      error: true,
+    })),
+  ]
+
+  return { active, completed }
 }

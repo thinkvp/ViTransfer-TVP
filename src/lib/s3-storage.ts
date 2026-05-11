@@ -16,6 +16,8 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  CopyObjectCommand,
+  UploadPartCopyCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   HeadObjectCommand,
@@ -76,6 +78,11 @@ export function getS3Bucket(): string {
   if (!bucket) throw new Error('S3_BUCKET is not configured')
   return bucket
 }
+
+const S3_SINGLE_COPY_MAX_BYTES = 5 * 1024 * 1024 * 1024
+const S3_MULTIPART_MIN_PART_BYTES = 5 * 1024 * 1024
+const S3_MULTIPART_DEFAULT_PART_BYTES = 64 * 1024 * 1024
+const S3_MULTIPART_MAX_PARTS = 10_000
 
 // ---------------------------------------------------------------------------
 // Basic file operations
@@ -175,6 +182,319 @@ export async function s3DeleteDirectory(prefix: string): Promise<void> {
 
     continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
   } while (continuationToken)
+}
+
+function encodeS3CopySource(bucket: string, sourceKey: string): string {
+  return `${bucket}/${encodeURIComponent(sourceKey).replace(/%2F/g, '/')}`
+}
+
+function computeMultipartCopyPartSize(totalBytes: number): number {
+  const targetPartSize = Math.max(
+    S3_MULTIPART_MIN_PART_BYTES,
+    S3_MULTIPART_DEFAULT_PART_BYTES,
+    Math.ceil(totalBytes / S3_MULTIPART_MAX_PARTS)
+  )
+
+  // Round to the nearest MiB boundary to keep ranges neat.
+  const mib = 1024 * 1024
+  return Math.ceil(targetPartSize / mib) * mib
+}
+
+async function s3CopyObjectWithFallback(
+  client: S3Client,
+  bucket: string,
+  sourceKey: string,
+  destinationKey: string,
+  sizeBytes?: number
+): Promise<void> {
+  const copySource = encodeS3CopySource(bucket, sourceKey)
+
+  if (!sizeBytes || sizeBytes <= S3_SINGLE_COPY_MAX_BYTES) {
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        Key: destinationKey,
+        CopySource: copySource,
+      })
+    )
+    return
+  }
+
+  const createResponse = await client.send(
+    new CreateMultipartUploadCommand({
+      Bucket: bucket,
+      Key: destinationKey,
+    })
+  )
+
+  const uploadId = createResponse.UploadId
+  if (!uploadId) {
+    throw new Error(`Failed to create multipart copy upload for key: ${destinationKey}`)
+  }
+
+  const partSize = computeMultipartCopyPartSize(sizeBytes)
+  const partCount = Math.ceil(sizeBytes / partSize)
+  const parts: Array<{ ETag: string; PartNumber: number }> = []
+
+  try {
+    for (let partNumber = 1; partNumber <= partCount; partNumber += 1) {
+      const rangeStart = (partNumber - 1) * partSize
+      const rangeEnd = Math.min(sizeBytes - 1, rangeStart + partSize - 1)
+
+      const partResponse = await client.send(
+        new UploadPartCopyCommand({
+          Bucket: bucket,
+          Key: destinationKey,
+          UploadId: uploadId,
+          PartNumber: partNumber,
+          CopySource: copySource,
+          CopySourceRange: `bytes=${rangeStart}-${rangeEnd}`,
+        })
+      )
+
+      const etag = partResponse.CopyPartResult?.ETag
+      if (!etag) {
+        throw new Error(`Missing ETag for multipart copy part ${partNumber} (${destinationKey})`)
+      }
+
+      parts.push({ ETag: etag, PartNumber: partNumber })
+    }
+
+    await client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: bucket,
+        Key: destinationKey,
+        UploadId: uploadId,
+        MultipartUpload: { Parts: parts },
+      })
+    )
+  } catch (error) {
+    await client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: bucket,
+        Key: destinationKey,
+        UploadId: uploadId,
+      })
+    ).catch(() => {})
+
+    throw error
+  }
+}
+
+/**
+ * List all objects under a prefix and return their total count and byte size.
+ * Used to show the user how much data will be copied before confirming a rename.
+ */
+export async function s3GetDirectorySizeInfo(
+  prefix: string,
+): Promise<{ totalObjects: number; totalBytes: bigint }> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+  const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`
+
+  let continuationToken: string | undefined
+  let totalObjects = 0
+  let totalBytes = BigInt(0)
+
+  do {
+    const listResponse = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: normalizedPrefix,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      }),
+    )
+
+    for (const obj of listResponse.Contents ?? []) {
+      totalObjects++
+      totalBytes += BigInt(obj.Size ?? 0)
+    }
+
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  return { totalObjects, totalBytes }
+}
+
+/**
+ * Same as s3MoveDirectory but reports progress via a callback after each object is copied.
+ * The callback receives running totals so callers can persist progress to a DB job record.
+ *
+ * On failure, any already-copied objects remain at the destination prefix. The caller is
+ * responsible for cleanup (the source remains intact so data is never lost).
+ */
+export async function s3MoveDirectoryWithProgress(
+  fromPrefix: string,
+  toPrefix: string,
+  onProgress: (copiedObjects: number, totalObjects: number, copiedBytes: bigint, totalBytes: bigint) => Promise<void>,
+): Promise<void> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const fromNormalized = fromPrefix.endsWith('/') ? fromPrefix : `${fromPrefix}/`
+  const toNormalized = toPrefix.endsWith('/') ? toPrefix : `${toPrefix}/`
+
+  if (fromNormalized === toNormalized) return
+
+  // First pass: enumerate all objects to get totals for progress reporting.
+  let continuationToken: string | undefined
+  const allObjects: Array<{ key: string; size: number }> = []
+
+  do {
+    const listResponse = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: fromNormalized,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      }),
+    )
+
+    for (const obj of listResponse.Contents ?? []) {
+      if (obj.Key) {
+        allObjects.push({ key: obj.Key, size: obj.Size ?? 0 })
+      }
+    }
+
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  if (allObjects.length === 0) return
+
+  const totalObjects = allObjects.length
+  const totalBytes = allObjects.reduce((acc, o) => acc + BigInt(o.size), BigInt(0))
+  let copiedObjects = 0
+  let copiedBytes = BigInt(0)
+
+  // Second pass: copy each object, reporting progress.
+  const keysToDelete: string[] = []
+
+  for (const obj of allObjects) {
+    const suffix = obj.key.slice(fromNormalized.length)
+    const destinationKey = `${toNormalized}${suffix}`
+
+    await s3CopyObjectWithFallback(client, bucket, obj.key, destinationKey, obj.size)
+
+    keysToDelete.push(obj.key)
+    copiedObjects++
+    copiedBytes += BigInt(obj.size)
+
+    await onProgress(copiedObjects, totalObjects, copiedBytes, totalBytes)
+  }
+
+  // Third pass: delete source objects in batches of 1000.
+  for (let i = 0; i < keysToDelete.length; i += 1000) {
+    const chunk = keysToDelete.slice(i, i + 1000)
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: chunk.map((key) => ({ Key: key })),
+          Quiet: true,
+        },
+      }),
+    )
+  }
+}
+
+/**
+ * Move all objects under one prefix to another prefix.
+ *
+ * Implemented as copy + delete because S3 has no native rename.
+ *
+ * Behavior matches local moveDirectory semantics:
+ * - missing source prefix: no-op
+ * - existing destination prefix: throws unless merge=true
+ * - merge=true: throws on conflicting destination keys
+ */
+export async function s3MoveDirectory(
+  fromPrefix: string,
+  toPrefix: string,
+  options?: { merge?: boolean },
+): Promise<void> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const fromNormalized = fromPrefix.endsWith('/') ? fromPrefix : `${fromPrefix}/`
+  const toNormalized = toPrefix.endsWith('/') ? toPrefix : `${toPrefix}/`
+
+  if (fromNormalized === toNormalized) return
+
+  const sourceProbe = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: fromNormalized,
+      MaxKeys: 1,
+    })
+  )
+
+  if (!sourceProbe.Contents || sourceProbe.Contents.length === 0) {
+    return
+  }
+
+  if (!options?.merge) {
+    const destinationProbe = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: toNormalized,
+        MaxKeys: 1,
+      })
+    )
+
+    if (destinationProbe.Contents && destinationProbe.Contents.length > 0) {
+      throw new Error(`Destination already exists: ${toPrefix}`)
+    }
+  }
+
+  let continuationToken: string | undefined
+  const keysToDelete: string[] = []
+
+  do {
+    const listResponse = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: fromNormalized,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      })
+    )
+
+    const objects = listResponse.Contents ?? []
+    for (const obj of objects) {
+      const sourceKey = obj.Key
+      if (!sourceKey) continue
+
+      const suffix = sourceKey.slice(fromNormalized.length)
+      const destinationKey = `${toNormalized}${suffix}`
+
+      if (options?.merge) {
+        const exists = await s3FileExists(destinationKey)
+        if (exists) {
+          throw new Error(`Destination already exists: ${destinationKey}`)
+        }
+      }
+
+      await s3CopyObjectWithFallback(client, bucket, sourceKey, destinationKey, obj.Size)
+
+      keysToDelete.push(sourceKey)
+    }
+
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  for (let i = 0; i < keysToDelete.length; i += 1000) {
+    const chunk = keysToDelete.slice(i, i + 1000)
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: chunk.map((key) => ({ Key: key })),
+          Quiet: true,
+        },
+      })
+    )
+  }
 }
 
 /** Check whether a key exists in S3. */

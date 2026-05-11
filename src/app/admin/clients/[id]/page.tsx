@@ -3,13 +3,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Save } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, AlertTriangle, FolderSync, ChevronsLeft, ChevronsRight, Save } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { apiFetch, apiPatch } from '@/lib/api-client'
+import { apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
 import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
 import { ClientFileUpload } from '@/components/ClientFileUpload'
@@ -78,6 +78,13 @@ export default function ClientDetailPage() {
   const [togglingActive, setTogglingActive] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  // S3 rename confirmation modal
+  const [renameConfirmOpen, setRenameConfirmOpen] = useState(false)
+  const [pendingRenameName, setPendingRenameName] = useState('')
+  const [renameSizeLoading, setRenameSizeLoading] = useState(false)
+  const [renameSizeInfo, setRenameSizeInfo] = useState<{ totalObjects: number; totalBytes: string } | null>(null)
+  const [renameConfirming, setRenameConfirming] = useState(false)
 
   const [client, setClient] = useState<ClientResponse | null>(null)
   const [formData, setFormData] = useState({
@@ -505,7 +512,7 @@ export default function ClientDetailPage() {
 
     setSaving(true)
     try {
-      await apiPatch(`/api/clients/${clientId}`, {
+      const patchResult = await apiPatch<any>(`/api/clients/${clientId}`, {
         name: formData.name.trim(),
         address: formData.address.trim() ? formData.address.trim() : null,
         phone: formData.phone.trim() ? formData.phone.trim() : null,
@@ -521,6 +528,21 @@ export default function ClientDetailPage() {
           receiveSalesReminders: (r as any)?.receiveSalesReminders !== false,
         })),
       })
+
+      // If S3 mode requires a background folder rename, show confirmation modal
+      if (patchResult?.requiresJobConfirmation) {
+        setPendingRenameName(patchResult.proposedName ?? formData.name.trim())
+        setRenameSizeInfo(null)
+        setRenameConfirmOpen(true)
+        setSaving(false)
+        setRenameSizeLoading(true)
+        apiFetch(`/api/clients/${clientId}/rename-size`)
+          .then((r) => r.json())
+          .then((data) => setRenameSizeInfo(data))
+          .catch(() => {})
+          .finally(() => setRenameSizeLoading(false))
+        return
+      }
 
       await loadClient()
 
@@ -1036,6 +1058,83 @@ export default function ClientDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* S3 folder rename confirmation modal */}
+      {renameConfirmOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-background dark:bg-card border border-border rounded-lg max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <FolderSync className="w-6 h-6 text-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h2 className="text-xl font-bold">Rename Requires Background Copy</h2>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Because files are stored on S3, renaming this client to <strong>{pendingRenameName}</strong> requires copying all project files to a new location. This may take a long time.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-2 text-sm">
+              {renameSizeLoading ? (
+                <p className="text-muted-foreground flex items-center gap-2">
+                  <FolderSync className="w-4 h-4 animate-spin" />
+                  Calculating total size across all projects…
+                </p>
+              ) : renameSizeInfo ? (
+                <p className="text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {renameSizeInfo.totalObjects} file{renameSizeInfo.totalObjects !== 1 ? 's' : ''}
+                  </span>{' '}
+                  ·{' '}
+                  <span className="font-medium text-foreground">
+                    {(Number(renameSizeInfo.totalBytes) / (1024 ** 3)).toFixed(2)} GB
+                  </span>{' '}
+                  to copy across all projects
+                </p>
+              ) : null}
+              <ul className="space-y-1 ml-4 list-disc text-muted-foreground">
+                <li>All projects under this client will be locked for uploads during the copy</li>
+                <li>Progress will appear in the Running Jobs indicator</li>
+                <li>Original files remain intact until the copy completes</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <Button
+                variant="outline"
+                disabled={renameConfirming}
+                onClick={() => {
+                  setRenameConfirmOpen(false)
+                  setRenameSizeInfo(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={renameConfirming}
+                onClick={async () => {
+                  setRenameConfirming(true)
+                  try {
+                    await apiPost(`/api/clients/${clientId}/rename-confirm`, { name: pendingRenameName })
+                    setRenameConfirmOpen(false)
+                    setRenameSizeInfo(null)
+                    await loadClient()
+                  } catch (err: any) {
+                    setError(err?.message || 'Failed to start rename')
+                  } finally {
+                    setRenameConfirming(false)
+                  }
+                }}
+              >
+                {renameConfirming ? (
+                  <><FolderSync className="w-4 h-4 mr-2 animate-spin" />Starting…</>
+                ) : (
+                  'Start rename in background'
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

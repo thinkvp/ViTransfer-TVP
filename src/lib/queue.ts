@@ -12,6 +12,7 @@ let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
 let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
 let dropboxUploadQueueInstance: Queue<DropboxUploadJob> | null = null
 let albumZipDropboxUploadQueueInstance: Queue<AlbumZipDropboxUploadJob> | null = null
+let folderRenameQueueInstance: Queue<FolderRenameJobPayload> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -83,6 +84,12 @@ export interface AlbumZipDropboxUploadJob {
   localPath: string
   dropboxPath: string // Human-friendly path relative to Dropbox root
   fileSizeBytes: number
+}
+
+/** Payload for a background S3 folder rename job (copy + delete). */
+export interface FolderRenameJobPayload {
+  /** The FolderRenameJob DB record id. All state lives in DB, not BullMQ. */
+  folderRenameJobId: string
 }
 
 export function getVideoQueue(): Queue<VideoProcessingJob> {
@@ -355,6 +362,31 @@ export function getAlbumZipDropboxUploadQueue(): Queue<AlbumZipDropboxUploadJob>
   }
 
   return albumZipDropboxUploadQueueInstance
+}
+
+export function getFolderRenameQueue(): Queue<FolderRenameJobPayload> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!folderRenameQueueInstance) {
+    folderRenameQueueInstance = new Queue<FolderRenameJobPayload>('folder-rename', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        // Do not auto-retry — on failure the DB record is marked FAILED and the
+        // source files are still intact. An admin can trigger a re-attempt.
+        attempts: 1,
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return folderRenameQueueInstance
 }
 
 // Export for backward compatibility, but use getter in new code

@@ -86,10 +86,22 @@ export type AlbumZipDropboxJob = {
   fileSizeBytes: number
 }
 
+export type FolderRenameJob = {
+  id: string
+  entityType: 'PROJECT' | 'CLIENT' | 'VIDEO_GROUP' | 'ALBUM'
+  entityId: string
+  entityName: string
+  status: 'PENDING' | 'IN_PROGRESS'
+  totalObjects: number
+  copiedObjects: number
+  totalBytes: string // BigInt serialised as string
+  copiedBytes: string // BigInt serialised as string
+}
+
 /** A server-side job that has recently completed (kept for 30 min). */
 export type CompletedServerJob = {
   id: string
-  type: 'processing' | 'dropbox' | 'albumZip' | 'albumZipDropbox'
+  type: 'processing' | 'dropbox' | 'albumZip' | 'albumZipDropbox' | 'folderRename'
   label: string
   sublabel: string
   projectId: string
@@ -126,6 +138,8 @@ export type UploadManagerContextType = {
   albumZipJobs: AlbumZipJob[]
   /** Album ZIP Dropbox upload jobs (polled). */
   albumZipDropboxJobs: AlbumZipDropboxJob[]
+  /** Active folder rename jobs (polled). */
+  folderRenameJobs: FolderRenameJob[]
   /** Recently completed server-side jobs (kept for 30 min). */
   completedServerJobs: CompletedServerJob[]
   /** Badge count: queued + uploading + paused + processing + dropbox + album zips. */
@@ -213,6 +227,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const [dropboxJobs, setDropboxJobs] = useState<DropboxUploadJob[]>([])
   const [albumZipJobs, setAlbumZipJobs] = useState<AlbumZipJob[]>([])
   const [albumZipDropboxJobs, setAlbumZipDropboxJobs] = useState<AlbumZipDropboxJob[]>([])
+  const [folderRenameJobs, setFolderRenameJobs] = useState<FolderRenameJob[]>([])
   const [completedServerJobs, setCompletedServerJobs] = useState<CompletedServerJob[]>([])
 
   // Track previously-seen job IDs so we can detect completions.
@@ -220,11 +235,13 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const prevDropboxIdsRef = useRef<Set<string>>(new Set())
   const prevAlbumZipIdsRef = useRef<Set<string>>(new Set())
   const prevAlbumZipDropboxIdsRef = useRef<Set<string>>(new Set())
+  const prevFolderRenameIdsRef = useRef<Set<string>>(new Set())
   // Map id → job metadata for building completion entries.
   const prevProcessingMapRef = useRef<Map<string, ProcessingJob>>(new Map())
   const prevDropboxMapRef = useRef<Map<string, DropboxUploadJob>>(new Map())
   const prevAlbumZipMapRef = useRef<Map<string, AlbumZipJob>>(new Map())
   const prevAlbumZipDropboxMapRef = useRef<Map<string, AlbumZipDropboxJob>>(new Map())
+  const prevFolderRenameMapRef = useRef<Map<string, FolderRenameJob>>(new Map())
   // Track IDs that the user has manually dismissed (so re-polls don't re-add them).
   const dismissedServerJobIdsRef = useRef<Set<string>>(new Set())
 
@@ -751,6 +768,43 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             setAlbumZipDropboxJobs(incoming)
           }
 
+          // --- Folder rename jobs ---
+          if (data.folderRenameJobs?.active != null || data.folderRenameJobs?.completed != null) {
+            const incoming = (data.folderRenameJobs.active ?? []) as FolderRenameJob[]
+            const incomingIds = new Set(incoming.map((j: FolderRenameJob) => j.id))
+
+            for (const prevId of prevFolderRenameIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('folderRename', prevId))) {
+                const prev = prevFolderRenameMapRef.current.get(prevId)
+                if (prev) {
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'folderRename',
+                    label: prev.entityName,
+                    sublabel: prev.entityType === 'PROJECT' ? 'Project rename complete'
+                      : prev.entityType === 'CLIENT' ? 'Client rename complete'
+                      : prev.entityType === 'VIDEO_GROUP' ? 'Video rename complete'
+                      : 'Album rename complete',
+                    projectId: prev.entityType === 'PROJECT' ? prev.entityId : '',
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            // Also surface any server-reported completed/errored folder rename jobs
+            for (const j of (data.folderRenameJobs.completed ?? []) as any[]) {
+              const key = getCompletedServerJobKeyByParts('folderRename', j.id)
+              if (!dismissedServerJobIdsRef.current.has(key)) {
+                newCompleted.push({ ...j, type: 'folderRename' } as CompletedServerJob)
+              }
+            }
+
+            prevFolderRenameIdsRef.current = incomingIds
+            prevFolderRenameMapRef.current = new Map(incoming.map((j: FolderRenameJob) => [j.id, j]))
+            setFolderRenameJobs(incoming)
+          }
+
           // Merge new completions and purge stale (>30 min, but keep errors)
           if (newCompleted.length > 0) {
             setCompletedServerJobs((prev) => {
@@ -957,7 +1011,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     processingJobs.length +
     dropboxJobs.length +
     albumZipJobs.length +
-    albumZipDropboxJobs.length
+    albumZipDropboxJobs.length +
+    folderRenameJobs.length
 
   const actionsValue = useMemo<UploadManagerActionsContextType>(() => ({
     addUpload,
@@ -975,6 +1030,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     dropboxJobs,
     albumZipJobs,
     albumZipDropboxJobs,
+    folderRenameJobs,
     completedServerJobs,
     totalActiveCount,
     addUpload,
@@ -990,6 +1046,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     dropboxJobs,
     albumZipJobs,
     albumZipDropboxJobs,
+    folderRenameJobs,
     completedServerJobs,
     totalActiveCount,
     addUpload,

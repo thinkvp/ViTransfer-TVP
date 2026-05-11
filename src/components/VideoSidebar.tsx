@@ -144,11 +144,12 @@ export default function VideoSidebar({
     const containerHeight = Math.round(containerWidth * 9 / 16)
 
     for (const [videoName, videos] of Object.entries(videosByName || {})) {
-      const latestVideo = videos[0]
-      if (latestVideo) {
+      const approvedVideo = videos.find((v: any) => v.approved === true)
+      const displayVideo = approvedVideo || videos[0]
+      if (displayVideo) {
         dims[videoName] = calculateThumbnailDimensions(
-          latestVideo.width || latestVideo.videoWidth,
-          latestVideo.height || latestVideo.videoHeight,
+          displayVideo.width || displayVideo.videoWidth,
+          displayVideo.height || displayVideo.videoHeight,
           containerWidth,
           containerHeight
         )
@@ -272,7 +273,9 @@ export default function VideoSidebar({
               const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
               const isActive = !activeAlbumId && activeVideoName === group.name
               const latestVideo = group.videos[0]
-              const thumbnailUrl = latestVideo?.thumbnailUrl
+              const approvedVideo = group.videos.find((v: any) => v.approved === true)
+              const displayVideo = approvedVideo || latestVideo
+              const thumbnailUrl = displayVideo?.thumbnailUrl
               const dims = thumbnailDimensions[group.name]
               // Account for nav + button padding, plus a small inset so the thumbnail
               // isn't visually hard up against the selected-state highlight on desktop.
@@ -576,13 +579,15 @@ export default function VideoSidebar({
               {shouldShowVideos && sortedVideoGroups(videoGroups).map((group) => {
                 const isActive = !activeAlbumId && activeVideoName === group.name
                 const latestVideo = group.videos[0]
-                const thumbnailUrl = latestVideo?.thumbnailUrl
+                const approvedVideo = group.videos.find((v: any) => v.approved === true)
+                const displayVideo = approvedVideo || latestVideo
+                const thumbnailUrl = displayVideo?.thumbnailUrl
                 const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
                 const mobileThumbSize = 100
                 const mobileThumbHeight = Math.round(mobileThumbSize * 9 / 16)
                 const latestVideoDims = calculateThumbnailDimensions(
-                  latestVideo?.width || latestVideo?.videoWidth,
-                  latestVideo?.height || latestVideo?.videoHeight,
+                  displayVideo?.width || displayVideo?.videoWidth,
+                  displayVideo?.height || displayVideo?.videoHeight,
                   mobileThumbSize,
                   mobileThumbHeight
                 )

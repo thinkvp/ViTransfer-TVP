@@ -56,6 +56,43 @@ export function getRedis(): IORedis {
 }
 
 /**
+ * Ensure an ioredis client is ready without calling connect() redundantly.
+ * Avoids "Redis is already connecting/connected" during concurrent startup requests.
+ */
+export async function ensureRedisReady(client: IORedis): Promise<void> {
+  if (client.status === 'ready') return
+
+  if (client.status === 'wait') {
+    await client.connect()
+    return
+  }
+
+  if (client.status === 'connecting' || client.status === 'connect' || client.status === 'reconnecting') {
+    await new Promise<void>((resolve, reject) => {
+      const onReady = () => {
+        cleanup()
+        resolve()
+      }
+      const onError = (error: Error) => {
+        cleanup()
+        reject(error)
+      }
+      const cleanup = () => {
+        client.off('ready', onReady)
+        client.off('error', onError)
+      }
+
+      client.once('ready', onReady)
+      client.once('error', onError)
+    })
+    return
+  }
+
+  // Covers states like "close"/"end".
+  await client.connect()
+}
+
+/**
  * Get or create Redis connection optimized for BullMQ
  * BullMQ requires specific configuration: maxRetriesPerRequest: null, enableReadyCheck: false
  *

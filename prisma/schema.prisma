@@ -70,6 +70,34 @@ model Role {
   users User[]
 }
 
+/// Tracks a background S3 folder rename (copy + delete) job.
+/// Used when renaming a project or client in S3 mode, where the operation
+/// may involve gigabytes of data and cannot complete within a single HTTP request.
+model FolderRenameJob {
+  id            String    @id @default(cuid())
+  /// 'PROJECT' or 'CLIENT'
+  entityType    String
+  /// The project or client id
+  entityId      String
+  /// Display name (project title or client name) at the time of rename
+  entityName    String
+  oldPrefix     String
+  newPrefix     String
+  /// PENDING | IN_PROGRESS | COMPLETED | FAILED
+  status        String    @default("PENDING")
+  totalObjects  Int       @default(0)
+  copiedObjects Int       @default(0)
+  totalBytes    BigInt    @default(0)
+  copiedBytes   BigInt    @default(0)
+  error         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  completedAt   DateTime?
+
+  @@index([status])
+  @@index([entityType, entityId])
+}
+
 model Client {
   id                   String    @id @default(cuid())
   name                 String    @unique

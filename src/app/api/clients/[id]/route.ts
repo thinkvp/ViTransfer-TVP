@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteDirectory, moveDirectory } from '@/lib/storage'
 import { deleteDropboxPath, isDropboxStorageConfigured, moveDropboxPath } from '@/lib/storage-provider-dropbox'
+import { isS3Mode } from '@/lib/s3-storage'
 import {
   buildClientStorageRoot,
   replaceStoredStoragePathPrefix,
@@ -150,6 +151,30 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const oldClientStorageRoot = buildClientStorageRoot(existing.name)
     const newClientStorageRoot = trimmedName ? buildClientStorageRoot(trimmedName) : oldClientStorageRoot
     const clientRenamePlanned = Boolean(trimmedName) && trimmedName !== String(existing.name || '').trim()
+
+    // In S3 mode, a client rename is a very heavy background operation (it copies all
+    // projects' data). Return 202 to prompt the user to confirm via the warning modal.
+    if (clientRenamePlanned && isS3Mode()) {
+      const activeRenameJob = await prisma.folderRenameJob.findFirst({
+        where: { entityType: 'CLIENT', entityId: id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      })
+      if (activeRenameJob) {
+        return NextResponse.json(
+          { error: 'A folder rename is already in progress for this client. Please wait for it to complete.' },
+          { status: 423 },
+        )
+      }
+
+      return NextResponse.json(
+        {
+          requiresJobConfirmation: true,
+          proposedName: trimmedName,
+          oldStoragePath: oldClientStorageRoot,
+          newStoragePath: newClientStorageRoot,
+        },
+        { status: 202 },
+      )
+    }
 
     let movedClientStorage = false
     if (clientRenamePlanned) {

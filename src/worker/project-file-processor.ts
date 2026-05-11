@@ -1,8 +1,10 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { getFilePath } from '../lib/storage'
+import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -25,8 +27,13 @@ export async function processProjectFile(job: Job<ProjectFileProcessingJob>) {
   }
 
   try {
-    // Read magic bytes directly from storage — no temp copy needed
-    const filePath = getFilePath(storagePath)
+    // Resolve file to a local path — downloads from S3 if running in S3 mode
+    const resolved = await materializeStoragePathToLocalFile({
+      rawPath: storagePath,
+      tempDir: path.join(os.tmpdir(), 'vitransfer-file-tmp'),
+      suggestedName: `${projectFileId}-file.bin`,
+    })
+    const filePath = resolved.localPath
 
     const stats = fs.statSync(filePath)
     if (stats.size === 0) {
