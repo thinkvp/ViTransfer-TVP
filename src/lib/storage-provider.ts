@@ -25,7 +25,7 @@ export class DropboxPreferredDownloadError extends Error {
 }
 
 function sanitizeTempFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'file.bin'
+  return name.replace(/[^a-zA-Z0-9 ._-]/g, '_') || 'file.bin'
 }
 
 const DROPBOX_LINK_RETRY_ATTEMPTS = 3

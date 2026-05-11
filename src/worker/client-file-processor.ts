@@ -1,10 +1,31 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
+import { uploadFile } from '../lib/storage'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+
+/**
+ * Strip dangerous content from SVG files before storage.
+ * Removes <script> elements, event-handler attributes, and javascript: URIs.
+ * This runs server-side in the worker as a defence-in-depth measure;
+ * all SVG downloads are also served as attachments with
+ * Content-Disposition: attachment and Content-Type: application/octet-stream.
+ */
+function sanitizeSvgContent(raw: string): string {
+  // Remove <script>…</script> blocks
+  let out = raw.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+  // Remove event-handler attributes (onclick, onload, onerror, etc.)
+  out = out.replace(/\s+on[a-z][a-z0-9]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+  // Neutralise javascript: URIs in href / xlink:href / src / action
+  out = out.replace(
+    /((?:xlink:)?href|src|action)\s*=\s*["']\s*javascript:[^"']*["']/gi,
+    '$1=""'
+  )
+  return out
+}
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -107,6 +128,23 @@ export async function processClientFile(job: Job<ClientFileProcessingJob>) {
         category: finalCategory,
       },
     })
+
+    // Sanitize SVG content in-place to strip scripts and event handlers.
+    // Defence-in-depth: downloads are also forced to attachment + octet-stream.
+    if (fileType.mime === 'image/svg+xml') {
+      const raw = await fs.promises.readFile(filePath, 'utf8')
+      const sanitized = sanitizeSvgContent(raw)
+      if (sanitized !== raw) {
+        console.log(`[WORKER] Sanitizing SVG content for client file ${clientFileId}`)
+        const buf = Buffer.from(sanitized, 'utf8')
+        if (resolved.isTemporary) {
+          // S3 mode: replace the stored object with the sanitized version
+          await uploadFile(storagePath, buf, buf.length, 'image/svg+xml')
+        } else {
+          await fs.promises.writeFile(filePath, buf)
+        }
+      }
+    }
 
     console.log(`[WORKER] Client file ${clientFileId} processed successfully`)
   } catch (error) {

@@ -65,7 +65,13 @@ export async function GET(
   }
 
   const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
-  const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
+  // SVGs are served as application/octet-stream regardless of what is stored in
+  // the DB so that no browser will render them inline, even if Content-Disposition
+  // is somehow ignored. All other types use the stored MIME as-is.
+  const isSvg = isValidMimeType(file.fileType) && file.fileType.toLowerCase() === 'image/svg+xml'
+  const contentType = isSvg
+    ? 'application/octet-stream'
+    : (isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream')
 
   const { downloadChunkSizeBytes } = await getTransferTuningSettings()
   const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })

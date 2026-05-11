@@ -22,6 +22,11 @@ type OrphanProjectFileCleanupResult = {
   scannedFiles: number
   orphanFiles: number
   orphanFileBytes: number
+  /** DB records whose file is absent from storage */
+  missingFiles: number
+  missingFileSample?: {
+    paths: string[]
+  }
   sample?: {
     orphanPaths: string[]
     projectIds: string[]
@@ -315,9 +320,10 @@ export function DeveloperToolsSection({
 
   const orphanProjectFilesSummary = useMemo(() => {
     if (!orphanProjectFilesResult) return null
-    const line1 = `${orphanProjectFilesResult.orphanFiles} orphan files (${formatBytes(orphanProjectFilesResult.orphanFileBytes)})`
-    const line2 = `${orphanProjectFilesResult.scannedFiles} files scanned across ${orphanProjectFilesResult.scannedProjects ?? orphanProjectFilesResult.scannedDirectories ?? orphanProjectFilesResult.scannedProjectDirectories} project${(orphanProjectFilesResult.scannedProjects ?? 1) === 1 ? '' : 's'}`
-    return { line1, line2 }
+    const scannedLabel = `${orphanProjectFilesResult.scannedFiles} files scanned across ${orphanProjectFilesResult.scannedProjects ?? orphanProjectFilesResult.scannedDirectories ?? orphanProjectFilesResult.scannedProjectDirectories} project${(orphanProjectFilesResult.scannedProjects ?? 1) === 1 ? '' : 's'}`
+    const orphanLabel = `${orphanProjectFilesResult.orphanFiles} orphan file${orphanProjectFilesResult.orphanFiles === 1 ? '' : 's'} on storage (${formatBytes(orphanProjectFilesResult.orphanFileBytes)})`
+    const missingLabel = `${orphanProjectFilesResult.missingFiles} missing file${orphanProjectFilesResult.missingFiles === 1 ? '' : 's'} in DB`
+    return { scannedLabel, orphanLabel, missingLabel }
   }, [orphanProjectFilesResult])
 
   async function runOrphanProjectFilesCleanup(dryRun: boolean) {
@@ -633,11 +639,14 @@ export function DeveloperToolsSection({
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-0.5 min-w-0">
-                <Label>Orphan project files cleanup</Label>
+                <Label>Storage integrity scan</Label>
                 <p className="text-xs text-muted-foreground">
-                  Scans project storage for files that are no longer referenced by the database
-                  (videos, previews, timeline sprites, album photos, ZIPs, comment uploads, project files, and imported emails).
-                  Run a dry run first to preview impact.
+                  Checks storage for two classes of issue: <strong>orphan files</strong> — files present on
+                  storage that have no matching database record (videos, previews, album photos, comment
+                  uploads, project files, accounting receipts, and more); and <strong>missing files</strong>
+                  — database records whose file is absent from storage. Run a dry run first to preview
+                  findings. The clean-up action removes orphan files only; missing files must be
+                  investigated and re-uploaded manually.
                 </p>
 
                 {orphanProjectFilesError ? (
@@ -646,12 +655,19 @@ export function DeveloperToolsSection({
 
                 {orphanProjectFilesSummary ? (
                   <div className="mt-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">{orphanProjectFilesSummary.line1}</p>
-                    <p className="text-xs text-muted-foreground">{orphanProjectFilesSummary.line2}</p>
+                    <p className="text-xs text-muted-foreground">{orphanProjectFilesSummary.scannedLabel}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {orphanProjectFilesSummary.orphanLabel}
+                      {orphanProjectFilesResult?.orphanFiles === 0 ? ' — none found ✓' : ''}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {orphanProjectFilesSummary.missingLabel}
+                      {orphanProjectFilesResult?.missingFiles === 0 ? ' — none found ✓' : ''}
+                    </p>
                     {orphanProjectFilesResult?.deleted ? (
                       <p className="text-xs text-muted-foreground">
-                        Deleted: {orphanProjectFilesResult.deleted.filesDeleted} files
-                        {orphanProjectFilesResult.deleted.filesFailed ? ` (${orphanProjectFilesResult.deleted.filesFailed} file deletes failed)` : ''}
+                        Deleted: {orphanProjectFilesResult.deleted.filesDeleted} orphan files
+                        {orphanProjectFilesResult.deleted.filesFailed ? ` (${orphanProjectFilesResult.deleted.filesFailed} deletes failed)` : ''}
                         {orphanProjectFilesResult.deleted.emptyDirsPruned ? `; pruned ${orphanProjectFilesResult.deleted.emptyDirsPruned} empty directories` : ''}
                       </p>
                     ) : null}
@@ -659,25 +675,37 @@ export function DeveloperToolsSection({
                       <p className="text-xs text-muted-foreground">Errors: {orphanProjectFilesResult.errors.length}</p>
                     ) : null}
 
-                    {orphanProjectFilesResult?.sample ? (
+                    {(orphanProjectFilesResult?.sample || orphanProjectFilesResult?.missingFileSample) ? (
                       <details className="mt-2">
                         <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                           Show sample paths
                         </summary>
                         <div className="mt-2 space-y-2">
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Orphan paths (first 20)</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {orphanProjectFilesResult.sample.orphanPaths.join('\n') || 'None'}
-                            </pre>
-                          </div>
+                          {orphanProjectFilesResult?.sample ? (
+                            <>
+                              <div>
+                                <div className="text-[11px] font-medium text-muted-foreground">Orphan paths (first 20)</div>
+                                <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                  {orphanProjectFilesResult.sample.orphanPaths.join('\n') || 'None'}
+                                </pre>
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-medium text-muted-foreground">Related project IDs</div>
+                                <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                  {orphanProjectFilesResult.sample.projectIds.join('\n') || 'None'}
+                                </pre>
+                              </div>
+                            </>
+                          ) : null}
 
-                          <div>
-                            <div className="text-[11px] font-medium text-muted-foreground">Project IDs</div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
-                              {orphanProjectFilesResult.sample.projectIds.join('\n') || 'None'}
-                            </pre>
-                          </div>
+                          {orphanProjectFilesResult?.missingFileSample?.paths.length ? (
+                            <div>
+                              <div className="text-[11px] font-medium text-muted-foreground">Missing file paths (first 20)</div>
+                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                {orphanProjectFilesResult.missingFileSample.paths.join('\n')}
+                              </pre>
+                            </div>
+                          ) : null}
 
                           {orphanProjectFilesResult?.errors?.length ? (
                             <div>
@@ -712,11 +740,11 @@ export function DeveloperToolsSection({
                   variant="secondary"
                   disabled={orphanProjectFilesLoading}
                   onClick={() => {
-                    if (!confirm('Delete orphan project files from storage? This cannot be undone.')) return
+                    if (!confirm('Delete orphan files from storage? Missing files (DB records with no file) will NOT be deleted and must be re-uploaded manually. This cannot be undone.')) return
                     void runOrphanProjectFilesCleanup(false)
                   }}
                 >
-                  {orphanProjectFilesLoading ? 'Running…' : 'Clean up'}
+                  {orphanProjectFilesLoading ? 'Running…' : 'Clean up orphans'}
                 </Button>
               </div>
             </div>

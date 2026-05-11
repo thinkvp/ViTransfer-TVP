@@ -84,9 +84,12 @@ export async function GET(request: NextRequest) {
     settings = settings!
     securitySettings = securitySettings!
 
-    // Decrypt sensitive fields before sending to admin
+    // Decrypt sensitive fields before sending to admin.
+    // Exclude internal BigInt fields (accountingFilesBytes) that are not
+    // needed by the settings UI and cannot be JSON-serialised.
+    const { accountingFilesBytes: _accountingFilesBytes, ...settingsForClient } = settings
     const decryptedSettings = {
-      ...settings,
+      ...settingsForClient,
       smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
     }
 
@@ -104,12 +107,19 @@ export async function GET(request: NextRequest) {
       && process.env.DROPBOX_REFRESH_TOKEN?.trim()
     )
 
+    const s3Configured = process.env.STORAGE_PROVIDER === 's3'
+      && Boolean(process.env.S3_ENDPOINT?.trim())
+      && Boolean(process.env.S3_ACCESS_KEY_ID?.trim())
+      && Boolean(process.env.S3_SECRET_ACCESS_KEY?.trim())
+      && Boolean(process.env.S3_BUCKET?.trim())
+
     const response = NextResponse.json({
       ...decryptedSettings,
       security: securitySettings,
       smtpConfigured,
       dropboxConfigured,
       dropboxRootPath: process.env.DROPBOX_ROOT_PATH?.trim() || '',
+      s3Configured,
     })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
@@ -194,6 +204,8 @@ export async function PATCH(request: NextRequest) {
       emailHeaderTextMode,
       defaultTheme,
       allowThemeToggle,
+      s3LocalBackupEnabled,
+      s3LocalBackupCategories,
     } = body
 
     // SECURITY: Validate auto-close settings
@@ -543,6 +555,8 @@ export async function PATCH(request: NextRequest) {
       emailHeaderTextMode: emailHeaderTextMode === 'LIGHT' || emailHeaderTextMode === 'DARK' ? emailHeaderTextMode : undefined,
       defaultTheme: defaultTheme === 'LIGHT' || defaultTheme === 'DARK' || defaultTheme === 'AUTO' ? defaultTheme : undefined,
       allowThemeToggle: typeof allowThemeToggle === 'boolean' ? allowThemeToggle : undefined,
+      s3LocalBackupEnabled: typeof s3LocalBackupEnabled === 'boolean' ? s3LocalBackupEnabled : undefined,
+      s3LocalBackupCategories: Array.isArray(s3LocalBackupCategories) ? JSON.stringify(s3LocalBackupCategories) : undefined,
     }
 
     // Only update password if it's not the placeholder
@@ -606,8 +620,9 @@ export async function PATCH(request: NextRequest) {
     invalidateEmailSettingsCache()
 
     // Decrypt sensitive fields before sending to admin
+    const { accountingFilesBytes: _accountingFilesBytes2, ...settingsForClient2 } = settings
     const decryptedSettings = {
-      ...settings,
+      ...settingsForClient2,
       smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
     }
 

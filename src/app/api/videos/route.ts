@@ -6,6 +6,7 @@ import { validateUploadedFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isDropboxStorageConfigured, toDropboxStoragePath } from '@/lib/storage-provider-dropbox'
+import { isS3Mode } from '@/lib/s3-storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoOriginalDropboxPath, buildVideoOriginalStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
 export const runtime = 'nodejs'
 
@@ -161,7 +162,9 @@ export async function POST(request: NextRequest) {
         )
       : null
 
-    console.log(`[VIDEO] Storage path decision: dropboxEnabled=${effectiveDropboxEnabled}, dropboxConfigured=${dropboxConfigured}, backend=${effectiveDropboxEnabled ? 'dropbox' : 'local'}`)
+    const s3Active = isS3Mode()
+    const storageBackendLabel = s3Active ? 's3' : effectiveDropboxEnabled ? 'dropbox' : 'local'
+    console.log(`[VIDEO] Storage path decision: dropboxEnabled=${effectiveDropboxEnabled}, dropboxConfigured=${dropboxConfigured}, s3Active=${s3Active}, backend=${storageBackendLabel}`)
 
     // Create video record
     const video = await prisma.video.create({
@@ -190,7 +193,7 @@ export async function POST(request: NextRequest) {
     // Return videoId - TUS will handle upload directly
     const response = NextResponse.json({
       videoId: video.id,
-      storageBackend: effectiveDropboxEnabled ? 'dropbox' : 'local',
+      storageBackend: storageBackendLabel,
     })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')

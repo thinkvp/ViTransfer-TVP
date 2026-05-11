@@ -1,13 +1,14 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch, apiPost } from '@/lib/api-client'
-import { cn, formatFileSize } from '@/lib/utils'
+import { cn, formatFileSize, formatDateTime } from '@/lib/utils'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ChevronDown, ChevronUp, RefreshCw, HardDriveDownload } from 'lucide-react'
 
 type StorageOverview = {
   provider?: 'local' | 'dropbox' | 's3'
@@ -25,6 +26,7 @@ type StorageOverview = {
     projectFilesBytes: number
     clientFilesBytes: number
     userFilesBytes: number
+    accountingFilesBytes: number
   }
 }
 
@@ -48,15 +50,39 @@ type ClosedProjectPreviewCleanupResult = {
   }
 }
 
+const BACKUP_CATEGORY_KEYS = [
+  'originalVideosBytes',
+  'videoPreviewsBytes',
+  'videoAssetsBytes',
+  'commentAttachmentsBytes',
+  'originalPhotosBytes',
+  'photoZipBytes',
+  'communicationsBytes',
+  'projectFilesBytes',
+  'clientFilesBytes',
+  'userFilesBytes',
+  'accountingFilesBytes',
+] as const
+
+type BackupCategory = (typeof BACKUP_CATEGORY_KEYS)[number]
+
 interface StorageOverviewSectionProps {
   show: boolean
   setShow: (value: boolean) => void
   hideCollapse?: boolean
   autoDeletePreviewsOnClose: boolean
   setAutoDeletePreviewsOnClose: (value: boolean) => void
-  onRecalculateProjectDataTotals?: () => void
+  onRecalculateProjectDataTotals?: () => Promise<void>
   recalculateProjectDataTotalsLoading?: boolean
   recalculateProjectDataTotalsResult?: string | null
+  /** True when STORAGE_PROVIDER=s3 and all S3 env vars are set */
+  s3Configured?: boolean
+  /** Whether the daily S3-&gt;local backup is enabled */
+  s3LocalBackupEnabled: boolean
+  setS3LocalBackupEnabled: (value: boolean) => void
+  /** Which categories to include in the backup */
+  s3LocalBackupCategories: BackupCategory[]
+  setS3LocalBackupCategories: (value: BackupCategory[]) => void
 }
 
 export function StorageOverviewSection({
@@ -68,6 +94,11 @@ export function StorageOverviewSection({
   recalculateProjectDataTotalsLoading,
   recalculateProjectDataTotalsResult,
   hideCollapse,
+  s3Configured = false,
+  s3LocalBackupEnabled,
+  setS3LocalBackupEnabled,
+  s3LocalBackupCategories,
+  setS3LocalBackupCategories,
 }: StorageOverviewSectionProps) {
   const [data, setData] = useState<StorageOverview | null>(null)
   const [loading, setLoading] = useState(false)
@@ -78,6 +109,45 @@ export function StorageOverviewSection({
   const [closedPreviewsResult, setClosedPreviewsResult] =
     useState<ClosedProjectPreviewCleanupResult | null>(null)
   const [closedPreviewsError, setClosedPreviewsError] = useState<string | null>(null)
+
+  // Backup run state
+  const [backupRunning, setBackupRunning] = useState(false)
+  const [backupRunResult, setBackupRunResult] = useState<string | null>(null)
+  const [backupRunError, setBackupRunError] = useState<string | null>(null)
+  const [backupLastRunAt, setBackupLastRunAt] = useState<string | null>(null)
+
+  // Load backup status on mount when S3 is configured
+  useEffect(() => {
+    if (!s3Configured) return
+    apiFetch('/api/settings/s3-local-backup/run')
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        if (!json) return
+        if (json.lastRunAt) setBackupLastRunAt(json.lastRunAt)
+        if (json.lastRunResult) setBackupRunResult(json.lastRunResult)
+        if (json.running) setBackupRunning(true)
+      })
+      .catch(() => {})
+  }, [s3Configured])
+
+  // While a backup is running, poll the status endpoint every 2 s for live progress.
+  // Also detects when a scheduled backup (started outside this session) finishes.
+  useEffect(() => {
+    if (!backupRunning || !s3Configured) return
+    const interval = setInterval(() => {
+      apiFetch('/api/settings/s3-local-backup/run')
+        .then((res) => res.ok ? res.json() : null)
+        .then((json) => {
+          if (!json) return
+          if (json.lastRunResult) setBackupRunResult(json.lastRunResult)
+          if (json.lastRunAt) setBackupLastRunAt(json.lastRunAt)
+          // Stop polling when the backup has finished (covers scheduled runs too)
+          if (json.running === false) setBackupRunning(false)
+        })
+        .catch(() => {})
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [backupRunning, s3Configured])
 
   useEffect(() => {
     if (!show || hasLoaded) return
@@ -123,29 +193,47 @@ export function StorageOverviewSection({
     }
   }
 
+  async function runManualBackup() {
+    setBackupRunning(true)
+    setBackupRunError(null)
+    setBackupRunResult(null)
+    try {
+      const res = await apiPost('/api/settings/s3-local-backup/run', {
+        categories: s3LocalBackupCategories,
+      }) as any
+      setBackupRunResult(res?.summary ?? 'Backup completed')
+      setBackupLastRunAt(new Date().toISOString())
+    } catch (e: any) {
+      setBackupRunError(e?.message || 'Backup run failed')
+    } finally {
+      setBackupRunning(false)
+    }
+  }
+
+  function toggleBackupCategory(key: BackupCategory, checked: boolean) {
+    if (checked) {
+      setS3LocalBackupCategories([...s3LocalBackupCategories, key])
+    } else {
+      setS3LocalBackupCategories(s3LocalBackupCategories.filter((k) => k !== key))
+    }
+  }
+
   const rows = useMemo(() => {
     if (!data) return []
     const total = Math.max(0, data.totalBytes)
     const b = data.breakdown
     const items = [
-      { key: 'originalVideosBytes', label: 'Original Videos', bytes: b.originalVideosBytes },
-      {
-        key: 'videoPreviewsBytes',
-        label: 'Video Previews',
-        bytes: b.videoPreviewsBytes,
-      },
-      { key: 'videoAssetsBytes', label: 'Video Assets', bytes: b.videoAssetsBytes },
-      {
-        key: 'commentAttachmentsBytes',
-        label: 'Comment Attachments',
-        bytes: b.commentAttachmentsBytes,
-      },
-      { key: 'originalPhotosBytes', label: 'Original Photos', bytes: b.originalPhotosBytes },
-      { key: 'photoZipBytes', label: 'Photo ZIP files & previews', bytes: b.photoZipBytes },
-      { key: 'communicationsBytes', label: 'External Communication', bytes: b.communicationsBytes },
-      { key: 'projectFilesBytes', label: 'Project Files', bytes: b.projectFilesBytes },
-      { key: 'clientFilesBytes', label: 'Client Files', bytes: b.clientFilesBytes },
-      { key: 'userFilesBytes', label: 'User Files', bytes: b.userFilesBytes },
+      { key: 'originalVideosBytes' as BackupCategory, label: 'Original Videos', bytes: b.originalVideosBytes },
+      { key: 'videoPreviewsBytes' as BackupCategory, label: 'Video Previews', bytes: b.videoPreviewsBytes },
+      { key: 'videoAssetsBytes' as BackupCategory, label: 'Video Assets', bytes: b.videoAssetsBytes },
+      { key: 'commentAttachmentsBytes' as BackupCategory, label: 'Comment Attachments', bytes: b.commentAttachmentsBytes },
+      { key: 'originalPhotosBytes' as BackupCategory, label: 'Original Photos', bytes: b.originalPhotosBytes },
+      { key: 'photoZipBytes' as BackupCategory, label: 'Photo ZIP files & previews', bytes: b.photoZipBytes },
+      { key: 'communicationsBytes' as BackupCategory, label: 'External Communication', bytes: b.communicationsBytes },
+      { key: 'projectFilesBytes' as BackupCategory, label: 'Project Files', bytes: b.projectFilesBytes },
+      { key: 'clientFilesBytes' as BackupCategory, label: 'Client Files', bytes: b.clientFilesBytes },
+      { key: 'userFilesBytes' as BackupCategory, label: 'User Files', bytes: b.userFilesBytes },
+      { key: 'accountingFilesBytes' as BackupCategory, label: 'Accounting Files', bytes: b.accountingFilesBytes ?? 0 },
     ]
     return items.map((it) => {
       const bytes = Math.max(0, it.bytes)
@@ -173,10 +261,12 @@ export function StorageOverviewSection({
 
   const providerLabel = useMemo(() => {
     const provider = data?.provider
-    if (provider === 's3') return 'S3 tracked data'
-    if (provider === 'dropbox') return 'Local tracked data (Dropbox mirrored)'
-    return 'Local tracked data'
+    if (provider === 's3') return 'S3'
+    if (provider === 'dropbox') return 'Local & Dropbox'
+    return 'Local'
   }, [data])
+
+  const showBackupColumn = s3Configured && s3LocalBackupEnabled
 
   return (
     <Card className="border-border">
@@ -224,10 +314,10 @@ export function StorageOverviewSection({
                         className="h-6 w-6 text-muted-foreground hover:text-foreground flex-shrink-0"
                         disabled={!onRecalculateProjectDataTotals || recalculateProjectDataTotalsLoading}
                         title={recalculateProjectDataTotalsLoading ? 'Recalculating…' : 'Recalculate & refresh'}
-                        onClick={() => {
-                          onRecalculateProjectDataTotals?.()
+                        onClick={() => void (async () => {
+                          await onRecalculateProjectDataTotals?.()
                           setHasLoaded(false)
-                        }}
+                        })()}
                       >
                         <RefreshCw className={cn('w-3.5 h-3.5', recalculateProjectDataTotalsLoading && 'animate-spin')} />
                       </Button>
@@ -256,32 +346,149 @@ export function StorageOverviewSection({
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  {rows.map((r) => (
-                    <div key={r.key} className="space-y-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-medium">{r.label}</div>
-                        <div className="text-xs text-muted-foreground tabular-nums">
+                {/* Breakdown rows — optional Backup column when S3 backup is enabled */}
+                {showBackupColumn ? (
+                  <div className="space-y-0 rounded-lg border border-border overflow-hidden">
+                    {/* Column headers */}
+                    <div className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2 bg-muted/50 border-b border-border">
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Type</div>
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide text-right">Data</div>
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide text-center w-14">Backup</div>
+                    </div>
+                    {rows.map((r, i) => (
+                      <div
+                        key={r.key}
+                        className={cn(
+                          'grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5',
+                          i !== rows.length - 1 && 'border-b border-border/60',
+                        )}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{r.label}</div>
+                          <div className="mt-1 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={cn('h-full rounded-full bg-primary/70', r.bytes === 0 && 'bg-muted')}
+                              style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground tabular-nums text-right whitespace-nowrap">
                           {formatFileSize(r.bytes)}
-                          {data.totalBytes > 0 ? ` • ${r.pct}%` : ''}
+                          {data.totalBytes > 0 ? <><br />{r.pct}%</> : null}
+                        </div>
+                        <div className="flex items-center justify-center w-14">
+                          <Checkbox
+                            checked={s3LocalBackupCategories.includes(r.key)}
+                            onCheckedChange={(checked) => toggleBackupCategory(r.key, checked === true)}
+                            aria-label={`Back up ${r.label}`}
+                          />
                         </div>
                       </div>
-                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={cn(
-                            'h-full rounded-full bg-primary/70',
-                            r.bytes === 0 && 'bg-muted'
-                          )}
-                          style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }}
-                          aria-label={`${r.label} ${r.pct}%`}
-                        />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {rows.map((r) => (
+                      <div key={r.key} className="space-y-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium">{r.label}</div>
+                          <div className="text-xs text-muted-foreground tabular-nums">
+                            {formatFileSize(r.bytes)}
+                            {data.totalBytes > 0 ? ` • ${r.pct}%` : ''}
+                          </div>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={cn(
+                              'h-full rounded-full bg-primary/70',
+                              r.bytes === 0 && 'bg-muted'
+                            )}
+                            style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }}
+                            aria-label={`${r.label} ${r.pct}%`}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </>
             ) : null}
           </div>
+
+          {/* S3 Local Backup — only shown when S3 is configured */}
+          {s3Configured && (
+            <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="flex items-center gap-2 mb-1">
+                <HardDriveDownload className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <span className="text-sm font-semibold">Local Backup</span>
+              </div>
+
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5 flex-1">
+                  <Label htmlFor="s3LocalBackupEnabled">Daily S3 &rarr; local backup</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Runs daily at 10 PM. Copies files from S3 to local storage, mirroring the exact
+                    paths used in local mode so the app can fall back transparently. Files already
+                    present locally with a matching size are skipped. Files that exist locally but
+                    not in S3 are never modified or deleted. When enabled, a{' '}
+                    <strong>Backup</strong>{' '}column appears in the breakdown above &mdash; tick the
+                    categories you want included.
+                  </p>
+                </div>
+                <Switch
+                  id="s3LocalBackupEnabled"
+                  checked={s3LocalBackupEnabled}
+                  onCheckedChange={setS3LocalBackupEnabled}
+                />
+              </div>
+
+              {/* Last run info + manual trigger */}
+              {s3LocalBackupEnabled && (
+                <div className="space-y-2 pt-1">
+                  {s3LocalBackupCategories.length === 0 && (
+                    <p className="text-xs text-amber-500">
+                      No categories selected — tick at least one category in the breakdown above to include it in the backup.
+                    </p>
+                  )}
+
+                  {/* Live progress — shown while backup is running */}
+                  {backupRunning && backupRunResult && (
+                    <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <RefreshCw className="w-3 h-3 mt-0.5 flex-shrink-0 animate-spin" />
+                      <span>{backupRunResult}</span>
+                    </div>
+                  )}
+
+                  {/* Final result — shown when not running */}
+                  {!backupRunning && backupRunResult && !backupRunError && (
+                    <p className="text-xs text-muted-foreground">
+                      Last result: {backupRunResult}
+                      {backupLastRunAt && (
+                        <> &bull; {formatDateTime(backupLastRunAt)}</>
+                      )}
+                    </p>
+                  )}
+
+                  {backupRunError && (
+                    <p className="text-xs text-destructive">{backupRunError}</p>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={backupRunning || s3LocalBackupCategories.length === 0}
+                    onClick={() => void runManualBackup()}
+                    className="gap-2"
+                  >
+                    <HardDriveDownload className={cn('w-3.5 h-3.5', backupRunning && 'animate-pulse')} />
+                    {backupRunning ? 'Backing up\u2026' : 'Run backup now'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Auto-delete previews on close toggle */}
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">

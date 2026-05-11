@@ -181,7 +181,7 @@ export function getAllowedFileTypesDescription(): string {
  */
 export function generateCommentFilePath(projectStoragePath: string, commentId: string, fileName: string): string {
   // Sanitize filename and ensure it doesn't contain path traversal attempts
-  const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const sanitized = fileName.replace(/[^a-zA-Z0-9 ._-]/g, "_");
 
   // Generate unique filename to avoid collisions
   const timestamp = Date.now();

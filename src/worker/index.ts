@@ -32,6 +32,7 @@ import { processAutoStartProjectsOnShootingKeyDate } from './auto-start-projects
 import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuickBooksDailyPullAttempt } from '@/lib/quickbooks/integration-settings'
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
+import { reconcileAccountingFilesBytes } from '@/lib/accounting/file-storage'
 import { runDropboxStorageConsistencyScanAndSyncNotification } from '@/lib/dropbox-storage-consistency'
 import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
@@ -39,6 +40,8 @@ import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notificati
 import { processAccountingReminders } from '@/lib/accounting-reminders'
 import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { isS3Mode, s3AbortIncompleteMultipartUploadsOlderThan } from '@/lib/s3-storage'
+import { runS3LocalBackup, getS3LocalBackupSettings, formatBackupResultSummary } from '@/lib/s3-local-backup'
+import { upsertS3BackupFailureNotification } from '@/lib/s3-backup-failure-notifications'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -598,6 +601,20 @@ async function main() {
         removeOnFail: true,
       }
     )
+
+    // S3 local backup — daily @ 22:00 (runs only when enabled in settings)
+    await notificationQueue.add(
+      's3-local-backup',
+      {},
+      {
+        repeat: {
+          pattern: '0 22 * * *',
+        },
+        jobId: 's3-local-backup',
+        removeOnComplete: true,
+        removeOnFail: true,
+      }
+    )
   }
 
   // Orphan project files scan (weekly on Sunday at 03:00 server/container time)
@@ -688,8 +705,14 @@ async function main() {
 
       if (job.name === 'reconcile-project-total-bytes') {
         console.log('[TOTALS] Running scheduled project totalBytes + diskBytes reconciliation...')
-        const result = await reconcileAllProjectsStorageTotals()
-        console.log('[TOTALS] Reconciliation completed', result)
+        const [result, accountingBytes] = await Promise.all([
+          reconcileAllProjectsStorageTotals(),
+          reconcileAccountingFilesBytes().catch((e) => {
+            console.warn('[TOTALS] Failed to reconcile accounting file bytes (continuing):', e instanceof Error ? e.message : e)
+            return BigInt(0)
+          }),
+        ])
+        console.log('[TOTALS] Reconciliation completed', { ...result, accountingFilesBytes: accountingBytes.toString() })
         return
       }
 
@@ -773,14 +796,15 @@ async function main() {
 
       if (job.name === 'orphan-project-files-scan') {
         try {
-          console.log('[CONSISTENCY] Running scheduled orphan project files scan (dry run)...')
+          console.log('[CONSISTENCY] Running scheduled storage integrity scan (dry run)...')
           const result = await cleanupProjectStorageOrphans(true)
-          if (result.orphanFiles > 0) {
+          const hasIssues = result.orphanFiles > 0 || result.missingFiles > 0
+          if (hasIssues) {
             await upsertOrphanProjectFilesScanNotification(result, new Date().toISOString())
-            console.log(`[CONSISTENCY] Orphan scan completed: ${result.orphanFiles} orphan files found (${result.orphanFileBytes} bytes)`)
+            console.log(`[CONSISTENCY] Storage integrity scan completed: ${result.orphanFiles} orphan files, ${result.missingFiles} missing files`)
           } else {
             await clearOrphanProjectFilesScanNotifications()
-            console.log('[CONSISTENCY] Orphan scan completed: no orphan files found')
+            console.log('[CONSISTENCY] Storage integrity scan completed: no issues found')
           }
         } catch (e) {
           console.error('[CONSISTENCY] Orphan project files scan failed:', e instanceof Error ? e.message : e)
@@ -816,6 +840,57 @@ async function main() {
           }
         } catch (e) {
           console.error('[S3-CLEANUP] Multipart upload cleanup failed:', e instanceof Error ? e.message : e)
+        }
+        return
+      }
+
+      if (job.name === 's3-local-backup') {
+        try {
+          const backupSettings = await getS3LocalBackupSettings()
+          if (!backupSettings?.enabled) {
+            // Silently skip — backup is not enabled
+            return
+          }
+          if (backupSettings.categories.length === 0) {
+            console.log('[S3-BACKUP] No categories configured; skipping scheduled backup run')
+            return
+          }
+          if (backupSettings.running) {
+            console.log('[S3-BACKUP] Backup already in progress; skipping scheduled run')
+            return
+          }
+
+          console.log(`[S3-BACKUP] Starting scheduled backup (categories: ${backupSettings.categories.join(', ')})`)
+          await prisma.settings.update({ where: { id: 'default' }, data: { s3LocalBackupRunning: true } })
+
+          try {
+            const result = await runS3LocalBackup(backupSettings.categories)
+            const summary = formatBackupResultSummary(result)
+            await prisma.settings.update({
+              where: { id: 'default' },
+              data: {
+                s3LocalBackupLastRunAt: new Date(),
+                s3LocalBackupLastRunResult: summary,
+                s3LocalBackupRunning: false,
+              },
+            })
+            console.log(`[S3-BACKUP] ${summary}`)
+            // If any files failed, create a pinned notification + push
+            if (!result.ok && result.failed > 0) {
+              const errorSummary = result.errors.slice(0, 3).join('; ') || 'Unknown error'
+              upsertS3BackupFailureNotification(`${result.failed} file(s) failed. ${errorSummary}`).catch(() => {})
+            }
+          } catch (innerErr) {
+            const msg = innerErr instanceof Error ? innerErr.message : String(innerErr)
+            await prisma.settings.update({
+              where: { id: 'default' },
+              data: { s3LocalBackupLastRunResult: `Error: ${msg}`, s3LocalBackupRunning: false },
+            }).catch(() => {})
+            upsertS3BackupFailureNotification(msg).catch(() => {})
+            throw innerErr
+          }
+        } catch (e) {
+          console.error('[S3-BACKUP] Scheduled backup failed:', e instanceof Error ? e.message : e)
         }
         return
       }

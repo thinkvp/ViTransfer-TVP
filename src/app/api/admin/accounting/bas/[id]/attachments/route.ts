@@ -4,7 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import { processImageBuffer } from '@/lib/image-processing'
-import { buildBasPeriodFilePath, writeAccountingFile } from '@/lib/accounting/file-storage'
+import { buildBasPeriodFilePath, writeAccountingFile, adjustAccountingFilesBytes } from '@/lib/accounting/file-storage'
 import { accountingAttachmentFromDb } from '@/lib/accounting/db-mappers'
 
 export const runtime = 'nodejs'
@@ -77,9 +77,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       data: {
         storagePath: storagePath.relativePath,
         originalName: rawName.slice(0, 500),
+        fileSize: finalBuffer.length,
         basPeriodId: id,
       },
     })
+    void adjustAccountingFilesBytes(finalBuffer.length)
     created.push(accountingAttachmentFromDb(attachment))
   }
 

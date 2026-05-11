@@ -163,7 +163,7 @@ export async function GET(
     const readableStream = Readable.toWeb(output as any) as ReadableStream
 
     // Generate filename
-    const sanitizedVideoName = video.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const sanitizedVideoName = video.name.replace(/[^a-zA-Z0-9 ._-]/g, '_')
     const zipFilename = sanitizeFilenameForHeader(
       `${sanitizedVideoName}_${video.versionLabel}_assets.zip`
     )

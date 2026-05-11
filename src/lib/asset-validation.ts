@@ -1,6 +1,6 @@
 export const ALLOWED_ASSET_EXTENSIONS = {
   thumbnail: ['.jpg', '.jpeg', '.png'],
-  image: ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd', '.ai', '.eps'],
+  image: ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd', '.ai', '.eps', '.svg'],
   audio: ['.wav', '.mp3', '.aac', '.flac', '.m4a'],
   video: ['.mp4', '.mov', '.avi', '.mkv', '.mxf', '.prores'],
   subtitle: ['.srt', '.vtt', '.ass', '.ssa', '.sub'],

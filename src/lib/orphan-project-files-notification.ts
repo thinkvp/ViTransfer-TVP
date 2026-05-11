@@ -32,11 +32,22 @@ export async function upsertOrphanProjectFilesScanNotification(
   const sentAt = new Date(scannedAtIso)
   const orphanPaths = result.sample?.orphanPaths ?? []
   const projectIds = result.sample?.projectIds ?? []
+  const missingPaths = result.missingFileSample?.paths ?? []
+
+  // Build a human-readable summary for the notification message.
+  const parts: string[] = []
+  if (result.orphanFiles > 0) {
+    parts.push(`${result.orphanFiles} orphaned file${result.orphanFiles === 1 ? '' : 's'} (on storage but not in DB)`)
+  }
+  if (result.missingFiles > 0) {
+    parts.push(`${result.missingFiles} missing file${result.missingFiles === 1 ? '' : 's'} (in DB but not on storage)`)
+  }
+  const message = parts.join(' and ') + ' found during the weekly scan'
 
   const details = {
     __payload: {
-      title: 'System alert: orphaned files detected',
-      message: `${result.orphanFiles} orphaned file${result.orphanFiles === 1 ? '' : 's'} found during the weekly dry run`,
+      title: 'System alert: storage integrity issues detected',
+      message,
       projectName: undefined,
     },
     __link: {
@@ -57,11 +68,22 @@ export async function upsertOrphanProjectFilesScanNotification(
     'Projects in DB': String(result.scannedProjects ?? result.scannedDirectories),
     'Scanned storage roots': String(result.scannedDirectories),
     'Scanned files': String(result.scannedFiles),
-    'Orphan files': String(result.orphanFiles),
-    'Approx bytes': formatBytes(result.orphanFileBytes),
+    'Orphan files (storage \u2260 DB)': String(result.orphanFiles),
+    'Orphan bytes': formatBytes(result.orphanFileBytes),
+    'Missing files (DB \u2260 storage)': String(result.missingFiles),
     'Related project IDs': projectIds.length > 0 ? projectIds.join(', ') : 'None',
-    Details: orphanPaths.slice(0, 10).join('\n') || 'No sample paths recorded',
-    ...(orphanPaths.length > 10 ? { 'Additional lines': `${orphanPaths.length - 10} more line${orphanPaths.length - 10 === 1 ? '' : 's'}` } : {}),
+    ...(orphanPaths.length > 0
+      ? {
+          'Orphan paths (first 10)': orphanPaths.slice(0, 10).join('\n'),
+          ...(orphanPaths.length > 10 ? { 'Orphan paths additional': `${orphanPaths.length - 10} more` } : {}),
+        }
+      : {}),
+    ...(missingPaths.length > 0
+      ? {
+          'Missing paths (first 10)': missingPaths.slice(0, 10).join('\n'),
+          ...(missingPaths.length > 10 ? { 'Missing paths additional': `${missingPaths.length - 10} more` } : {}),
+        }
+      : {}),
   }
 
   const existing = await prisma.pushNotificationLog.findMany({

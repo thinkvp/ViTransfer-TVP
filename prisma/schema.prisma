@@ -939,6 +939,16 @@ model Settings {
   // Per-type client email toggles (global defaults, all enabled by default)
   clientEmailProjectApproved Boolean @default(true) // Client notified when entire project is approved
 
+  // Cached storage totals (reconciled daily by worker)
+  accountingFilesBytes BigInt @default(0) // Total bytes of accounting attachments (receipts, BAS docs, etc.)
+
+  // S3 local backup settings (only active when STORAGE_PROVIDER=s3)
+  s3LocalBackupEnabled    Boolean  @default(false) // Whether daily S3-to-local backup is active
+  s3LocalBackupCategories String   @default("[]")  // JSON array of category keys to back up
+  s3LocalBackupLastRunAt  DateTime? // Timestamp of most recent completed backup run
+  s3LocalBackupLastRunResult String? // Human-readable summary of last backup run
+  s3LocalBackupRunning    Boolean  @default(false) // Lock flag: backup job currently in progress
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -2269,6 +2279,7 @@ model AccountingAttachment {
   id                  String  @id @default(cuid())
   storagePath         String                               // Relative path in ACCOUNTING_STORAGE_ROOT
   originalName        String  @db.VarChar(500)
+  fileSize            Int     @default(0)                 // Stored file size in bytes (after any image processing)
 
   bankTransactionId   String?
   bankTransaction     BankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)

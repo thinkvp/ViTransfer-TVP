@@ -30,6 +30,7 @@ export interface PushNotificationPayload {
     | 'DROPBOX_STORAGE_INCONSISTENCY'
     | 'VEHICLE_ODOMETER_REMINDER'
     | 'BAS_DUE_REMINDER'
+    | 'S3_LOCAL_BACKUP_FAILURE'
   projectId?: string
   projectName?: string
   kanbanCardId?: string

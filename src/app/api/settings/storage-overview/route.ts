@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       userFileAgg,
       projectTotals,
       projectsWithDisk,
+      accountingFilesRow,
     ] = await Promise.all([
       prisma.video.aggregate({ _sum: { originalFileSize: true } }),
       prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
@@ -65,6 +66,8 @@ export async function GET(request: NextRequest) {
             where: { diskBytes: { not: null } },
             _sum: { totalBytes: true, diskBytes: true },
           }),
+      // Accounting files total bytes — read from DB (reconciled daily by worker)
+      prisma.settings.findUnique({ where: { id: 'default' }, select: { accountingFilesBytes: true } }),
     ])
 
     const originalVideosBytes = asNumber(videoAgg._sum.originalFileSize)
@@ -85,6 +88,8 @@ export async function GET(request: NextRequest) {
       albumZipSocialBytes
     const clientFilesBytes = asNumber(clientFileAgg._sum.fileSize)
     const userFilesBytes = asNumber(userFileAgg._sum.fileSize)
+    // Read cached accounting bytes from DB (written by daily reconcile job)
+    const accountingFilesBytes = asNumber(accountingFilesRow?.accountingFilesBytes ?? 0)
 
     // In S3 mode, use DB-backed previewBytes (reconciled daily) instead of a live S3 scan.
     // In local mode, estimate preview bytes as the difference between disk total and DB-tracked total.
@@ -99,7 +104,7 @@ export async function GET(request: NextRequest) {
 
     const allProjectTotalBytes = asNumber(projectTotals._sum.totalBytes)
     const totalBytes =
-      allProjectTotalBytes + videoPreviewsBytes + clientFilesBytes + userFilesBytes
+      allProjectTotalBytes + videoPreviewsBytes + clientFilesBytes + userFilesBytes + accountingFilesBytes
 
     let capacityBytes: number | null = null
     let availableBytes: number | null = null
@@ -130,6 +135,7 @@ export async function GET(request: NextRequest) {
         projectFilesBytes,
         clientFilesBytes,
         userFilesBytes,
+        accountingFilesBytes,
       },
     })
   } catch (e: any) {

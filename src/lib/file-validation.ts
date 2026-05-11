@@ -114,8 +114,8 @@ export function sanitizeFilename(filename: string): string {
     safe = 'upload.bin'
   }
   
-  // Additional safety: only allow alphanumeric, dash, underscore, dot
-  safe = safe.replace(/[^a-zA-Z0-9._-]/g, '_')
+  // Additional safety: only allow alphanumeric, space, dash, underscore, dot
+  safe = safe.replace(/[^a-zA-Z0-9 ._-]/g, '_')
   
   return safe
 }

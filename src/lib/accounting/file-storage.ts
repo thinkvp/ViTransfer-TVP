@@ -4,15 +4,24 @@
  * Manages file storage for accounting documents (receipts, transaction attachments)
  * on a dedicated volume separate from the main uploads volume.
  *
- * Folder structure:
+ * Local folder structure:
  *   <ACCOUNTING_STORAGE_ROOT>/FYyyyy-yyyy/<AccountName>/filename.ext
  *   <ACCOUNTING_STORAGE_ROOT>/FYyyyy-yyyy/<ParentAccount>/<ChildAccount>/filename.ext
+ *
+ * S3 key structure (when STORAGE_PROVIDER=s3):
+ *   accounting/FYyyyy-yyyy/<AccountName>/filename.ext
  *
  * The fiscal year is determined from the record's date, not the upload date.
  */
 import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
+import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, getS3Client, getS3Bucket, s3GetDirectorySizeInfo } from '@/lib/s3-storage'
+import { GetObjectCommand, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { Readable } from 'stream'
+
+/** S3 key prefix for all accounting files */
+export const ACCOUNTING_S3_PREFIX = 'accounting'
 
 export const ACCOUNTING_STORAGE_ROOT =
   process.env.ACCOUNTING_STORAGE_ROOT || path.join(process.cwd(), 'accounting')
@@ -109,19 +118,31 @@ function validateAccountingPath(fullPath: string): void {
 /* ------------------------------------------------------------------ */
 
 /**
- * Given a directory and a desired filename, return a filename that doesn't
+ * Given a directory (local) or S3 key prefix, return a filename that doesn't
  * clash with existing files.  Adds " (2)", " (3)", … before the extension.
  */
-async function deduplicateFilename(dir: string, filename: string): Promise<string> {
-  const ext = path.extname(filename)
-  const base = path.basename(filename, ext)
+async function deduplicateFilename(dirOrPrefix: string, filename: string, isS3: boolean): Promise<string> {
+  const ext = path.posix.extname(filename)
+  const base = path.posix.basename(filename, ext)
   let candidate = filename
   let n = 1
 
   while (true) {
-    const fullPath = path.join(dir, candidate)
-    const exists = await fs.promises.access(fullPath).then(() => true).catch(() => false)
-    if (!exists) return candidate
+    if (isS3) {
+      const key = `${dirOrPrefix}/${candidate}`
+      try {
+        await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }))
+        // exists
+      } catch (e: any) {
+        const code = Number(e?.$metadata?.httpStatusCode || 0)
+        if (code === 404 || e?.name === 'NotFound' || e?.name === 'NoSuchKey') return candidate
+        throw e
+      }
+    } else {
+      const fullPath = path.join(dirOrPrefix, candidate)
+      const exists = await fs.promises.access(fullPath).then(() => true).catch(() => false)
+      if (!exists) return candidate
+    }
     n++
     candidate = `${base} (${n})${ext}`
   }
@@ -164,11 +185,19 @@ export async function buildAccountingFilePath(
   accountId: string | null,
   originalName: string,
 ): Promise<AccountingStoragePath> {
+  if (isS3Mode()) {
+    const s3KeyPrefix = await getAccountingS3KeyPrefix(recordDate, accountId)
+    const safeName = sanitiseFilename(originalName)
+    const finalName = await deduplicateFilename(s3KeyPrefix, safeName, true)
+    const relativePath = `${s3KeyPrefix}/${finalName}`.replace(/^accounting\//, '')
+    return { relativePath, absolutePath: '' }
+  }
+
   const dir = await getAccountingDirectoryPath(recordDate, accountId)
   await fs.promises.mkdir(dir, { recursive: true })
 
   const safeName = sanitiseFilename(originalName)
-  const finalName = await deduplicateFilename(dir, safeName)
+  const finalName = await deduplicateFilename(dir, safeName, false)
 
   const absolutePath = path.join(dir, finalName)
   validateAccountingPath(absolutePath)
@@ -208,11 +237,20 @@ export async function buildBasPeriodFilePath(
 ): Promise<AccountingStoragePath> {
   const fyStartMonth = await getFyStartMonth()
   const fyLabel = getFiscalYearLabel(periodStartDate, fyStartMonth)
+
+  if (isS3Mode()) {
+    const s3KeyPrefix = `${ACCOUNTING_S3_PREFIX}/${fyLabel}/BAS`
+    const safeName = sanitiseFilename(originalName)
+    const finalName = await deduplicateFilename(s3KeyPrefix, safeName, true)
+    const relativePath = `${fyLabel}/BAS/${finalName}`
+    return { relativePath, absolutePath: '' }
+  }
+
   const dir = path.join(ACCOUNTING_STORAGE_ROOT, fyLabel, 'BAS')
   await fs.promises.mkdir(dir, { recursive: true })
 
   const safeName = sanitiseFilename(originalName)
-  const finalName = await deduplicateFilename(dir, safeName)
+  const finalName = await deduplicateFilename(dir, safeName, false)
 
   const absolutePath = path.join(dir, finalName)
   validateAccountingPath(absolutePath)
@@ -222,20 +260,30 @@ export async function buildBasPeriodFilePath(
 }
 
 /**
- * Write a buffer to the accounting volume.
+ * Write a buffer to the accounting volume (local) or S3 (when in S3 mode).
  */
 export async function writeAccountingFile(
   storagePath: AccountingStoragePath,
   buffer: Buffer,
 ): Promise<void> {
+  if (isS3Mode()) {
+    const key = toAccountingS3Key(storagePath.relativePath)
+    await s3UploadFile(key, buffer, 'application/octet-stream', buffer.length)
+    return
+  }
   validateAccountingPath(storagePath.absolutePath)
   await fs.promises.writeFile(storagePath.absolutePath, buffer)
 }
 
 /**
- * Read a file from the accounting volume.
+ * Read a file from the accounting volume (local) or S3 (when in S3 mode).
  */
 export async function readAccountingFile(relativePath: string): Promise<Buffer> {
+  if (isS3Mode()) {
+    const key = toAccountingS3Key(relativePath)
+    const { stream } = await s3DownloadFile(key)
+    return streamToBuffer(stream)
+  }
   const fullPath = resolveAccountingFilePath(relativePath)
   return fs.promises.readFile(fullPath)
 }
@@ -243,10 +291,16 @@ export async function readAccountingFile(relativePath: string): Promise<Buffer> 
 /**
  * Delete a single file from the accounting volume.
  * Silently succeeds if the file doesn't exist.
- * After deletion, removes empty parent directories up to the FY folder.
+ * After deletion (local), removes empty parent directories up to the FY folder.
  */
 export async function deleteAccountingFile(relativePath: string): Promise<void> {
   if (!relativePath) return
+
+  if (isS3Mode()) {
+    const key = toAccountingS3Key(relativePath)
+    await s3DeleteFile(key).catch(() => {})
+    return
+  }
 
   const fullPath = resolveAccountingFilePath(relativePath)
 
@@ -266,6 +320,30 @@ export async function moveAccountingFile(
 ): Promise<string> {
   if (!relativePath) return relativePath
 
+  if (isS3Mode()) {
+    const currentKey = toAccountingS3Key(relativePath)
+    const targetS3Prefix = await getAccountingS3KeyPrefix(recordDate, accountId)
+    const currentFileName = relativePath.split('/').pop() || relativePath
+    const desiredFileName = sanitiseFilename(originalName?.trim() || currentFileName)
+    const finalName = await deduplicateFilename(targetS3Prefix, desiredFileName, true)
+    const targetKey = `${targetS3Prefix}/${finalName}`
+
+    if (currentKey === targetKey) return relativePath
+
+    const client = getS3Client()
+    const bucket = getS3Bucket()
+    // CopySource must be URL-encoded (segments separated by unencoded '/')
+    const encodedCopySource = currentKey.split('/').map(encodeURIComponent).join('/')
+    await client.send(new CopyObjectCommand({
+      Bucket: bucket,
+      Key: targetKey,
+      CopySource: `${bucket}/${encodedCopySource}`,
+    }))
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: currentKey }))
+
+    return targetKey.replace(`${ACCOUNTING_S3_PREFIX}/`, '')
+  }
+
   const currentAbsolutePath = resolveAccountingFilePath(relativePath)
   const exists = await fs.promises.access(currentAbsolutePath).then(() => true).catch(() => false)
   if (!exists) return relativePath
@@ -280,7 +358,7 @@ export async function moveAccountingFile(
     return relativePath
   }
 
-  const targetFileName = await deduplicateFilename(targetDir, desiredFileName)
+  const targetFileName = await deduplicateFilename(targetDir, desiredFileName, false)
   const targetAbsolutePath = path.join(targetDir, targetFileName)
   validateAccountingPath(targetAbsolutePath)
 
@@ -332,6 +410,17 @@ async function removeEmptyAccountingDirectories(startDir: string): Promise<void>
  * Check whether a file exists in the accounting volume.
  */
 export async function accountingFileExists(relativePath: string): Promise<boolean> {
+  if (isS3Mode()) {
+    const key = toAccountingS3Key(relativePath)
+    try {
+      await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }))
+      return true
+    } catch (e: any) {
+      const code = Number(e?.$metadata?.httpStatusCode || 0)
+      if (code === 404 || e?.name === 'NotFound' || e?.name === 'NoSuchKey') return false
+      throw e
+    }
+  }
   try {
     const fullPath = resolveAccountingFilePath(relativePath)
     await fs.promises.access(fullPath)
@@ -339,6 +428,171 @@ export async function accountingFileExists(relativePath: string): Promise<boolea
   } catch {
     return false
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  S3 helpers                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Convert a relative accounting storage path (as stored in the DB) to an S3 key.
+ * e.g. "FY2025-2026/Expenses/receipt.pdf" → "accounting/FY2025-2026/Expenses/receipt.pdf"
+ */
+export function toAccountingS3Key(relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (normalized.startsWith(`${ACCOUNTING_S3_PREFIX}/`)) return normalized
+  return `${ACCOUNTING_S3_PREFIX}/${normalized}`
+}
+
+/**
+ * Build the S3 key prefix for a given record date and account (without trailing slash).
+ */
+async function getAccountingS3KeyPrefix(recordDate: Date | string, accountId: string | null): Promise<string> {
+  const fyStartMonth = await getFyStartMonth()
+  const fyLabel = getFiscalYearLabel(recordDate, fyStartMonth)
+  const accountSegments = accountId
+    ? await getAccountFolderSegments(accountId)
+    : ['Uncategorised']
+  return `${ACCOUNTING_S3_PREFIX}/${fyLabel}/${accountSegments.join('/')}`
+}
+
+/**
+ * Get total size in bytes of all accounting files stored in S3.
+ */
+export async function getAccountingS3TotalBytes(): Promise<number> {
+  const { totalBytes } = await s3GetDirectorySizeInfo(`${ACCOUNTING_S3_PREFIX}/`)
+  return Number(totalBytes)
+}
+
+/**
+ * Get total size in bytes of all accounting files stored on local disk.
+ */
+export async function getAccountingLocalTotalBytes(): Promise<number> {
+  return walkDirBytes(ACCOUNTING_STORAGE_ROOT)
+}
+
+/**
+ * Compute the current accounting files byte total and persist it to Settings.
+ * Called by the daily reconcile-project-total-bytes worker job.
+ */
+export async function reconcileAccountingFilesBytes(): Promise<bigint> {
+  const bytes = isS3Mode()
+    ? await getAccountingS3TotalBytes()
+    : await getAccountingLocalTotalBytes()
+  const bigIntBytes = BigInt(Math.round(bytes))
+  await prisma.settings.upsert({
+    where: { id: 'default' },
+    create: { id: 'default', accountingFilesBytes: bigIntBytes },
+    update: { accountingFilesBytes: bigIntBytes },
+  })
+  return bigIntBytes
+}
+
+/**
+ * Adjust the cached accounting files total by a delta (positive = upload, negative = delete).
+ * Uses a raw UPDATE so it is safe even if the Settings row doesn't exist yet (0 rows updated).
+ * Uses GREATEST(0, …) on decrements to prevent the cached value from going negative.
+ */
+export async function adjustAccountingFilesBytes(deltaBytes: number): Promise<void> {
+  if (deltaBytes === 0) return
+  try {
+    if (deltaBytes > 0) {
+      const bigDelta = BigInt(Math.round(deltaBytes))
+      await prisma.$executeRaw`UPDATE "Settings" SET "accountingFilesBytes" = "accountingFilesBytes" + ${bigDelta} WHERE id = 'default'`
+    } else {
+      const bigDelta = BigInt(Math.round(-deltaBytes))
+      await prisma.$executeRaw`UPDATE "Settings" SET "accountingFilesBytes" = GREATEST(0, "accountingFilesBytes" - ${bigDelta}) WHERE id = 'default'`
+    }
+  } catch {
+    // Ignore — the daily reconcile will correct the value next run
+  }
+}
+
+async function walkDirBytes(dir: string): Promise<number> {
+  let total = 0
+  let entries: fs.Dirent[]
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      total += await walkDirBytes(entryPath)
+    } else if (entry.isFile()) {
+      const stat = await fs.promises.stat(entryPath).catch(() => null)
+      if (stat) total += stat.size
+    }
+  }
+  return total
+}
+
+/** List all accounting file S3 keys (for orphan scan). */
+export async function listAccountingS3Keys(): Promise<Array<{ key: string; bytes: number }>> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+  const prefix = `${ACCOUNTING_S3_PREFIX}/`
+  const results: Array<{ key: string; bytes: number }> = []
+  let continuationToken: string | undefined
+
+  do {
+    const resp = await client.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+      MaxKeys: 1000,
+    }))
+    for (const obj of resp.Contents ?? []) {
+      if (obj.Key) results.push({ key: obj.Key, bytes: obj.Size ?? 0 })
+    }
+    continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  return results
+}
+
+/** Walk the local accounting directory and return all file paths relative to ACCOUNTING_STORAGE_ROOT. */
+export async function listAccountingLocalFiles(): Promise<Array<{ relPath: string; bytes: number }>> {
+  const results: Array<{ relPath: string; bytes: number }> = []
+  await walkAccountingDir(ACCOUNTING_STORAGE_ROOT, ACCOUNTING_STORAGE_ROOT, results)
+  return results
+}
+
+async function walkAccountingDir(
+  dir: string,
+  root: string,
+  out: Array<{ relPath: string; bytes: number }>,
+): Promise<void> {
+  let entries: fs.Dirent[]
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      await walkAccountingDir(entryPath, root, out)
+    } else if (entry.isFile()) {
+      const stat = await fs.promises.stat(entryPath).catch(() => null)
+      if (stat) {
+        out.push({
+          relPath: path.relative(root, entryPath).replace(/\\/g, '/'),
+          bytes: stat.size,
+        })
+      }
+    }
+  }
+}
+
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+    stream.on('end', () => resolve(Buffer.concat(chunks)))
+    stream.on('error', reject)
+  })
 }
 
 /**

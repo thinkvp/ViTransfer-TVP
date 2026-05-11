@@ -111,7 +111,7 @@ export async function POST(
     const readableStream = Readable.toWeb(archive as any) as ReadableStream
 
     // Generate zip filename
-    const sanitizedVideoName = video.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const sanitizedVideoName = video.name.replace(/[^a-zA-Z0-9 ._-]/g, '_')
     const zipFilename = sanitizeFilenameForHeader(
       `${sanitizedVideoName}_${video.versionLabel}_assets.zip`
     )

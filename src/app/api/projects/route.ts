@@ -598,6 +598,8 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({
       ...project,
       totalBytes: asNumberBigInt((project as any).totalBytes),
+      previewBytes: asNumberBigInt((project as any).previewBytes),
+      diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
     })
 
     try {

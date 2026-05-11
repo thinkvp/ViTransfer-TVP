@@ -13,6 +13,12 @@ import {
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { isS3Mode, s3DeleteFile, getS3Bucket, getS3Client } from '@/lib/s3-storage'
 import { ListObjectsV2Command } from '@aws-sdk/client-s3'
+import {
+  ACCOUNTING_STORAGE_ROOT,
+  ACCOUNTING_S3_PREFIX,
+  listAccountingS3Keys,
+  listAccountingLocalFiles,
+} from '@/lib/accounting/file-storage'
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 
@@ -24,6 +30,11 @@ export type ProjectStorageOrphanCleanupResult = {
   scannedFiles: number
   orphanFiles: number
   orphanFileBytes: number
+  /** DB records whose file is absent from storage (file on storage ≠ file in DB) */
+  missingFiles: number
+  missingFileSample?: {
+    paths: string[]
+  }
   sample?: {
     orphanPaths: string[]
     projectIds: string[]
@@ -71,6 +82,11 @@ function isIgnoredStoragePath(relPath: string): boolean {
     normalized === '.tus-tmp'
     || normalized.startsWith('.tus-tmp/')
     || isProtectedMetadataFile(normalized)
+    // Accounting files live under a separate prefix/volume and are scanned
+    // independently by scanAccountingOrphans — exclude them here to prevent
+    // the main S3 scan from treating all accounting files as orphans.
+    || normalized === ACCOUNTING_S3_PREFIX
+    || normalized.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
   )
 }
 
@@ -513,29 +529,273 @@ async function scanS3ForOrphans(
   return orphanFiles
 }
 
+/**
+ * Build the set of directly-referenced file paths from the database for the
+ * missing-files check.  Only includes fields that are always set when a record
+ * is created (i.e. the primary uploaded file), NOT derived/computed paths such
+ * as preview paths, thumbnail fallbacks, or ZIP archives that may not have been
+ * generated yet.  Returns two sets:
+ *   mainPaths       – paths relative to STORAGE_ROOT (= S3 keys in S3 mode)
+ *   accountingPaths – paths relative to ACCOUNTING_STORAGE_ROOT (= storagePath DB field)
+ */
+async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; accountingPaths: Set<string> }> {
+  const mainPaths = new Set<string>()
+  const accountingPaths = new Set<string>()
+
+  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, clientFiles, userFiles, accountingAttachments] = await Promise.all([
+    prisma.video.findMany({ select: { originalStoragePath: true } }),
+    prisma.videoAsset.findMany({ select: { storagePath: true } }),
+    prisma.commentFile.findMany({ select: { storagePath: true } }),
+    prisma.projectFile.findMany({ select: { storagePath: true } }),
+    prisma.albumPhoto.findMany({ select: { storagePath: true } }),
+    prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
+    prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
+    prisma.clientFile.findMany({ select: { storagePath: true } }),
+    prisma.userFile.findMany({ select: { storagePath: true } }),
+    prisma.accountingAttachment.findMany({ select: { storagePath: true } }),
+  ])
+
+  const addMain = (storagePath: string | null | undefined) => {
+    const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
+    if (!normalizedStoragePath) return
+    try {
+      mainPaths.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(normalizedStoragePath))))
+    } catch { /* malformed historical path */ }
+  }
+
+  for (const v of videos) addMain(v.originalStoragePath)
+  for (const a of videoAssets) addMain(a.storagePath)
+  for (const c of commentFiles) addMain(c.storagePath)
+  for (const f of projectFiles) addMain(f.storagePath)
+  for (const p of albumPhotos) addMain(p.storagePath)
+  for (const e of projectEmails) addMain(e.rawStoragePath)
+  for (const a of projectEmailAttachments) addMain(a.storagePath)
+  for (const c of clientFiles) addMain(c.storagePath)
+  for (const u of userFiles) addMain(u.storagePath)
+
+  for (const a of accountingAttachments) {
+    const relPath = a.storagePath?.trim()
+    if (relPath) accountingPaths.add(relPath.replace(/\\/g, '/'))
+  }
+
+  return { mainPaths, accountingPaths }
+}
+
+/**
+ * Check which referenced DB paths are absent from the active storage backend.
+ * In S3 mode we compare against a pre-fetched key Set (no extra API calls).
+ * In local mode we stat each path individually.
+ *
+ * @param mainPaths         Paths relative to STORAGE_ROOT (or S3 keys in S3 mode)
+ * @param accountingPaths   Paths relative to ACCOUNTING_STORAGE_ROOT
+ * @param s3KeySet          Set of all main-storage S3 keys; null in local mode
+ * @param acctS3RelKeySet   Set of accounting S3 keys WITHOUT the `accounting/` prefix; null in local mode
+ */
+async function checkMissingFiles(
+  mainPaths: Set<string>,
+  accountingPaths: Set<string>,
+  s3KeySet: Set<string> | null,
+  acctS3RelKeySet: Set<string> | null,
+): Promise<{ count: number; sample: string[] }> {
+  const missing: string[] = []
+
+  if (s3KeySet !== null) {
+    // S3 mode — O(1) lookup per path, no extra API calls
+    for (const relPath of mainPaths) {
+      if (!s3KeySet.has(relPath)) missing.push(relPath)
+    }
+    for (const relPath of accountingPaths) {
+      if (acctS3RelKeySet === null || !acctS3RelKeySet.has(relPath)) {
+        missing.push(`${ACCOUNTING_S3_PREFIX}/${relPath}`)
+      }
+    }
+  } else {
+    // Local mode — fs.access per path
+    for (const relPath of mainPaths) {
+      const absPath = path.join(STORAGE_ROOT, relPath)
+      const exists = await fs.promises.access(absPath).then(() => true).catch(() => false)
+      if (!exists) missing.push(relPath)
+    }
+    for (const relPath of accountingPaths) {
+      const absPath = path.join(ACCOUNTING_STORAGE_ROOT, relPath)
+      const exists = await fs.promises.access(absPath).then(() => true).catch(() => false)
+      if (!exists) missing.push(`accounting/${relPath}`)
+    }
+  }
+
+  return { count: missing.length, sample: missing.slice(0, 20) }
+}
+
+/**
+ * Build the set of referenced accounting file paths from the database.
+ * Returns relative paths (as stored in AccountingAttachment.storagePath).
+ * Accepts a pre-fetched set to avoid a duplicate DB query when called from
+ * cleanupProjectStorageOrphans alongside buildMissingFilesReferences().
+ */
+async function buildReferencedAccountingPaths(
+  prefetched?: Set<string>,
+): Promise<Set<string>> {
+  if (prefetched) return prefetched
+  const attachments = await prisma.accountingAttachment.findMany({ select: { storagePath: true } })
+  const referenced = new Set<string>()
+  for (const a of attachments) {
+    const relPath = a.storagePath?.trim()
+    if (relPath) referenced.add(relPath.replace(/\\/g, '/'))
+  }
+  return referenced
+}
+
+/**
+ * Scan accounting storage for orphaned files (files not referenced by any AccountingAttachment).
+ * Accepts pre-fetched data to avoid duplicate S3 list calls when invoked from
+ * cleanupProjectStorageOrphans.
+ */
+async function scanAccountingOrphans(
+  accountingRefPaths: Set<string>,
+  stats: { scannedFiles: number },
+  errors: Array<{ path: string; error: string }>,
+  prefetchedS3Files?: Array<{ key: string; bytes: number }>,
+): Promise<OrphanFileEntry[]> {
+  const orphanFiles: OrphanFileEntry[] = []
+
+  if (isS3Mode()) {
+    let s3Files: Array<{ key: string; bytes: number }>
+    if (prefetchedS3Files) {
+      s3Files = prefetchedS3Files
+    } else {
+      try {
+        s3Files = await listAccountingS3Keys()
+      } catch (e: any) {
+        errors.push({ path: `${ACCOUNTING_S3_PREFIX}/`, error: String(e?.message || e) })
+        return orphanFiles
+      }
+    }
+
+    for (const obj of s3Files) {
+      stats.scannedFiles++
+      // Convert S3 key (accounting/FY.../...) to relative path (FY.../...)
+      const relPath = obj.key.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
+        ? obj.key.slice(`${ACCOUNTING_S3_PREFIX}/`.length)
+        : obj.key
+
+      if (!accountingRefPaths.has(relPath)) {
+        orphanFiles.push({
+          absPath: `s3://${getS3Bucket()}/${obj.key}`,
+          relPath: obj.key,
+          bytes: obj.bytes,
+        })
+      }
+    }
+  } else {
+    let localFiles: Array<{ relPath: string; bytes: number }>
+    try {
+      localFiles = await listAccountingLocalFiles()
+    } catch (e: any) {
+      errors.push({ path: ACCOUNTING_STORAGE_ROOT, error: String(e?.message || e) })
+      return orphanFiles
+    }
+
+    for (const file of localFiles) {
+      stats.scannedFiles++
+      if (!accountingRefPaths.has(file.relPath)) {
+        orphanFiles.push({
+          absPath: path.join(ACCOUNTING_STORAGE_ROOT, file.relPath),
+          relPath: `accounting/${file.relPath}`,
+          bytes: file.bytes,
+        })
+      }
+    }
+  }
+
+  return orphanFiles
+}
+
+/**
+ * After deleting local accounting orphan files, prune any now-empty directories
+ * under ACCOUNTING_STORAGE_ROOT. These are separate from STORAGE_ROOT so the
+ * main pruneEmptyDirectories function cannot handle them.
+ */
+async function pruneEmptyAccountingDirectories(accountingOrphans: OrphanFileEntry[]): Promise<void> {
+  if (accountingOrphans.length === 0) return
+  // Collect candidate directories (deepest first)
+  const candidates = new Set<string>()
+  const root = path.resolve(ACCOUNTING_STORAGE_ROOT)
+  for (const orphan of accountingOrphans) {
+    // Resolve to absolute in case ACCOUNTING_STORAGE_ROOT is a relative path
+    let dir = path.dirname(path.resolve(orphan.absPath))
+    while (dir !== root && dir.startsWith(root + path.sep)) {
+      candidates.add(dir)
+      dir = path.dirname(dir)
+    }
+  }
+
+  // Sort deepest first so we prune children before parents
+  const sorted = Array.from(candidates).sort((a, b) => b.split(path.sep).length - a.split(path.sep).length)
+  for (const dir of sorted) {
+    const children = await fs.promises.readdir(dir).catch(() => null)
+    if (children && children.length === 0) {
+      await fs.promises.rmdir(dir).catch(() => {})
+    }
+  }
+}
+
 export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<ProjectStorageOrphanCleanupResult> {
-  const [refs, projectRootIndex] = await Promise.all([
+  const [refs, projectRootIndex, missingRefs] = await Promise.all([
     buildProjectStorageReferences(),
     buildProjectRootIndex(),
+    buildMissingFilesReferences(),
   ])
   const errors: Array<{ path: string; error: string }> = []
   const orphanFiles: OrphanFileEntry[] = []
   const stats = { scannedFiles: 0 }
 
   let roots: Array<{ absPath: string; relPath: string }> = []
+  let missingResult: { count: number; sample: string[] } = { count: 0, sample: [] }
 
   // Scan storage based on configured provider
   if (isS3Mode()) {
-    // S3 mode: list S3 bucket objects
-    const s3Objects = await listS3Objects()
+    // Fetch both S3 listings once and share between orphan detection and missing-files check.
+    const [s3Objects, accountingS3Files] = await Promise.all([
+      listS3Objects(),
+      listAccountingS3Keys().catch((e: any) => {
+        errors.push({ path: `${ACCOUNTING_S3_PREFIX}/`, error: String(e?.message || e) })
+        return [] as Array<{ key: string; bytes: number }>
+      }),
+    ])
+
+    // Orphan scans (files on storage with no DB record)
     const s3Orphans = await scanS3ForOrphans(s3Objects, refs, errors, stats)
     orphanFiles.push(...s3Orphans)
+    const accountingOrphans = await scanAccountingOrphans(
+      missingRefs.accountingPaths,
+      stats,
+      errors,
+      accountingS3Files,
+    )
+    orphanFiles.push(...accountingOrphans)
+
+    // Missing-files check (DB records with no file on storage)
+    const s3KeySet = new Set(s3Objects.map((o) => o.key))
+    const acctS3RelKeySet = new Set(
+      accountingS3Files.map((f) =>
+        f.key.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
+          ? f.key.slice(`${ACCOUNTING_S3_PREFIX}/`.length)
+          : f.key
+      )
+    )
+    missingResult = await checkMissingFiles(missingRefs.mainPaths, missingRefs.accountingPaths, s3KeySet, acctS3RelKeySet)
   } else {
-    // Local mode: walk filesystem as before
+    // Local mode: walk filesystem
     roots = await listPhysicalProjectRoots()
     for (const root of roots) {
       await walkProjectFiles(root.absPath, root.relPath, orphanFiles, refs, errors, stats)
     }
+    // Accounting orphans
+    const accountingOrphans = await scanAccountingOrphans(missingRefs.accountingPaths, stats, errors)
+    orphanFiles.push(...accountingOrphans)
+
+    // Missing-files check (local)
+    missingResult = await checkMissingFiles(missingRefs.mainPaths, missingRefs.accountingPaths, null, null)
   }
 
   const orphanFileBytes = orphanFiles.reduce((total, file) => total + file.bytes, 0)
@@ -556,6 +816,8 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
       orphanFileBytes,
+      missingFiles: missingResult.count,
+      missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
       sample: {
         orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
         projectIds: sampleProjectIds,
@@ -568,10 +830,9 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   let filesFailed = 0
 
   if (isS3Mode()) {
-    // Delete from S3
+    // Delete orphan files from S3 only (missing files can't be deleted — they don't exist)
     for (const orphanFile of orphanFiles) {
       try {
-        // Extract S3 key from the relPath (which is the key when from S3 scan)
         await s3DeleteFile(orphanFile.relPath)
         filesDeleted++
       } catch (error: any) {
@@ -579,21 +840,8 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
         errors.push({ path: orphanFile.relPath, error: String(error?.message || error) })
       }
     }
-  } else {
-    // Delete from local filesystem
-    for (const orphanFile of orphanFiles) {
-      try {
-        await fs.promises.unlink(orphanFile.absPath)
-        filesDeleted++
-      } catch (error: any) {
-        filesFailed++
-        errors.push({ path: orphanFile.relPath, error: String(error?.message || error) })
-      }
-    }
 
-    // Prune empty directories (local only — S3 has no directory concept)
-    const emptyDirsPruned = await pruneEmptyDirectories(buildDirPruneCandidates(orphanFiles), false)
-
+    // For S3 mode, no empty dir pruning needed
     return {
       ok: true,
       dryRun: false,
@@ -602,6 +850,8 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
       orphanFileBytes,
+      missingFiles: missingResult.count,
+      missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
       sample: {
         orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
         projectIds: sampleProjectIds,
@@ -609,13 +859,30 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       deleted: {
         filesDeleted,
         filesFailed,
-        emptyDirsPruned,
+        emptyDirsPruned: 0,
       },
       errors: errors.length ? errors.slice(0, 50) : undefined,
     }
   }
 
-  // For S3 mode, no empty dir pruning needed
+  // Delete orphan files from local filesystem
+  for (const orphanFile of orphanFiles) {
+    try {
+      await fs.promises.unlink(orphanFile.absPath)
+      filesDeleted++
+    } catch (error: any) {
+      filesFailed++
+      errors.push({ path: orphanFile.relPath, error: String(error?.message || error) })
+    }
+  }
+
+  // Prune empty directories (local only — S3 has no directory concept)
+  // Split main-storage orphans from accounting orphans since they live under different roots.
+  const mainOrphans = orphanFiles.filter((f) => !f.relPath.startsWith('accounting/'))
+  const accountingLocalOrphans = orphanFiles.filter((f) => f.relPath.startsWith('accounting/'))
+  const emptyDirsPruned = await pruneEmptyDirectories(buildDirPruneCandidates(mainOrphans), false)
+  await pruneEmptyAccountingDirectories(accountingLocalOrphans)
+
   return {
     ok: true,
     dryRun: false,
@@ -624,6 +891,8 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     scannedFiles: stats.scannedFiles,
     orphanFiles: orphanFiles.length,
     orphanFileBytes,
+    missingFiles: missingResult.count,
+    missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
     sample: {
       orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
       projectIds: sampleProjectIds,
@@ -631,7 +900,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     deleted: {
       filesDeleted,
       filesFailed,
-      emptyDirsPruned: 0,
+      emptyDirsPruned,
     },
     errors: errors.length ? errors.slice(0, 50) : undefined,
   }

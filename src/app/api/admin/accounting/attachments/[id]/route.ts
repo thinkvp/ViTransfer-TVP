@@ -3,7 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeFilenameForHeader } from '@/lib/storage'
-import { deleteAccountingFile, resolveAccountingFilePath } from '@/lib/accounting/file-storage'
+import { deleteAccountingFile, readAccountingFile, resolveAccountingFilePath, adjustAccountingFilesBytes } from '@/lib/accounting/file-storage'
+import { isS3Mode } from '@/lib/s3-storage'
 import fs from 'fs'
 
 export const runtime = 'nodejs'
@@ -29,16 +30,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   })
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
-  let fullPath: string
-  try {
-    fullPath = resolveAccountingFilePath(attachment.storagePath)
-  } catch {
-    return NextResponse.json({ error: 'Invalid attachment path' }, { status: 500 })
-  }
-
-  const stat = await fs.promises.stat(fullPath).catch(() => null)
-  if (!stat?.isFile()) return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
-
   const ext = attachment.storagePath.split('.').pop()?.toLowerCase() ?? ''
   const contentType =
     ext === 'pdf' ? 'application/pdf'
@@ -47,9 +38,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     : 'image/jpeg'
 
   const filename = sanitizeFilenameForHeader(attachment.originalName)
-  const fileBuffer = await fs.promises.readFile(fullPath)
 
-  return new NextResponse(fileBuffer, {
+  let fileBuffer: Buffer
+  if (isS3Mode()) {
+    try {
+      fileBuffer = await readAccountingFile(attachment.storagePath)
+    } catch {
+      return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
+    }
+  } else {
+    let fullPath: string
+    try {
+      fullPath = resolveAccountingFilePath(attachment.storagePath)
+    } catch {
+      return NextResponse.json({ error: 'Invalid attachment path' }, { status: 500 })
+    }
+
+    const stat = await fs.promises.stat(fullPath).catch(() => null)
+    if (!stat?.isFile()) return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
+
+    fileBuffer = await fs.promises.readFile(fullPath)
+  }
+
+  return new NextResponse(fileBuffer as unknown as BodyInit, {
     headers: {
       'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${filename}"`,
@@ -76,12 +87,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const attachment = await prisma.accountingAttachment.findUnique({
     where: { id },
-    select: { id: true, storagePath: true },
+    select: { id: true, storagePath: true, fileSize: true },
   })
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
   await deleteAccountingFile(attachment.storagePath).catch(() => {})
   await prisma.accountingAttachment.delete({ where: { id } })
+  void adjustAccountingFilesBytes(-(attachment.fileSize ?? 0))
 
   return NextResponse.json({ ok: true })
 }

@@ -3,6 +3,7 @@ import path from 'path'
 import { prisma } from '@/lib/db'
 import { getFilePath } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { ACCOUNTING_STORAGE_ROOT, ACCOUNTING_S3_PREFIX } from '@/lib/accounting/file-storage'
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 
@@ -305,8 +306,66 @@ async function collectReferencedPaths(): Promise<Set<string>> {
   return keys
 }
 
+/**
+ * Build local entries for accounting attachments.
+ * These live under ACCOUNTING_STORAGE_ROOT and are uploaded to S3 under the 'accounting/' prefix.
+ */
+async function buildAccountingLocalEntries(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number }> {
+  const attachments = await prisma.accountingAttachment.findMany({ select: { storagePath: true } })
+  const entries: LocalEntry[] = []
+  let missingLocalFiles = 0
+
+  for (const attachment of attachments) {
+    const relPath = attachment.storagePath?.trim()
+    if (!relPath) continue
+
+    // Prevent path traversal
+    const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
+    if (normalized.startsWith('..') || normalized.includes('/../')) {
+      missingLocalFiles++
+      continue
+    }
+
+    const absPath = path.join(ACCOUNTING_STORAGE_ROOT, normalized)
+    let stats: fs.Stats
+    try {
+      stats = await fs.promises.stat(absPath)
+    } catch {
+      missingLocalFiles++
+      continue
+    }
+
+    if (!stats.isFile()) {
+      missingLocalFiles++
+      continue
+    }
+
+    // S3 key for accounting files uses the 'accounting/' prefix
+    const key = `${ACCOUNTING_S3_PREFIX}/${normalized}`
+    entries.push({ key, absPath, size: stats.size })
+  }
+
+  return { entries, discoveredPaths: attachments.length, missingLocalFiles }
+}
+
 async function buildLocalManifest(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number }> {
   const referencedKeys = await collectReferencedPaths()
+  const [mainEntries, accountingResult] = await Promise.all([
+    buildMainLocalEntries(referencedKeys),
+    buildAccountingLocalEntries(),
+  ])
+
+  const entries = [...mainEntries.entries, ...accountingResult.entries]
+  entries.sort((a, b) => a.key.localeCompare(b.key))
+
+  return {
+    entries,
+    discoveredPaths: referencedKeys.size + accountingResult.discoveredPaths,
+    missingLocalFiles: mainEntries.missingLocalFiles + accountingResult.missingLocalFiles,
+  }
+}
+
+async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ entries: LocalEntry[]; missingLocalFiles: number }> {
   const entries: LocalEntry[] = []
   let missingLocalFiles = 0
 
@@ -335,13 +394,7 @@ async function buildLocalManifest(): Promise<{ entries: LocalEntry[]; discovered
     entries.push({ key, absPath, size: stats.size })
   }
 
-  entries.sort((a, b) => a.key.localeCompare(b.key))
-
-  return {
-    entries,
-    discoveredPaths: referencedKeys.size,
-    missingLocalFiles,
-  }
+  return { entries, missingLocalFiles }
 }
 
 async function objectMatchesSize(client: S3Client, bucket: string, key: string, size: number): Promise<boolean> {

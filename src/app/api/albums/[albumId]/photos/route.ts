@@ -167,7 +167,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const timestamp = Date.now()
-  const safeName = validation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255)
+  const safeName = validation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._-]/g, '_').substring(0, 255)
 
   // Allocate a collision-free filename within the album
   const existingPhotos = await prisma.albumPhoto.findMany({

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Cloud, Video, FolderKanban, Wrench, Bell, Shield } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Video, FolderKanban, Wrench, Bell, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CompanyBrandingSection } from '@/components/settings/CompanyBrandingSection'
 import { DomainConfigurationSection } from '@/components/settings/DomainConfigurationSection'
@@ -14,7 +14,6 @@ import { DeveloperToolsSection } from '@/components/settings/DeveloperToolsSecti
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
 import { CpuConfigurationSection } from '@/components/settings/CpuConfigurationSection'
 import { PushNotificationsSection } from '@/components/settings/PushNotificationsSection'
-import { DropboxStorageSection } from '@/components/settings/DropboxStorageSection'
 import { StorageOverviewSection } from '@/components/settings/StorageOverviewSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 import {
@@ -76,6 +75,9 @@ interface Settings {
   excludeInternalIpsFromAnalytics?: boolean | null
   uploadChunkSizeMB?: number | null
   downloadChunkSizeMB?: number | null
+  s3Configured?: boolean | null
+  s3LocalBackupEnabled?: boolean | null
+  s3LocalBackupCategories?: string | null
 }
 
 interface SecuritySettings {
@@ -119,7 +121,6 @@ const SETTING_SECTIONS = [
   { id: 'email', label: 'Email & SMTP', icon: Mail },
   { id: 'cpu', label: 'CPU Configuration', icon: Cpu },
   { id: 'storage', label: 'Storage Overview', icon: HardDrive },
-  { id: 'dropbox', label: 'Dropbox Storage', icon: Cloud },
   { id: 'video-processing', label: 'Default Project Settings', icon: Video },
   { id: 'project-behavior', label: 'Project Behavior', icon: FolderKanban },
   { id: 'developer-tools', label: 'Developer Tools', icon: Wrench },
@@ -183,6 +184,11 @@ export default function GlobalSettingsPage() {
   const [excludeInternalIpsFromAnalytics, setExcludeInternalIpsFromAnalytics] = useState(true)
   const [uploadChunkSizeMB, setUploadChunkSizeMB] = useState<number | ''>(DEFAULT_UPLOAD_CHUNK_SIZE_MB)
   const [downloadChunkSizeMB, setDownloadChunkSizeMB] = useState<number | ''>(DEFAULT_DOWNLOAD_CHUNK_SIZE_MB)
+
+  // S3 local backup state
+  const [s3Configured, setS3Configured] = useState(false)
+  const [s3LocalBackupEnabled, setS3LocalBackupEnabled] = useState(false)
+  const [s3LocalBackupCategories, setS3LocalBackupCategories] = useState<string[]>([])
 
   const [autoCloseApprovedProjectsEnabled, setAutoCloseApprovedProjectsEnabled] = useState(false)
   const [autoCloseApprovedProjectsAfterDays, setAutoCloseApprovedProjectsAfterDays] = useState<number | ''>(7)
@@ -279,10 +285,7 @@ export default function GlobalSettingsPage() {
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
-  const [showDropboxStorage, setShowDropboxStorage] = useState(false)
   const [showStorageOverview, setShowStorageOverview] = useState(false)
-  const [dropboxConfigured, setDropboxConfigured] = useState(false)
-  const [dropboxRootPath, setDropboxRootPath] = useState('')
 
   // CPU Configuration state
   const [showCpuConfig, setShowCpuConfig] = useState(false)
@@ -325,6 +328,7 @@ export default function GlobalSettingsPage() {
     shareSessionRateLimit, shareTokenTtlSeconds, passwordAttempts, sessionTimeoutValue,
     sessionTimeoutUnit, trackAnalytics, trackSecurityLogs, viewSecurityEvents,
     maxInternalCommentsPerProject, maxCommentsPerVideoVersion, maxProjectRecipients,
+    s3LocalBackupEnabled, s3LocalBackupCategories,
     maxProjectFilesPerProject, pushEnabled,
     pushNotifyUnauthorizedOTP, pushNotifyFailedAdminLogin, pushNotifySuccessfulAdminLogin,
     pushNotifyFailedSharePasswordAttempt, pushNotifySuccessfulShareAccess,
@@ -405,6 +409,16 @@ export default function GlobalSettingsPage() {
         setDownloadChunkSizeMB(data.downloadChunkSizeMB ?? DEFAULT_DOWNLOAD_CHUNK_SIZE_MB)
         setAutoCloseApprovedProjectsEnabled(data.autoCloseApprovedProjectsEnabled ?? false)
         setAutoCloseApprovedProjectsAfterDays(data.autoCloseApprovedProjectsAfterDays ?? 7)
+
+        // S3 local backup
+        setS3Configured(data.s3Configured ?? false)
+        setS3LocalBackupEnabled(data.s3LocalBackupEnabled ?? false)
+        try {
+          const parsed = JSON.parse(data.s3LocalBackupCategories || '[]')
+          setS3LocalBackupCategories(Array.isArray(parsed) ? parsed : [])
+        } catch {
+          setS3LocalBackupCategories([])
+        }
         setTestEmailAddress(data.smtpFromAddress || '')
 
         // Set notification settings
@@ -507,11 +521,6 @@ export default function GlobalSettingsPage() {
           )
         }
 
-        // Dropbox status is included in the main settings response
-        if (data.dropboxConfigured !== undefined) {
-          setDropboxConfigured(data.dropboxConfigured)
-          setDropboxRootPath(data.dropboxRootPath || '')
-        }
       } catch (err) {
         setError('Failed to load settings')
       } finally {
@@ -750,6 +759,8 @@ export default function GlobalSettingsPage() {
         defaultClientNotificationTime: defaultClientNotificationSchedule === 'DAILY' ? defaultClientNotificationTime : null,
         defaultClientNotificationDay: null,
         clientEmailProjectApproved,
+        s3LocalBackupEnabled,
+        s3LocalBackupCategories,
       }
 
       // Save global settings
@@ -868,6 +879,11 @@ export default function GlobalSettingsPage() {
         setAutoCloseApprovedProjectsEnabled(refreshedData.autoCloseApprovedProjectsEnabled ?? false)
         setAutoCloseApprovedProjectsAfterDays(refreshedData.autoCloseApprovedProjectsAfterDays ?? 7)
         setAutoDeletePreviewsOnClose(refreshedData.autoDeletePreviewsOnClose ?? false)
+        setS3LocalBackupEnabled(refreshedData.s3LocalBackupEnabled ?? false)
+        try {
+          const parsed = JSON.parse(refreshedData.s3LocalBackupCategories || '[]')
+          setS3LocalBackupCategories(Array.isArray(parsed) ? parsed : [])
+        } catch { setS3LocalBackupCategories([]) }
         setAdminNotificationSchedule(refreshedData.adminNotificationSchedule || 'HOURLY')
         setAdminNotificationTime(refreshedData.adminNotificationTime || '09:00')
         setAdminNotificationDay(refreshedData.adminNotificationDay ?? 1)
@@ -1213,13 +1229,11 @@ export default function GlobalSettingsPage() {
             onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
             recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
             recalculateProjectDataTotalsResult={recalcProjectDataResult}
-          />
-
-          <DropboxStorageSection
-            show={showDropboxStorage}
-            setShow={setShowDropboxStorage}
-            dropboxConfigured={dropboxConfigured}
-            dropboxRootPath={dropboxRootPath}
+            s3Configured={s3Configured}
+            s3LocalBackupEnabled={s3LocalBackupEnabled}
+            setS3LocalBackupEnabled={setS3LocalBackupEnabled}
+            s3LocalBackupCategories={s3LocalBackupCategories as any}
+            setS3LocalBackupCategories={setS3LocalBackupCategories as any}
           />
 
           <VideoProcessingSettingsSection
@@ -1581,16 +1595,11 @@ export default function GlobalSettingsPage() {
                 onRecalculateProjectDataTotals={handleRecalculateProjectDataTotals}
                 recalculateProjectDataTotalsLoading={recalcProjectDataLoading}
                 recalculateProjectDataTotalsResult={recalcProjectDataResult}
-              />
-            )}
-
-            {activeSection === 'dropbox' && (
-              <DropboxStorageSection
-                show={true}
-                setShow={() => {}}
-                hideCollapse
-                dropboxConfigured={dropboxConfigured}
-                dropboxRootPath={dropboxRootPath}
+                s3Configured={s3Configured}
+                s3LocalBackupEnabled={s3LocalBackupEnabled}
+                setS3LocalBackupEnabled={setS3LocalBackupEnabled}
+                s3LocalBackupCategories={s3LocalBackupCategories as any}
+                setS3LocalBackupCategories={setS3LocalBackupCategories as any}
               />
             )}
 

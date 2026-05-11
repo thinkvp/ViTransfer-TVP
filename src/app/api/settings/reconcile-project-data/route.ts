@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getRedisForQueue } from '@/lib/redis'
 import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
+import { reconcileAccountingFilesBytes } from '@/lib/accounting/file-storage'
 
 export const runtime = 'nodejs'
 
@@ -59,7 +60,12 @@ export async function POST(request: NextRequest) {
     }
   } catch (e) {
     console.warn('[SETTINGS] Failed to enqueue reconcile-project-total-bytes; running inline:', e)
-    const result = await reconcileAllProjectsStorageTotals()
+    const [result] = await Promise.all([
+      reconcileAllProjectsStorageTotals(),
+      reconcileAccountingFilesBytes().catch((e) => {
+        console.warn('[SETTINGS] Failed to reconcile accounting file bytes:', e instanceof Error ? e.message : e)
+      }),
+    ])
     return NextResponse.json({ ok: true, queued: false, ranInline: true, result })
   } finally {
     try {

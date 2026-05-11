@@ -106,7 +106,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const timestamp = Date.now()
   const sanitizedFileName =
-    fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255)
+    fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._-]/g, '_').substring(0, 255)
   const storagePath = `users/${userId}/files/userfile-${timestamp}-${sanitizedFileName}`
 
   const category = fileValidation.detectedCategory || 'other'
