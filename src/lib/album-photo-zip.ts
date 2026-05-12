@@ -43,6 +43,34 @@ export function getAlbumZipStoragePath(params: {
   return `projects/${projectId}/albums/${albumId}/zips/${fileName}`
 }
 
+export function getAlbumZipStoragePaths(params: {
+  projectId?: string
+  albumId?: string
+  projectStoragePath?: string
+  albumFolderName?: string
+  albumName: string
+}): { full: string; social: string } {
+  const { projectId, albumId, projectStoragePath, albumFolderName, albumName } = params
+  return {
+    full: getAlbumZipStoragePath({
+      projectId,
+      albumId,
+      projectStoragePath,
+      albumFolderName,
+      albumName,
+      variant: 'full',
+    }),
+    social: getAlbumZipStoragePath({
+      projectId,
+      albumId,
+      projectStoragePath,
+      albumFolderName,
+      albumName,
+      variant: 'social',
+    }),
+  }
+}
+
 export function getAlbumZipDropboxPath(params: {
   clientName: string
   projectFolderName: string

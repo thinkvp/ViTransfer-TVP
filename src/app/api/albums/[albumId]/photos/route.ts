@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateAlbumPhotoFile } from '@/lib/photo-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
-import { buildAlbumPhotoStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { buildAlbumPhotoStoragePath, buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -190,6 +190,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const projectStoragePath = album.project.storagePath
     || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
   const storagePath = buildAlbumPhotoStoragePath(projectStoragePath, album.storageFolderName || album.name, uniqueName)
+  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(storagePath)
 
   const photo = await prisma.albumPhoto.create({
     data: {
@@ -198,6 +199,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       fileSize: BigInt(fileSize),
       fileType: 'application/octet-stream',
       storagePath,
+      thumbnailStoragePath,
       status: 'UPLOADING',
       uploadedBy: currentUser.id,
       uploadedByName: currentUser.name || currentUser.email,

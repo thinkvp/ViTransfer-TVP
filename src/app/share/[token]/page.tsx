@@ -1435,7 +1435,7 @@ export default function SharePage() {
           id: String(a.id),
           name: String(a.name || ''),
           photoCount: Number(a?._count?.photos || 0),
-          previewPhotoUrl: (a as any)?.previewPhotoUrl || null,
+          thumbnailPhotoUrl: (a as any)?.thumbnailPhotoUrl || null,
         }))}
         activeAlbumId={activeAlbumId}
         onAlbumSelect={handleAlbumSelect}

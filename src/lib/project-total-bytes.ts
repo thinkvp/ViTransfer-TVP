@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { reconcileAllAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { getFilePath } from '@/lib/storage'
 import { isS3Mode, s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
 import * as fs from 'fs'
@@ -173,9 +174,9 @@ export async function computeProjectTotalBytes(
     albumIdList.length > 0
       ? prismaClient.albumPhoto.aggregate({
           where: { albumId: { in: albumIdList } },
-          _sum: { fileSize: true, socialFileSize: true },
+          _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true },
         })
-      : Promise.resolve({ _sum: { fileSize: ZERO as any, socialFileSize: ZERO as any } } as any),
+      : Promise.resolve({ _sum: { fileSize: ZERO as any, socialFileSize: ZERO as any, thumbnailFileSize: ZERO as any } } as any),
     projectEmailIdList.length > 0
       ? prismaClient.projectEmailAttachment.aggregate({
           where: { projectEmailId: { in: projectEmailIdList } },
@@ -194,6 +195,7 @@ export async function computeProjectTotalBytes(
     toBigIntSafe((albumRow as any)?._sum?.socialZipFileSize) +
     toBigIntSafe((albumPhotoRows as any)?._sum?.fileSize) +
     toBigIntSafe((albumPhotoRows as any)?._sum?.socialFileSize) +
+    toBigIntSafe((albumPhotoRows as any)?._sum?.thumbnailFileSize) +
     toBigIntSafe((projectEmailAttachmentRows as any)?._sum?.fileSize)
 
   return total > ZERO ? total : ZERO
@@ -398,6 +400,8 @@ export async function reconcileAllProjectsStorageTotals(
   diskBytes: { checkedCount: number; updatedCount: number }
   previewBytes: { checkedCount: number; updatedCount: number }
 }> {
+  await reconcileAllAlbumZipSizes(prismaClient)
+
   const [totalBytes, diskBytes, previewBytes] = await Promise.all([
     reconcileAllProjectsTotalBytes(prismaClient),
     reconcileAllProjectsDiskBytes(prismaClient),

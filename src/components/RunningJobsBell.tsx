@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Activity, CheckCircle2, Cloud, FileArchive, FolderSync, Loader2, Pause, Play, X, XCircle } from 'lucide-react'
+import { Activity, CheckCircle2, Cloud, FileArchive, FolderSync, ImageIcon, Loader2, Pause, Play, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
-import { useUploadManager, type UploadJob, type ProcessingJob, type DropboxUploadJob, type AlbumZipJob, type AlbumZipDropboxJob, type CompletedServerJob, type FolderRenameJob } from '@/components/UploadManagerProvider'
+import { useUploadManager, type UploadJob, type ProcessingJob, type DropboxUploadJob, type AlbumZipJob, type AlbumThumbnailJob, type AlbumZipDropboxJob, type CompletedServerJob, type FolderRenameJob } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
@@ -367,6 +367,58 @@ function AlbumZipDropboxJobRow({ job, onNavigate }: { job: AlbumZipDropboxJob; o
   )
 }
 
+function AlbumThumbnailJobRow({ job, onNavigate }: { job: AlbumThumbnailJob; onNavigate: (projectId: string) => void }) {
+  const isPending = job.status === 'PENDING'
+  const totalBytes = Number(job.totalBytes)
+  const processedBytes = Number(job.processedBytes)
+  const progress = totalBytes > 0
+    ? Math.min(100, Math.round((processedBytes / totalBytes) * 100))
+    : (job.totalPhotos > 0 ? Math.min(100, Math.round((job.processedPhotos / job.totalPhotos) * 100)) : 0)
+
+  return (
+    <div
+      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      onClick={() => onNavigate(job.projectId)}
+    >
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.albumName}</div>
+          <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">Thumbnails</div>
+        </div>
+        <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
+          <ImageIcon className="w-3 h-3 flex-shrink-0" />
+          {job.projectName}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all',
+              isPending ? 'bg-warning' : 'bg-primary',
+            )}
+            style={{ width: isPending ? '100%' : `${Math.max(progress, 1)}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            {isPending ? (
+              'Queued for thumbnails…'
+            ) : (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {job.processedPhotos}/{job.totalPhotos} photos
+              </>
+            )}
+          </span>
+          {!isPending && progress > 0 && <span>{progress}%</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FolderRenameJobRow({ job }: { job: FolderRenameJob }) {
   const isPending = job.status === 'PENDING'
   const totalBytes = Number(job.totalBytes)
@@ -434,6 +486,8 @@ function CompletedServerJobRow({
         ? 'Dropbox upload failed'
         : job.type === 'albumZip'
           ? 'ZIP build failed'
+          : job.type === 'albumThumbnail'
+            ? 'Thumbnail generation failed'
           : job.type === 'folderRename'
             ? 'Folder rename failed'
             : 'Album Dropbox upload failed'
@@ -443,6 +497,8 @@ function CompletedServerJobRow({
         ? 'Dropbox upload complete'
         : job.type === 'albumZip'
           ? 'ZIP build complete'
+          : job.type === 'albumThumbnail'
+            ? 'Thumbnail generation complete'
           : job.type === 'folderRename'
             ? 'Folder rename complete'
             : 'Album Dropbox upload complete'
@@ -450,6 +506,7 @@ function CompletedServerJobRow({
   const TypeIcon =
     job.type === 'dropbox' || job.type === 'albumZipDropbox' ? Cloud
     : job.type === 'albumZip' ? FileArchive
+    : job.type === 'albumThumbnail' ? ImageIcon
     : job.type === 'folderRename' ? FolderSync
     : Activity
 
@@ -495,7 +552,7 @@ function CompletedServerJobRow({
 }
 
 export default function RunningJobsBell() {
-  const { uploads, processingJobs, dropboxJobs, albumZipJobs, albumZipDropboxJobs, folderRenameJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
+  const { uploads, processingJobs, dropboxJobs, albumZipJobs, albumThumbnailJobs, albumZipDropboxJobs, folderRenameJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const router = useRouter()
@@ -533,6 +590,7 @@ export default function RunningJobsBell() {
     processingJobs.length > 0 ||
     dropboxJobs.length > 0 ||
     albumZipJobs.length > 0 ||
+    albumThumbnailJobs.length > 0 ||
     albumZipDropboxJobs.length > 0 ||
     folderRenameJobs.length > 0
 
@@ -650,6 +708,20 @@ export default function RunningJobsBell() {
                     <div className="divide-y divide-border">
                       {albumZipDropboxJobs.map((job) => (
                         <AlbumZipDropboxJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Album thumbnail jobs */}
+                {albumThumbnailJobs.length > 0 && (
+                  <div>
+                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                      Album Thumbnails ({albumThumbnailJobs.length})
+                    </div>
+                    <div className="divide-y divide-border">
+                      {albumThumbnailJobs.map((job) => (
+                        <AlbumThumbnailJobRow key={job.id} job={job} onNavigate={handleNavigate} />
                       ))}
                     </div>
                   </div>

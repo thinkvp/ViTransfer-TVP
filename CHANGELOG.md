@@ -5,6 +5,36 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.8] - 2026-05-13
+
+### Added
+- **Album photo thumbnail generation** — a new `AlbumPhotoThumbnailStatus` enum and `AlbumThumbnailJob` model (migration `20260513000000_add_album_photo_thumbnails`) track background thumbnail creation per album; five new columns on `AlbumPhoto` (`thumbnailStoragePath`, `thumbnailStatus`, `thumbnailError`, `thumbnailGeneratedAt`, `thumbnailFileSize`) persist the result; a new `album-photo-thumbnail-processor` BullMQ worker uses `sharp` to produce 320 px long-edge JPEG thumbnails (quality 82) stored in a `thumbnails/` subfolder alongside the originals; both S3 and local storage modes are supported; per-photo progress is written to the `AlbumThumbnailJob` DB record after each photo; if pending photos remain after a run the job self-re-enqueues with a 2-second delay.
+- **`enqueueAlbumThumbnailJob()`** — new helper (`src/lib/album-photo-thumbnail.ts`) that creates or reuses an `AlbumThumbnailJob` DB record, deduplicates PENDING jobs, and enqueues the BullMQ worker; called from the upload-finalize path, the share album list route, and the share album detail route.
+- **`variant=thumbnail` on the photo content route** — `GET /api/content/photo/[token]` accepts `?variant=thumbnail` and serves the stored thumbnail when `thumbnailStatus === READY`; falls back to the social (2048 px) derivative if available, then to the original; a shared `streamInlineImage()` helper is extracted and used by both the thumbnail and preview paths.
+- **Thumbnail URL exposed on share album APIs** — `GET /api/share/[token]/albums` now returns `thumbnailPhotoUrl` (replaces `previewPhotoUrl`) using `?variant=thumbnail`; `GET /api/share/[token]/albums/[albumId]` now returns `thumbnailUrl` and `thumbnailReady` per photo; both endpoints trigger `enqueueAlbumThumbnailJob` when thumbnails are not yet ready, providing lazy backfill for existing albums.
+- **`buildAlbumPhotoThumbnailStoragePath()`** — new helper in `project-storage-paths.ts` that derives the thumbnail storage path (`thumbnails/` subfolder, filename normalised to `.jpg`).
+- **Album thumbnail jobs in Running Jobs bell** — `GET /api/running-jobs` now includes `albumThumbnailJobs` (PENDING/IN_PROGRESS active jobs + recently completed/failed entries); `UploadManagerProvider` tracks them with the same completion-entry and dismiss pattern as other job types; `RunningJobsBell` renders an "Album Thumbnails" section with per-album progress bars and photo counts.
+- **`reconcileAllAlbumZipSizes()`** — new function in `album-zip-size-sync.ts` that bulk-verifies all album ZIP file sizes against storage (S3 or local) using a 4-worker async pool; called at the start of `reconcileAllProjectsStorageTotals()` so the daily reconcile also heals stale ZIP size cached totals.
+- **`getAlbumZipStoragePaths()`** — new convenience wrapper in `album-photo-zip.ts` returning both `full` and `social` ZIP paths in a single call; adopted across `album-zip-size-sync.ts`, `project-storage-orphan-cleanup.ts`, `local-to-s3-migration.ts`, and `s3-local-backup.ts` to replace duplicated path construction.
+- **`finalizeAlbumPhotoUpload()`** — new `src/lib/album-photo-upload-finalize.ts` module encapsulating the full TUS upload-finish logic (mark `READY`, enqueue social + thumbnail + ZIP jobs, reset Dropbox tracking); the TUS handler now delegates to this function, removing ~100 lines of inline code from `pages/api/uploads/[[...path]].ts`.
+
+### Changed
+- **Thumbnail storage paths rebased on project/client/album rename** — `folder-rename-processor.ts` (all three path-rebase SQL blocks), `PATCH /api/projects/[id]`, `PATCH /api/clients/[id]`, and `PATCH /api/albums/[albumId]` now include `thumbnailStoragePath` in rebase operations alongside `storagePath` and `socialStoragePath`.
+- **Thumbnail file size included in all storage totals** — `computeProjectTotalBytes`, `GET /api/projects/[id]/storage`, and `GET /api/settings/storage-overview` now aggregate `thumbnailFileSize` alongside `socialFileSize`; photo and album delete routes deduct `thumbnailFileSize` from project totals.
+- **Thumbnail file deleted on photo and album delete** — `DELETE /api/albums/[albumId]/photos/[photoId]` and `DELETE /api/albums/[albumId]` now call `deleteFile(thumbnailStoragePath)` after removing the original and social derivative.
+- **Thumbnail path stored at photo create** — `POST /api/albums/[albumId]/photos` pre-computes and stores `thumbnailStoragePath` using `buildAlbumPhotoThumbnailStoragePath()` so the path is available before the thumbnail worker runs.
+- **S3 local backup includes thumbnail files** — `collectKeysForCategory('photoZipBytes')` now includes `thumbnailStoragePath` entries alongside social derivative and ZIP files.
+- **Local-to-S3 migration includes thumbnail and album ZIP files** — `collectReferencedPaths()` now collects `thumbnailStoragePath` per photo and album ZIP paths (guarded by non-zero `fullZipFileSize`/`socialZipFileSize`) so thumbnails and ZIPs are included in a full local-to-S3 migration.
+- **Storage integrity scan coverage expanded** — `buildMissingFilesReferences()` now tracks `thumbnailStoragePath` per photo, album ZIP paths (when non-zero size), video preview/thumbnail/timeline paths, user avatar paths, and company logo/favicon/dark-logo paths; the orphan scan (`buildProjectStorageReferences()`) also registers `thumbnailStoragePath` so thumbnail files are not misreported as orphans.
+- **`ShareAlbumViewer` and `VideoSidebar` use thumbnail URL** — the photo grid now uses `thumbnailUrl || previewUrl || url` priority order; both components accept `thumbnailPhotoUrl` (renamed from `previewPhotoUrl`) for album cover images; admin share page updated to pass `thumbnailPhotoUrl`.
+- **Thumbnail jobs cancelled on project delete** — `cancelProjectJobs()` now also removes any pending BullMQ `album-photo-thumbnail` jobs for the project's albums.
+- **BullMQ purge route queue names corrected** — `POST /api/settings/purge-bullmq-jobs` fixes stale queue names (`album-photo-social-processing` → `album-photo-social`, `album-photo-zip-processing` → `album-photo-zip`) and adds `album-photo-thumbnail` to the purge list.
+- **Excel and PowerPoint files accepted as project and video asset documents** — `.xls`, `.xlsx`, `.ppt`, `.pptx` added to `ALLOWED_ASSET_EXTENSIONS.document` and to `ALLOWED_ASSET_TYPES.document` (with correct MIME types) so spreadsheets and presentations can be attached to projects and shared with clients.
+
+### Fixed
+- **`ProjectEmailUpload` completed uploads auto-clear after 1.5 seconds** — a `useEffect` now removes completed queue entries 1.5 s after they appear so the upload list does not accumulate stale "completed" rows requiring manual dismissal.
+- **Sales Dashboard Projects Overview chart no longer produces invalid dimension warnings** — `ResponsiveContainer` switched from a fixed `height={220}` to `height="100%"` with `minHeight={220}` so the chart renders correctly before the container has laid out its final height.
+
 ## [1.7.7] - 2026-05-12
 
 ### Changed

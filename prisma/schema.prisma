@@ -98,6 +98,30 @@ model FolderRenameJob {
   @@index([entityType, entityId])
 }
 
+/// Tracks background album thumbnail generation for share-page thumbnails.
+/// One record represents a batched album-level job so Running Jobs can show
+/// aggregate progress instead of one row per photo.
+model AlbumThumbnailJob {
+  id             String    @id @default(cuid())
+  albumId        String
+  projectId      String
+  albumName      String
+  projectName    String
+  status         String    @default("PENDING")
+  totalPhotos    Int       @default(0)
+  processedPhotos Int      @default(0)
+  totalBytes     BigInt    @default(0)
+  processedBytes BigInt    @default(0)
+  error          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+
+  @@index([status])
+  @@index([albumId])
+  @@index([projectId])
+}
+
 model Client {
   id                   String    @id @default(cuid())
   name                 String    @unique
@@ -512,6 +536,12 @@ model AlbumPhoto {
   socialGeneratedAt DateTime?
   socialFileSize    BigInt                 @default(0)
 
+  thumbnailStoragePath String?
+  thumbnailStatus      AlbumPhotoThumbnailStatus @default(PENDING)
+  thumbnailError       String?
+  thumbnailGeneratedAt DateTime?
+  thumbnailFileSize    BigInt                    @default(0)
+
   analytics AlbumAnalytics[]
 
   uploadedBy     String?
@@ -523,6 +553,7 @@ model AlbumPhoto {
   @@index([albumId])
   @@index([albumId, status])
   @@index([albumId, socialStatus])
+  @@index([albumId, thumbnailStatus])
 }
 
 enum AlbumPhotoStatus {
@@ -532,6 +563,13 @@ enum AlbumPhotoStatus {
 }
 
 enum AlbumPhotoSocialStatus {
+  PENDING
+  PROCESSING
+  READY
+  ERROR
+}
+
+enum AlbumPhotoThumbnailStatus {
   PENDING
   PROCESSING
   READY

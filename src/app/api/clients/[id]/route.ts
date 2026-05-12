@@ -287,7 +287,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
           const albumPhotos = await tx.albumPhoto.findMany({
             where: { album: { project: { clientId: id } } },
-            select: { id: true, storagePath: true, socialStoragePath: true },
+            select: { id: true, storagePath: true, socialStoragePath: true, thumbnailStoragePath: true },
           })
           for (const photo of albumPhotos) {
             await tx.albumPhoto.update({
@@ -295,6 +295,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               data: {
                 storagePath: replaceStoredStoragePathPrefix(photo.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
                 socialStoragePath: replaceStoredStoragePathPrefix(photo.socialStoragePath, oldClientStorageRoot, newClientStorageRoot),
+                thumbnailStoragePath: replaceStoredStoragePathPrefix(photo.thumbnailStoragePath, oldClientStorageRoot, newClientStorageRoot),
               },
             })
           }

@@ -71,35 +71,53 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     storagePath = photo.socialStoragePath
   }
 
+  async function streamInlineImage(candidateStoragePath: string): Promise<NextResponse | null> {
+    const exists = isS3Mode()
+      ? await s3FileExists(candidateStoragePath)
+      : existsSync(getFilePath(candidateStoragePath))
+
+    if (!exists) return null
+
+    const { downloadChunkSizeBytes } = await getTransferTuningSettings()
+
+    if (isS3Mode()) {
+      const presignedUrl = await s3GetPresignedStreamUrl(candidateStoragePath, 14400, 'image/jpeg')
+      return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
+    }
+
+    const fullPath = getFilePath(candidateStoragePath)
+    const stat = statSync(fullPath)
+    const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
+    return new NextResponse(createWebReadableStream(fileStream), {
+      headers: {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': stat.size.toString(),
+        'Cache-Control': 'private, max-age=86400, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+      },
+    })
+  }
+
+  if (variant === 'thumbnail') {
+    if (photo.thumbnailStatus === 'READY' && photo.thumbnailStoragePath) {
+      const thumbnailResponse = await streamInlineImage(photo.thumbnailStoragePath)
+      if (thumbnailResponse) return thumbnailResponse
+    }
+
+    if (photo.socialStatus === 'READY' && photo.socialStoragePath) {
+      const previewResponse = await streamInlineImage(photo.socialStoragePath)
+      if (previewResponse) return previewResponse
+    }
+    // Fall through to the original as a graceful last resort.
+  }
+
   // Preview: serve the social-sized derivative (2048px long edge) when ready,
   // otherwise fall through to the original so the viewer is never broken.
   if (variant === 'preview') {
     if (photo.socialStatus === 'READY' && photo.socialStoragePath) {
-      const previewExists = isS3Mode()
-        ? await s3FileExists(photo.socialStoragePath)
-        : existsSync(getFilePath(photo.socialStoragePath))
-
-      if (previewExists) {
-        const { downloadChunkSizeBytes } = await getTransferTuningSettings()
-
-        if (isS3Mode()) {
-          const presignedUrl = await s3GetPresignedStreamUrl(photo.socialStoragePath, 14400, 'image/jpeg')
-          return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
-        } else {
-          const previewFullPath = getFilePath(photo.socialStoragePath)
-          const previewStat = statSync(previewFullPath)
-          const previewStream = createReadStream(previewFullPath, { highWaterMark: downloadChunkSizeBytes })
-          return new NextResponse(createWebReadableStream(previewStream), {
-            headers: {
-              'Content-Type': 'image/jpeg',
-              'Content-Length': previewStat.size.toString(),
-              'Cache-Control': 'private, max-age=86400, immutable',
-              'X-Content-Type-Options': 'nosniff',
-              'Referrer-Policy': 'strict-origin-when-cross-origin',
-            },
-          })
-        }
-      }
+      const previewResponse = await streamInlineImage(photo.socialStoragePath)
+      if (previewResponse) return previewResponse
     }
     // Social derivative not ready yet — fall through and serve the original as a graceful fallback.
   }

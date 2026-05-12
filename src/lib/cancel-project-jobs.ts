@@ -1,5 +1,6 @@
-import { getVideoQueue, getAlbumPhotoSocialQueue, getAlbumPhotoZipQueue } from './queue'
+import { getVideoQueue, getAlbumPhotoSocialQueue, getAlbumPhotoThumbnailQueue, getAlbumPhotoZipQueue } from './queue'
 import { getAlbumZipJobId, AlbumZipVariant } from './album-photo-zip'
+import { getAlbumThumbnailQueueJobId } from './album-photo-thumbnail'
 import { prisma } from './db'
 
 type PreviewResolution = '480p' | '720p' | '1080p'
@@ -18,7 +19,7 @@ function sanitizeRequestedPreviewResolutions(value: unknown): PreviewResolution[
 /**
  * Cancel all pending/waiting BullMQ jobs for a project.
  * Removes waiting, delayed, and prioritized jobs from the video-processing,
- * album-photo-social, and album-photo-zip queues.
+ * album-photo-social, album-photo-thumbnail, and album-photo-zip queues.
  */
 export async function cancelProjectJobs(projectId: string): Promise<{ cancelled: number }> {
   let cancelled = 0
@@ -80,6 +81,27 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
     }
   } catch (err) {
     console.error(`[JOB-CANCEL] Error cancelling album photo social jobs for project ${projectId}:`, err)
+  }
+
+  // 4. Cancel album-photo-thumbnail jobs for this project's albums
+  try {
+    const albums = await prisma.album.findMany({
+      where: { projectId },
+      select: { id: true },
+    })
+    if (albums.length > 0) {
+      const thumbnailQueue = getAlbumPhotoThumbnailQueue()
+      for (const album of albums) {
+        try {
+          await thumbnailQueue.remove(getAlbumThumbnailQueueJobId(album.id))
+          cancelled++
+        } catch {
+          // Job may not exist or already completed
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[JOB-CANCEL] Error cancelling album photo thumbnail jobs for project ${projectId}:`, err)
   }
 
   if (cancelled > 0) {

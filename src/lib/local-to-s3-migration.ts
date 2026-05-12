@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { prisma } from '@/lib/db'
+import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { getFilePath } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { ACCOUNTING_STORAGE_ROOT, ACCOUNTING_S3_PREFIX } from '@/lib/accounting/file-storage'
@@ -193,6 +195,7 @@ async function collectReferencedPaths(): Promise<Set<string>> {
     commentFiles,
     projectFiles,
     albumPhotos,
+    albums,
     projectEmails,
     projectEmailAttachments,
     clientFiles,
@@ -214,7 +217,23 @@ async function collectReferencedPaths(): Promise<Set<string>> {
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
     prisma.projectFile.findMany({ select: { storagePath: true } }),
-    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true } }),
+    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
+    prisma.album.findMany({
+      select: {
+        name: true,
+        storageFolderName: true,
+        fullZipFileSize: true,
+        socialZipFileSize: true,
+        project: {
+          select: {
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+          },
+        },
+      },
+    }),
     prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
     prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
     prisma.clientFile.findMany({ select: { storagePath: true } }),
@@ -266,6 +285,28 @@ async function collectReferencedPaths(): Promise<Set<string>> {
     if (key) keys.add(key)
     const socialKey = normalizeKey(row.socialStoragePath || '')
     if (socialKey) keys.add(socialKey)
+    const thumbnailKey = normalizeKey(row.thumbnailStoragePath || '')
+    if (thumbnailKey) keys.add(thumbnailKey)
+  }
+
+  for (const album of albums) {
+    const projectStoragePath = album.project.storagePath
+      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+    const albumFolderName = album.storageFolderName || album.name
+    const zipPaths = getAlbumZipStoragePaths({
+      projectStoragePath,
+      albumFolderName,
+      albumName: album.name,
+    })
+
+    if (Number(album.fullZipFileSize || 0) > 0) {
+      const fullKey = normalizeKey(zipPaths.full)
+      if (fullKey) keys.add(fullKey)
+    }
+    if (Number(album.socialZipFileSize || 0) > 0) {
+      const socialKey = normalizeKey(zipPaths.social)
+      if (socialKey) keys.add(socialKey)
+    }
   }
 
   for (const row of projectEmails) {

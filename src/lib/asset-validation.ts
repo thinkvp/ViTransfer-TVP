@@ -5,7 +5,7 @@ export const ALLOWED_ASSET_EXTENSIONS = {
   video: ['.mp4', '.mov', '.avi', '.mkv', '.mxf', '.prores'],
   subtitle: ['.srt', '.vtt', '.ass', '.ssa', '.sub'],
   project: ['.prproj', '.drp', '.drt', '.dra', '.fcpbundle', '.fcpxml'],
-  document: ['.pdf', '.txt', '.md', '.doc', '.docx'],
+  document: ['.pdf', '.txt', '.md', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'],
   archive: ['.zip']
 } as const
 

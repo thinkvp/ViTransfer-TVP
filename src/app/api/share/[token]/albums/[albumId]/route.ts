@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 
@@ -90,13 +91,19 @@ export async function GET(
         fileSize: p.fileSize.toString(),
         createdAt: p.createdAt,
         url: `/api/content/photo/${tokenValue}`,
+        thumbnailUrl: `/api/content/photo/${tokenValue}?variant=thumbnail`,
         previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
         downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         socialDownloadUrl: `/api/content/photo/${tokenValue}?download=true&variant=social`,
         socialReady: p.socialStatus === 'READY' && Boolean(p.socialStoragePath),
+        thumbnailReady: p.thumbnailStatus === 'READY' && Boolean(p.thumbnailStoragePath),
       }
     })
   )
+
+  if (album.photos.some((p) => p.thumbnailStatus !== 'READY' || !p.thumbnailStoragePath)) {
+    void enqueueAlbumThumbnailJob({ albumId: album.id, delayMs: 500 }).catch(() => {})
+  }
 
   const projectStoragePath = album.project.storagePath
     || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)

@@ -161,7 +161,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (albumRenamePlan && !isS3Mode()) {
       const photos = await tx.albumPhoto.findMany({
         where: { albumId },
-        select: { id: true, storagePath: true, socialStoragePath: true },
+        select: { id: true, storagePath: true, socialStoragePath: true, thumbnailStoragePath: true },
       })
       for (const photo of photos) {
         await tx.albumPhoto.update({
@@ -174,6 +174,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
             )!,
             socialStoragePath: replaceStoredStoragePathPrefix(
               photo.socialStoragePath,
+              albumRenamePlan.oldAlbumStorageRoot,
+              albumRenamePlan.newAlbumStorageRoot,
+            ),
+            thumbnailStoragePath: replaceStoredStoragePathPrefix(
+              photo.thumbnailStoragePath,
               albumRenamePlan.oldAlbumStorageRoot,
               albumRenamePlan.newAlbumStorageRoot,
             ),
@@ -243,7 +248,15 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
           },
         },
         photos: {
-          select: { id: true, fileSize: true, socialFileSize: true, storagePath: true, socialStoragePath: true },
+          select: {
+            id: true,
+            fileSize: true,
+            socialFileSize: true,
+            thumbnailFileSize: true,
+            storagePath: true,
+            socialStoragePath: true,
+            thumbnailStoragePath: true,
+          },
         },
       },
     })
@@ -283,6 +296,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
         if (photo.socialStoragePath) {
           await deleteFile(photo.socialStoragePath).catch(() => {})
         }
+
+        if (photo.thumbnailStoragePath) {
+          await deleteFile(photo.thumbnailStoragePath).catch(() => {})
+        }
       } catch {
         // Ignore storage errors; DB is source of truth
       }
@@ -292,7 +309,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await prisma.albumPhoto.deleteMany({ where: { albumId } })
     await prisma.album.delete({ where: { id: albumId } })
 
-    const photosDelta = album.photos.reduce((acc, p) => acc + p.fileSize + p.socialFileSize, BigInt(0))
+    const photosDelta = album.photos.reduce(
+      (acc, p) => acc + p.fileSize + p.socialFileSize + (p.thumbnailFileSize ?? BigInt(0)),
+      BigInt(0)
+    )
     const zipDelta = (album.fullZipFileSize ?? BigInt(0)) + (album.socialZipFileSize ?? BigInt(0))
     await adjustProjectTotalBytes(album.projectId, (photosDelta + zipDelta) * BigInt(-1))
 

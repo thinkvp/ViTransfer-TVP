@@ -345,6 +345,16 @@ export function ProjectEmailUpload({
     for (const item of toStart) void startUpload(item.id)
   }, [queue, maxConcurrent, startUpload])
 
+  useEffect(() => {
+    if (!queue.some((u) => u.status === 'completed')) return
+
+    const timer = window.setTimeout(() => {
+      setQueue((prev) => prev.filter((u) => u.status !== 'completed'))
+    }, 1500)
+
+    return () => window.clearTimeout(timer)
+  }, [queue])
+
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()

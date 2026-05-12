@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
       prisma.projectFile.aggregate({ _sum: { fileSize: true } }),
       prisma.projectEmail.aggregate({ _sum: { rawFileSize: true } }),
       prisma.projectEmailAttachment.aggregate({ _sum: { fileSize: true } }),
-      prisma.albumPhoto.aggregate({ _sum: { fileSize: true, socialFileSize: true } }),
+      prisma.albumPhoto.aggregate({ _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true } }),
       prisma.album.aggregate({ _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
       prisma.clientFile.aggregate({ _sum: { fileSize: true } }),
       prisma.userFile.aggregate({ _sum: { fileSize: true } }),
@@ -84,6 +84,7 @@ export async function GET(request: NextRequest) {
     const albumZipSocialBytes = asNumber(albumAgg._sum.socialZipFileSize)
     const photoZipBytes =
       asNumber(albumPhotoAgg._sum.socialFileSize) +
+      asNumber(albumPhotoAgg._sum.thumbnailFileSize) +
       albumZipFullBytes +
       albumZipSocialBytes
     const clientFilesBytes = asNumber(clientFileAgg._sum.fileSize)

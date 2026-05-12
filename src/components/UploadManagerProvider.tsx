@@ -86,6 +86,19 @@ export type AlbumZipDropboxJob = {
   fileSizeBytes: number
 }
 
+export type AlbumThumbnailJob = {
+  id: string
+  albumId: string
+  albumName: string
+  projectId: string
+  projectName: string
+  status: 'PENDING' | 'IN_PROGRESS'
+  totalPhotos: number
+  processedPhotos: number
+  totalBytes: string
+  processedBytes: string
+}
+
 export type FolderRenameJob = {
   id: string
   entityType: 'PROJECT' | 'CLIENT' | 'VIDEO_GROUP' | 'ALBUM'
@@ -101,7 +114,7 @@ export type FolderRenameJob = {
 /** A server-side job that has recently completed (kept for 30 min). */
 export type CompletedServerJob = {
   id: string
-  type: 'processing' | 'dropbox' | 'albumZip' | 'albumZipDropbox' | 'folderRename'
+  type: 'processing' | 'dropbox' | 'albumZip' | 'albumThumbnail' | 'albumZipDropbox' | 'folderRename'
   label: string
   sublabel: string
   projectId: string
@@ -136,6 +149,8 @@ export type UploadManagerContextType = {
   dropboxJobs: DropboxUploadJob[]
   /** Album ZIP generation jobs (polled from queue). */
   albumZipJobs: AlbumZipJob[]
+  /** Album thumbnail generation jobs (polled from DB). */
+  albumThumbnailJobs: AlbumThumbnailJob[]
   /** Album ZIP Dropbox upload jobs (polled). */
   albumZipDropboxJobs: AlbumZipDropboxJob[]
   /** Active folder rename jobs (polled). */
@@ -226,6 +241,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const [processingJobs, setProcessingJobs] = useState<ProcessingJob[]>([])
   const [dropboxJobs, setDropboxJobs] = useState<DropboxUploadJob[]>([])
   const [albumZipJobs, setAlbumZipJobs] = useState<AlbumZipJob[]>([])
+  const [albumThumbnailJobs, setAlbumThumbnailJobs] = useState<AlbumThumbnailJob[]>([])
   const [albumZipDropboxJobs, setAlbumZipDropboxJobs] = useState<AlbumZipDropboxJob[]>([])
   const [folderRenameJobs, setFolderRenameJobs] = useState<FolderRenameJob[]>([])
   const [completedServerJobs, setCompletedServerJobs] = useState<CompletedServerJob[]>([])
@@ -234,12 +250,14 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const prevProcessingIdsRef = useRef<Set<string>>(new Set())
   const prevDropboxIdsRef = useRef<Set<string>>(new Set())
   const prevAlbumZipIdsRef = useRef<Set<string>>(new Set())
+  const prevAlbumThumbnailIdsRef = useRef<Set<string>>(new Set())
   const prevAlbumZipDropboxIdsRef = useRef<Set<string>>(new Set())
   const prevFolderRenameIdsRef = useRef<Set<string>>(new Set())
   // Map id → job metadata for building completion entries.
   const prevProcessingMapRef = useRef<Map<string, ProcessingJob>>(new Map())
   const prevDropboxMapRef = useRef<Map<string, DropboxUploadJob>>(new Map())
   const prevAlbumZipMapRef = useRef<Map<string, AlbumZipJob>>(new Map())
+  const prevAlbumThumbnailMapRef = useRef<Map<string, AlbumThumbnailJob>>(new Map())
   const prevAlbumZipDropboxMapRef = useRef<Map<string, AlbumZipDropboxJob>>(new Map())
   const prevFolderRenameMapRef = useRef<Map<string, FolderRenameJob>>(new Map())
   // Track IDs that the user has manually dismissed (so re-polls don't re-add them).
@@ -768,6 +786,39 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             setAlbumZipDropboxJobs(incoming)
           }
 
+          // --- Album thumbnail jobs ---
+          if (data.albumThumbnailJobs?.active != null || data.albumThumbnailJobs?.completed != null) {
+            const incoming = (data.albumThumbnailJobs.active ?? []) as AlbumThumbnailJob[]
+            const incomingIds = new Set(incoming.map((j: AlbumThumbnailJob) => j.id))
+
+            for (const prevId of prevAlbumThumbnailIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('albumThumbnail', prevId))) {
+                const prev = prevAlbumThumbnailMapRef.current.get(prevId)
+                if (prev) {
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'albumThumbnail',
+                    label: prev.albumName,
+                    sublabel: `${prev.projectName} · Album thumbnails complete`,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            for (const j of (data.albumThumbnailJobs.completed ?? []) as any[]) {
+              const key = getCompletedServerJobKeyByParts('albumThumbnail', j.id)
+              if (!dismissedServerJobIdsRef.current.has(key)) {
+                newCompleted.push({ ...j, type: 'albumThumbnail' } as CompletedServerJob)
+              }
+            }
+
+            prevAlbumThumbnailIdsRef.current = incomingIds
+            prevAlbumThumbnailMapRef.current = new Map(incoming.map((j: AlbumThumbnailJob) => [j.id, j]))
+            setAlbumThumbnailJobs(incoming)
+          }
+
           // --- Folder rename jobs ---
           if (data.folderRenameJobs?.active != null || data.folderRenameJobs?.completed != null) {
             const incoming = (data.folderRenameJobs.active ?? []) as FolderRenameJob[]
@@ -1011,6 +1062,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     processingJobs.length +
     dropboxJobs.length +
     albumZipJobs.length +
+    albumThumbnailJobs.length +
     albumZipDropboxJobs.length +
     folderRenameJobs.length
 
@@ -1029,6 +1081,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     processingJobs,
     dropboxJobs,
     albumZipJobs,
+    albumThumbnailJobs,
     albumZipDropboxJobs,
     folderRenameJobs,
     completedServerJobs,
@@ -1045,6 +1098,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     processingJobs,
     dropboxJobs,
     albumZipJobs,
+    albumThumbnailJobs,
     albumZipDropboxJobs,
     folderRenameJobs,
     completedServerJobs,

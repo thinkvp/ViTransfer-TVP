@@ -166,7 +166,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       prisma.projectFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
       prisma.projectEmail.aggregate({ where: { projectId }, _sum: { rawFileSize: true } }),
       prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
-      prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true } }),
+      prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true } }),
       prisma.album.aggregate({ where: { projectId }, _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
       includeDropbox
         ? prisma.video.findMany({
@@ -214,6 +214,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const photosOriginalBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
     const socialPhotosBytes = asNumberBigInt(albumPhotoAgg._sum.socialFileSize)
+    const thumbnailPhotosBytes = asNumberBigInt(albumPhotoAgg._sum.thumbnailFileSize)
 
     let s3VideoPreviewsBytes = 0
     // Use DB-backed previewBytes (reconciled daily) instead of a live S3 scan.
@@ -228,7 +229,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const originalVideosBytes = videosBytes
     const originalPhotosBytes = photosOriginalBytes
-    const photoZipBytes = socialPhotosBytes + albumZipFullBytes + albumZipSocialBytes
+    const photoZipBytes = socialPhotosBytes + thumbnailPhotosBytes + albumZipFullBytes + albumZipSocialBytes
 
     // Fold sub-categories into the existing breakdown rows used by the UI.
     const photosBytes = originalPhotosBytes + photoZipBytes
@@ -328,6 +329,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           select: {
             storagePath: true,
             socialStoragePath: true,
+            thumbnailStoragePath: true,
           },
         }),
         prisma.album.findMany({
@@ -366,6 +368,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.storagePath)),
         Promise.all([
           sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.socialStoragePath)),
+          sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.thumbnailStoragePath)),
           sumStorageEntrySizes(
             albumEntries.flatMap((album) => [
               getAlbumZipStoragePath({
@@ -386,7 +389,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
               }),
             ])
           ),
-        ]).then(([socialPhotoBytesDisk, albumZipBytesDisk]) => socialPhotoBytesDisk + albumZipBytesDisk),
+        ]).then(([socialPhotoBytesDisk, thumbnailPhotoBytesDisk, albumZipBytesDisk]) => socialPhotoBytesDisk + thumbnailPhotoBytesDisk + albumZipBytesDisk),
       ])
 
       videoPreviewsBytes = Math.max(0, videoPreviewsBytesDisk)

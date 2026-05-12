@@ -31,6 +31,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
 import { ACCOUNTING_STORAGE_ROOT, ACCOUNTING_S3_PREFIX } from '@/lib/accounting/file-storage'
+import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildAlbumZipStoragePath, buildAlbumPhotoPreviewStoragePath } from '@/lib/project-storage-paths'
 
 // ---------------------------------------------------------------------------
@@ -237,13 +238,10 @@ async function collectAlbumZipKeys(): Promise<FileEntry[]> {
     select: {
       name: true,
       storageFolderName: true,
+      socialCopiesEnabled: true,
       project: { select: { storagePath: true } },
     },
-    where: {
-      project: { storagePath: { not: null } },
-      // Only collect if at least one ZIP exists (non-zero size)
-      OR: [{ fullZipFileSize: { gt: 0 } }, { socialZipFileSize: { gt: 0 } }],
-    },
+    where: { project: { storagePath: { not: null } } },
   })
 
   const entries: FileEntry[] = []
@@ -252,11 +250,19 @@ async function collectAlbumZipKeys(): Promise<FileEntry[]> {
     const folderName = album.storageFolderName
     if (!projectPath || !folderName) continue
 
-    const fullZipKey = normalizeKey(buildAlbumZipStoragePath(projectPath, folderName, album.name, 'full'))
+    const zipPaths = getAlbumZipStoragePaths({
+      projectStoragePath: projectPath,
+      albumFolderName: folderName,
+      albumName: album.name,
+    })
+
+    const fullZipKey = normalizeKey(zipPaths.full)
     if (fullZipKey) entries.push({ key: fullZipKey, localPath: path.join(STORAGE_ROOT, fullZipKey) })
 
-    const socialZipKey = normalizeKey(buildAlbumZipStoragePath(projectPath, folderName, album.name, 'social'))
-    if (socialZipKey) entries.push({ key: socialZipKey, localPath: path.join(STORAGE_ROOT, socialZipKey) })
+    if (album.socialCopiesEnabled) {
+      const socialZipKey = normalizeKey(zipPaths.social)
+      if (socialZipKey) entries.push({ key: socialZipKey, localPath: path.join(STORAGE_ROOT, socialZipKey) })
+    }
   }
   return entries
 }
@@ -324,14 +330,18 @@ async function collectKeysForCategory(
 
     case 'photoZipBytes': {
       // Social resized copies, album photo previews, and album ZIP archives
-      const photoRows = await prisma.albumPhoto.findMany({ select: { socialStoragePath: true } })
+      const photoRows = await prisma.albumPhoto.findMany({ select: { socialStoragePath: true, thumbnailStoragePath: true } })
       const socialEntries: FileEntry[] = photoRows.flatMap((r) => {
         const key = normalizeKey(r.socialStoragePath)
         return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
       })
+      const thumbnailEntries: FileEntry[] = photoRows.flatMap((r) => {
+        const key = normalizeKey(r.thumbnailStoragePath)
+        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
+      })
       const previewEntries = await collectAlbumPhotoPreviewKeys()
       const zipEntries = await collectAlbumZipKeys()
-      return [...socialEntries, ...previewEntries, ...zipEntries]
+      return [...socialEntries, ...thumbnailEntries, ...previewEntries, ...zipEntries]
     }
 
     case 'communicationsBytes': {

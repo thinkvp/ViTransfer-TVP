@@ -71,6 +71,7 @@ type ShareAlbumPhoto = {
   id: string
   fileName: string
   url: string
+  thumbnailUrl?: string
   previewUrl?: string
   downloadUrl: string
   socialDownloadUrl: string
@@ -343,7 +344,7 @@ export function ShareAlbumViewer({
                       title="Click to view"
                     >
                       <div className="relative w-full h-36 sm:h-40">
-                        <LazyAlbumThumbnail src={p.previewUrl || p.url} alt={p.fileName} />
+                        <LazyAlbumThumbnail src={p.thumbnailUrl || p.previewUrl || p.url} alt={p.fileName} />
                       </div>
                       <div className="absolute inset-x-0 bottom-0 bg-background/80 backdrop-blur-sm px-2 py-1">
                         <p className="text-xs truncate">{p.fileName}</p>

@@ -49,7 +49,8 @@ async function updateProjectDbPaths(
       UPDATE "AlbumPhoto"
       SET
         "storagePath"       = REPLACE("storagePath",       ${oldPrefix}, ${newPrefix}),
-        "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${oldPrefix}, ${newPrefix}) END
+        "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${oldPrefix}, ${newPrefix}) END,
+        "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${oldPrefix}, ${newPrefix}) END
       WHERE "albumId" IN (SELECT "id" FROM "Album" WHERE "projectId" = ${projectId})
     `
 
@@ -123,7 +124,8 @@ async function updateClientDbPaths(
       UPDATE "AlbumPhoto"
       SET
         "storagePath"       = REPLACE("storagePath",       ${oldPrefix}, ${newPrefix}),
-        "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${oldPrefix}, ${newPrefix}) END
+        "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${oldPrefix}, ${newPrefix}) END,
+        "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${oldPrefix}, ${newPrefix}) END
       WHERE "albumId" IN (
         SELECT "id" FROM "Album"
         WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
@@ -249,7 +251,8 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
           UPDATE "AlbumPhoto"
           SET
             "storagePath"       = REPLACE("storagePath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END
+            "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
+            "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END
           WHERE "albumId" = ${renameJob.entityId}
         `
       })

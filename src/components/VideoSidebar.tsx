@@ -16,7 +16,7 @@ interface VideoSidebarProps {
   videosByName: Record<string, any[]>
   activeVideoName: string
   onVideoSelect: (videoName: string) => void
-  albums?: Array<{ id: string; name: string; photoCount?: number; previewPhotoUrl?: string | null }>
+  albums?: Array<{ id: string; name: string; photoCount?: number; thumbnailPhotoUrl?: string | null }>
   activeAlbumId?: string | null
   onAlbumSelect?: (albumId: string) => void
   heading?: string
@@ -392,7 +392,7 @@ export default function VideoSidebar({
                     <div className="space-y-1">
                       {albumsList.map((a) => {
                         const isActive = activeAlbumId === a.id
-                        const previewUrl = (a as any)?.previewPhotoUrl as string | null | undefined
+                        const previewUrl = (a as any)?.thumbnailPhotoUrl as string | null | undefined
                         const availableContentWidth = sidebarWidth - 48
                         const containerWidth = Math.max(120, availableContentWidth - 16)
                         const containerHeight = Math.round(containerWidth * 9 / 16)
@@ -653,7 +653,7 @@ export default function VideoSidebar({
               {/* Albums */}
               {shouldShowAlbums && albumsList.map((a) => {
                 const isActive = activeAlbumId === a.id
-                const previewUrl = (a as any)?.previewPhotoUrl as string | null | undefined
+                const previewUrl = (a as any)?.thumbnailPhotoUrl as string | null | undefined
                 const mobileThumbSize = 100
                 const mobileThumbHeight = Math.round(mobileThumbSize * 9 / 16)
 

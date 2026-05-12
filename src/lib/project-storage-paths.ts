@@ -217,6 +217,18 @@ export function buildAlbumPhotoPreviewStoragePath(photoStoragePath: string): str
   return `${photoStoragePath.substring(0, lastSlash)}/previews/${photoStoragePath.substring(lastSlash + 1)}`
 }
 
+/**
+ * Derives the thumbnail storage path for an album photo.
+ * Thumbnails live in a `thumbnails/` subfolder in the same album directory as the original.
+ * e.g. albums/AlbumName/photo.jpg -> albums/AlbumName/thumbnails/photo.jpg
+ */
+export function buildAlbumPhotoThumbnailStoragePath(photoStoragePath: string): string {
+  const parsed = path.posix.parse(photoStoragePath)
+  const fileName = `${parsed.name || 'thumbnail'}.jpg`
+  if (!parsed.dir) return `thumbnails/${fileName}`
+  return `${parsed.dir}/thumbnails/${fileName}`
+}
+
 export function buildAlbumZipStoragePath(
   projectStoragePath: string,
   albumFolderName: string,

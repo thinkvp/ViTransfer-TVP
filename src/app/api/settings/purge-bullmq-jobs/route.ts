@@ -17,8 +17,9 @@ const QUEUE_NAMES = [
   'client-file-processing',
   'project-file-processing',
   'project-email-processing',
-  'album-photo-social-processing',
-  'album-photo-zip-processing',
+  'album-photo-social',
+  'album-photo-thumbnail',
+  'album-photo-zip',
   'notification-processing',
 ]
 

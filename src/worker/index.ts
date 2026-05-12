@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoZipJob, DropboxUploadJob, AlbumZipDropboxUploadJob, FolderRenameJobPayload } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, DropboxUploadJob, AlbumZipDropboxUploadJob, FolderRenameJobPayload } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -13,6 +13,7 @@ import { processUserFile } from './user-file-processor'
 import { processProjectFile } from './project-file-processor'
 import { processProjectEmail } from './project-email-processor'
 import { processAlbumPhotoSocial } from './album-photo-social-processor'
+import { processAlbumPhotoThumbnail } from './album-photo-thumbnail-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processDropboxUpload } from './dropbox-upload-processor'
 import { processAlbumZipDropboxUpload } from './album-zip-dropbox-upload-processor'
@@ -311,6 +312,29 @@ async function main() {
   })
 
   console.log('[WORKER] Album photo social derivative worker started')
+
+  // Create album photo thumbnail derivative worker
+  const albumPhotoThumbnailWorker = new Worker<AlbumPhotoThumbnailJob>('album-photo-thumbnail', processAlbumPhotoThumbnail, {
+    connection: getRedisForQueue(),
+    concurrency: Math.max(1, concurrency),
+  })
+
+  albumPhotoThumbnailWorker.on('completed', (job) => {
+    console.log(`[WORKER] Album photo thumbnail job ${job.id} completed successfully`)
+  })
+
+  albumPhotoThumbnailWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Album photo thumbnail job ${job?.id} failed:`, err)
+    if (DEBUG) {
+      console.error('[WORKER DEBUG] Album photo thumbnail job failure details:', {
+        jobId: job?.id,
+        jobData: job?.data,
+        error: err instanceof Error ? err.stack : err,
+      })
+    }
+  })
+
+  console.log('[WORKER] Album photo thumbnail derivative worker started')
 
   // Create album photo ZIP generation worker
   const albumPhotoZipWorker = new Worker<AlbumPhotoZipJob>('album-photo-zip', processAlbumPhotoZip, {

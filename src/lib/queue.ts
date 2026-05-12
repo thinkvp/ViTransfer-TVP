@@ -9,6 +9,7 @@ let userFileQueueInstance: Queue<UserFileProcessingJob> | null = null
 let projectFileQueueInstance: Queue<ProjectFileProcessingJob> | null = null
 let projectEmailQueueInstance: Queue<ProjectEmailProcessingJob> | null = null
 let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
+let albumPhotoThumbnailQueueInstance: Queue<AlbumPhotoThumbnailJob> | null = null
 let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
 let dropboxUploadQueueInstance: Queue<DropboxUploadJob> | null = null
 let albumZipDropboxUploadQueueInstance: Queue<AlbumZipDropboxUploadJob> | null = null
@@ -62,6 +63,10 @@ export interface ProjectEmailProcessingJob {
 
 export interface AlbumPhotoSocialJob {
   photoId: string
+}
+
+export interface AlbumPhotoThumbnailJob {
+  albumThumbnailJobId: string
 }
 
 export interface AlbumPhotoZipJob {
@@ -280,6 +285,29 @@ export function getAlbumPhotoSocialQueue(): Queue<AlbumPhotoSocialJob> {
   }
 
   return albumPhotoSocialQueueInstance
+}
+
+export function getAlbumPhotoThumbnailQueue(): Queue<AlbumPhotoThumbnailJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!albumPhotoThumbnailQueueInstance) {
+    albumPhotoThumbnailQueueInstance = new Queue<AlbumPhotoThumbnailJob>('album-photo-thumbnail', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 1,
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return albumPhotoThumbnailQueueInstance
 }
 
 export function getAlbumPhotoZipQueue(): Queue<AlbumPhotoZipJob> {

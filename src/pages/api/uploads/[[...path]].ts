@@ -653,120 +653,16 @@ async function handleAlbumPhotoUploadFinish(
   const { moveUploadedFile } = await import('@/lib/storage')
   await moveUploadedFile(tusFilePath, photo.storagePath, fileSize)
 
-  const actualFileType = 'image/jpeg'
-
-  const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
-
-  await prisma.albumPhoto.update({
-    where: { id: photoId },
-    data: {
-      fileType: actualFileType,
-      status: 'READY',
-      error: null,
-      socialStoragePath,
-      socialStatus: 'PENDING',
-      socialError: null,
-    },
-  })
-
-  // Upload is complete; downstream derivative + ZIP work will run next.
-  await prisma.album.update({
-    where: { id: photo.albumId },
-    data: { status: 'PROCESSING' },
-  }).catch(() => {})
+  const { finalizeAlbumPhotoUpload } = await import('@/lib/album-photo-upload-finalize')
+  const finalized = await finalizeAlbumPhotoUpload(photoId)
+  if (!finalized.ok) {
+    console.error(`[UPLOAD] Album photo not found during finalize: ${photoId}`)
+    return {}
+  }
 
   await cleanupTUSFile(tusFilePath).catch(() => {}) // no-op if already moved; cleans up any orphaned sidecar
 
   console.log(`[UPLOAD] Album photo uploaded and marked READY: ${photoId}`)
-
-  // Queue social-size derivative generation (always — used as preview)
-  try {
-    const { getAlbumPhotoSocialQueue } = await import('@/lib/queue')
-    const q = getAlbumPhotoSocialQueue()
-    await q.add(
-      'process-album-photo-social',
-      { photoId },
-      {
-        jobId: `album-photo-social-${photoId}`,
-      }
-    )
-  } catch (e) {
-    // Best-effort: social generation can be triggered later (e.g. on download).
-    console.warn('[UPLOAD] Failed to enqueue album photo social derivative job:', e)
-  }
-
-  // Invalidate and (debounced) regenerate album ZIPs
-  try {
-    const { deleteFile } = await import('@/lib/storage')
-    const { getAlbumZipJobId, getAlbumZipStoragePath } = await import('@/lib/album-photo-zip')
-    const { syncAlbumZipSizes } = await import('@/lib/album-zip-size-sync')
-    const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
-
-    const fullZipPath = getAlbumZipStoragePath({
-      projectId: photo.album.projectId,
-      albumId: photo.albumId,
-      albumName: photo.album.name,
-      variant: 'full',
-    })
-
-    await deleteFile(fullZipPath).catch(() => {})
-
-    if (photo.album.socialCopiesEnabled) {
-      const socialZipPath = getAlbumZipStoragePath({
-        projectId: photo.album.projectId,
-        albumId: photo.albumId,
-        albumName: photo.album.name,
-        variant: 'social',
-      })
-      await deleteFile(socialZipPath).catch(() => {})
-    }
-
-    // Delete old Dropbox copies and reset tracking so re-upload queues after new ZIPs are ready
-    if (photo.album.dropboxEnabled) {
-      const { isDropboxStorageConfigured, deleteDropboxFile } = await import('@/lib/storage-provider-dropbox')
-      const dbxPaths = [
-        photo.album.fullZipDropboxPath,
-        ...(photo.album.socialCopiesEnabled ? [photo.album.socialZipDropboxPath] : []),
-      ].filter(Boolean) as string[]
-      if (isDropboxStorageConfigured()) {
-        await Promise.allSettled(dbxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
-      }
-      await prisma.album.update({
-        where: { id: photo.albumId },
-        data: {
-          fullZipDropboxStatus: null,
-          fullZipDropboxProgress: 0,
-          fullZipDropboxError: null,
-          fullZipDropboxPath: null,
-          ...(photo.album.socialCopiesEnabled ? {
-            socialZipDropboxStatus: null,
-            socialZipDropboxProgress: 0,
-            socialZipDropboxError: null,
-            socialZipDropboxPath: null,
-          } : {}),
-        },
-      }).catch(() => {})
-    }
-
-    await syncAlbumZipSizes({ albumId: photo.albumId, projectId: photo.album.projectId }).catch(() => {})
-
-    const zipQueue = getAlbumPhotoZipQueue()
-
-    const fullJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'full' })
-    await zipQueue.remove(fullJobId).catch(() => {})
-
-    // Delay to allow large batches to finish; the worker also skips if uploads are still in progress.
-    const delayMs = 30_000
-    await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'full' }, { jobId: fullJobId, delay: delayMs })
-
-    if (photo.album.socialCopiesEnabled) {
-      const socialJobId = getAlbumZipJobId({ albumId: photo.albumId, variant: 'social' })
-      await zipQueue.remove(socialJobId).catch(() => {})
-      await zipQueue.add('generate-album-zip', { albumId: photo.albumId, variant: 'social' }, { jobId: socialJobId, delay: delayMs })
-    }
-  } catch (e) {
-    console.warn('[UPLOAD] Failed to schedule album ZIP regeneration:', e)
-  }
 
   await cleanupTUSFile(tusFilePath)
   return {}

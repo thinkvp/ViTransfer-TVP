@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
-import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
+import { getAlbumZipStoragePath, getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import {
   getFilePath,
@@ -240,7 +240,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
     prisma.projectFile.findMany({ select: { storagePath: true } }),
-    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true } }),
+    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
     prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
     prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
     prisma.album.findMany({
@@ -324,6 +324,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const albumPhoto of albumPhotos) {
     addResolvedFilePath(exactFilePaths, albumPhoto.storagePath)
     addResolvedFilePath(exactFilePaths, albumPhoto.socialStoragePath)
+    addResolvedFilePath(exactFilePaths, albumPhoto.thumbnailStoragePath)
   }
 
   for (const projectEmail of projectEmails) addResolvedFilePath(exactFilePaths, projectEmail.rawStoragePath)
@@ -542,16 +543,50 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   const mainPaths = new Set<string>()
   const accountingPaths = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, clientFiles, userFiles, accountingAttachments] = await Promise.all([
-    prisma.video.findMany({ select: { originalStoragePath: true } }),
+  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, albums, projectEmails, projectEmailAttachments, clientFiles, userFiles, users, settings, accountingAttachments] = await Promise.all([
+    prisma.video.findMany({
+      select: {
+        originalStoragePath: true,
+        preview480Path: true,
+        preview720Path: true,
+        preview1080Path: true,
+        thumbnailPath: true,
+        timelinePreviewVttPath: true,
+      },
+    }),
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
     prisma.projectFile.findMany({ select: { storagePath: true } }),
-    prisma.albumPhoto.findMany({ select: { storagePath: true } }),
+    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
+    prisma.album.findMany({
+      select: {
+        name: true,
+        storageFolderName: true,
+        fullZipFileSize: true,
+        socialZipFileSize: true,
+        project: {
+          select: {
+            storagePath: true,
+            title: true,
+            companyName: true,
+            client: { select: { name: true } },
+          },
+        },
+      },
+    }),
     prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
     prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
     prisma.clientFile.findMany({ select: { storagePath: true } }),
     prisma.userFile.findMany({ select: { storagePath: true } }),
+    prisma.user.findMany({ select: { avatarPath: true } }),
+    prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: {
+        companyLogoPath: true,
+        darkLogoPath: true,
+        companyFaviconPath: true,
+      },
+    }),
     prisma.accountingAttachment.findMany({ select: { storagePath: true } }),
   ])
 
@@ -563,15 +598,43 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     } catch { /* malformed historical path */ }
   }
 
-  for (const v of videos) addMain(v.originalStoragePath)
+  for (const v of videos) {
+    addMain(v.originalStoragePath)
+    addMain(v.preview480Path)
+    addMain(v.preview720Path)
+    addMain(v.preview1080Path)
+    addMain(v.thumbnailPath)
+    addMain(v.timelinePreviewVttPath)
+  }
   for (const a of videoAssets) addMain(a.storagePath)
   for (const c of commentFiles) addMain(c.storagePath)
   for (const f of projectFiles) addMain(f.storagePath)
-  for (const p of albumPhotos) addMain(p.storagePath)
+  for (const p of albumPhotos) {
+    addMain(p.storagePath)
+    addMain(p.socialStoragePath)
+    addMain(p.thumbnailStoragePath)
+  }
+  for (const album of albums) {
+    const projectStoragePath = album.project.storagePath
+      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+    const albumFolderName = album.storageFolderName || album.name
+    const zipPaths = getAlbumZipStoragePaths({
+      projectStoragePath,
+      albumFolderName,
+      albumName: album.name,
+    })
+
+    if (Number(album.fullZipFileSize || 0) > 0) addMain(zipPaths.full)
+    if (Number(album.socialZipFileSize || 0) > 0) addMain(zipPaths.social)
+  }
   for (const e of projectEmails) addMain(e.rawStoragePath)
   for (const a of projectEmailAttachments) addMain(a.storagePath)
   for (const c of clientFiles) addMain(c.storagePath)
   for (const u of userFiles) addMain(u.storagePath)
+  for (const u of users) addMain(u.avatarPath)
+  addMain(settings?.companyLogoPath)
+  addMain(settings?.darkLogoPath)
+  addMain(settings?.companyFaviconPath)
 
   for (const a of accountingAttachments) {
     const relPath = a.storagePath?.trim()

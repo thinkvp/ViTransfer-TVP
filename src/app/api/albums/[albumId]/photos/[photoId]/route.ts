@@ -61,8 +61,10 @@ export async function DELETE(
         id: true,
         fileSize: true,
         socialFileSize: true,
+        thumbnailFileSize: true,
         storagePath: true,
         socialStoragePath: true,
+        thumbnailStoragePath: true,
         album: { select: { projectId: true, name: true } },
       },
     })
@@ -87,7 +89,10 @@ export async function DELETE(
 
     await prisma.albumPhoto.delete({ where: { id: photoId } })
 
-    await adjustProjectTotalBytes(photo.album.projectId, (photo.fileSize + photo.socialFileSize) * BigInt(-1))
+    await adjustProjectTotalBytes(
+      photo.album.projectId,
+      (photo.fileSize + photo.socialFileSize + (photo.thumbnailFileSize ?? BigInt(0))) * BigInt(-1)
+    )
 
     try {
       const sharedCount = await prisma.albumPhoto.count({
@@ -104,6 +109,10 @@ export async function DELETE(
       if (photo.socialStoragePath) {
         // Social derivatives are not shared across records today; delete best-effort.
         await deleteFile(photo.socialStoragePath).catch(() => {})
+      }
+
+      if (photo.thumbnailStoragePath) {
+        await deleteFile(photo.thumbnailStoragePath).catch(() => {})
       }
     } catch {
       // Ignore storage delete errors; DB is source of truth.

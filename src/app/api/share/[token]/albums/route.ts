@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -70,15 +71,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         where: { status: 'READY' },
         orderBy: { createdAt: 'asc' },
         take: 1,
-        select: { id: true },
+        select: { id: true, thumbnailStatus: true, thumbnailStoragePath: true },
       },
     },
   })
 
+  const albumsNeedingThumbnailBackfill = new Set<string>()
+
   const albumsSafe = await Promise.all(
     albums.map(async (a) => {
-      const firstPhotoId = (a as any)?.photos?.[0]?.id as string | undefined
-      let previewPhotoUrl: string | null = null
+      const firstPhoto = (a as any)?.photos?.[0] as { id: string; thumbnailStatus: string; thumbnailStoragePath: string | null } | undefined
+      const firstPhotoId = firstPhoto?.id
+      let thumbnailPhotoUrl: string | null = null
 
       if (firstPhotoId) {
         try {
@@ -89,7 +93,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             request,
             sessionId,
           })
-          previewPhotoUrl = `/api/content/photo/${tokenValue}`
+          thumbnailPhotoUrl = `/api/content/photo/${tokenValue}?variant=thumbnail`
+          if (firstPhoto?.thumbnailStatus !== 'READY' || !firstPhoto?.thumbnailStoragePath) {
+            albumsNeedingThumbnailBackfill.add(a.id)
+          }
         } catch {
           // ignore
         }
@@ -97,12 +104,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
       return {
         ...a,
-        previewPhotoUrl,
+        thumbnailPhotoUrl,
         fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
         socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
       }
     })
   )
+
+  if (albumsNeedingThumbnailBackfill.size > 0) {
+    await Promise.allSettled(
+      [...albumsNeedingThumbnailBackfill].map((albumId) => enqueueAlbumThumbnailJob({ albumId, delayMs: 500 }))
+    )
+  }
 
   return NextResponse.json({ albums: albumsSafe })
 }

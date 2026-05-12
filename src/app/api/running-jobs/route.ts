@@ -654,6 +654,7 @@ export async function GET(request: NextRequest) {
       completedDropboxJobs,
       erroredProcessingJobs,
       albumZipJobs,
+      albumThumbnailJobs: await buildAlbumThumbnailJobs(),
       albumZipDropboxJobs,
       erroredAlbumZipDropboxJobs,
       folderRenameJobs: await buildFolderRenameJobs(),
@@ -662,6 +663,60 @@ export async function GET(request: NextRequest) {
     console.error('[running-jobs]', err)
     return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })
   }
+}
+
+async function buildAlbumThumbnailJobs() {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+  const [activeJobs, completedJobs, failedJobs] = await Promise.all([
+    prisma.albumThumbnailJob.findMany({
+      where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      orderBy: { createdAt: 'asc' },
+    }),
+    prisma.albumThumbnailJob.findMany({
+      where: { status: 'COMPLETED', completedAt: { gte: cutoff } },
+      orderBy: { completedAt: 'desc' },
+    }),
+    prisma.albumThumbnailJob.findMany({
+      where: { status: 'FAILED' },
+      orderBy: { completedAt: 'desc' },
+    }),
+  ])
+
+  const active = activeJobs.map((job) => ({
+    id: job.id,
+    albumId: job.albumId,
+    albumName: job.albumName,
+    projectId: job.projectId,
+    projectName: job.projectName,
+    status: job.status,
+    totalPhotos: job.totalPhotos,
+    processedPhotos: job.processedPhotos,
+    totalBytes: job.totalBytes.toString(),
+    processedBytes: job.processedBytes.toString(),
+  }))
+
+  const completed = [
+    ...completedJobs.map((job) => ({
+      id: job.id,
+      type: 'albumThumbnail' as const,
+      label: job.albumName,
+      sublabel: `${job.projectName} · Album thumbnails complete`,
+      projectId: job.projectId,
+      completedAt: (job.completedAt ?? job.updatedAt).getTime(),
+    })),
+    ...failedJobs.map((job) => ({
+      id: job.id,
+      type: 'albumThumbnail' as const,
+      label: job.albumName,
+      sublabel: `${job.projectName} · Album thumbnails failed`,
+      projectId: job.projectId,
+      completedAt: (job.completedAt ?? job.updatedAt).getTime(),
+      error: true,
+    })),
+  ]
+
+  return { active, completed }
 }
 
 // ---------------------------------------------------------------------------
