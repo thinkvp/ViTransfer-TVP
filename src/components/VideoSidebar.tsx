@@ -413,13 +413,12 @@ export default function VideoSidebar({
                                 className="bg-black rounded overflow-hidden relative mx-auto"
                                 style={{ width: containerWidth, height: containerHeight }}
                               >
-                                <Image
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
                                   src={previewUrl}
                                   alt={a.name}
-                                  fill
-                                  className="object-cover"
-                                  sizes={`${containerWidth}px`}
-                                  priority={isActive}
+                                  className="w-full h-full object-cover"
+                                  loading={isActive ? 'eager' : 'lazy'}
                                 />
                               </div>
                             ) : (
@@ -673,13 +672,12 @@ export default function VideoSidebar({
                         className="bg-black rounded overflow-hidden relative"
                         style={{ width: mobileThumbSize, height: mobileThumbHeight }}
                       >
-                        <Image
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           src={previewUrl}
                           alt={a.name}
-                          fill
-                          className="object-cover"
-                          sizes={`${mobileThumbSize}px`}
-                          priority={isActive}
+                          className="w-full h-full object-cover"
+                          loading={isActive ? 'eager' : 'lazy'}
                         />
                       </div>
                     ) : (

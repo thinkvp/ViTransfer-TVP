@@ -235,6 +235,16 @@ export default function BasDetailPage() {
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
       if (!res.ok) { alert('Failed to download attachment'); return }
+      const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
+      if (isS3Redirect) {
+        void res.body?.cancel()
+        const a = document.createElement('a')
+        a.href = res.url
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        return
+      }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

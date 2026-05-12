@@ -58,16 +58,28 @@ export function UserFileList({ userId, refreshTrigger }: UserFileListProps) {
         throw new Error(data?.error || 'Failed to download file')
       }
 
+      // If the route redirected to an S3/R2 presigned URL, navigate there directly
+      // so the browser uses its native download manager (no memory buffering).
+      const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
+      if (isS3Redirect) {
+        void res.body?.cancel()
+        const a = document.createElement('a')
+        a.href = res.url
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        return
+      }
+
+      // Local storage fallback: buffer via blob.
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
-
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = fileName
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
       URL.revokeObjectURL(url)
     } catch (e: any) {
       alert(e?.message || 'Failed to download file')

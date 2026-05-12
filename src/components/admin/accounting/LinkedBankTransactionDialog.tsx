@@ -77,6 +77,16 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
         alert(d.error || 'Failed to download attachment')
         return
       }
+      const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
+      if (isS3Redirect) {
+        void res.body?.cancel()
+        const anchor = document.createElement('a')
+        anchor.href = res.url
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        return
+      }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')

@@ -73,6 +73,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}))
+  const dryRun = body.dryRun === true
 
   // Validate categories list
   let categories: BackupCategory[]
@@ -92,6 +93,17 @@ export async function POST(request: NextRequest) {
     categories = settings.categories
     if (categories.length === 0) {
       return NextResponse.json({ error: 'No backup categories are configured' }, { status: 400 })
+    }
+  }
+
+  // Dry run — scan and report without downloading or updating DB
+  if (dryRun) {
+    try {
+      const result = await runS3LocalBackup(categories, undefined, { dryRun: true })
+      const summary = formatBackupResultSummary(result)
+      return NextResponse.json({ ok: true, result, summary })
+    } catch (err: any) {
+      return NextResponse.json({ error: err?.message || 'Dry run failed' }, { status: 500 })
     }
   }
 

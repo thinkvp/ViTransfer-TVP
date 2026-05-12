@@ -98,7 +98,12 @@ export async function processClientNotifications() {
       const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
 
       if (recipients.length === 0) {
-        console.log(`[CLIENT]   No recipients with notifications enabled, skipping`)
+        console.log(`[CLIENT]   No recipients with notifications enabled, marking as sent`)
+        const noRecipientIds = project.notificationQueue.map(n => n.id)
+        await prisma.notificationQueue.updateMany({
+          where: { id: { in: noRecipientIds } },
+          data: { sentToClients: true, clientSentAt: new Date() },
+        })
         continue
       }
 

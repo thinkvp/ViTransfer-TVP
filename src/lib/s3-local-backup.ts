@@ -55,10 +55,12 @@ export type BackupCategory = (typeof ALL_BACKUP_CATEGORIES)[number]
 
 export interface S3LocalBackupResult {
   ok: boolean
+  dryRun?: boolean
   categories: BackupCategory[]
   totalKeys: number
   skipped: number
   downloaded: number
+  wouldDownload?: number
   failed: number
   errors: string[]
   durationMs: number
@@ -395,14 +397,19 @@ async function collectKeysForCategory(
 export async function runS3LocalBackup(
   categories: BackupCategory[],
   onProgress?: BackupProgressFn,
+  options?: { dryRun?: boolean },
 ): Promise<S3LocalBackupResult> {
+  const dryRun = options?.dryRun ?? false
+
   if (!isS3Mode()) {
     return {
       ok: false,
+      dryRun,
       categories,
       totalKeys: 0,
       skipped: 0,
       downloaded: 0,
+      wouldDownload: 0,
       failed: 0,
       errors: ['S3 mode is not active (STORAGE_PROVIDER is not "s3")'],
       durationMs: 0,
@@ -416,6 +423,7 @@ export async function runS3LocalBackup(
   let totalKeys = 0
   let skipped = 0
   let downloaded = 0
+  let wouldDownload = 0
   let failed = 0
   const errors: string[] = []
 
@@ -462,6 +470,8 @@ export async function runS3LocalBackup(
 
         if (await localFileSizeMatches(entry.localPath, s3Size)) {
           skipped++
+        } else if (dryRun) {
+          wouldDownload++
         } else {
           await downloadKey(client, bucket, entry.key, entry.localPath)
           downloaded++
@@ -498,10 +508,12 @@ export async function runS3LocalBackup(
   const durationMs = Date.now() - startMs
   return {
     ok: failed === 0,
+    dryRun,
     categories,
     totalKeys,
     skipped,
     downloaded,
+    wouldDownload,
     failed,
     errors,
     durationMs,
@@ -556,6 +568,12 @@ export async function getS3LocalBackupSettings(): Promise<{
 export function formatBackupResultSummary(result: S3LocalBackupResult): string {
   const dur = (result.durationMs / 1000).toFixed(1)
   const catList = result.categories.join(', ')
+  if (result.dryRun) {
+    if (!result.ok) {
+      return `Dry run: ${result.wouldDownload ?? 0} would download, ${result.skipped} already up-to-date, ${result.failed} errors (${dur}s)`
+    }
+    return `Dry run: ${result.wouldDownload ?? 0} would download, ${result.skipped} already up-to-date (${dur}s)`
+  }
   if (!result.ok) {
     return `Backup completed with errors (${result.failed} failed, ${result.downloaded} downloaded, ${result.skipped} skipped, ${dur}s). Categories: ${catList}`
   }

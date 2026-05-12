@@ -13,8 +13,6 @@ import {
 import {
   isS3Mode,
   s3DownloadFile,
-  s3GetPresignedStreamUrl,
-  s3GetPresignedDownloadUrl,
 } from '@/lib/s3-storage'
 
 export class DropboxPreferredDownloadError extends Error {
@@ -91,20 +89,6 @@ export async function resolveStorageDownloadTarget(rawPath: string, options?: { 
   | { kind: 'local-file'; absolutePath: string }
   | { kind: 'redirect'; url: string }
 > {
-  // S3 mode: always redirect to a presigned URL (never serve from local disk)
-  if (isS3Mode()) {
-    if (options?.isDownload && options.filename) {
-      return {
-        kind: 'redirect',
-        url: await s3GetPresignedDownloadUrl(rawPath, 3600, options.filename, options.contentType),
-      }
-    }
-    return {
-      kind: 'redirect',
-      url: await s3GetPresignedStreamUrl(rawPath, 14400, options?.contentType),
-    }
-  }
-
   const location = parseStorageLocation(rawPath)
 
   if (location.provider === 'local' && options?.preferDropbox && options.dropboxPath) {
@@ -159,6 +143,7 @@ export async function materializeStoragePathToLocalFile(params: {
 }): Promise<{ localPath: string; isTemporary: boolean }> {
   // S3 mode: download from R2 to a temp file for local processing (e.g. FFmpeg)
   if (isS3Mode()) {
+    await fs.promises.mkdir(params.tempDir, { recursive: true })
     const tempPath = path.join(params.tempDir, sanitizeTempFileName(params.suggestedName))
     const { stream, contentLength } = await s3DownloadFile(params.rawPath)
     const writeStream = fs.createWriteStream(tempPath)

@@ -156,12 +156,6 @@ export function AlbumPhotoUploadItem({
             <X className="h-4 w-4" />
           </Button>
         )}
-
-        {upload.status === 'completed' && (
-          <Button type="button" variant="ghost" size="icon" onClick={onRemove} title="Remove" className="h-8 w-8">
-            <X className="h-4 w-4" />
-          </Button>
-        )}
       </div>
     </div>
   )

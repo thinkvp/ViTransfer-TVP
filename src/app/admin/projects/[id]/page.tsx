@@ -818,6 +818,7 @@ export default function ProjectPage() {
                     onExternalFilesChanged={() => {
                       setProjectFilesRefresh((v) => v + 1)
                       bumpProjectStorageRefresh()
+                      void fetchProject()
                     }}
                 />
               </div>

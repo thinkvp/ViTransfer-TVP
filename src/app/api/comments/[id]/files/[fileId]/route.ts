@@ -4,8 +4,9 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
-import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
-import { isS3Mode } from '@/lib/s3-storage'
+import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
+import { createWebReadableStream } from '@/lib/stream-utils'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 import type { Readable } from 'stream'
@@ -134,20 +135,17 @@ export async function GET(
 
     const safeFilename = sanitizeFilenameForHeader(commentFile.fileName)
 
+    if (isS3Mode()) {
+      // In S3 mode, redirect to a presigned URL so the browser downloads directly from R2
+      const presignedUrl = await s3GetPresignedDownloadUrl(commentFile.storagePath, 300, commentFile.fileName, mimeType)
+      return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
+    }
+
     let fileReadable: Readable
     let contentLength: number
 
-    if (isS3Mode()) {
-      // In S3 mode, stream directly from R2
-      try {
-        fileReadable = await downloadFile(commentFile.storagePath)
-      } catch (err) {
-        console.error(`[COMMENT_FILE_DOWNLOAD] S3 download failed: ${commentFile.storagePath}`, err)
-        return NextResponse.json({ error: 'File not found' }, { status: 404 })
-      }
-      contentLength = Number(commentFile.fileSize)
-    } else {
-      // In local mode, resolve path and stream from disk
+    {
+      // Local mode: resolve path and stream from disk
       let fullPath: string
       try {
         fullPath = getFilePath(commentFile.storagePath)
@@ -175,24 +173,7 @@ export async function GET(
       contentLength = stat.size
     }
 
-    let closed = false
-    const readableStream = new ReadableStream({
-      start(controller) {
-        fileReadable.on('data', (chunk) => {
-          if (!closed) controller.enqueue(chunk)
-        })
-        fileReadable.on('end', () => {
-          if (!closed) { closed = true; controller.close() }
-        })
-        fileReadable.on('error', (err) => {
-          if (!closed) { closed = true; controller.error(err) }
-        })
-      },
-      cancel() {
-        closed = true
-        fileReadable.destroy()
-      },
-    })
+    const readableStream = createWebReadableStream(fileReadable)
 
     // Return file with appropriate headers
     return new NextResponse(readableStream, {

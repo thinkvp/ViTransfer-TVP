@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs, { createReadStream } from 'fs'
 
 export const runtime = 'nodejs'
@@ -74,12 +75,17 @@ export async function GET(
 
   if (!file) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
+  const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
+  const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
+
+  if (isS3Mode()) {
+    const presignedUrl = await s3GetPresignedDownloadUrl(file.storagePath, 300, file.fileName, contentType)
+    return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
+  }
+
   const fullPath = getFilePath(file.storagePath)
   const stat = await fs.promises.stat(fullPath)
   if (!stat.isFile()) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
-
-  const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
-  const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
 
   const { downloadChunkSizeBytes } = await getTransferTuningSettings()
   const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })

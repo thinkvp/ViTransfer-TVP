@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyVideoAccessToken, detectHotlinking, logSecurityEvent, getSecuritySettings } from '@/lib/video-access'
 import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
-import { createReadStream, existsSync, statSync, ReadStream } from 'fs'
+import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
@@ -20,6 +20,7 @@ import { getAuthContext } from '@/lib/auth'
 import { recordClientActivity } from '@/lib/client-activity'
 import { registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
 import { getTransferTuningSettings } from '@/lib/settings'
+import { createWebReadableStream } from '@/lib/stream-utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -73,102 +74,6 @@ function isValidMimeType(value: unknown): value is string {
   const trimmed = value.trim()
   if (trimmed.length === 0 || trimmed.length > 255) return false
   return /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(trimmed)
-}
-
-/**
- * Convert Node.js ReadStream to Web ReadableStream with proper backpressure.
- *
- * The previous push-based implementation fired controller.enqueue() as fast as
- * the disk could read, never pausing the Node.js stream. For a 1 GB file on a
- * slow client connection the Web ReadableStream internal queue would grow
- * unbounded in memory, causing OOM errors or HTTP-layer timeouts that forced
- * the client to retry the download from scratch.
- *
- * This pull-based approach only reads the next chunk from disk when the
- * consumer (browser) is ready for more data, keeping memory flat regardless of
- * file size and transfer speed.
- */
-function createWebReadableStream(
-  fileStream: ReadStream,
-  hooks?: {
-    onBytes?: (bytes: number) => void
-    onComplete?: () => void
-    onError?: (error: Error) => void
-    onCancel?: () => void
-  },
-): ReadableStream {
-  let ended = false
-  let closed = false
-
-  return new ReadableStream({
-    start() {
-      // Pause immediately — we only resume inside pull().
-      fileStream.pause()
-      fileStream.once('end', () => { ended = true })
-    },
-
-    pull(controller) {
-      // Guard: the runtime may call pull() one extra time after the controller
-      // was already closed by a previous onEnd/onError callback, which would
-      // throw ERR_INVALID_STATE ("Controller is already closed").
-      if (closed) return
-      if (ended) {
-        closed = true
-        controller.close()
-        return
-      }
-
-      return new Promise<void>((resolve) => {
-        const onData = (chunk: Buffer | string) => {
-          cleanup()
-          fileStream.pause()
-          const output = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
-          if (!closed) {
-            hooks?.onBytes?.(output.byteLength)
-            controller.enqueue(output)
-          }
-          resolve()
-        }
-        const onEnd = () => {
-          cleanup()
-          ended = true
-          if (!closed) {
-            closed = true
-            hooks?.onComplete?.()
-            controller.close()
-          }
-          resolve()
-        }
-        const onError = (err: Error) => {
-          cleanup()
-          if (!closed) {
-            closed = true
-            hooks?.onError?.(err)
-            controller.error(err)
-          }
-          resolve()
-        }
-        const cleanup = () => {
-          fileStream.removeListener('data', onData)
-          fileStream.removeListener('end', onEnd)
-          fileStream.removeListener('error', onError)
-        }
-
-        fileStream.once('data', onData)
-        fileStream.once('end', onEnd)
-        fileStream.once('error', onError)
-        fileStream.resume()
-      })
-    },
-
-    cancel() {
-      if (!closed && !ended) {
-        hooks?.onCancel?.()
-      }
-      closed = true
-      fileStream.destroy()
-    },
-  })
 }
 
 /**

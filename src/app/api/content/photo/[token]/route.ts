@@ -4,36 +4,16 @@ import { getRedis } from '@/lib/redis'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { createReadStream, existsSync, statSync } from 'fs'
-import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getAuthContext } from '@/lib/auth'
 import { getSecuritySettings } from '@/lib/video-access'
 import { verifyAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { getTransferTuningSettings } from '@/lib/settings'
-import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
+import { isS3Mode, s3FileExists, s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
+import { createWebReadableStream } from '@/lib/stream-utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function createWebReadableStream(fileStream: NodeJS.ReadableStream): ReadableStream {
-  let closed = false
-  return new ReadableStream({
-    start(controller) {
-      fileStream.on('data', (chunk) => {
-        if (!closed) controller.enqueue(chunk)
-      })
-      fileStream.on('end', () => {
-        if (!closed) { closed = true; controller.close() }
-      })
-      fileStream.on('error', (err) => {
-        if (!closed) { closed = true; controller.error(err) }
-      })
-    },
-    cancel() {
-      closed = true
-      ;(fileStream as any).destroy?.()
-    },
-  })
-}
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
@@ -103,17 +83,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         const { downloadChunkSizeBytes } = await getTransferTuningSettings()
 
         if (isS3Mode()) {
-          const previewSize = await s3GetFileSize(photo.socialStoragePath)
-          const previewStream = await downloadFile(photo.socialStoragePath)
-          return new NextResponse(createWebReadableStream(previewStream), {
-            headers: {
-              'Content-Type': 'image/jpeg',
-              ...(previewSize != null ? { 'Content-Length': previewSize.toString() } : {}),
-              'Cache-Control': 'private, max-age=86400, immutable',
-              'X-Content-Type-Options': 'nosniff',
-              'Referrer-Policy': 'strict-origin-when-cross-origin',
-            },
-          })
+          const presignedUrl = await s3GetPresignedStreamUrl(photo.socialStoragePath, 14400, 'image/jpeg')
+          return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
         } else {
           const previewFullPath = getFilePath(photo.socialStoragePath)
           const previewStat = statSync(previewFullPath)
@@ -164,21 +135,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   if (isS3Mode()) {
-    const fileSize = await s3GetFileSize(storagePath)
-    const fileStream = await downloadFile(storagePath)
-    const readableStream = createWebReadableStream(fileStream)
-    return new NextResponse(readableStream, {
-      headers: {
-        'Content-Type': 'image/jpeg',
-        ...(fileSize != null ? { 'Content-Length': fileSize.toString() } : {}),
-        'Cache-Control': isDownload
-          ? 'private, no-store, must-revalidate'
-          : 'private, max-age=3600, immutable',
-        'X-Content-Type-Options': 'nosniff',
-        ...(isDownload ? { 'Content-Disposition': `attachment; filename="${filename}"` } : {}),
-        'Referrer-Policy': 'strict-origin-when-cross-origin',
-      },
-    })
+    const presignedUrl = isDownload
+      ? await s3GetPresignedDownloadUrl(storagePath, 300, photo.fileName || 'photo.jpg', 'image/jpeg')
+      : await s3GetPresignedStreamUrl(storagePath, 14400, 'image/jpeg')
+    return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
   }
 
   const fullPath = getFilePath(storagePath)

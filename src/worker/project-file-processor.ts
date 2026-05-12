@@ -1,5 +1,6 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
+import { isS3Mode, s3ReadFileHeader } from '../lib/s3-storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
 import fs from 'fs'
@@ -27,28 +28,32 @@ export async function processProjectFile(job: Job<ProjectFileProcessingJob>) {
   }
 
   try {
-    // Resolve file to a local path — downloads from S3 if running in S3 mode
-    const resolved = await materializeStoragePathToLocalFile({
-      rawPath: storagePath,
-      tempDir: path.join(os.tmpdir(), 'vitransfer-file-tmp'),
-      suggestedName: `${projectFileId}-file.bin`,
-    })
-    const filePath = resolved.localPath
-
-    const stats = fs.statSync(filePath)
-    if (stats.size === 0) {
-      throw new Error('Project file is empty')
-    }
-
     const { fileTypeFromBuffer } = await import('file-type/core')
 
-    const sampleSize = 4100
-    const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
-    const fileHandle = await fs.promises.open(filePath, 'r')
-    try {
-      await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
-    } finally {
-      await fileHandle.close()
+    let sampleBuffer: Buffer
+
+    if (isS3Mode()) {
+      // Ranged GET — only fetch the bytes needed for magic-byte detection
+      const { data, totalSize } = await s3ReadFileHeader(storagePath, 4100)
+      if (totalSize === 0) throw new Error('Project file is empty')
+      sampleBuffer = data
+    } else {
+      const resolved = await materializeStoragePathToLocalFile({
+        rawPath: storagePath,
+        tempDir: path.join(os.tmpdir(), 'vitransfer-file-tmp'),
+        suggestedName: `${projectFileId}-file.bin`,
+      })
+      const filePath = resolved.localPath
+      const stats = fs.statSync(filePath)
+      if (stats.size === 0) throw new Error('Project file is empty')
+      const buf = Buffer.alloc(Math.min(4100, stats.size))
+      const fh = await fs.promises.open(filePath, 'r')
+      try {
+        await fh.read(buf, 0, buf.length, 0)
+      } finally {
+        await fh.close()
+      }
+      sampleBuffer = buf
     }
 
     const fileType = await fileTypeFromBuffer(sampleBuffer)

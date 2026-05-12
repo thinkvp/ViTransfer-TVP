@@ -1,5 +1,6 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
+import { isS3Mode, s3ReadFileHeader, s3DownloadFileToBuffer } from '../lib/s3-storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { uploadFile } from '../lib/storage'
 import { ALLOWED_ASSET_TYPES } from '../lib/file-validation'
@@ -48,28 +49,34 @@ export async function processClientFile(job: Job<ClientFileProcessingJob>) {
   }
 
   try {
-    // Resolve file to a local path — downloads from S3 if running in S3 mode
-    const resolved = await materializeStoragePathToLocalFile({
-      rawPath: storagePath,
-      tempDir: path.join(os.tmpdir(), 'vitransfer-file-tmp'),
-      suggestedName: `${clientFileId}-file.bin`,
-    })
-    const filePath = resolved.localPath
-
-    const stats = fs.statSync(filePath)
-    if (stats.size === 0) {
-      throw new Error('Client file is empty')
-    }
-
     const { fileTypeFromBuffer } = await import('file-type/core')
 
-    const sampleSize = 4100
-    const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))
-    const fileHandle = await fs.promises.open(filePath, 'r')
-    try {
-      await fileHandle.read(sampleBuffer, 0, sampleBuffer.length, 0)
-    } finally {
-      await fileHandle.close()
+    let sampleBuffer: Buffer
+    // resolved is only set in non-S3 mode and may be used by the SVG branch below
+    let resolved: { localPath: string; isTemporary: boolean } | undefined
+
+    if (isS3Mode()) {
+      // Ranged GET — only fetch the bytes needed for magic-byte detection
+      const { data, totalSize } = await s3ReadFileHeader(storagePath, 4100)
+      if (totalSize === 0) throw new Error('Client file is empty')
+      sampleBuffer = data
+    } else {
+      resolved = await materializeStoragePathToLocalFile({
+        rawPath: storagePath,
+        tempDir: path.join(os.tmpdir(), 'vitransfer-file-tmp'),
+        suggestedName: `${clientFileId}-file.bin`,
+      })
+      const filePath = resolved.localPath
+      const stats = fs.statSync(filePath)
+      if (stats.size === 0) throw new Error('Client file is empty')
+      const buf = Buffer.alloc(Math.min(4100, stats.size))
+      const fh = await fs.promises.open(filePath, 'r')
+      try {
+        await fh.read(buf, 0, buf.length, 0)
+      } finally {
+        await fh.close()
+      }
+      sampleBuffer = buf
     }
 
     const fileType = await fileTypeFromBuffer(sampleBuffer)
@@ -132,16 +139,23 @@ export async function processClientFile(job: Job<ClientFileProcessingJob>) {
     // Sanitize SVG content in-place to strip scripts and event handlers.
     // Defence-in-depth: downloads are also forced to attachment + octet-stream.
     if (fileType.mime === 'image/svg+xml') {
-      const raw = await fs.promises.readFile(filePath, 'utf8')
+      let raw: string
+      if (isS3Mode()) {
+        // Download full SVG from S3 into memory (SVGs are small)
+        const buf = await s3DownloadFileToBuffer(storagePath)
+        raw = buf.toString('utf8')
+      } else {
+        raw = await fs.promises.readFile(resolved!.localPath, 'utf8')
+      }
       const sanitized = sanitizeSvgContent(raw)
       if (sanitized !== raw) {
         console.log(`[WORKER] Sanitizing SVG content for client file ${clientFileId}`)
         const buf = Buffer.from(sanitized, 'utf8')
-        if (resolved.isTemporary) {
-          // S3 mode: replace the stored object with the sanitized version
+        if (isS3Mode() || resolved?.isTemporary) {
+          // Replace the stored object with the sanitized version
           await uploadFile(storagePath, buf, buf.length, 'image/svg+xml')
         } else {
-          await fs.promises.writeFile(filePath, buf)
+          await fs.promises.writeFile(resolved!.localPath, buf)
         }
       }
     }

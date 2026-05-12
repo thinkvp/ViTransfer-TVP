@@ -84,6 +84,9 @@ const S3_MULTIPART_MIN_PART_BYTES = 5 * 1024 * 1024
 const S3_MULTIPART_DEFAULT_PART_BYTES = 64 * 1024 * 1024
 const S3_MULTIPART_MAX_PARTS = 10_000
 
+/** Presigned part-upload URL validity (1 hour). Shared across all presign routes. */
+export const S3_PRESIGNED_PART_EXPIRES_SECONDS = 3600
+
 // ---------------------------------------------------------------------------
 // Basic file operations
 // ---------------------------------------------------------------------------
@@ -129,6 +132,59 @@ export async function s3DownloadFile(key: string): Promise<{ stream: Readable; c
     stream: response.Body as unknown as Readable,
     contentLength: response.ContentLength ?? 0,
   }
+}
+
+/**
+ * Download just the first `bytes` bytes of an S3 object via a ranged GET.
+ * Returns the data buffer and the total object size (from Content-Range).
+ * Use this for magic-byte detection — avoids downloading the whole file.
+ */
+export async function s3ReadFileHeader(key: string, bytes: number): Promise<{ data: Buffer; totalSize: number }> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const response = await client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Range: `bytes=0-${bytes - 1}`,
+    })
+  )
+
+  if (!response.Body) {
+    throw new Error(`S3 object has no body: ${key}`)
+  }
+
+  const chunks: Buffer[] = []
+  for await (const chunk of response.Body as unknown as AsyncIterable<Uint8Array>) {
+    chunks.push(Buffer.from(chunk))
+  }
+
+  // Content-Range: bytes 0-4099/12345  →  totalSize = 12345
+  const totalSize = response.ContentRange
+    ? parseInt(response.ContentRange.split('/')[1] ?? '0', 10)
+    : (response.ContentLength ?? 0)
+
+  return { data: Buffer.concat(chunks), totalSize }
+}
+
+/** Download an entire S3 object into a Buffer. */
+export async function s3DownloadFileToBuffer(key: string): Promise<Buffer> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+
+  if (!response.Body) {
+    throw new Error(`S3 object has no body: ${key}`)
+  }
+
+  const chunks: Buffer[] = []
+  for await (const chunk of response.Body as unknown as AsyncIterable<Uint8Array>) {
+    chunks.push(Buffer.from(chunk))
+  }
+
+  return Buffer.concat(chunks)
 }
 
 /** Delete a single file from S3. Silently ignores 404 (file already gone). */

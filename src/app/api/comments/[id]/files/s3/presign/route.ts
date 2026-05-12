@@ -9,7 +9,7 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
-import { isS3Mode, s3InitiateMultipartUpload, s3GetPresignedPartUrl } from '@/lib/s3-storage'
+import { isS3Mode, s3InitiateMultipartUpload, s3GetPresignedPartUrl, S3_PRESIGNED_PART_EXPIRES_SECONDS } from '@/lib/s3-storage'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
@@ -21,7 +21,6 @@ export const runtime = 'nodejs'
 const MIN_PART_SIZE_BYTES = 16 * 1024 * 1024
 const MAX_PART_SIZE_BYTES = 256 * 1024 * 1024
 const MAX_PARTS = 10_000
-const PART_URL_EXPIRES_SECONDS = 3600
 
 function calculatePartSize(fileSize: number): number {
   let partSize = MIN_PART_SIZE_BYTES
@@ -169,7 +168,7 @@ export async function POST(
 
     const partUrls = await Promise.all(
       Array.from({ length: partCount }, (_, i) =>
-        s3GetPresignedPartUrl(storagePath, uploadId, i + 1, PART_URL_EXPIRES_SECONDS)
+        s3GetPresignedPartUrl(storagePath, uploadId, i + 1, S3_PRESIGNED_PART_EXPIRES_SECONDS)
       )
     )
 

@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { isS3Mode, s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 
@@ -82,10 +83,6 @@ export async function GET(
 
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
-  const fullPath = getFilePath(attachment.storagePath)
-  const stat = await fs.promises.stat(fullPath)
-  if (!stat.isFile()) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
-
   const url = new URL(request.url)
   const inlineRequested = url.searchParams.get('inline') === '1'
 
@@ -93,6 +90,18 @@ export async function GET(
   const contentType = isValidMimeType(attachment.fileType) ? attachment.fileType : 'application/octet-stream'
 
   const dispositionType = inlineRequested && attachment.isInline ? 'inline' : 'attachment'
+
+  // S3 mode: redirect to a presigned URL so the browser downloads directly from R2
+  if (isS3Mode()) {
+    const presignedUrl = dispositionType === 'inline'
+      ? await s3GetPresignedStreamUrl(attachment.storagePath, 300, contentType)
+      : await s3GetPresignedDownloadUrl(attachment.storagePath, 300, attachment.fileName, contentType)
+    return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
+  }
+
+  const fullPath = getFilePath(attachment.storagePath)
+  const stat = await fs.promises.stat(fullPath)
+  if (!stat.isFile()) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
   const { downloadChunkSizeBytes } = await getTransferTuningSettings()
   const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })

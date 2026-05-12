@@ -534,21 +534,7 @@ export function ProjectFileUpload({
   }, [selectedFiles])
 
   const headerRowPicker = (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        if (hasActiveUploads) return
-        if (e.dataTransfer.files.length > 0) {
-          addFilesToQueue(Array.from(e.dataTransfer.files))
-        }
-      }}
-      className="flex justify-end"
-    >
+    <div className="flex justify-end">
       <Input
         ref={fileInputRef}
         id="project-files"
@@ -561,16 +547,42 @@ export function ProjectFileUpload({
         }}
         className="hidden"
       />
-      <Button
+      <button
         type="button"
-        variant="outline"
         onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setIsDragging(true)
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setIsDragging(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setIsDragging(false)
+          if (hasActiveUploads) return
+          if (e.dataTransfer.files.length > 0) {
+            addFilesToQueue(Array.from(e.dataTransfer.files))
+          }
+        }}
         disabled={hasActiveUploads}
         aria-label="Add Files"
+        className={
+          `inline-flex h-9 items-center justify-center rounded-md border border-dashed px-3 text-sm font-medium transition-colors ` +
+          (hasActiveUploads
+            ? 'opacity-50 cursor-not-allowed'
+            : isDragging
+              ? 'border-primary bg-primary/10'
+              : 'border-border bg-muted/30 hover:bg-muted/50')
+        }
       >
         <Upload className="w-4 h-4 sm:mr-2" />
         <span className="hidden sm:inline">Add Files</span>
-      </Button>
+      </button>
     </div>
   )
 
@@ -700,9 +712,11 @@ export function ProjectFileUpload({
                           <RotateCw className="w-4 h-4" />
                         </Button>
                       )}
-                      <Button type="button" variant="outline" size="sm" onClick={() => void cancelUpload(u.id)} title="Remove">
-                        <X className="w-4 h-4" />
-                      </Button>
+                      {!isDone && (
+                        <Button type="button" variant="outline" size="sm" onClick={() => void cancelUpload(u.id)} title="Remove">
+                          <X className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
 

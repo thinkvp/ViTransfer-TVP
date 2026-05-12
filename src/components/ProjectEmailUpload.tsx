@@ -486,9 +486,11 @@ export function ProjectEmailUpload({
                         <RotateCw className="w-4 h-4" />
                       </Button>
                     )}
-                    <Button type="button" variant="outline" size="sm" onClick={() => removeUpload(u.id)}>
-                      <X className="w-4 h-4" />
-                    </Button>
+                    {u.status !== 'completed' && (
+                      <Button type="button" variant="outline" size="sm" onClick={() => removeUpload(u.id)}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -648,9 +650,11 @@ export function ProjectEmailUpload({
                       <RotateCw className="w-4 h-4" />
                     </Button>
                   )}
-                  <Button type="button" variant="outline" size="sm" onClick={() => removeUpload(u.id)}>
-                    <X className="w-4 h-4" />
-                  </Button>
+                  {u.status !== 'completed' && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => removeUpload(u.id)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
 

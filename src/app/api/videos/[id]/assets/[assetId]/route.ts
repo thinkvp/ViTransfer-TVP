@@ -9,6 +9,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { buildProjectStorageRoot, buildVideoAssetDropboxPath, buildVideoThumbnailStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { isDropboxStorageConfigured, toDropboxStoragePath, deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { createReadStream } from 'fs'
 import fs from 'fs'
 export const runtime = 'nodejs'
@@ -102,18 +103,20 @@ export async function GET(
       }
     }
 
+    const sanitizedFilename = sanitizeFilenameForHeader(asset.fileName)
+    const contentType = isValidMimeType(asset.fileType) ? asset.fileType : 'application/octet-stream'
+
+    if (isS3Mode()) {
+      const presignedUrl = await s3GetPresignedDownloadUrl(asset.storagePath, 300, asset.fileName, contentType)
+      return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
+    }
+
     // Get the full file path and check if exists
     const fullPath = getFilePath(asset.storagePath)
     const stat = await fs.promises.stat(fullPath)
     if (!stat.isFile()) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
-
-    const sanitizedFilename = sanitizeFilenameForHeader(asset.fileName)
-
-    const contentType = isValidMimeType(asset.fileType)
-      ? asset.fileType
-      : 'application/octet-stream'
 
     // Stream file with proper Node.js to Web API stream conversion
     const { downloadChunkSizeBytes } = await getTransferTuningSettings()

@@ -254,6 +254,10 @@ export async function queueNotification(context: NotificationContext, alreadySen
   }
 
   const now = new Date()
+  // CLIENT_COMMENT entries are only ever processed by the admin-side worker; the
+  // client-side worker exclusively handles ADMIN_REPLY.  Pre-mark sentToClients=true
+  // so these entries don't accumulate indefinitely as "pending=clients" in the backlog.
+  const clientAlreadyHandled = type === 'CLIENT_COMMENT' || alreadySentTo?.clients || false
   await prisma.notificationQueue.create({
     data: {
       projectId: comment.projectId,
@@ -261,8 +265,8 @@ export async function queueNotification(context: NotificationContext, alreadySen
       // Pre-mark sides already handled via IMMEDIATE so workers don't re-process them.
       sentToAdmins: alreadySentTo?.admins || false,
       adminSentAt: alreadySentTo?.admins ? now : undefined,
-      sentToClients: alreadySentTo?.clients || false,
-      clientSentAt: alreadySentTo?.clients ? now : undefined,
+      sentToClients: clientAlreadyHandled,
+      clientSentAt: clientAlreadyHandled ? now : undefined,
       data: {
         type, // Include type in data JSON for email templates
         commentId: comment.id,

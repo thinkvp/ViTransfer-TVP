@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ChevronDown, ChevronUp, RefreshCw, HardDriveDownload } from 'lucide-react'
+import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 
 type StorageOverview = {
   provider?: 'local' | 'dropbox' | 's3'
@@ -116,6 +116,11 @@ export function StorageOverviewSection({
   const [backupRunError, setBackupRunError] = useState<string | null>(null)
   const [backupLastRunAt, setBackupLastRunAt] = useState<string | null>(null)
 
+  // Backup dry run state
+  const [backupDryRunning, setBackupDryRunning] = useState(false)
+  const [backupDryRunResult, setBackupDryRunResult] = useState<string | null>(null)
+  const [backupDryRunError, setBackupDryRunError] = useState<string | null>(null)
+
   // Load backup status on mount when S3 is configured
   useEffect(() => {
     if (!s3Configured) return
@@ -207,6 +212,23 @@ export function StorageOverviewSection({
       setBackupRunError(e?.message || 'Backup run failed')
     } finally {
       setBackupRunning(false)
+    }
+  }
+
+  async function runManualBackupDryRun() {
+    setBackupDryRunning(true)
+    setBackupDryRunError(null)
+    setBackupDryRunResult(null)
+    try {
+      const res = await apiPost('/api/settings/s3-local-backup/run', {
+        categories: s3LocalBackupCategories,
+        dryRun: true,
+      }) as any
+      setBackupDryRunResult(res?.summary ?? 'Dry run completed')
+    } catch (e: any) {
+      setBackupDryRunError(e?.message || 'Dry run failed')
+    } finally {
+      setBackupDryRunning(false)
     }
   }
 
@@ -312,14 +334,16 @@ export function StorageOverviewSection({
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 text-muted-foreground hover:text-foreground flex-shrink-0"
-                        disabled={!onRecalculateProjectDataTotals || recalculateProjectDataTotalsLoading}
-                        title={recalculateProjectDataTotalsLoading ? 'Recalculating…' : 'Recalculate & refresh'}
+                        disabled={recalculateProjectDataTotalsLoading || loading}
+                        title={(recalculateProjectDataTotalsLoading || loading) ? 'Refreshing…' : 'Recalculate & refresh'}
                         onClick={() => void (async () => {
-                          await onRecalculateProjectDataTotals?.()
+                          if (onRecalculateProjectDataTotals) {
+                            await onRecalculateProjectDataTotals()
+                          }
                           setHasLoaded(false)
                         })()}
                       >
-                        <RefreshCw className={cn('w-3.5 h-3.5', recalculateProjectDataTotalsLoading && 'animate-spin')} />
+                        <RefreshCw className={cn('w-3.5 h-3.5', (recalculateProjectDataTotalsLoading || loading) && 'animate-spin')} />
                       </Button>
                       <div className="text-lg font-semibold tabular-nums">{totalLabel}</div>
                     </div>
@@ -418,11 +442,6 @@ export function StorageOverviewSection({
           {/* S3 Local Backup — only shown when S3 is configured */}
           {s3Configured && (
             <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-              <div className="flex items-center gap-2 mb-1">
-                <HardDriveDownload className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                <span className="text-sm font-semibold">Local Backup</span>
-              </div>
-
               {/* Enable toggle */}
               <div className="flex items-center justify-between gap-4">
                 <div className="space-y-0.5 flex-1">
@@ -474,17 +493,32 @@ export function StorageOverviewSection({
                     <p className="text-xs text-destructive">{backupRunError}</p>
                   )}
 
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={backupRunning || s3LocalBackupCategories.length === 0}
-                    onClick={() => void runManualBackup()}
-                    className="gap-2"
-                  >
-                    <HardDriveDownload className={cn('w-3.5 h-3.5', backupRunning && 'animate-pulse')} />
-                    {backupRunning ? 'Backing up\u2026' : 'Run backup now'}
-                  </Button>
+                  {backupDryRunResult && (
+                    <p className="text-xs text-muted-foreground">{backupDryRunResult}</p>
+                  )}
+
+                  {backupDryRunError && (
+                    <p className="text-xs text-destructive">{backupDryRunError}</p>
+                  )}
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={backupRunning || backupDryRunning || s3LocalBackupCategories.length === 0}
+                      onClick={() => void runManualBackupDryRun()}
+                    >
+                      {backupDryRunning ? 'Running…' : 'Dry run'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={backupRunning || backupDryRunning || s3LocalBackupCategories.length === 0}
+                      onClick={() => void runManualBackup()}
+                    >
+                      {backupRunning ? 'Backing up…' : 'Run backup now'}
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>

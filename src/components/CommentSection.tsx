@@ -489,9 +489,22 @@ export function CommentSectionView({
         throw new Error(err.error || 'Failed to download file')
       }
 
+      // If the route redirected to an external S3/R2 presigned URL, navigate there directly
+      // so the browser uses its native download manager (with progress indicator).
+      const isS3Redirect = response.url && !response.url.startsWith(window.location.origin) && !response.url.startsWith('/')
+      if (isS3Redirect) {
+        void response.body?.cancel()
+        const a = document.createElement('a')
+        a.href = response.url
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        return
+      }
+
+      // Local storage fallback: buffer via blob.
       const blob = await response.blob()
       const objectUrl = URL.createObjectURL(blob)
-
       const a = document.createElement('a')
       a.href = objectUrl
       a.download = fileName

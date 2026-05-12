@@ -3,8 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeFilenameForHeader } from '@/lib/storage'
-import { deleteAccountingFile, readAccountingFile, resolveAccountingFilePath, adjustAccountingFilesBytes } from '@/lib/accounting/file-storage'
-import { isS3Mode } from '@/lib/s3-storage'
+import { deleteAccountingFile, resolveAccountingFilePath, adjustAccountingFilesBytes, toAccountingS3Key } from '@/lib/accounting/file-storage'
+import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs from 'fs'
 
 export const runtime = 'nodejs'
@@ -39,27 +39,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const filename = sanitizeFilenameForHeader(attachment.originalName)
 
-  let fileBuffer: Buffer
+  // S3 mode: redirect to a presigned download URL so bytes go direct from R2 to browser
   if (isS3Mode()) {
-    try {
-      fileBuffer = await readAccountingFile(attachment.storagePath)
-    } catch {
-      return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
-    }
-  } else {
-    let fullPath: string
-    try {
-      fullPath = resolveAccountingFilePath(attachment.storagePath)
-    } catch {
-      return NextResponse.json({ error: 'Invalid attachment path' }, { status: 500 })
-    }
-
-    const stat = await fs.promises.stat(fullPath).catch(() => null)
-    if (!stat?.isFile()) return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
-
-    fileBuffer = await fs.promises.readFile(fullPath)
+    const key = toAccountingS3Key(attachment.storagePath)
+    const presignedUrl = await s3GetPresignedDownloadUrl(key, 300, attachment.originalName, contentType)
+    return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
   }
 
+  // Local storage: read file and stream buffer
+  let fullPath: string
+  try {
+    fullPath = resolveAccountingFilePath(attachment.storagePath)
+  } catch {
+    return NextResponse.json({ error: 'Invalid attachment path' }, { status: 500 })
+  }
+
+  const stat = await fs.promises.stat(fullPath).catch(() => null)
+  if (!stat?.isFile()) return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
+
+  const fileBuffer = await fs.promises.readFile(fullPath)
   return new NextResponse(fileBuffer as unknown as BodyInit, {
     headers: {
       'Content-Type': contentType,

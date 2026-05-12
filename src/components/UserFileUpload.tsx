@@ -588,9 +588,11 @@ export function UserFileUpload({ userId, onUploadComplete, maxConcurrent = 3 }: 
                       <RotateCw className="w-4 h-4" />
                     </Button>
                   )}
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void cancelUpload(upload.id)}>
-                    <X className="w-4 h-4" />
-                  </Button>
+                  {upload.status !== 'completed' && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => void cancelUpload(upload.id)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
 

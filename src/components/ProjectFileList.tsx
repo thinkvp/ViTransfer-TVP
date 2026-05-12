@@ -64,16 +64,28 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
         throw new Error(data?.error || 'Failed to download file')
       }
 
+      // If the route redirected to an external S3/R2 presigned URL, navigate there
+      // directly so the browser uses its native download manager (with progress bar).
+      const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
+      if (isS3Redirect) {
+        void res.body?.cancel()
+        const a = document.createElement('a')
+        a.href = res.url
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        return
+      }
+
+      // Local storage fallback: buffer via blob.
       const blob = await res.blob()
       const blobUrl = URL.createObjectURL(blob)
-
       const a = document.createElement('a')
       a.href = blobUrl
       a.download = file.fileName
       document.body.appendChild(a)
       a.click()
       a.remove()
-
       URL.revokeObjectURL(blobUrl)
     } catch (e: any) {
       alert(e?.message || 'Failed to download file')

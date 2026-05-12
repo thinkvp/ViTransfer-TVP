@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
-import { Readable } from 'stream'
 import { createReadStream, existsSync, statSync } from 'fs'
+import { Readable } from 'stream'
 import { getAlbumZipFileName, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { getClientIpAddress } from '@/lib/utils'
 import { getSecuritySettings } from '@/lib/video-access'
 import { createTemporaryDropboxLink } from '@/lib/storage-provider-dropbox'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
+import { isS3Mode, s3FileExists, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -149,18 +149,8 @@ export async function GET(
     const zipFilename = sanitizeFilenameForHeader(getAlbumZipFileName({ albumName: album.name, variant }))
 
     if (isS3Mode()) {
-      const fileSize = await s3GetFileSize(zipStoragePath)
-      const fileStream = await downloadFile(zipStoragePath)
-      const readableStream = Readable.toWeb(fileStream as any) as ReadableStream
-      return new NextResponse(readableStream, {
-        headers: {
-          'Content-Type': 'application/zip',
-          'Content-Disposition': `attachment; filename="${zipFilename}"`,
-          ...(fileSize != null ? { 'Content-Length': fileSize.toString() } : {}),
-          'Cache-Control': 'private, no-cache',
-          'X-Content-Type-Options': 'nosniff',
-        },
-      })
+      const presignedUrl = await s3GetPresignedDownloadUrl(zipStoragePath, 300, getAlbumZipFileName({ albumName: album.name, variant }), 'application/zip')
+      return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
     }
 
     const zipFullPath = getFilePath(zipStoragePath)

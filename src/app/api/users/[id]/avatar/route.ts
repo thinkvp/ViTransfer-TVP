@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile, getFilePath, uploadFile } from '@/lib/storage'
+import { isS3Mode, s3GetPresignedStreamUrl, s3FileExists } from '@/lib/s3-storage'
 import { createReadStream, statSync } from 'fs'
 import sharp from 'sharp'
 
@@ -35,6 +36,18 @@ export async function GET(
 
     if (!user?.avatarPath) {
       return NextResponse.json({ error: 'No avatar' }, { status: 404 })
+    }
+
+    // S3 mode: redirect to a presigned stream URL
+    if (isS3Mode()) {
+      const exists = await s3FileExists(user.avatarPath)
+      if (!exists) return NextResponse.json({ error: 'Avatar file not found' }, { status: 404 })
+
+      const presignedUrl = await s3GetPresignedStreamUrl(user.avatarPath, 86400, 'image/jpeg')
+      return NextResponse.redirect(presignedUrl, {
+        status: 302,
+        headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=600' },
+      })
     }
 
     const fullPath = getFilePath(user.avatarPath)
