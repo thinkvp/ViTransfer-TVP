@@ -427,6 +427,31 @@ async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ ent
       continue
     }
 
+    if (stats.isDirectory()) {
+      // Some DB paths (e.g. timelinePreviewSpritesPath) point to a directory
+      // containing multiple derived files. Enumerate immediate children so
+      // every file inside gets uploaded to S3.
+      try {
+        const children = await fs.promises.readdir(absPath)
+        for (const child of children) {
+          const childAbsPath = path.join(absPath, child)
+          let childStats: fs.Stats
+          try {
+            childStats = await fs.promises.stat(childAbsPath)
+          } catch {
+            continue
+          }
+          if (!childStats.isFile()) continue
+          const childKey = `${key}/${child}`
+          entries.push({ key: childKey, absPath: childAbsPath, size: childStats.size })
+        }
+      } catch {
+        // If readdir fails, count as missing rather than crashing the whole run.
+        missingLocalFiles++
+      }
+      continue
+    }
+
     if (!stats.isFile()) {
       missingLocalFiles++
       continue

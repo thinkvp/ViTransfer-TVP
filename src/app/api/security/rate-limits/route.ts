@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
-import { getRateLimitedEntries, clearRateLimitByKey } from '@/lib/rate-limit'
+import { getRateLimitedEntries, clearRateLimitByKey, rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 export const runtime = 'nodejs'
 
@@ -23,6 +23,9 @@ export async function GET(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'viewSecurityRateLimits')
   if (forbiddenAction) return forbiddenAction
+
+  const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'security-rl-read')
+  if (limited) return limited
 
   try {
     const entries = await getRateLimitedEntries()
@@ -60,6 +63,9 @@ export async function DELETE(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'manageSecurityRateLimits')
   if (forbiddenAction) return forbiddenAction
+
+  const limitedDelete = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'security-rl-delete')
+  if (limitedDelete) return limitedDelete
 
   try {
     const body = await request.json()

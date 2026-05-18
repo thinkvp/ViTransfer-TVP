@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { updateRecipient, deleteRecipient } from '@/lib/recipients'
 import { z } from 'zod'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
 
@@ -38,6 +39,9 @@ export async function PATCH(
 
   const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
   if (forbiddenAction) return forbiddenAction
+
+  const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'recipient-update')
+  if (limited) return limited
 
   try {
     const { id: projectId, rid: recipientId } = await params
@@ -96,6 +100,9 @@ export async function DELETE(
 
   const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
   if (forbiddenAction) return forbiddenAction
+
+  const limitedDelete = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'recipient-update')
+  if (limitedDelete) return limitedDelete
 
   try {
     const { id: projectId, rid: recipientId } = await params

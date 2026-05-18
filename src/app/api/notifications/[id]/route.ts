@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import {
 	isClearablePinnedNotificationDetails,
 } from '@/lib/pinned-system-notifications'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 
@@ -25,6 +26,9 @@ export async function DELETE(
 	}
 
 	const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
+
+	const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'notification-delete')
+	if (limited) return limited
 
 	try {
 		const { id } = await params

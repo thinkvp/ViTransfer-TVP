@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+    try {
     const session = event.data.object as Stripe.Checkout.Session
 
     const paymentStatus = typeof session.payment_status === 'string'
@@ -301,6 +302,10 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.error('[STRIPE_WEBHOOK] Unexpected error sending invoice paid email', e)
       }
+    }
+    } catch (error) {
+      console.error('[STRIPE_WEBHOOK] Unexpected error handling checkout.session event:', error)
+      // Return 200 below — Stripe must not retry; the INSERT uses ON CONFLICT DO NOTHING for idempotency
     }
   }
 

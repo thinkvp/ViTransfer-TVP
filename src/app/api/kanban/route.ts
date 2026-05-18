@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,8 +17,12 @@ export async function GET(request: NextRequest) {
   const authResult = await requireApiUser(request)
   if (authResult instanceof Response) return authResult
 
+  const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'kanban-list')
+  if (limited) return limited
+
   const isAdmin = authResult.appRoleIsSystemAdmin === true
 
+  try {
   const columns = await prisma.kanbanColumn.findMany({
     orderBy: { position: 'asc' },
     include: {
@@ -66,4 +71,8 @@ export async function GET(request: NextRequest) {
   })
 
   return NextResponse.json({ columns })
+  } catch (error) {
+    console.error('[KANBAN] Failed to fetch columns:', error)
+    return NextResponse.json({ error: 'Failed to fetch kanban data' }, { status: 500 })
+  }
 }

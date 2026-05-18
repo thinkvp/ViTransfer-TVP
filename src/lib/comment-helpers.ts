@@ -7,6 +7,14 @@ import { sendImmediateNotification, queueNotification } from '@/lib/notification
 import { sendPushNotification } from '@/lib/push-notifications'
 import { canDoAction, isProjectStatusVisible, normalizeRolePermissions } from '@/lib/rbac'
 
+function buildAdminShareUrl(projectId: string, videoName?: string | null, videoVersion?: number | null): string {
+  if (!videoName || !Number.isFinite(videoVersion ?? NaN)) {
+    return `/admin/projects/${encodeURIComponent(projectId)}`
+  }
+
+  return `/admin/projects/${encodeURIComponent(projectId)}/share?video=${encodeURIComponent(videoName)}&version=${encodeURIComponent(String(videoVersion))}`
+}
+
 export async function resolveCommentDisplayColorSnapshot(params: {
   projectId: string
   isInternal: boolean
@@ -218,15 +226,6 @@ export async function handleCommentNotifications(params: {
   const { comment, projectId, videoId, parentId } = params
 
   try {
-    // Check if SMTP is configured
-    const smtpConfigured = await isSmtpConfigured()
-    console.log('[COMMENT-NOTIFICATION] SMTP configured:', smtpConfigured)
-
-    if (!smtpConfigured) {
-      console.log('[COMMENT-NOTIFICATION] Skipping - SMTP not configured')
-      return
-    }
-
     const [project, video, settings] = await Promise.all([
       prisma.project.findUnique({
         where: { id: projectId },
@@ -240,7 +239,7 @@ export async function handleCommentNotifications(params: {
       videoId
         ? prisma.video.findUnique({
             where: { id: videoId },
-            select: { name: true, versionLabel: true }
+            select: { name: true, version: true, versionLabel: true }
           })
         : Promise.resolve(null),
       prisma.settings.findUnique({
@@ -259,6 +258,86 @@ export async function handleCommentNotifications(params: {
     // IMPORTANT: author identity is not the same as visibility.
     // Internal users can create share-visible comments (isInternal === false).
     const isAdminAuthored = !!comment?.userId || comment.isInternal
+
+    // --- Bell / browser push notifications ---
+    // These run regardless of SMTP configuration; they feed the in-app
+    // notification bell and (if enabled) browser push delivery.
+
+    // Collaboration signal: share-visible admin comment (authored by an internal user).
+    // Exclude internal-only comments (`isInternal === true`).
+    if (isAdminAuthored && comment?.isInternal === false && comment?.userId) {
+      try {
+        const shareUrl = buildAdminShareUrl(project.id, video?.name, comment.videoVersion)
+        await sendPushNotification({
+          type: 'ADMIN_SHARE_COMMENT',
+          projectId: project.id,
+          projectName: project.title,
+          title: 'New admin comment',
+          message: 'New admin comment on project',
+          details: {
+            __meta: {
+              authorUserId: String(comment.userId),
+              commentId: String(comment.id),
+              videoId: comment.videoId,
+              videoVersion: comment.videoVersion,
+              videoName: video?.name,
+            },
+            __link: {
+              href: shareUrl,
+            },
+            'Project': project.title,
+            'Video': video?.name || 'N/A',
+            'Timecode': comment.timecode,
+            'Author': comment.authorName || 'Admin',
+            'Comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
+          },
+        })
+      } catch (e) {
+        console.warn('[COMMENT-NOTIFICATION] Failed to emit admin share-comment push event')
+      }
+    }
+
+    // Client comment bell notification (not admin activity)
+    if (!isAdminAuthored) {
+      try {
+        const shareUrl = buildAdminShareUrl(project.id, video?.name, comment.videoVersion)
+        await sendPushNotification({
+          type: 'CLIENT_COMMENT',
+          projectId: project.id,
+          projectName: project.title,
+          title: 'New Client Comment',
+          message: `New comment on project`,
+          details: {
+            __meta: {
+              commentId: String(comment.id),
+              videoId: comment.videoId,
+              videoVersion: comment.videoVersion,
+              videoName: video?.name,
+            },
+            __link: {
+              href: shareUrl,
+            },
+            'Project': project.title,
+            'Video': video?.name || 'N/A',
+            'Timecode': comment.timecode,
+            'Author': comment.authorName || 'Client',
+            'Comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
+          },
+        })
+      } catch (e) {
+        console.warn('[COMMENT-NOTIFICATION] Failed to emit client comment push event')
+      }
+    }
+
+    // --- Email notifications ---
+    // These require SMTP to be configured; skip silently if it is not.
+    const smtpConfigured = await isSmtpConfigured()
+    console.log('[COMMENT-NOTIFICATION] SMTP configured:', smtpConfigured)
+
+    if (!smtpConfigured) {
+      console.log('[COMMENT-NOTIFICATION] Skipping email - SMTP not configured')
+      return
+    }
 
     // Each side has its own schedule. Evaluate both independently so all
     // non-author recipients on both sides are always notified.
@@ -294,55 +373,6 @@ export async function handleCommentNotifications(params: {
     if (adminBatch || clientBatch) {
       console.log(`[COMMENT-NOTIFICATION] Queuing for batched delivery (admin: ${adminSchedule}, client: ${clientSchedule})...`)
       await queueNotification(context, { admins: adminImmediate || adminNone, clients: clientImmediate || clientNone })
-    }
-
-    // Collaboration signal: share-visible admin comment (authored by an internal user).
-    // This feeds the admin header notification bell (PushNotificationLog).
-    // Exclude internal-only comments (`isInternal === true`).
-    if (isAdminAuthored && comment?.isInternal === false && comment?.userId) {
-      try {
-        await sendPushNotification({
-          type: 'ADMIN_SHARE_COMMENT',
-          projectId: project.id,
-          projectName: project.title,
-          title: 'New admin comment',
-          message: 'New admin comment on project',
-          details: {
-            __meta: {
-              authorUserId: String(comment.userId),
-              commentId: String(comment.id),
-            },
-            __link: {
-              href: `/admin/projects/${encodeURIComponent(project.id)}`,
-            },
-            'Project': project.title,
-            'Video': video?.name || 'N/A',
-            'Timecode': comment.timecode,
-            'Author': comment.authorName || 'Admin',
-            'Comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
-          },
-        })
-      } catch (e) {
-        console.warn('[COMMENT-NOTIFICATION] Failed to emit admin share-comment push event')
-      }
-    }
-
-    // Send push notification for client comments only (not admin activity)
-    if (!isAdminAuthored) {
-      await sendPushNotification({
-        type: 'CLIENT_COMMENT',
-        projectId: project.id,
-        projectName: project.title,
-        title: 'New Client Comment',
-        message: `New comment on project`,
-        details: {
-          'Project': project.title,
-          'Video': video?.name || 'N/A',
-          'Timecode': comment.timecode,
-          'Author': comment.authorName || 'Client',
-          'Comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
-        },
-      })
     }
   } catch (emailError) {
     // Don't fail the request if notification processing fails

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiSystemAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { z } from 'zod'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -30,6 +31,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'kanban-columns-update')
+  if (limited) return limited
+
+  try {
   const existing = await prisma.kanbanColumn.findUnique({ where: { id } })
   if (!existing) {
     return NextResponse.json({ error: 'Column not found' }, { status: 404 })
@@ -65,6 +70,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   })
 
   return NextResponse.json({ column })
+  } catch (error) {
+    console.error('[KANBAN] Failed to update column:', error)
+    return NextResponse.json({ error: 'Failed to update column' }, { status: 500 })
+  }
 }
 
 /**
@@ -77,6 +86,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params
 
+  const limitedDel = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'kanban-columns-delete')
+  if (limitedDel) return limitedDel
+
+  try {
   const existing = await prisma.kanbanColumn.findUnique({ where: { id } })
   if (!existing) {
     return NextResponse.json({ error: 'Column not found' }, { status: 404 })
@@ -91,4 +104,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   })
 
   return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('[KANBAN] Failed to delete column:', error)
+    return NextResponse.json({ error: 'Failed to delete column' }, { status: 500 })
+  }
 }

@@ -12,6 +12,7 @@ import { isS3Mode, s3CompleteMultipartUpload, type CompletedPart } from '@/lib/s
 import { verifyProjectAccess } from '@/lib/project-access'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 
@@ -23,29 +24,39 @@ export async function POST(
     return NextResponse.json({ error: 'S3 storage is not enabled' }, { status: 404 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'comment-s3-complete')
+  if (limited) return limited
+
   const { id: commentId } = await params
 
-  const comment = await prisma.comment.findUnique({
-    where: { id: commentId },
-    select: { id: true, projectId: true, isInternal: true, userId: true },
-  })
+  let comment: { id: string; projectId: string; isInternal: boolean; userId: string | null } | null
+  let projectSettings: { id: string; sharePassword: string | null; authMode: string; allowClientUploadFiles: boolean } | null
+  try {
+    comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true, projectId: true, isInternal: true, userId: true },
+    })
 
-  if (!comment) {
-    return NextResponse.json({ error: 'Comment not found' }, { status: 404 })
-  }
+    if (!comment) {
+      return NextResponse.json({ error: 'Comment not found' }, { status: 404 })
+    }
 
-  const projectSettings = await prisma.project.findUnique({
-    where: { id: comment.projectId },
-    select: {
-      id: true,
-      sharePassword: true,
-      authMode: true,
-      allowClientUploadFiles: true,
-    },
-  })
+    projectSettings = await prisma.project.findUnique({
+      where: { id: comment.projectId },
+      select: {
+        id: true,
+        sharePassword: true,
+        authMode: true,
+        allowClientUploadFiles: true,
+      },
+    })
 
-  if (!projectSettings) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    if (!projectSettings) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+  } catch (error) {
+    console.error('[COMMENT S3 COMPLETE] Failed to load comment/project:', error)
+    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
   }
 
   const authResult = await verifyProjectAccess(
@@ -116,28 +127,33 @@ export async function POST(
     ? fileType.trim()
     : 'application/octet-stream'
 
-  const commentFile = await prisma.commentFile.create({
-    data: {
-      commentId,
-      projectId: comment.projectId,
-      fileName,
-      fileSize: BigInt(fileSize),
-      fileType: resolvedFileType,
-      storagePath: key,
-    },
-  })
+  try {
+    const commentFile = await prisma.commentFile.create({
+      data: {
+        commentId,
+        projectId: comment.projectId,
+        fileName,
+        fileSize: BigInt(fileSize),
+        fileType: resolvedFileType,
+        storagePath: key,
+      },
+    })
 
-  await recalculateAndStoreProjectTotalBytes(comment.projectId)
+    await recalculateAndStoreProjectTotalBytes(comment.projectId)
 
-  console.log(`[COMMENT S3 COMPLETE] Comment file ${commentFile.id} upload complete`)
-  return NextResponse.json({
-    success: true,
-    file: {
-      id: commentFile.id,
-      fileName: commentFile.fileName,
-      fileSize: Number(commentFile.fileSize),
-      storagePath: commentFile.storagePath,
-      createdAt: commentFile.createdAt,
-    },
-  })
+    console.log(`[COMMENT S3 COMPLETE] Comment file ${commentFile.id} upload complete`)
+    return NextResponse.json({
+      success: true,
+      file: {
+        id: commentFile.id,
+        fileName: commentFile.fileName,
+        fileSize: Number(commentFile.fileSize),
+        storagePath: commentFile.storagePath,
+        createdAt: commentFile.createdAt,
+      },
+    })
+  } catch (error) {
+    console.error('[COMMENT S3 COMPLETE] S3 upload succeeded but DB record creation failed — orphaned object at key:', key, error)
+    return NextResponse.json({ error: 'Upload completed but failed to save file record' }, { status: 500 })
+  }
 }

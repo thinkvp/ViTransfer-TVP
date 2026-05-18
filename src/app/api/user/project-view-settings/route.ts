@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAuth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { rateLimit } from '@/lib/rate-limit'
 
 type SectionVisibility = {
   sales: boolean
@@ -27,6 +28,9 @@ export async function GET(request: NextRequest) {
     const authResult = await requireApiAuth(request)
     if (authResult instanceof Response) return authResult
     const user = authResult
+
+    const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'project-view-settings-read')
+    if (limited) return limited
 
     const url = new URL(request.url)
     const projectId = url.searchParams.get('projectId')
@@ -73,6 +77,9 @@ export async function POST(request: NextRequest) {
     const authResult = await requireApiAuth(request)
     if (authResult instanceof Response) return authResult
     const user = authResult
+
+    const limitedPost = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'project-view-settings-write')
+    if (limitedPost) return limitedPost
 
     const body = await request.json()
     const { projectId, visibleSections, setAsDefault } = body

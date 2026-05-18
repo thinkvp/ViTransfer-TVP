@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,6 +60,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'kanban-cards-update')
+  if (limited) return limited
+
+  try {
   const existing = await prisma.kanbanCard.findUnique({
     where: { id },
     include: {
@@ -385,6 +390,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   return NextResponse.json({ card })
+  } catch (error) {
+    console.error('[KANBAN] Failed to update card:', error)
+    return NextResponse.json({ error: 'Failed to update card' }, { status: 500 })
+  }
 }
 
 /**
@@ -402,6 +411,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const limitedDel = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'kanban-cards-delete')
+  if (limitedDel) return limitedDel
+
+  try {
   const existing = await prisma.kanbanCard.findUnique({ where: { id } })
   if (!existing) {
     return NextResponse.json({ error: 'Card not found' }, { status: 404 })
@@ -416,4 +429,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   })
 
   return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('[KANBAN] Failed to delete card:', error)
+    return NextResponse.json({ error: 'Failed to delete card' }, { status: 500 })
+  }
 }

@@ -5,6 +5,27 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.9] - 2026-05-18
+
+### Added
+- **Rate limiting on additional sensitive routes** — `rateLimit()` is now applied to: passkey manage (`DELETE`/`PATCH`, 20 req/min), password reset (`POST` 10 req/15 min, `GET` 20 req/15 min), comment S3 multipart complete (30 req/min), kanban card archive/unarchive (30 req/min), share video-token (120 req/min), security rate-limits read/delete (60/20 req/min); closes remaining gaps in API-level brute-force protection.
+- **Deep-link URLs in admin push notifications for comments** — `buildAdminShareUrl()` helper generates `/admin/projects/{id}/share?video={name}&version={n}` links when a comment is on a specific video version; both `ADMIN_SHARE_COMMENT` and `CLIENT_COMMENT` push notification payloads now include `__link.href` pointing to the exact video on the share page, as well as `__meta` fields (`commentId`, `videoId`, `videoVersion`, `videoName`) for client-side routing.
+- **Local-to-S3 migration handles directory-typed storage paths** — `buildMainLocalEntries()` now detects when a referenced DB path resolves to a directory (e.g. `timelinePreviewSpritesPath`) and enumerates its immediate children, uploading each child file individually under a `{key}/{child}` S3 key; previously these directories were silently counted as missing files.
+
+### Changed
+- **Storage integrity scan covers timeline sprite directories** — `buildMissingFilesReferences()` now fetches `timelinePreviewSpritesPath` for all videos and tracks sprite directory prefixes separately; `checkMissingFiles()` verifies sprite existence by matching `timeline-*.jpg` patterns in the S3 key set (or listing the local directory), so missing sprite sheets are correctly reported instead of silently skipped.
+- **Album ZIP paths always included in missing-file checks** — previously `buildMissingFilesReferences()` only added album ZIP paths when the cached `fullZipFileSize`/`socialZipFileSize` was non-zero; the size gate is removed so stale or zero-cached sizes no longer hide real DB→storage mismatches.
+- **`scannedDirectories` correctly reported in S3 mode** — `cleanupProjectStorageOrphans()` now sets `scannedStorageRoots = 2` for S3 runs (main namespace + `accounting/` prefix) instead of reporting `0` (the length of the empty local `roots` array).
+- **`CLIENT_COMMENT` push notifications include metadata and link** — push notification payloads for client comments now carry `__meta` (commentId, videoId, videoVersion, videoName) and `__link.href` matching the `ADMIN_SHARE_COMMENT` pattern, enabling consistent deep-link navigation for both comment types.
+- **Video query in comment notifications fetches `version` field** — `handleCommentNotifications()` now selects `version` alongside `name` and `versionLabel` so the correct numeric version is available when constructing deep-link URLs.
+
+### Fixed
+- **Push/bell notifications no longer blocked when SMTP is not configured** — `handleCommentNotifications()` previously returned early when SMTP was absent, preventing `sendPushNotification()` from running and leaving the in-app notification bell empty. The function now fires `CLIENT_COMMENT` and `ADMIN_SHARE_COMMENT` push/bell notifications unconditionally; the SMTP-required email path (immediate send / batch queue) is independently gated and skipped gracefully when SMTP is not configured.
+- **`AccountingTrendChart` no longer shows a stale "Gross margin" stat** — the `totalCogsCents` memo and `grossMarginPct` calculation are removed; the summary line now shows only "Net Profit / Net Loss" to avoid displaying a misleading gross margin figure when COGS lines are not fully categorised.
+- **Comment S3 multipart complete route handles DB failure gracefully** — the `CommentFile` create and `recalculateAndStoreProjectTotalBytes` calls are now wrapped in a `try/catch`; if the DB write fails after S3 upload completes the route logs the orphaned S3 key and returns a 500 instead of an unhandled exception.
+- **Kanban archive/unarchive routes return structured errors on DB failure** — both `POST` (archive) and `DELETE` (unarchive) handlers are now wrapped in `try/catch` blocks that log the error and return `{ error: … }` with status 500 rather than propagating unhandled rejections.
+- **Share video-token route wraps all DB lookups in a single `try/catch`** — previously an unhandled Prisma error mid-handler would surface as an unformatted 500; the route now returns `{ error: 'Failed to load video' }` with status 500.
+
 ## [1.7.8] - 2026-05-13
 
 ### Added

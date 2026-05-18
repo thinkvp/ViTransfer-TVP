@@ -268,19 +268,10 @@ export function AccountingTrendChart({
     () => monthlyData.reduce((s, m) => s + m.incomeCents, 0),
     [monthlyData],
   )
-  const totalCogsCents = useMemo(
-    () => monthlyData.reduce((s, m) => s + m.cogsCents, 0),
-    [monthlyData],
-  )
   const totalNetProfitCents = useMemo(
     () => monthlyData.reduce((s, m) => s + m.netProfitCents, 0),
     [monthlyData],
   )
-
-  const grossMarginPct =
-    totalIncomeCents > 0
-      ? Math.round(((totalIncomeCents - totalCogsCents) / totalIncomeCents) * 100)
-      : null
 
   const hasData = data.some((d) => d.income > 0 || d.totalCosts > 0)
 
@@ -302,7 +293,6 @@ export function AccountingTrendChart({
               {totalNetProfitCents >= 0 ? 'Net Profit' : 'Net Loss'}:{' '}
               {fmtAudShort(totalNetProfitCents, sym)}
             </span>
-            {grossMarginPct !== null && ` · Gross margin: ${grossMarginPct}%`}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {reportingBasis === 'CASH' ? 'Cash basis' : 'Accrual basis'} · ex GST

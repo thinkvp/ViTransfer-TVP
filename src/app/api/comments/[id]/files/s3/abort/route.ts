@@ -11,6 +11,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { isS3Mode, s3AbortMultipartUpload } from '@/lib/s3-storage'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { prisma } from '@/lib/db'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 
@@ -22,24 +23,34 @@ export async function POST(
     return NextResponse.json({ error: 'S3 storage is not enabled' }, { status: 404 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'comment-s3-abort')
+  if (limited) return limited
+
   const { id: commentId } = await params
 
-  const comment = await prisma.comment.findUnique({
-    where: { id: commentId },
-    select: { id: true, projectId: true },
-  })
+  let comment: { id: string; projectId: string } | null
+  let projectSettings: { sharePassword: string | null; authMode: string } | null
+  try {
+    comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true, projectId: true },
+    })
 
-  if (!comment) {
-    return NextResponse.json({ error: 'Comment not found' }, { status: 404 })
-  }
+    if (!comment) {
+      return NextResponse.json({ error: 'Comment not found' }, { status: 404 })
+    }
 
-  const projectSettings = await prisma.project.findUnique({
-    where: { id: comment.projectId },
-    select: { sharePassword: true, authMode: true },
-  })
+    projectSettings = await prisma.project.findUnique({
+      where: { id: comment.projectId },
+      select: { sharePassword: true, authMode: true },
+    })
 
-  if (!projectSettings) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    if (!projectSettings) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+  } catch (error) {
+    console.error('[COMMENT S3 ABORT] Failed to load comment/project:', error)
+    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
   }
 
   const authResult = await verifyProjectAccess(

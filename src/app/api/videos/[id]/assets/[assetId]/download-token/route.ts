@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { rateLimit } from '@/lib/rate-limit'
 
 /**
  * Generate a temporary download token for asset downloads (admins and share users)
@@ -13,6 +14,9 @@ export async function POST(
 ) {
   try {
     const { id: videoId, assetId } = await params
+
+    const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'video-download-token')
+    if (limited) return limited
 
     // Get asset with video and project info
     const asset = await prisma.videoAsset.findUnique({

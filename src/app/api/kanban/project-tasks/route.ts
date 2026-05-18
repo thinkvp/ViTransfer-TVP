@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,8 +21,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'kanban-project-tasks')
+  if (limited) return limited
+
   const isAdmin = authResult.appRoleIsSystemAdmin === true
 
+  try {
   const cards = await prisma.kanbanCard.findMany({
     where: {
       projectId,
@@ -69,4 +74,8 @@ export async function GET(request: NextRequest) {
   })
 
   return NextResponse.json({ tasks: cards })
+  } catch (error) {
+    console.error('[KANBAN] Failed to fetch project tasks:', error)
+    return NextResponse.json({ error: 'Failed to fetch project tasks' }, { status: 500 })
+  }
 }

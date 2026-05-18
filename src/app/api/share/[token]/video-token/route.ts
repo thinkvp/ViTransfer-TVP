@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getShareContext } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -60,49 +61,65 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: shareContext.projectId },
-    select: { id: true, slug: true, enableVideos: true },
-  })
+  const limited = await rateLimit(request, { maxRequests: 120, windowMs: 60_000 }, 'share-video-token')
+  if (limited) return limited
 
-  if (!project || project.slug !== token) {
-    return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+  let project: { id: string; slug: string; enableVideos: boolean | null } | null
+  let video: {
+    id: string; projectId: string; approved: boolean;
+    originalStoragePath: string | null; thumbnailPath: string | null;
+    preview480Path: string | null; preview720Path: string | null;
+    preview1080Path: string | null; timelinePreviewVttPath: string | null;
+    timelinePreviewSpritesPath: string | null;
+  } | null
+  try {
+    project = await prisma.project.findUnique({
+      where: { id: shareContext.projectId },
+      select: { id: true, slug: true, enableVideos: true },
+    })
+
+    if (!project || project.slug !== token) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+    }
+
+    if (project.enableVideos === false) {
+      return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
+    video = await prisma.video.findUnique({
+      where: { id: videoId },
+      select: {
+        id: true,
+        projectId: true,
+        approved: true,
+        originalStoragePath: true,
+        thumbnailPath: true,
+        preview480Path: true,
+        preview720Path: true,
+        preview1080Path: true,
+        timelinePreviewVttPath: true,
+        timelinePreviewSpritesPath: true,
+      },
+    })
+
+    if (!video || video.projectId !== project.id) {
+      return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+  } catch (error) {
+    console.error('[SHARE] Failed to load project/video:', error)
+    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
   }
 
-  if (project.enableVideos === false) {
-    return NextResponse.json({ error: 'Video not found' }, { status: 404 })
-  }
-
-  const video = await prisma.video.findUnique({
-    where: { id: videoId },
-    select: {
-      id: true,
-      projectId: true,
-      approved: true,
-      originalStoragePath: true,
-      thumbnailPath: true,
-      preview480Path: true,
-      preview720Path: true,
-      preview1080Path: true,
-      timelinePreviewVttPath: true,
-      timelinePreviewSpritesPath: true,
-    },
-  })
-
-  if (!video || video.projectId !== project.id) {
-    return NextResponse.json({ error: 'Video not found' }, { status: 404 })
-  }
-
-  if (!canIssueShareVideoToken(video, quality)) {
+  if (!canIssueShareVideoToken(video!, quality)) {
     return NextResponse.json({ error: `${quality} unavailable` }, { status: quality === 'original' ? 403 : 404 })
   }
 
-  const sessionId = shareContext.sessionId || `share:${project.id}:${token}`
+  const sessionId = shareContext.sessionId || `share:${project!.id}:${token}`
 
   try {
     const tokenValue = await generateVideoAccessToken(
-      video.id,
-      project.id,
+      video!.id,
+      project!.id,
       quality,
       request,
       sessionId

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
 import { deletePasskey, updatePasskeyName } from '@/lib/passkey'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
 
@@ -31,6 +32,9 @@ export async function DELETE(
 
     const forbiddenAction = requireActionAccess(user, 'changeSettings')
     if (forbiddenAction) return forbiddenAction
+
+    const limited = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'passkey-manage')
+    if (limited) return limited
 
     const { id: credentialId } = await params
 
@@ -86,6 +90,9 @@ export async function PATCH(
 
     const forbiddenAction = requireActionAccess(user, 'changeSettings')
     if (forbiddenAction) return forbiddenAction
+
+    const limitedPatch = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'passkey-manage')
+    if (limitedPatch) return limitedPatch
 
     const { id: credentialId } = await params
 

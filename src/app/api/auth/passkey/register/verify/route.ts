@@ -4,6 +4,7 @@ import { verifyPasskeyRegistration } from '@/lib/passkey'
 import { getClientIpAddress } from '@/lib/utils'
 import type { RegistrationResponseJSON } from '@simplewebauthn/browser'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
 
@@ -39,6 +40,9 @@ export async function POST(request: NextRequest) {
 
     const forbiddenAction = requireActionAccess(user, 'changeSettings')
     if (forbiddenAction) return forbiddenAction
+
+    const limited = await rateLimit(request, { maxRequests: 10, windowMs: 60_000 }, 'passkey-register-verify')
+    if (limited) return limited
 
     // Parse request body
     const body = await request.json()

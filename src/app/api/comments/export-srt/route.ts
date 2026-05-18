@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -74,6 +75,10 @@ export async function GET(request: NextRequest) {
   const forbiddenAction = requireActionAccess(authResult, 'accessProjectSettings')
   if (forbiddenAction) return forbiddenAction
 
+  const limited = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'comments-export-srt')
+  if (limited) return limited
+
+  try {
   const { searchParams } = new URL(request.url)
   const projectId = searchParams.get('projectId')
   const videoId = searchParams.get('videoId')
@@ -274,4 +279,8 @@ export async function GET(request: NextRequest) {
       'cache-control': 'no-store',
     },
   })
+  } catch (error) {
+    console.error('[COMMENTS EXPORT SRT] Error generating SRT:', error)
+    return NextResponse.json({ error: 'Failed to export SRT' }, { status: 500 })
+  }
 }

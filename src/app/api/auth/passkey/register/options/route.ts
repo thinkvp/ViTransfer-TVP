@@ -3,6 +3,7 @@ import { requireApiUser } from '@/lib/auth'
 import { generatePasskeyRegistrationOptions } from '@/lib/passkey'
 import { isPasskeyConfigured } from '@/lib/settings'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
 
@@ -33,6 +34,9 @@ export async function POST(request: NextRequest) {
 
     const forbiddenAction = requireActionAccess(user, 'changeSettings')
     if (forbiddenAction) return forbiddenAction
+
+    const limited = await rateLimit(request, { maxRequests: 10, windowMs: 60_000 }, 'passkey-register-options')
+    if (limited) return limited
 
     // Check if PassKey is configured
     const configured = await isPasskeyConfigured()

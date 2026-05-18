@@ -539,9 +539,10 @@ async function scanS3ForOrphans(
  *   mainPaths       – paths relative to STORAGE_ROOT (= S3 keys in S3 mode)
  *   accountingPaths – paths relative to ACCOUNTING_STORAGE_ROOT (= storagePath DB field)
  */
-async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; accountingPaths: Set<string> }> {
+async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; accountingPaths: Set<string>; timelineSpritePrefixes: Set<string> }> {
   const mainPaths = new Set<string>()
   const accountingPaths = new Set<string>()
+  const timelineSpritePrefixes = new Set<string>()
 
   const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, albums, projectEmails, projectEmailAttachments, clientFiles, userFiles, users, settings, accountingAttachments] = await Promise.all([
     prisma.video.findMany({
@@ -552,6 +553,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
         preview1080Path: true,
         thumbnailPath: true,
         timelinePreviewVttPath: true,
+        timelinePreviewSpritesPath: true,
       },
     }),
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
@@ -562,8 +564,6 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
       select: {
         name: true,
         storageFolderName: true,
-        fullZipFileSize: true,
-        socialZipFileSize: true,
         project: {
           select: {
             storagePath: true,
@@ -598,6 +598,14 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     } catch { /* malformed historical path */ }
   }
 
+  const addTimelineSpritePrefix = (storagePath: string | null | undefined) => {
+    const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
+    if (!normalizedStoragePath) return
+    try {
+      timelineSpritePrefixes.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(normalizedStoragePath))))
+    } catch { /* malformed historical path */ }
+  }
+
   for (const v of videos) {
     addMain(v.originalStoragePath)
     addMain(v.preview480Path)
@@ -605,6 +613,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     addMain(v.preview1080Path)
     addMain(v.thumbnailPath)
     addMain(v.timelinePreviewVttPath)
+    addTimelineSpritePrefix(v.timelinePreviewSpritesPath)
   }
   for (const a of videoAssets) addMain(a.storagePath)
   for (const c of commentFiles) addMain(c.storagePath)
@@ -624,8 +633,11 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
       albumName: album.name,
     })
 
-    if (Number(album.fullZipFileSize || 0) > 0) addMain(zipPaths.full)
-    if (Number(album.socialZipFileSize || 0) > 0) addMain(zipPaths.social)
+    // Always include derived ZIP paths in missing-file checks. Cached ZIP sizes
+    // can be stale (e.g. 0 while an archive should exist), so gating on size
+    // can hide real DB->storage mismatches.
+    addMain(zipPaths.full)
+    addMain(zipPaths.social)
   }
   for (const e of projectEmails) addMain(e.rawStoragePath)
   for (const a of projectEmailAttachments) addMain(a.storagePath)
@@ -641,7 +653,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     if (relPath) accountingPaths.add(relPath.replace(/\\/g, '/'))
   }
 
-  return { mainPaths, accountingPaths }
+  return { mainPaths, accountingPaths, timelineSpritePrefixes }
 }
 
 /**
@@ -657,6 +669,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
 async function checkMissingFiles(
   mainPaths: Set<string>,
   accountingPaths: Set<string>,
+  timelineSpritePrefixes: Set<string>,
   s3KeySet: Set<string> | null,
   acctS3RelKeySet: Set<string> | null,
 ): Promise<{ count: number; sample: string[] }> {
@@ -672,6 +685,14 @@ async function checkMissingFiles(
         missing.push(`${ACCOUNTING_S3_PREFIX}/${relPath}`)
       }
     }
+    const spritePrefixesOnStorage = new Set<string>()
+    for (const key of s3KeySet) {
+      const match = key.match(/^(.*)\/timeline-\d+\.jpg$/i)
+      if (match?.[1]) spritePrefixesOnStorage.add(match[1])
+    }
+    for (const prefix of timelineSpritePrefixes) {
+      if (!spritePrefixesOnStorage.has(prefix)) missing.push(`${prefix}/timeline-*.jpg`)
+    }
   } else {
     // Local mode — fs.access per path
     for (const relPath of mainPaths) {
@@ -683,6 +704,12 @@ async function checkMissingFiles(
       const absPath = path.join(ACCOUNTING_STORAGE_ROOT, relPath)
       const exists = await fs.promises.access(absPath).then(() => true).catch(() => false)
       if (!exists) missing.push(`accounting/${relPath}`)
+    }
+    for (const prefix of timelineSpritePrefixes) {
+      const absDir = path.join(STORAGE_ROOT, prefix)
+      const names = await fs.promises.readdir(absDir).catch(() => [] as string[])
+      const hasSprites = names.some((name) => /^timeline-\d+\.jpg$/i.test(name))
+      if (!hasSprites) missing.push(`${prefix}/timeline-*.jpg`)
     }
   }
 
@@ -811,12 +838,14 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   const errors: Array<{ path: string; error: string }> = []
   const orphanFiles: OrphanFileEntry[] = []
   const stats = { scannedFiles: 0 }
+  let scannedStorageRoots = 0
 
   let roots: Array<{ absPath: string; relPath: string }> = []
   let missingResult: { count: number; sample: string[] } = { count: 0, sample: [] }
 
   // Scan storage based on configured provider
   if (isS3Mode()) {
+    scannedStorageRoots = 2 // Main bucket namespace + accounting/ prefix namespace
     // Fetch both S3 listings once and share between orphan detection and missing-files check.
     const [s3Objects, accountingS3Files] = await Promise.all([
       listS3Objects(),
@@ -846,10 +875,17 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
           : f.key
       )
     )
-    missingResult = await checkMissingFiles(missingRefs.mainPaths, missingRefs.accountingPaths, s3KeySet, acctS3RelKeySet)
+    missingResult = await checkMissingFiles(
+      missingRefs.mainPaths,
+      missingRefs.accountingPaths,
+      missingRefs.timelineSpritePrefixes,
+      s3KeySet,
+      acctS3RelKeySet,
+    )
   } else {
     // Local mode: walk filesystem
     roots = await listPhysicalProjectRoots()
+    scannedStorageRoots = roots.length
     for (const root of roots) {
       await walkProjectFiles(root.absPath, root.relPath, orphanFiles, refs, errors, stats)
     }
@@ -858,7 +894,13 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     orphanFiles.push(...accountingOrphans)
 
     // Missing-files check (local)
-    missingResult = await checkMissingFiles(missingRefs.mainPaths, missingRefs.accountingPaths, null, null)
+    missingResult = await checkMissingFiles(
+      missingRefs.mainPaths,
+      missingRefs.accountingPaths,
+      missingRefs.timelineSpritePrefixes,
+      null,
+      null,
+    )
   }
 
   const orphanFileBytes = orphanFiles.reduce((total, file) => total + file.bytes, 0)
@@ -874,7 +916,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     return {
       ok: true,
       dryRun: true,
-      scannedDirectories: roots.length,
+      scannedDirectories: scannedStorageRoots,
       scannedProjects: projectRootIndex.size,
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
@@ -908,7 +950,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     return {
       ok: true,
       dryRun: false,
-      scannedDirectories: roots.length,
+      scannedDirectories: scannedStorageRoots,
       scannedProjects: projectRootIndex.size,
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
@@ -949,7 +991,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   return {
     ok: true,
     dryRun: false,
-    scannedDirectories: roots.length,
+    scannedDirectories: scannedStorageRoots,
     scannedProjects: projectRootIndex.size,
     scannedFiles: stats.scannedFiles,
     orphanFiles: orphanFiles.length,

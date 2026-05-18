@@ -3,6 +3,7 @@ import { requireApiUser } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { z } from 'zod'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -50,6 +51,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'kanban-cards-create')
+  if (limited) return limited
+
+  try {
   // Validate column exists
   const column = await prisma.kanbanColumn.findUnique({ where: { id: parsed.data.columnId } })
   if (!column) {
@@ -143,4 +148,8 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ card }, { status: 201 })
+  } catch (error) {
+    console.error('[KANBAN] Failed to create card:', error)
+    return NextResponse.json({ error: 'Failed to create card' }, { status: 500 })
+  }
 }

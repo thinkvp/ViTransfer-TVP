@@ -9,6 +9,7 @@ import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { z } from 'zod'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -39,6 +40,9 @@ const resetPasswordSchema = z.object({
 
 export async function POST(request: NextRequest) {
   const ipAddress = getClientIpAddress(request)
+
+  const limited = await rateLimit(request, { maxRequests: 10, windowMs: 15 * 60_000 }, 'reset-password')
+  if (limited) return limited
 
   try {
     // Parse and validate request body
@@ -183,6 +187,9 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   const ipAddress = getClientIpAddress(request)
+
+  const limitedGet = await rateLimit(request, { maxRequests: 20, windowMs: 15 * 60_000 }, 'reset-password-verify')
+  if (limitedGet) return limitedGet
 
   try {
     const { searchParams } = new URL(request.url)

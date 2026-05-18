@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { Prisma } from '@prisma/client'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
 
   const forbiddenMenu = requireMenuAccess(authResult, 'settings')
   if (forbiddenMenu) return forbiddenMenu
+
+  const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'push-notif-settings-read')
+  if (limited) return limited
 
   try {
     const settings = await prisma.pushNotificationSettings.upsert({
@@ -98,6 +102,9 @@ export async function PATCH(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'changeSettings')
   if (forbiddenAction) return forbiddenAction
+
+  const limitedPatch = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'push-notif-settings-write')
+  if (limitedPatch) return limitedPatch
 
   try {
     const body = await request.json()

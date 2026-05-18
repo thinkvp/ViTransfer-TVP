@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { deleteWebPushSubscription } from '@/lib/admin-web-push'
 import { Prisma } from '@prisma/client'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -13,6 +14,9 @@ function asTrimmedString(value: unknown): string {
 export async function POST(request: NextRequest) {
   const user = await requireApiAdmin(request)
   if (user instanceof Response) return user
+
+  const limited = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'web-push-unsubscribe')
+  if (limited) return limited
 
   try {
     const body = await request.json().catch(() => null)

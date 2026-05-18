@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiSystemAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { z } from 'zod'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
   }
 
+  const limited = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'kanban-columns-create')
+  if (limited) return limited
+
+  try {
   // Get next position
   const maxPos = await prisma.kanbanColumn.aggregate({ _max: { position: true } })
   const nextPosition = (maxPos._max.position ?? -1) + 1
@@ -38,4 +43,8 @@ export async function POST(request: NextRequest) {
   })
 
   return NextResponse.json({ column }, { status: 201 })
+  } catch (error) {
+    console.error('[KANBAN] Failed to create column:', error)
+    return NextResponse.json({ error: 'Failed to create column' }, { status: 500 })
+  }
 }

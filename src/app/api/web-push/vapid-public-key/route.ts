@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { getWebPushPublicKey } from '@/lib/admin-web-push'
 import { Prisma } from '@prisma/client'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -9,6 +10,9 @@ export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   const user = await requireApiAdmin(request)
   if (user instanceof Response) return user
+
+  const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'vapid-key')
+  if (limited) return limited
 
   try {
     const publicKey = await getWebPushPublicKey()
