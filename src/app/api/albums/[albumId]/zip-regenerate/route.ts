@@ -7,7 +7,6 @@ import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
-import { isDropboxStorageConfigured, deleteDropboxFile } from '@/lib/storage-provider-dropbox'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -40,9 +39,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       name: true,
       storageFolderName: true,
       socialCopiesEnabled: true,
-      dropboxEnabled: true,
-      fullZipDropboxPath: true,
-      socialZipDropboxPath: true,
       project: {
         select: {
           storagePath: true,
@@ -101,31 +97,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await deleteFile(socialZipPath).catch(() => {})
   }
 
-  // Delete Dropbox copies if they exist and reset tracking so re-upload queues after new ZIPs are ready.
-  if (album.dropboxEnabled) {
-    const dropboxPaths = [
-      album.fullZipDropboxPath,
-      ...(album.socialCopiesEnabled ? [album.socialZipDropboxPath] : []),
-    ].filter(Boolean) as string[]
-    if (isDropboxStorageConfigured()) {
-      await Promise.allSettled(dropboxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
-    }
-    await prisma.album.update({
-      where: { id: album.id },
-      data: {
-        fullZipDropboxStatus: null,
-        fullZipDropboxProgress: 0,
-        fullZipDropboxError: null,
-        fullZipDropboxPath: null,
-        ...(album.socialCopiesEnabled ? {
-          socialZipDropboxStatus: null,
-          socialZipDropboxProgress: 0,
-          socialZipDropboxError: null,
-          socialZipDropboxPath: null,
-        } : {}),
-      },
-    }).catch(() => {})
-  }
+  await prisma.album.update({
+    where: { id: album.id },
+    data: {},
+  }).catch(() => {})
 
   // Keep DB totals consistent with storage after invalidation.
   await syncAlbumZipSizes({ albumId: album.id, projectId: album.projectId }).catch(() => {})

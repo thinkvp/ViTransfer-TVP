@@ -4,12 +4,10 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteDirectory, moveDirectory } from '@/lib/storage'
-import { deleteDropboxPath, isDropboxStorageConfigured, moveDropboxPath } from '@/lib/storage-provider-dropbox'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
   buildClientStorageRoot,
   replaceStoredStoragePathPrefix,
-  replaceStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
@@ -223,7 +221,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               where: { id: project.id },
               data: {
                 companyName: updated.name,
-                storagePath: replaceStoragePathPrefix(project.storagePath, oldClientStorageRoot, newClientStorageRoot),
+                storagePath: replaceStoredStoragePathPrefix(project.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
               },
             })
           }
@@ -252,7 +250,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               thumbnailPath: true,
               timelinePreviewVttPath: true,
               timelinePreviewSpritesPath: true,
-              dropboxPath: true,
             },
           })
           for (const video of videos) {
@@ -266,21 +263,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
                 thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldClientStorageRoot, newClientStorageRoot),
                 timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldClientStorageRoot, newClientStorageRoot),
                 timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldClientStorageRoot, newClientStorageRoot),
-                dropboxPath: replaceStoragePathPrefix(video.dropboxPath, oldClientStorageRoot, newClientStorageRoot),
               },
             })
           }
 
           const assets = await tx.videoAsset.findMany({
             where: { video: { project: { clientId: id } } },
-            select: { id: true, storagePath: true, dropboxPath: true },
+            select: { id: true, storagePath: true },
           })
           for (const asset of assets) {
             await tx.videoAsset.update({
               where: { id: asset.id },
               data: {
                 storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-                dropboxPath: replaceStoragePathPrefix(asset.dropboxPath, oldClientStorageRoot, newClientStorageRoot),
               },
             })
           }
@@ -296,20 +291,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
                 storagePath: replaceStoredStoragePathPrefix(photo.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
                 socialStoragePath: replaceStoredStoragePathPrefix(photo.socialStoragePath, oldClientStorageRoot, newClientStorageRoot),
                 thumbnailStoragePath: replaceStoredStoragePathPrefix(photo.thumbnailStoragePath, oldClientStorageRoot, newClientStorageRoot),
-              },
-            })
-          }
-
-          const albums = await tx.album.findMany({
-            where: { project: { clientId: id } },
-            select: { id: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
-          })
-          for (const album of albums) {
-            await tx.album.update({
-              where: { id: album.id },
-              data: {
-                fullZipDropboxPath: replaceStoragePathPrefix(album.fullZipDropboxPath, oldClientStorageRoot, newClientStorageRoot),
-                socialZipDropboxPath: replaceStoragePathPrefix(album.socialZipDropboxPath, oldClientStorageRoot, newClientStorageRoot),
               },
             })
           }
@@ -502,10 +483,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       throw error
     }
 
-    if (clientRenamePlanned && isDropboxStorageConfigured()) {
-      void moveDropboxPath(oldClientStorageRoot, newClientStorageRoot).catch(() => {})
-    }
-
     return NextResponse.json({ client })
   } catch (error: any) {
     if (error?.code === 'P2002') {
@@ -565,14 +542,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await deleteDirectory(clientStorageRoot)
   } catch (error) {
     console.error(`Failed to delete local client directory for ${id}:`, error)
-  }
-
-  if (isDropboxStorageConfigured()) {
-    try {
-      await deleteDropboxPath('', clientStorageRoot, { pruneEmptyParents: false })
-    } catch (error) {
-      console.error(`Failed to delete Dropbox client directory for ${id}:`, error)
-    }
   }
 
   return NextResponse.json({ ok: true })

@@ -7,12 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 type StorageSummary = {
-  provider?: 'local' | 'dropbox' | 's3'
+  provider?: 'local' | 's3'
   totalBytes: number
   diskTotalBytes?: number | null
   diskOtherBytes?: number | null
-  dropboxConfigured?: boolean
-  dropboxBytes?: number | null
   capacityBytes?: number | null
   availableBytes?: number | null
   breakdown: {
@@ -195,12 +193,6 @@ export function ProjectStorageUsage({
     return 'Tracked data'
   }, [data])
 
-  const dropboxLabel = useMemo(() => {
-    const dropboxBytes = Number(data?.dropboxBytes ?? NaN)
-    if (!Number.isFinite(dropboxBytes) || dropboxBytes < 0) return null
-    return formatFileSize(dropboxBytes)
-  }, [data])
-
   if (!loading && !error && data && rows.length === 0 && Number((data.diskTotalBytes ?? data.totalBytes) || 0) <= 0) {
     return null
   }
@@ -248,12 +240,6 @@ export function ProjectStorageUsage({
                   <div className="text-xs text-muted-foreground">Source</div>
                   <div className="text-xs text-muted-foreground tabular-nums">{sourceLabel}</div>
                 </div>
-                {data.dropboxConfigured && dropboxLabel && (
-                  <div className="mt-1 flex items-baseline justify-between gap-3">
-                    <div className="text-xs text-muted-foreground">Dropbox (not counted in totals)</div>
-                    <div className="text-xs text-muted-foreground tabular-nums">{dropboxLabel}</div>
-                  </div>
-                )}
                 {availableLabel && (
                   <div className="mt-1 flex items-baseline justify-between gap-3">
                     <div className="text-xs text-muted-foreground">Available space</div>

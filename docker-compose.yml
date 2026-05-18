@@ -112,13 +112,7 @@ services:
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
 
-      # Dropbox storage (optional, mutually exclusive with S3)
-      DROPBOX_APP_KEY: ${DROPBOX_APP_KEY:-}
-      DROPBOX_APP_SECRET: ${DROPBOX_APP_SECRET:-}
-      DROPBOX_REFRESH_TOKEN: ${DROPBOX_REFRESH_TOKEN:-}
-      DROPBOX_ROOT_PATH: ${DROPBOX_ROOT_PATH:-}
-
-      # S3-compatible storage — Cloudflare R2 (optional, mutually exclusive with Dropbox)
+      # S3-compatible storage — Cloudflare R2 (optional)
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       NEXT_PUBLIC_STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
@@ -200,13 +194,7 @@ services:
       QBO_MINOR_VERSION: ${QBO_MINOR_VERSION:-75}
       QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
 
-      # Dropbox storage (optional, mutually exclusive with S3)
-      DROPBOX_APP_KEY: ${DROPBOX_APP_KEY:-}
-      DROPBOX_APP_SECRET: ${DROPBOX_APP_SECRET:-}
-      DROPBOX_REFRESH_TOKEN: ${DROPBOX_REFRESH_TOKEN:-}
-      DROPBOX_ROOT_PATH: ${DROPBOX_ROOT_PATH:-}
-
-      # S3-compatible storage — Cloudflare R2 (optional, mutually exclusive with Dropbox)
+      # S3-compatible storage — Cloudflare R2 (optional)
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_BUCKET: ${S3_BUCKET:-}

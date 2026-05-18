@@ -20,7 +20,18 @@ export async function POST(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   try {
-    const result = await dryRunLocalToS3Migration()
+    const body = await request.json().catch(() => ({}))
+    const credentials = {
+      endpoint: body?.endpoint,
+      bucket: body?.bucket,
+      region: body?.region,
+      accessKeyId: body?.accessKeyId,
+      secretAccessKey: body?.secretAccessKey,
+      forcePathStyle: body?.forcePathStyle,
+    }
+    // Only pass credentials if at least endpoint + bucket are present
+    const hasCredentials = Boolean(credentials.endpoint && credentials.bucket && credentials.accessKeyId && credentials.secretAccessKey)
+    const result = await dryRunLocalToS3Migration(hasCredentials ? credentials : undefined)
     return NextResponse.json(result)
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || 'Failed to run migration dry run' }, { status: 500 })

@@ -3,7 +3,6 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireMenuAccess } from '@/lib/rbac-api'
-import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 
 export const runtime = 'nodejs'
 
@@ -74,21 +73,12 @@ export async function GET(
         timelinePreviewVttPath: true,
         timelinePreviewSpritesPath: true,
         timelinePreviewsReady: true,
-        dropboxEnabled: true,
-        dropboxUploadStatus: true,
-        dropboxUploadProgress: true,
-        dropboxUploadError: true,
         updatedAt: true,
       },
       orderBy: { version: 'desc' },
     })
 
-    const dropboxConfigured = isDropboxStorageConfigured()
-    const sanitizedVideos = dropboxConfigured
-      ? videos
-      : videos.map((v) => ({ ...v, dropboxEnabled: false }))
-
-    return NextResponse.json({ videos: sanitizedVideos })
+    return NextResponse.json({ videos })
   } catch (error) {
     console.error('[project-video-statuses] Failed to fetch:', error)
     return NextResponse.json({ error: 'Failed to fetch video statuses' }, { status: 500 })

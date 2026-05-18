@@ -2,7 +2,6 @@ import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { isS3Mode, s3FileExists } from '../lib/s3-storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus } from '@prisma/client'
 import {
@@ -11,6 +10,8 @@ import {
   buildVideoPreviewStoragePath,
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
+  isDropboxStoragePath,
+  stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
 import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
 import fs from 'fs'

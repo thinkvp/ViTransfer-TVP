@@ -489,18 +489,6 @@ model Album {
   // Whether social-media-sized photo derivatives (long edge scaled to 2048px) are generated for this album.
   socialCopiesEnabled Boolean @default(true)
 
-  // Dropbox upload tracking for generated ZIP files.
-  // null = not queued; PENDING = queued; UPLOADING = in progress; COMPLETE = done; ERROR = failed.
-  dropboxEnabled           Boolean @default(false)
-  fullZipDropboxStatus     String?
-  fullZipDropboxProgress   Int     @default(0)
-  fullZipDropboxError      String?
-  fullZipDropboxPath       String?
-  socialZipDropboxStatus   String?
-  socialZipDropboxProgress Int     @default(0)
-  socialZipDropboxError    String?
-  socialZipDropboxPath     String?
-
   photos AlbumPhoto[]
   analytics AlbumAnalytics[]
 
@@ -707,15 +695,6 @@ model Video {
   approvedAt DateTime?
   allowApproval Boolean @default(false)
 
-  // Dropbox storage
-  dropboxEnabled Boolean @default(false)
-  dropboxPath    String? // Human-friendly Dropbox path relative to root (e.g. "Project Name/Video Name/v1 - file.mp4")
-
-  // Dropbox background upload tracking
-  dropboxUploadStatus   String? // PENDING, UPLOADING, COMPLETE, ERROR
-  dropboxUploadProgress Float   @default(0)
-  dropboxUploadError    String?
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -744,13 +723,6 @@ model VideoAsset {
   fileType    String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
   storagePath String // Path in storage system
   category    String? // Optional category: "image", "audio", "project", "other"
-
-  // Dropbox storage
-  dropboxEnabled        Boolean @default(false)
-  dropboxPath           String? // Human-friendly Dropbox path relative to root
-  dropboxUploadStatus   String? // PENDING, UPLOADING, COMPLETE, ERROR
-  dropboxUploadProgress Float   @default(0)
-  dropboxUploadError    String?
 
   // Upload metadata
   expiresAt      DateTime?

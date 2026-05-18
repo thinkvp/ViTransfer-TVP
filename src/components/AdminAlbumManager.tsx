@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Cloud, Loader2, Layers, XCircle } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Loader2, Layers } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -48,28 +48,18 @@ type AlbumZipStatus = {
     socialPending: number
     socialError: number
   }
-  dropbox?: {
-    enabled: boolean
-    fullStatus: string | null
-    socialStatus: string | null
-    fullProgress: number
-    socialProgress: number
-    fullError: string | null
-    socialError: string | null
-  }
 }
 
 interface AdminAlbumManagerProps {
   projectId: string
   projectStatus: string
-  dropboxConfigured?: boolean
   canDelete?: boolean
   onProjectDataChanged?: () => void
 }
 
 type PhotoSortMode = 'alphabetical' | 'upload-date'
 
-export default function AdminAlbumManager({ projectId, projectStatus, dropboxConfigured = false, canDelete = true, onProjectDataChanged }: AdminAlbumManagerProps) {
+export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true, onProjectDataChanged }: AdminAlbumManagerProps) {
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,7 +70,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
   const [newAlbumName, setNewAlbumName] = useState('')
   const [newAlbumNotes, setNewAlbumNotes] = useState('')
   const [newAlbumSocialCopies, setNewAlbumSocialCopies] = useState(true)
-  const [newAlbumDropbox, setNewAlbumDropbox] = useState(dropboxConfigured)
   const [creating, setCreating] = useState(false)
 
   const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null)
@@ -97,7 +86,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
   const refreshAlbumsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
-  const [togglingDropboxAlbumId, setTogglingDropboxAlbumId] = useState<string | null>(null)
   const [togglingSocialCopiesAlbumId, setTogglingSocialCopiesAlbumId] = useState<string | null>(null)
 
   const sortedAlbums = useMemo(() => {
@@ -272,11 +260,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
         !data.zip.fullReady ||
         !data.zip.socialReady ||
         data.counts.uploading > 0 ||
-        data.counts.socialPending > 0 ||
-        (data.dropbox?.enabled && (
-          data.dropbox.fullStatus === 'PENDING' || data.dropbox.fullStatus === 'UPLOADING' ||
-          data.dropbox.socialStatus === 'PENDING' || data.dropbox.socialStatus === 'UPLOADING'
-        ))
+        data.counts.socialPending > 0
 
       const prevTimer = zipPollTimersRef.current.get(albumId)
       if (prevTimer) clearTimeout(prevTimer)
@@ -307,24 +291,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
       alert(e?.message || 'Failed to regenerate ZIPs')
     }
   }, [fetchZipStatus, onProjectDataChanged])
-
-  const handleToggleDropbox = useCallback(async (albumId: string, currentlyEnabled: boolean) => {
-    if (togglingDropboxAlbumId) return
-
-    if (currentlyEnabled) {
-      if (!confirm('Remove album ZIPs from Dropbox? The local copies will be kept.')) return
-    }
-
-    setTogglingDropboxAlbumId(albumId)
-    try {
-      await apiPost(`/api/albums/${albumId}/zip-dropbox`, { enabled: !currentlyEnabled })
-      void fetchZipStatus(albumId)
-    } catch (e: any) {
-      alert(e?.message || 'Failed to toggle Dropbox')
-    } finally {
-      setTogglingDropboxAlbumId(null)
-    }
-  }, [togglingDropboxAlbumId, fetchZipStatus])
 
   const handleToggleSocialCopies = useCallback(async (albumId: string, currentlyEnabled: boolean) => {
     if (togglingSocialCopiesAlbumId) return
@@ -452,13 +418,11 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
         name,
         notes: notes ? notes : null,
         socialCopiesEnabled: newAlbumSocialCopies,
-        dropboxEnabled: newAlbumDropbox,
       })
 
       setNewAlbumName('')
       setNewAlbumNotes('')
       setNewAlbumSocialCopies(true)
-      setNewAlbumDropbox(dropboxConfigured)
       setShowNewAlbumForm(false)
 
       await fetchAlbums()
@@ -572,19 +536,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                     FAILED
                   </span>
                 )}
-                {album.status !== 'ERROR' && (() => {
-                  const dbx = zipStatusByAlbumId[album.id]?.dropbox
-                  const hasDropboxError = dbx?.fullError || dbx?.socialError
-                  if (hasDropboxError) {
-                    return (
-                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
-                        <XCircle className="w-3 h-3" />
-                        UPLOAD FAILED
-                      </span>
-                    )
-                  }
-                  return null
-                })()}
                 {(album.status === 'UPLOADING' || album.status === 'PROCESSING') && Number(count) > 0 && (
                   <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-primary-visible text-primary border-2 border-primary-visible">
                     <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
@@ -655,56 +606,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                           <Layers className="w-4 h-4" />
                         )}
                       </Button>
-                      {dropboxConfigured && (
-                        (() => {
-                          const dbx = zipStatusByAlbumId[album.id]?.dropbox
-                          const isUploading = dbx?.fullStatus === 'PENDING' || dbx?.fullStatus === 'UPLOADING' ||
-                            dbx?.socialStatus === 'PENDING' || dbx?.socialStatus === 'UPLOADING'
-                          const hasDropboxError = dbx?.fullStatus === 'ERROR' || dbx?.socialStatus === 'ERROR'
-                          const isProcessing = album.status === 'PROCESSING' || album.status === 'UPLOADING'
-                          const spinning = isUploading || (dbx?.enabled && isProcessing)
-
-                          return (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className={cn(
-                                'h-8 w-8',
-                                hasDropboxError
-                                  ? 'text-destructive hover:text-destructive hover:bg-destructive-visible'
-                                  : dbx?.enabled
-                                    ? 'text-primary hover:text-primary/80 hover:bg-primary/5'
-                                    : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
-                              )}
-                              disabled={togglingDropboxAlbumId === album.id}
-                              onClick={() => handleToggleDropbox(album.id, dbx?.enabled || false)}
-                              title={
-                                hasDropboxError
-                                  ? 'Dropbox upload failed'
-                                  : dbx?.enabled
-                                    ? isUploading
-                                      ? 'Uploading ZIPs to Dropbox…'
-                                      : 'Remove ZIPs from Dropbox'
-                                    : 'Upload ZIPs to Dropbox'
-                              }
-                            >
-                              {togglingDropboxAlbumId === album.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : hasDropboxError ? (
-                                <XCircle className="w-4 h-4" />
-                              ) : spinning ? (
-                                <span className="relative inline-flex h-4 w-4">
-                                  <span className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-                                  <Cloud className="w-4 h-4 text-primary" />
-                                </span>
-                              ) : (
-                                <Cloud className="w-4 h-4" />
-                              )}
-                            </Button>
-                          )
-                        })()
-                      )}
                       <Button type="button" variant="outline" size="sm" onClick={() => void regenerateZips(album.id)}>
                         Regenerate ZIPs
                       </Button>
@@ -855,7 +756,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                     setNewAlbumName('')
                     setNewAlbumNotes('')
                     setNewAlbumSocialCopies(true)
-                    setNewAlbumDropbox(dropboxConfigured)
                   }}
                   disabled={creating}
                   title="Close"
@@ -892,7 +792,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                   />
                 </div>
 
-                <div className={`grid gap-4 ${dropboxConfigured ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <div className="grid gap-4 grid-cols-1">
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Allow social media downloads</div>
                     <div className="flex items-center gap-2 h-10">
@@ -907,24 +807,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, dropboxCon
                       </span>
                     </div>
                   </div>
-
-                  {dropboxConfigured && (
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Upload to Dropbox</div>
-                      <div className="flex items-center gap-2 h-10">
-                        <Checkbox
-                          checked={newAlbumDropbox}
-                          onCheckedChange={(v) => setNewAlbumDropbox(Boolean(v))}
-                          disabled={creating}
-                          aria-label="Upload to Dropbox"
-                        />
-                        <Cloud className={`w-4 h-4 ${newAlbumDropbox ? 'text-primary' : 'text-muted-foreground/50'}`} />
-                        <span className={newAlbumDropbox ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
-                          {newAlbumDropbox ? 'ZIPs uploaded to Dropbox' : 'Local storage only'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex justify-end">

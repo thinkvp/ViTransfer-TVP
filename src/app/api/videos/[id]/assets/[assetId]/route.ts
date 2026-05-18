@@ -6,9 +6,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { buildProjectStorageRoot, buildVideoAssetDropboxPath, buildVideoThumbnailStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import { getTransferTuningSettings } from '@/lib/settings'
-import { isDropboxStorageConfigured, toDropboxStoragePath, deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { createReadStream } from 'fs'
 import fs from 'fs'
@@ -277,7 +276,7 @@ export async function DELETE(
   }
 }
 
-// PATCH /api/videos/[id]/assets/[assetId] - Toggle Dropbox for asset
+// PATCH /api/videos/[id]/assets/[assetId] - deprecated asset update endpoint
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; assetId: string }> }
@@ -302,15 +301,6 @@ export async function PATCH(
 
   try {
     const body = await request.json()
-    const { dropboxEnabled } = body
-
-    if (typeof dropboxEnabled !== 'boolean') {
-      return NextResponse.json({ error: 'dropboxEnabled must be a boolean' }, { status: 400 })
-    }
-
-    if (dropboxEnabled && !isDropboxStorageConfigured()) {
-      return NextResponse.json({ error: 'Dropbox is not configured' }, { status: 400 })
-    }
 
     const asset = await prisma.videoAsset.findUnique({
       where: { id: assetId },
@@ -345,69 +335,7 @@ export async function PATCH(
       }
     }
 
-    const updateData: any = { dropboxEnabled }
-    const assetDropboxRelPath = buildVideoAssetDropboxPath(
-      asset.video.project.client?.name || asset.video.project.companyName || 'Client',
-      getStoragePathBasename(asset.video.project.storagePath) || asset.video.project.title,
-      asset.video.storageFolderName || asset.video.name || videoId,
-      asset.video.versionLabel,
-      asset.fileName,
-    )
-
-    if (dropboxEnabled) {
-      const currentPath = asset.storagePath
-      if (!isDropboxStoragePath(currentPath)) {
-        const dropboxPath = toDropboxStoragePath(currentPath)
-        updateData.storagePath = dropboxPath
-        updateData.dropboxPath = assetDropboxRelPath
-        updateData.dropboxUploadStatus = 'PENDING'
-        updateData.dropboxUploadProgress = 0
-        updateData.dropboxUploadError = null
-      } else if (asset.dropboxUploadStatus === 'ERROR') {
-        updateData.dropboxPath = assetDropboxRelPath
-        updateData.dropboxUploadStatus = 'PENDING'
-        updateData.dropboxUploadProgress = 0
-        updateData.dropboxUploadError = null
-      } else if (asset.dropboxPath !== assetDropboxRelPath) {
-        updateData.dropboxPath = assetDropboxRelPath
-      }
-    } else {
-      const currentPath = asset.storagePath
-      if (isDropboxStoragePath(currentPath)) {
-        updateData.storagePath = stripDropboxStoragePrefix(currentPath)
-        deleteDropboxFile(currentPath, asset.dropboxPath).catch((err) => {
-          console.error(`[DROPBOX] Failed to delete asset ${assetId} from Dropbox:`, err)
-        })
-      }
-      updateData.dropboxPath = null
-      updateData.dropboxUploadStatus = null
-      updateData.dropboxUploadProgress = 0
-      updateData.dropboxUploadError = null
-    }
-
-    await prisma.videoAsset.update({
-      where: { id: assetId },
-      data: updateData,
-    })
-
-    // Enqueue upload to Dropbox if enabling
-    if (dropboxEnabled && updateData.dropboxUploadStatus === 'PENDING') {
-      const localPath = stripDropboxStoragePrefix(updateData.storagePath || asset.storagePath)
-      const dropboxPath = updateData.storagePath || asset.storagePath
-      const { getDropboxUploadQueue } = await import('@/lib/queue')
-      const dropboxQueue = getDropboxUploadQueue()
-      await dropboxQueue.add('upload-asset-to-dropbox', {
-        videoId,
-        localPath,
-        dropboxPath,
-        dropboxRelPath: updateData.dropboxPath || asset.dropboxPath || null,
-        fileSizeBytes: Number(asset.fileSize),
-        assetId,
-      })
-      console.log(`[ASSET] Asset ${assetId} queued for Dropbox upload (toggled on)`)
-    }
-
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ error: 'Asset updates are no longer supported on this endpoint' }, { status: 410 })
   } catch (error) {
     console.error('Error updating asset:', error)
     return NextResponse.json({ error: 'Failed to update asset' }, { status: 500 })

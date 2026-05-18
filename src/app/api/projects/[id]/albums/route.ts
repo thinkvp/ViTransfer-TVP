@@ -3,7 +3,6 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
@@ -27,7 +26,6 @@ const createAlbumSchema = z.object({
   name: z.string().min(1).max(200),
   notes: z.string().max(500).nullable().optional(),
   socialCopiesEnabled: z.boolean().optional(),
-  dropboxEnabled: z.boolean().optional(),
 })
 
 // GET /api/projects/[id]/albums - list albums (admin)
@@ -151,7 +149,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       storageFolderName,
       notes,
       socialCopiesEnabled: parsed.data.socialCopiesEnabled !== false,
-      dropboxEnabled: parsed.data.dropboxEnabled === true || (parsed.data.dropboxEnabled !== false && isDropboxStorageConfigured()),
     },
   })
 

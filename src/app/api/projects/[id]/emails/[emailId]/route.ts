@@ -7,7 +7,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { deleteDirectory, deleteFile, pruneEmptyParentDirectories } from '@/lib/storage'
 import { sanitizeEmailHtml } from '@/lib/security/email-html-sanitization'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 
 export const runtime = 'nodejs'
 

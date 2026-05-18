@@ -1,17 +1,15 @@
 import path from 'path'
 import { sanitizeFilename } from '@/lib/file-validation'
 
-// Inlined from storage-provider-dropbox to avoid pulling Node-only modules
-// (fs, stream/promises) into the client bundle.
 const DROPBOX_PREFIX = 'dropbox:'
-function isDropboxStoragePath(rawPath: string): boolean {
+export function isDropboxStoragePath(rawPath: string): boolean {
   return rawPath.startsWith(DROPBOX_PREFIX)
 }
-function stripDropboxStoragePrefix(rawPath: string): string {
+export function stripDropboxStoragePrefix(rawPath: string): string {
   if (!rawPath.startsWith(DROPBOX_PREFIX)) return rawPath
   return rawPath.slice(DROPBOX_PREFIX.length).replace(/^\/+/, '')
 }
-function toDropboxStoragePath(rawPath: string): string {
+export function toDropboxStoragePath(rawPath: string): string {
   const stripped = stripDropboxStoragePrefix(rawPath).trim().replace(/\\/g, '/')
   const relative = stripped.replace(/^\/+/, '')
   return `${DROPBOX_PREFIX}/${relative}`
@@ -103,24 +101,12 @@ export function buildCommentFileStoragePath(projectStoragePath: string, commentI
   return path.posix.join(projectStoragePath, 'comments', commentId, finalName)
 }
 
-export function buildProjectDropboxRoot(clientName: string, projectFolderName: string): string {
-  return path.posix.join('clients', sanitizeStorageName(clientName), 'projects', sanitizeStorageName(projectFolderName))
-}
-
 export function buildVideoStorageRoot(projectStoragePath: string, videoFolderName: string): string {
   return path.posix.join(projectStoragePath, 'videos', sanitizeStorageName(videoFolderName))
 }
 
 export function buildVideoVersionRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
   return path.posix.join(buildVideoStorageRoot(projectStoragePath, videoFolderName), sanitizeStorageName(versionLabel))
-}
-
-export function buildVideoDropboxRoot(clientName: string, projectFolderName: string, videoFolderName: string): string {
-  return path.posix.join(buildProjectDropboxRoot(clientName, projectFolderName), 'videos', sanitizeStorageName(videoFolderName))
-}
-
-export function buildVideoVersionDropboxRoot(clientName: string, projectFolderName: string, videoFolderName: string, versionLabel: string): string {
-  return path.posix.join(buildVideoDropboxRoot(clientName, projectFolderName, videoFolderName), sanitizeStorageName(versionLabel))
 }
 
 export function buildVideoOriginalStoragePath(
@@ -136,31 +122,8 @@ export function buildVideoOriginalStoragePath(
   )
 }
 
-export function buildVideoOriginalDropboxPath(
-  clientName: string,
-  projectFolderName: string,
-  videoFolderName: string,
-  versionLabel: string,
-  originalFileName: string,
-): string {
-  const safeOriginalFileName = sanitizeFilename(originalFileName)
-  return path.posix.join(
-    buildVideoVersionDropboxRoot(clientName, projectFolderName, videoFolderName, versionLabel),
-    safeOriginalFileName,
-  )
-}
-
 export function buildVideoAssetsStorageRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
   return path.posix.join(buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel), 'assets')
-}
-
-export function buildVideoAssetsDropboxRoot(
-  clientName: string,
-  projectFolderName: string,
-  videoFolderName: string,
-  versionLabel: string,
-): string {
-  return path.posix.join(buildVideoVersionDropboxRoot(clientName, projectFolderName, videoFolderName, versionLabel), 'assets')
 }
 
 export function buildVideoAssetStoragePath(
@@ -170,16 +133,6 @@ export function buildVideoAssetStoragePath(
   fileName: string,
 ): string {
   return path.posix.join(buildVideoAssetsStorageRoot(projectStoragePath, videoFolderName, versionLabel), fileName)
-}
-
-export function buildVideoAssetDropboxPath(
-  clientName: string,
-  projectFolderName: string,
-  videoFolderName: string,
-  versionLabel: string,
-  fileName: string,
-): string {
-  return path.posix.join(buildVideoAssetsDropboxRoot(clientName, projectFolderName, videoFolderName, versionLabel), fileName)
 }
 
 export function buildVideoPreviewStoragePath(projectStoragePath: string, videoFolderName: string, versionLabel: string, resolution: string): string {
@@ -196,10 +149,6 @@ export function buildVideoTimelineStorageRoot(projectStoragePath: string, videoF
 
 export function buildAlbumStorageRoot(projectStoragePath: string, albumFolderName: string): string {
   return path.posix.join(projectStoragePath, 'albums', sanitizeStorageName(albumFolderName))
-}
-
-export function buildAlbumDropboxRoot(clientName: string, projectFolderName: string, albumFolderName: string): string {
-  return path.posix.join(buildProjectDropboxRoot(clientName, projectFolderName), 'albums', sanitizeStorageName(albumFolderName))
 }
 
 export function buildAlbumPhotoStoragePath(projectStoragePath: string, albumFolderName: string, fileName: string): string {
@@ -236,16 +185,6 @@ export function buildAlbumZipStoragePath(
   variant: AlbumZipVariant,
 ): string {
   return path.posix.join(buildAlbumStorageRoot(projectStoragePath, albumFolderName), 'zips', getAlbumZipFileNameLocal({ albumName, variant }))
-}
-
-export function buildAlbumZipDropboxPath(
-  clientName: string,
-  projectFolderName: string,
-  albumFolderName: string,
-  albumName: string,
-  variant: AlbumZipVariant,
-): string {
-  return path.posix.join(buildAlbumDropboxRoot(clientName, projectFolderName, albumFolderName), 'zips', getAlbumZipFileNameLocal({ albumName, variant }))
 }
 
 export function replaceStoragePathPrefix(currentPath: string | null | undefined, oldPrefix: string, newPrefix: string): string | null {

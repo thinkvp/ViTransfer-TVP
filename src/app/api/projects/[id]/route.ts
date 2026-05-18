@@ -8,15 +8,12 @@ import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib
 import { getProjectRecipients } from '@/lib/recipients'
 import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
-import { sanitizeDropboxName, moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
   allocateUniqueStorageName,
-  buildProjectDropboxRoot,
   buildProjectStorageRoot,
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
-  replaceStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
 import { generateShareUrl } from '@/lib/url'
@@ -905,8 +902,6 @@ export async function PATCH(
       | {
           oldProjectStoragePath: string
           newProjectStoragePath: string
-          oldProjectDropboxRoot: string
-          newProjectDropboxRoot: string
         }
       | null = null
 
@@ -936,8 +931,6 @@ export async function PATCH(
         projectStorageRename = {
           oldProjectStoragePath: currentProjectStoragePath,
           newProjectStoragePath: nextProjectStoragePath,
-          oldProjectDropboxRoot: buildProjectDropboxRoot(currentClientName, currentProjectFolderName),
-          newProjectDropboxRoot: buildProjectDropboxRoot(targetClientName, nextProjectFolderName),
         }
       }
     }
@@ -1002,7 +995,6 @@ export async function PATCH(
               thumbnailPath: true,
               timelinePreviewVttPath: true,
               timelinePreviewSpritesPath: true,
-              dropboxPath: true,
             },
           })
           for (const video of videos) {
@@ -1044,18 +1036,13 @@ export async function PATCH(
                   projectStorageRename.oldProjectStoragePath,
                   projectStorageRename.newProjectStoragePath,
                 ),
-                dropboxPath: replaceStoragePathPrefix(
-                  video.dropboxPath,
-                  projectStorageRename.oldProjectDropboxRoot,
-                  projectStorageRename.newProjectDropboxRoot,
-                ),
               },
             })
           }
 
           const assets = await tx.videoAsset.findMany({
             where: { video: { projectId: id } },
-            select: { id: true, storagePath: true, dropboxPath: true },
+            select: { id: true, storagePath: true },
           })
           for (const asset of assets) {
             await tx.videoAsset.update({
@@ -1066,11 +1053,6 @@ export async function PATCH(
                   projectStorageRename.oldProjectStoragePath,
                   projectStorageRename.newProjectStoragePath,
                 )!,
-                dropboxPath: replaceStoragePathPrefix(
-                  asset.dropboxPath,
-                  projectStorageRename.oldProjectDropboxRoot,
-                  projectStorageRename.newProjectDropboxRoot,
-                ),
               },
             })
           }
@@ -1170,27 +1152,6 @@ export async function PATCH(
             })
           }
 
-          const albums = await tx.album.findMany({
-            where: { projectId: id },
-            select: { id: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
-          })
-          for (const album of albums) {
-            await tx.album.update({
-              where: { id: album.id },
-              data: {
-                fullZipDropboxPath: replaceStoragePathPrefix(
-                  album.fullZipDropboxPath,
-                  projectStorageRename.oldProjectDropboxRoot,
-                  projectStorageRename.newProjectDropboxRoot,
-                ),
-                socialZipDropboxPath: replaceStoragePathPrefix(
-                  album.socialZipDropboxPath,
-                  projectStorageRename.oldProjectDropboxRoot,
-                  projectStorageRename.newProjectDropboxRoot,
-                ),
-              },
-            })
-          }
         }
 
         if (assignedUsersToSet !== null) {
@@ -1287,17 +1248,6 @@ export async function PATCH(
           )
         ).catch(() => {})
       }
-    }
-
-    if (
-      isDropboxStorageConfigured() &&
-      projectStorageRename
-      && projectStorageRename.oldProjectDropboxRoot !== projectStorageRename.newProjectDropboxRoot
-    ) {
-      void moveDropboxPath(
-        projectStorageRename.oldProjectDropboxRoot,
-        projectStorageRename.newProjectDropboxRoot,
-      ).catch(() => {})
     }
 
     // Record status change in analytics activity feed
@@ -1637,7 +1587,7 @@ export async function DELETE(
     // Delete all video files from storage
     for (const video of project.videos) {
       try {
-        // Delete asset files (including Dropbox copies)
+        // Delete asset files from storage
         for (const asset of video.assets) {
           try {
             await deleteFile(asset.storagePath)

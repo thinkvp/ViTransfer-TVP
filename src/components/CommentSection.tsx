@@ -309,8 +309,8 @@ export function CommentSectionView({
   const [exportingSrt, setExportingSrt] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [openDownloadAfterApprove, setOpenDownloadAfterApprove] = useState(false)
-  // Optimistic local flag: true immediately after the client approves, before server data propagates
-  const [localApproved, setLocalApproved] = useState(false)
+  // Optimistic local flag: remember which video was just approved until server data propagates.
+  const [localApprovedVideoId, setLocalApprovedVideoId] = useState<string | null>(null)
   const [videoNotesOpen, setVideoNotesOpen] = useState(true)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
@@ -639,7 +639,10 @@ export function CommentSectionView({
   // Check if ANY video in the group is approved (for admin view with multiple versions)
   const hasAnyApprovedVideo = videos.some(v => (v as any).approved === true)
   const approvedVideo = videos.find(v => (v as any).approved === true)
-  const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || localApproved
+  const hasLocallyApprovedVideoInGroup = Boolean(
+    localApprovedVideoId && videos.some(v => v.id === localApprovedVideoId)
+  )
+  const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || hasLocallyApprovedVideoInGroup
 
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
@@ -885,6 +888,7 @@ export function CommentSectionView({
   const latestSelectableVideo = sortedVideoVersions[0] || null
   const headerVideo = currentVideo || latestSelectableVideo
   const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
+  const isHeaderVideoLocallyApproved = Boolean(headerVideo?.id && localApprovedVideoId === headerVideo.id)
   const approvalEnabledForHeaderVideo = Boolean((headerVideo as any)?.allowApproval)
   const speedTestStorageKey = useMemo(() => {
     if (!headerVideo?.id) return null
@@ -962,7 +966,7 @@ export function CommentSectionView({
   const handleDownloadSelected = () => {
     const video = headerVideo
     if (!video) return
-    if (!(video as any).approved && !isApproved && !localApproved) return
+    if (!(video as any).approved && !isApproved && !isHeaderVideoLocallyApproved) return
     setShowDownloadOptions(true)
   }
 
@@ -1173,7 +1177,7 @@ export function CommentSectionView({
       // After approve, immediately update local state so the banner and download modal
       // appear without waiting for the async prop-refresh chain.
       if (!isAdminView) {
-        setLocalApproved(true)
+        setLocalApprovedVideoId(video.id)
         setShowDownloadOptions(true)
       }
 
@@ -1603,7 +1607,7 @@ export function CommentSectionView({
         </CardHeader>
 
       <CardContent className="flex-1 flex flex-col !p-0 overflow-hidden min-h-0">
-        {headerVideo && ((headerVideo as any)?.approved || isApproved || localApproved) ? (
+        {headerVideo && ((headerVideo as any)?.approved || isApproved || isHeaderVideoLocallyApproved) ? (
           <VideoAssetDownloadModal
             videoId={headerVideo.id}
             videoName={headerVideoName}
@@ -1612,8 +1616,6 @@ export function CommentSectionView({
             onClose={() => setShowDownloadOptions(false)}
             shareToken={shareToken}
             isAdmin={isAdminView}
-            dropboxEnabled={(headerVideo as any)?.dropboxEnabled === true}
-            videoDropboxUploadStatus={(headerVideo as any)?.dropboxUploadStatus ?? null}
           />
         ) : null}
 
@@ -1637,7 +1639,7 @@ export function CommentSectionView({
                 </div>
               </div>
 
-              {showVideoActions && headerVideo && ((headerVideo as any)?.approved || isApproved || localApproved) ? (
+              {showVideoActions && headerVideo && ((headerVideo as any)?.approved || isApproved || isHeaderVideoLocallyApproved) ? (
                 <div className="flex-shrink-0">
                   <Button
                     variant="default"
@@ -1702,7 +1704,7 @@ export function CommentSectionView({
 
               {showVideoActions && (
                 <>
-                  {showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !localApproved ? (
+                  {showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
                     <Button
                       variant="success"
                       size="sm"
@@ -1741,7 +1743,7 @@ export function CommentSectionView({
             </div>
           </div>
 
-          {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !localApproved ? (
+          {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
             <p className="mt-1 text-xs text-muted-foreground">
               If no changes are needed, click Approve Video to download this version.
             </p>

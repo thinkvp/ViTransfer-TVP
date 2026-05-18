@@ -3,7 +3,7 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
@@ -473,12 +473,6 @@ function resolveRedirectedProjectPath(
 
 export async function initStorage() {
   if (isS3Mode()) {
-    if (process.env.DROPBOX_APP_KEY?.trim() || process.env.DROPBOX_REFRESH_TOKEN?.trim()) {
-      console.warn(
-        '[STORAGE] WARNING: Both STORAGE_PROVIDER=s3 and Dropbox credentials are set. ' +
-        'Dropbox integration is disabled when S3 mode is active.'
-      )
-    }
     console.log('[STORAGE] S3 mode active — using Cloudflare R2 for file storage.')
     return
   }
@@ -560,10 +554,9 @@ export async function moveUploadedFile(
   }
 
   if (isDropboxStoragePath(destLogicalPath)) {
-    // For Dropbox-destined files, store locally first (fast same-filesystem rename).
-    // The Dropbox upload is handled asynchronously by the dropbox-upload worker queue.
+    // Legacy dropbox:-prefixed destinations are normalized to local storage.
     const localPath = stripDropboxStoragePrefix(destLogicalPath)
-    console.log(`[STORAGE] Dropbox path detected — storing locally at: ${localPath}`)
+    console.log(`[STORAGE] Legacy-prefixed path detected — storing locally at: ${localPath}`)
 
     await ensureProjectStorageLayoutForPath(localPath)
     const destFullPath = validatePathForWrite(localPath)
@@ -639,7 +632,7 @@ export async function downloadFile(filePath: string): Promise<Readable> {
     const { stream } = await s3DownloadFile(filePath)
     return stream
   }
-  // For Dropbox-stored files, resolve to the local copy (local-first model keeps files on disk)
+  // Legacy dropbox:-prefixed rows still resolve to local disk.
   const resolvedPath = isDropboxStoragePath(filePath)
     ? stripDropboxStoragePrefix(filePath)
     : filePath
@@ -656,10 +649,6 @@ export async function deleteFile(filePath: string): Promise<void> {
   const resolvedPath = isDropboxStoragePath(filePath)
     ? stripDropboxStoragePrefix(filePath)
     : filePath
-
-  if (isDropboxStoragePath(filePath)) {
-    await deleteDropboxFile(filePath)
-  }
 
   const base = validatePathBase(resolvedPath)
   const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })

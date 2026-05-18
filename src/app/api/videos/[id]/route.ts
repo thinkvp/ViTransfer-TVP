@@ -2,37 +2,22 @@ import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { deleteDirectory, deleteFile, moveDirectory, pruneEmptyParentDirectories } from '@/lib/storage'
-import { getFilePath } from '@/lib/storage'
+import { deleteDirectory, deleteFile, moveDirectory, pruneEmptyParentDirectories, getFilePath } from '@/lib/storage'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { getSecuritySettings } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { isDropboxStorageConfigured, toDropboxStoragePath, deleteDropboxFile, isDropboxStoragePath, stripDropboxStoragePrefix, moveDropboxPath } from '@/lib/storage-provider-dropbox'
 import {
   allocateUniqueStorageName,
   buildProjectStorageRoot,
-  buildVideoAssetDropboxPath,
   buildVideoAssetsStorageRoot,
   buildVideoStorageRoot,
   buildVideoVersionRoot,
-  buildVideoDropboxRoot,
-  buildVideoOriginalDropboxPath,
-  getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
-import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
-import { clearResolvedDropboxStorageIssueEntities } from '@/lib/dropbox-storage-inconsistency-log'
 export const runtime = 'nodejs'
-
-function findExistingVideoOriginalPath(video: Parameters<typeof resolveVideoOriginalPath>[0]): string | null {
-  return resolveVideoOriginalPath(video)
-}
-
-
-
 
 // GET /api/videos/[id] - Get video status (for polling during processing)
 export async function GET(
@@ -55,14 +40,14 @@ export async function GET(
   // Rate limit status checks (allow frequent polling)
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
-    maxRequests: 120, // Allow 2 requests per second for polling
+    maxRequests: 120,
     message: 'Too many video status requests. Please slow down.',
   }, 'video-status')
   if (rateLimitResult) return rateLimitResult
 
   try {
     const { id } = await params
-    
+
     const video = await prisma.video.findUnique({
       where: { id },
       select: {
@@ -75,7 +60,7 @@ export async function GET(
         width: true,
         height: true,
         projectId: true,
-      }
+      },
     })
 
     if (!video) {
@@ -107,27 +92,21 @@ export async function GET(
   }
 }
 
-// Helper: Check if all videos have at least one approved version
 async function checkAllVideosApproved(projectId: string): Promise<boolean> {
   const allVideos = await prisma.video.findMany({
     where: { projectId },
-    select: { approved: true, name: true }
+    select: { approved: true, name: true },
   })
 
-  // Group by video name
-  const videosByName = allVideos.reduce((acc: Record<string, any[]>, video) => {
+  const videosByName = allVideos.reduce((acc: Record<string, Array<{ approved: boolean; name: string }>>, video) => {
     if (!acc[video.name]) acc[video.name] = []
     acc[video.name].push(video)
     return acc
   }, {})
 
-  // Check if each unique video has at least one approved version
-  return Object.values(videosByName).every((versions: any[]) =>
-    versions.some(v => v.approved)
-  )
+  return Object.values(videosByName).every((versions) => versions.some((version) => version.approved))
 }
 
-// Helper: Update project status based on approval changes
 async function updateProjectStatus(
   projectId: string,
   videoId: string,
@@ -136,15 +115,10 @@ async function updateProjectStatus(
   changedById: string
 ): Promise<void> {
   const allApproved = await checkAllVideosApproved(projectId)
-
-  // Check if auto-approve is enabled
   const autoApprove = await getAutoApproveProject()
 
   if (allApproved && approved && autoApprove) {
-    // All videos approved AND auto-approve enabled → mark project as approved
     if (currentStatus === 'APPROVED') {
-      // Already approved: keep behavior of refreshing approvedAt/approvedVideoId,
-      // but do not emit a status-change event.
       await prisma.project.update({
         where: { id: projectId },
         data: {
@@ -174,7 +148,6 @@ async function updateProjectStatus(
       ])
     }
   } else if (!approved && currentStatus === 'APPROVED') {
-    // Unapproving when project was approved → revert to IN_REVIEW
     await prisma.$transaction([
       prisma.project.update({
         where: { id: projectId },
@@ -222,7 +195,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel, videoNotes, allowApproval, dropboxEnabled } = body
+    const { approved, name, versionLabel, videoNotes, allowApproval } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
@@ -260,13 +233,6 @@ export async function PATCH(
       )
     }
 
-    if (dropboxEnabled !== undefined && typeof dropboxEnabled !== 'boolean') {
-      return NextResponse.json(
-        { error: 'Invalid request: dropboxEnabled must be a boolean' },
-        { status: 400 }
-      )
-    }
-
     if (typeof videoNotes === 'string' && videoNotes.trim().length > 500) {
       return NextResponse.json(
         { error: 'Invalid request: videoNotes must be 500 characters or fewer' },
@@ -275,7 +241,7 @@ export async function PATCH(
     }
 
     // At least one field must be provided
-    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined && dropboxEnabled === undefined) {
+    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined) {
       return NextResponse.json(
         { error: 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -309,7 +275,7 @@ export async function PATCH(
     }
 
     // RBAC: conservative - any admin-side mutation requires Projects Full Control.
-    if (approved !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined || dropboxEnabled !== undefined) {
+    if (approved !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined) {
       const forbidden = requireActionAccess(authResult, 'projectsFullControl')
       if (forbidden) return forbidden
     }
@@ -367,48 +333,6 @@ export async function PATCH(
     if (name !== undefined) {
       const trimmedName = name.trim()
       updateData.name = trimmedName
-
-      // Rename Dropbox video folder if the video has Dropbox enabled and Dropbox is configured
-      if (video.dropboxEnabled && isDropboxStorageConfigured() && video.dropboxPath && trimmedName !== video.name) {
-        const clientName = video.project.client?.name || video.project.companyName || 'Client'
-        const projectFolderName = getStoragePathBasename(video.project.storagePath) || video.project.title
-        const oldVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, video.name)
-        const newVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, trimmedName)
-        if (oldVideoFolder !== newVideoFolder) {
-          moveDropboxPath(oldVideoFolder, newVideoFolder).catch((err) => {
-            console.error(`[DROPBOX] Failed to rename video folder from ${oldVideoFolder} to ${newVideoFolder}:`, err)
-          })
-
-          // Update dropboxPath for this video and all sibling versions
-          const siblingVideos = await prisma.video.findMany({
-            where: { projectId: video.projectId, name: video.name, dropboxPath: { not: null } },
-            select: { id: true, dropboxPath: true },
-          })
-          for (const sib of siblingVideos) {
-            if (sib.dropboxPath) {
-              const updatedPath = sib.dropboxPath.replace(oldVideoFolder + '/', newVideoFolder + '/')
-              await prisma.video.update({ where: { id: sib.id }, data: { dropboxPath: updatedPath } })
-            }
-          }
-          // Update dropboxPath for assets of all sibling versions
-          const siblingIds = siblingVideos.map(s => s.id)
-          const siblingAssets = await prisma.videoAsset.findMany({
-            where: { videoId: { in: siblingIds }, dropboxPath: { not: null } },
-            select: { id: true, dropboxPath: true },
-          })
-          for (const asset of siblingAssets) {
-            if (asset.dropboxPath) {
-              const updatedPath = asset.dropboxPath.replace(oldVideoFolder + '/', newVideoFolder + '/')
-              await prisma.videoAsset.update({ where: { id: asset.id }, data: { dropboxPath: updatedPath } })
-            }
-          }
-
-          // Update this video's dropboxPath too
-          if (video.dropboxPath) {
-            updateData.dropboxPath = video.dropboxPath.replace(oldVideoFolder + '/', newVideoFolder + '/')
-          }
-        }
-      }
 
       if (trimmedName !== video.name) {
         const projectStoragePath = video.project.storagePath
@@ -468,212 +392,50 @@ export async function PATCH(
       updateData.allowApproval = allowApproval
     }
 
-    // Handle Dropbox toggle
-    if (dropboxEnabled !== undefined) {
-      if (dropboxEnabled && !isDropboxStorageConfigured()) {
-        return NextResponse.json({ error: 'Dropbox is not configured' }, { status: 400 })
-      }
-
-      updateData.dropboxEnabled = dropboxEnabled
-
-      if (dropboxEnabled) {
-        const resolvedLocalOriginalPath = findExistingVideoOriginalPath(video)
-        if (!resolvedLocalOriginalPath) {
-          return NextResponse.json(
-            { error: 'Local original file could not be found for this video. Run the storage migration repair before enabling Dropbox.' },
-            { status: 409 }
-          )
-        }
-
-        // Enable: update storagePath to dropbox prefix (if not already) and enqueue upload
-        const dropboxStoragePath = toDropboxStoragePath(resolvedLocalOriginalPath)
-        if (video.originalStoragePath !== dropboxStoragePath) {
-          updateData.originalStoragePath = dropboxStoragePath
-        }
-
-        if (!video.dropboxPath) {
-          const cleanFileName = video.originalFileName.replace(/^(?:original|asset|photo)-\d+-/, '')
-          updateData.dropboxPath = buildVideoOriginalDropboxPath(
-            video.project.client?.name || video.project.companyName || 'Client',
-            getStoragePathBasename(video.project.storagePath) || video.project.title,
-            video.storageFolderName || video.name,
-            video.versionLabel,
-            cleanFileName,
-          )
-        }
-
-        if (!video.dropboxEnabled || video.dropboxUploadStatus === 'ERROR' || video.dropboxUploadStatus === null) {
-          updateData.dropboxUploadStatus = 'PENDING'
-          updateData.dropboxUploadProgress = 0
-          updateData.dropboxUploadError = null
-        }
-
-        const assets = await prisma.videoAsset.findMany({
-          where: { videoId: id },
-          select: {
-            id: true,
-            fileName: true,
-            fileSize: true,
-            storagePath: true,
-            dropboxEnabled: true,
-            dropboxPath: true,
-            dropboxUploadStatus: true,
-          },
-        })
-
-        for (const asset of assets) {
-          const assetUpdateData: {
-            dropboxEnabled?: boolean
-            storagePath?: string
-            dropboxPath?: string
-            dropboxUploadStatus?: 'PENDING'
-            dropboxUploadProgress?: number
-            dropboxUploadError?: null
-          } = {}
-
-          const assetDropboxPath = buildVideoAssetDropboxPath(
-            video.project.client?.name || video.project.companyName || 'Client',
-            getStoragePathBasename(video.project.storagePath) || video.project.title,
-            video.storageFolderName || video.name,
-            video.versionLabel,
-            asset.fileName,
-          )
-
-          if (!asset.dropboxEnabled) {
-            assetUpdateData.dropboxEnabled = true
-          }
-
-          const assetDropboxStoragePath = isDropboxStoragePath(asset.storagePath)
-            ? asset.storagePath
-            : toDropboxStoragePath(asset.storagePath)
-
-          if (asset.storagePath !== assetDropboxStoragePath) {
-            assetUpdateData.storagePath = assetDropboxStoragePath
-            assetUpdateData.dropboxPath = assetDropboxPath
-            assetUpdateData.dropboxUploadStatus = 'PENDING'
-            assetUpdateData.dropboxUploadProgress = 0
-            assetUpdateData.dropboxUploadError = null
-          } else if (asset.dropboxUploadStatus === 'ERROR' || asset.dropboxUploadStatus === null) {
-            assetUpdateData.dropboxPath = assetDropboxPath
-            assetUpdateData.dropboxUploadStatus = 'PENDING'
-            assetUpdateData.dropboxUploadProgress = 0
-            assetUpdateData.dropboxUploadError = null
-          } else if (asset.dropboxPath !== assetDropboxPath) {
-            assetUpdateData.dropboxPath = assetDropboxPath
-          }
-
-          if (Object.keys(assetUpdateData).length === 0) {
-            continue
-          }
-
-          await prisma.videoAsset.update({
-            where: { id: asset.id },
-            data: assetUpdateData,
-          })
-        }
-      } else {
-        // Disable: remove dropbox prefix from storagePath, delete from Dropbox
-        const currentPath = video.originalStoragePath
-        if (isDropboxStoragePath(currentPath)) {
-          updateData.originalStoragePath = stripDropboxStoragePrefix(currentPath)
-          // Delete from Dropbox in background (don't block the response)
-          deleteDropboxFile(currentPath, video.dropboxPath).catch((err) => {
-            console.error(`[DROPBOX] Failed to delete video ${id} from Dropbox:`, err)
-          })
-        }
-        updateData.dropboxUploadStatus = null
-        updateData.dropboxUploadProgress = 0
-        updateData.dropboxUploadError = null
-        updateData.dropboxPath = null
-
-        // Cascade: also disable Dropbox for all assets of this video
-        const assets = await prisma.videoAsset.findMany({
-          where: { videoId: id, dropboxEnabled: true },
-          select: { id: true, storagePath: true, dropboxPath: true },
-        })
-        for (const asset of assets) {
-          if (isDropboxStoragePath(asset.storagePath)) {
-            deleteDropboxFile(asset.storagePath, asset.dropboxPath).catch((err) => {
-              console.error(`[DROPBOX] Failed to delete asset ${asset.id} from Dropbox:`, err)
-            })
-          }
-        }
-        if (assets.length > 0) {
-          await prisma.videoAsset.updateMany({
-            where: { videoId: id, dropboxEnabled: true },
-            data: {
-              dropboxEnabled: false,
-              dropboxUploadStatus: null,
-              dropboxUploadProgress: 0,
-              dropboxUploadError: null,
-              dropboxPath: null,
-            },
-          })
-          // Strip dropbox: prefix from each asset's storagePath individually
-          for (const asset of assets) {
-            if (isDropboxStoragePath(asset.storagePath)) {
-              await prisma.videoAsset.update({
-                where: { id: asset.id },
-                data: { storagePath: stripDropboxStoragePrefix(asset.storagePath) },
-              })
-            }
-          }
-          console.log(`[VIDEO] Disabled Dropbox for ${assets.length} asset(s) of video ${id}`)
-        }
-
-        await clearResolvedDropboxStorageIssueEntities([
-          {
-            entityType: 'video',
-            entityId: id,
-            projectId: video.projectId,
-          },
-          ...assets.map((asset) => ({
-            entityType: 'asset' as const,
-            entityId: asset.id,
-            projectId: video.projectId,
-          })),
-        ])
-      }
-    }
-
     if (videoRenamePlan) {
       const siblingFolderByVideoId = new Map(
         videoRenamePlan.siblingVideos.map((row) => [row.id, row.storageFolderName || row.name] as const)
       )
-      const newVideoStorageRoot = buildVideoStorageRoot(
-        videoRenamePlan.projectStoragePath,
-        videoRenamePlan.newVideoFolderName,
-      )
-      const oldVideoRoots = Array.from(
-        new Set(
-          videoRenamePlan.siblingVideos
-            .map((row) => buildVideoStorageRoot(videoRenamePlan.projectStoragePath, row.storageFolderName || row.name))
-            .filter((root) => root !== newVideoStorageRoot)
-        )
-      )
-
-      for (const oldVideoRoot of oldVideoRoots) {
-        await moveDirectory(oldVideoRoot, newVideoStorageRoot, { merge: true })
-      }
 
       await prisma.$transaction(async (tx) => {
-        for (const siblingVideo of videoRenamePlan!.siblingVideos) {
-          const oldVideoStorageRoot = buildVideoStorageRoot(
-            videoRenamePlan!.projectStoragePath,
-            siblingVideo.storageFolderName || siblingVideo.name,
-          )
+        const newVideoStorageRoot = buildVideoStorageRoot(
+          videoRenamePlan.projectStoragePath,
+          videoRenamePlan.newVideoFolderName,
+        )
+
+        for (const siblingVideo of videoRenamePlan.siblingVideos) {
+          const oldFolderName = siblingFolderByVideoId.get(siblingVideo.id)
+          if (!oldFolderName) continue
+
+          const oldVideoStorageRoot = buildVideoStorageRoot(videoRenamePlan.projectStoragePath, oldFolderName)
           const rebasedVideoData = {
             name: updateData.name,
-            storageFolderName: videoRenamePlan!.newVideoFolderName,
+            storageFolderName: videoRenamePlan.newVideoFolderName,
             originalStoragePath: replaceStoredStoragePathPrefix(
-              siblingVideo.id === id ? (updateData.originalStoragePath || siblingVideo.originalStoragePath) : siblingVideo.originalStoragePath,
+              siblingVideo.originalStoragePath,
               oldVideoStorageRoot,
               newVideoStorageRoot,
             )!,
-            preview480Path: replaceStoredStoragePathPrefix(siblingVideo.preview480Path, oldVideoStorageRoot, newVideoStorageRoot),
-            preview720Path: replaceStoredStoragePathPrefix(siblingVideo.preview720Path, oldVideoStorageRoot, newVideoStorageRoot),
-            preview1080Path: replaceStoredStoragePathPrefix(siblingVideo.preview1080Path, oldVideoStorageRoot, newVideoStorageRoot),
-            thumbnailPath: replaceStoredStoragePathPrefix(siblingVideo.thumbnailPath, oldVideoStorageRoot, newVideoStorageRoot),
+            preview480Path: replaceStoredStoragePathPrefix(
+              siblingVideo.preview480Path,
+              oldVideoStorageRoot,
+              newVideoStorageRoot,
+            ),
+            preview720Path: replaceStoredStoragePathPrefix(
+              siblingVideo.preview720Path,
+              oldVideoStorageRoot,
+              newVideoStorageRoot,
+            ),
+            preview1080Path: replaceStoredStoragePathPrefix(
+              siblingVideo.preview1080Path,
+              oldVideoStorageRoot,
+              newVideoStorageRoot,
+            ),
+            thumbnailPath: replaceStoredStoragePathPrefix(
+              siblingVideo.thumbnailPath,
+              oldVideoStorageRoot,
+              newVideoStorageRoot,
+            ),
             timelinePreviewVttPath: replaceStoredStoragePathPrefix(
               siblingVideo.timelinePreviewVttPath,
               oldVideoStorageRoot,
@@ -688,15 +450,21 @@ export async function PATCH(
 
           await tx.video.update({
             where: { id: siblingVideo.id },
-            data: siblingVideo.id === id ? { ...updateData, ...rebasedVideoData } : rebasedVideoData,
+            data:
+              siblingVideo.id === id
+                ? { ...updateData, ...rebasedVideoData }
+                : {
+                    ...rebasedVideoData,
+                    ...(approved ? { approved: false, approvedAt: null } : {}),
+                  },
           })
         }
 
-        for (const asset of videoRenamePlan!.siblingAssets) {
+        for (const asset of videoRenamePlan.siblingAssets) {
           const oldFolderName = siblingFolderByVideoId.get(asset.videoId)
           if (!oldFolderName) continue
 
-          const oldVideoStorageRoot = buildVideoStorageRoot(videoRenamePlan!.projectStoragePath, oldFolderName)
+          const oldVideoStorageRoot = buildVideoStorageRoot(videoRenamePlan.projectStoragePath, oldFolderName)
           await tx.videoAsset.update({
             where: { id: asset.id },
             data: {
@@ -729,62 +497,6 @@ export async function PATCH(
           where: { id },
           data: updateData,
         })
-      }
-    }
-
-    // Enqueue Dropbox upload job if we just enabled it
-    if (dropboxEnabled === true && updateData.dropboxUploadStatus === 'PENDING') {
-      const localPath = findExistingVideoOriginalPath({
-        ...video,
-        originalStoragePath: updateData.originalStoragePath || video.originalStoragePath,
-      })
-
-      if (!localPath) {
-        return NextResponse.json(
-          { error: 'Local original file could not be found for this video. Run the storage migration repair before enabling Dropbox.' },
-          { status: 409 }
-        )
-      }
-
-      const dropboxStoragePath = updateData.originalStoragePath || video.originalStoragePath
-      const { getDropboxUploadQueue } = await import('@/lib/queue')
-      const dropboxQueue = getDropboxUploadQueue()
-      await dropboxQueue.add('upload-to-dropbox', {
-        videoId: id,
-        localPath,
-        dropboxPath: dropboxStoragePath,
-        dropboxRelPath: updateData.dropboxPath || null,
-        fileSizeBytes: Number(video.originalFileSize),
-      })
-      console.log(`[VIDEO] Video ${id} queued for Dropbox upload (toggled on)`)
-
-      const assetsToQueue = await prisma.videoAsset.findMany({
-        where: {
-          videoId: id,
-          dropboxEnabled: true,
-          dropboxUploadStatus: 'PENDING',
-        },
-        select: {
-          id: true,
-          fileSize: true,
-          storagePath: true,
-          dropboxPath: true,
-        },
-      })
-
-      for (const asset of assetsToQueue) {
-        await dropboxQueue.add('upload-asset-to-dropbox', {
-          videoId: id,
-          localPath: stripDropboxStoragePrefix(asset.storagePath),
-          dropboxPath: asset.storagePath,
-          dropboxRelPath: asset.dropboxPath,
-          fileSizeBytes: Number(asset.fileSize),
-          assetId: asset.id,
-        })
-      }
-
-      if (assetsToQueue.length > 0) {
-        console.log(`[VIDEO] Queued ${assetsToQueue.length} asset Dropbox upload(s) for video ${id}`)
       }
     }
 

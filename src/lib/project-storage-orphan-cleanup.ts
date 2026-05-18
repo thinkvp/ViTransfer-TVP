@@ -10,7 +10,7 @@ import {
   PROJECT_REDIRECTS_INDEX_FILENAME,
   STORAGE_ROOT,
 } from '@/lib/storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3DeleteFile, getS3Bucket, getS3Client } from '@/lib/s3-storage'
 import { ListObjectsV2Command } from '@aws-sdk/client-s3'
 import {

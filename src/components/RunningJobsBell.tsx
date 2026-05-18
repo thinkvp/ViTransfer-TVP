@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
-import { useUploadManager, type UploadJob, type ProcessingJob, type DropboxUploadJob, type AlbumZipJob, type AlbumThumbnailJob, type AlbumZipDropboxJob, type CompletedServerJob, type FolderRenameJob } from '@/components/UploadManagerProvider'
+import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
@@ -218,58 +218,6 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
   )
 }
 
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
-
-function DropboxUploadJobRow({ job, onNavigate }: { job: DropboxUploadJob; onNavigate: (projectId: string) => void }) {
-  const progress = Math.round(job.progress)
-  const isPending = job.status === 'PENDING'
-  const sizeMB = (job.fileSizeBytes / (1024 * 1024)).toFixed(0)
-
-  return (
-    <div
-      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
-      onClick={() => onNavigate(job.projectId)}
-    >
-      <div className="min-w-0">
-        <VideoNameWithLabel videoName={job.videoName} versionLabel={job.versionLabel} />
-        <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
-          <Cloud className="w-3 h-3 flex-shrink-0" />
-          {job.projectName} · {sizeMB} MB
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all',
-              isPending ? 'bg-warning' : 'bg-blue-500',
-            )}
-            style={{ width: `${isPending ? 100 : Math.max(progress, 1)}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            {isPending ? (
-              'Queued for Dropbox…'
-            ) : (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Uploading to Dropbox
-              </>
-            )}
-          </span>
-          {!isPending && progress > 0 && (
-            <span>{progress}%</span>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function AlbumZipJobRow({ job, onNavigate }: { job: AlbumZipJob; onNavigate: (projectId: string) => void }) {
   const isPending = job.status === 'PENDING'
   const variantLabel = job.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
@@ -308,58 +256,6 @@ function AlbumZipJobRow({ job, onNavigate }: { job: AlbumZipJob; onNavigate: (pr
               <Loader2 className="w-3 h-3 animate-spin" />
               Building ZIP…
             </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function AlbumZipDropboxJobRow({ job, onNavigate }: { job: AlbumZipDropboxJob; onNavigate: (projectId: string) => void }) {
-  const progress = Math.round(job.progress)
-  const isPending = job.status === 'PENDING'
-  const variantLabel = job.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
-  const sizeMB = job.fileSizeBytes > 0 ? (job.fileSizeBytes / (1024 * 1024)).toFixed(0) : null
-
-  return (
-    <div
-      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
-      onClick={() => onNavigate(job.projectId)}
-    >
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.albumName}</div>
-          <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">{variantLabel}</div>
-        </div>
-        <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
-          <Cloud className="w-3 h-3 flex-shrink-0" />
-          {job.projectName}{sizeMB ? ` · ${sizeMB} MB` : ''}
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all',
-              isPending ? 'bg-warning' : 'bg-blue-500',
-            )}
-            style={{ width: `${isPending ? 100 : Math.max(progress, 1)}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            {isPending ? (
-              'Queued for Dropbox…'
-            ) : (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Uploading to Dropbox
-              </>
-            )}
-          </span>
-          {!isPending && progress > 0 && (
-            <span>{progress}%</span>
           )}
         </div>
       </div>
@@ -482,30 +378,21 @@ function CompletedServerJobRow({
   const typeLabel = isError
     ? job.type === 'processing'
       ? 'Processing failed'
-      : job.type === 'dropbox'
-        ? 'Dropbox upload failed'
-        : job.type === 'albumZip'
+      : job.type === 'albumZip'
           ? 'ZIP build failed'
           : job.type === 'albumThumbnail'
             ? 'Thumbnail generation failed'
-          : job.type === 'folderRename'
-            ? 'Folder rename failed'
-            : 'Album Dropbox upload failed'
+          : 'Folder rename failed'
     : job.type === 'processing'
       ? 'Processing complete'
-      : job.type === 'dropbox'
-        ? 'Dropbox upload complete'
-        : job.type === 'albumZip'
+      : job.type === 'albumZip'
           ? 'ZIP build complete'
           : job.type === 'albumThumbnail'
             ? 'Thumbnail generation complete'
-          : job.type === 'folderRename'
-            ? 'Folder rename complete'
-            : 'Album Dropbox upload complete'
+          : 'Folder rename complete'
 
   const TypeIcon =
-    job.type === 'dropbox' || job.type === 'albumZipDropbox' ? Cloud
-    : job.type === 'albumZip' ? FileArchive
+    job.type === 'albumZip' ? FileArchive
     : job.type === 'albumThumbnail' ? ImageIcon
     : job.type === 'folderRename' ? FolderSync
     : Activity
@@ -552,7 +439,7 @@ function CompletedServerJobRow({
 }
 
 export default function RunningJobsBell() {
-  const { uploads, processingJobs, dropboxJobs, albumZipJobs, albumThumbnailJobs, albumZipDropboxJobs, folderRenameJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
+  const { uploads, processingJobs, albumZipJobs, albumThumbnailJobs, folderRenameJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const router = useRouter()
@@ -588,10 +475,8 @@ export default function RunningJobsBell() {
     completedCount > 0 ||
     failedCount > 0 ||
     processingJobs.length > 0 ||
-    dropboxJobs.length > 0 ||
     albumZipJobs.length > 0 ||
     albumThumbnailJobs.length > 0 ||
-    albumZipDropboxJobs.length > 0 ||
     folderRenameJobs.length > 0
 
   return (
@@ -671,20 +556,6 @@ export default function RunningJobsBell() {
                   </div>
                 )}
 
-                {/* Dropbox uploads */}
-                {dropboxJobs.length > 0 && (
-                  <div>
-                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      Dropbox Uploads ({dropboxJobs.length})
-                    </div>
-                    <div className="divide-y divide-border">
-                      {dropboxJobs.map((job) => (
-                        <DropboxUploadJobRow key={`dbx-${job.id}`} job={job} onNavigate={handleNavigate} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* Album ZIP generation jobs */}
                 {albumZipJobs.length > 0 && (
                   <div>
@@ -694,20 +565,6 @@ export default function RunningJobsBell() {
                     <div className="divide-y divide-border">
                       {albumZipJobs.map((job) => (
                         <AlbumZipJobRow key={job.id} job={job} onNavigate={handleNavigate} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Album ZIP Dropbox upload jobs */}
-                {albumZipDropboxJobs.length > 0 && (
-                  <div>
-                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      Album Dropbox Uploads ({albumZipDropboxJobs.length})
-                    </div>
-                    <div className="divide-y divide-border">
-                      {albumZipDropboxJobs.map((job) => (
-                        <AlbumZipDropboxJobRow key={job.id} job={job} onNavigate={handleNavigate} />
                       ))}
                     </div>
                   </div>

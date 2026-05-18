@@ -1,5 +1,5 @@
 import { getFilePath } from '@/lib/storage'
-import { buildAlbumZipDropboxPath as buildCanonicalAlbumZipDropboxPath, buildAlbumZipStoragePath as buildCanonicalAlbumZipStoragePath } from '@/lib/project-storage-paths'
+import { buildAlbumZipStoragePath as buildCanonicalAlbumZipStoragePath } from '@/lib/project-storage-paths'
 import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
 import fs from 'fs'
 
@@ -69,17 +69,6 @@ export function getAlbumZipStoragePaths(params: {
       variant: 'social',
     }),
   }
-}
-
-export function getAlbumZipDropboxPath(params: {
-  clientName: string
-  projectFolderName: string
-  albumFolderName: string
-  albumName: string
-  variant: AlbumZipVariant
-}): string {
-  const { clientName, projectFolderName, albumFolderName, albumName, variant } = params
-  return buildCanonicalAlbumZipDropboxPath(clientName, projectFolderName, albumFolderName, albumName, variant)
 }
 
 export async function albumZipExists(storagePath: string): Promise<boolean> {

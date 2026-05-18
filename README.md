@@ -65,11 +65,6 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
   <br><em>Responsive mobile view of client share page</em>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/Dropbox Download.png" alt="Dropbox Download Options" width="600">
-  <br><em>Download Options modal — clients can choose between Dropbox (faster, more concurrent) or Local Server as the download source</em>
-</p>
-
 ### Sales & CRM Integration
 
 Planning note: the staged roadmap for expanding Sales into a broader Finance area is documented in [docs/finance-roadmap.md](docs/finance-roadmap.md).
@@ -202,16 +197,6 @@ Built-in customer relationship management and invoicing capabilities:
 - **Quote System** — Manage quotes with expiry dates and conversion to projects
 - **Calendar Integration** — Quote expiry and invoice due dates automatically appear on the calendar view
 - **Project Linking** — Link invoices directly to projects for seamless workflow from quote to delivery
-
-### Dropbox Cloud Offloading
-Optional Dropbox integration to offload large file delivery from your server:
-- **Video Originals** — Upload approved video originals to Dropbox; share page downloads are served via temporary Dropbox links, eliminating multi-GB streams through your application server
-- **Photo Album ZIPs** — Upload full-resolution and social-crop ZIP files to Dropbox for direct client download, with automatic lifecycle management when photos are added or removed from an album
-- **Video Assets** — Per-asset Dropbox uploads available from the asset list
-- **Download Source Toggle** — The download modal lets clients choose between Dropbox (generally faster, more concurrent downloads) and Local Server, giving them a manual fallback if Dropbox is unavailable
-- **Running Jobs Visibility** — All Dropbox upload activity appears in the Running Jobs panel for real-time progress tracking
-- **Background Processing** — Uploads run as BullMQ background jobs with automatic retry (3 attempts, exponential backoff)
-- **Human-Readable Paths** — Files are stored in Dropbox under `clients/{Client Name}/projects/{Project Title}/...`, matching the same client-based folder structure used for local storage so files are easy to find in your Dropbox
 
 ### Export Feedback and Import in NLE
 - **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
@@ -532,10 +517,6 @@ The app and worker containers run as non-root user `911:911` by default. If you 
 
 | Variable | Description |
 |----------|-------------|
-| `DROPBOX_APP_KEY` | Dropbox app key — enables Dropbox-backed storage for video originals, assets, and album ZIPs |
-| `DROPBOX_APP_SECRET` | Dropbox app secret (paired with `DROPBOX_APP_KEY`) |
-| `DROPBOX_REFRESH_TOKEN` | Dropbox offline refresh token — used server-side to obtain temporary download/upload tokens |
-| `DROPBOX_ROOT_PATH` | Optional namespace prefix within Dropbox (e.g. `/ViTransfer-TVP`); defaults to Dropbox root |
 | `QBO_CLIENT_ID` | QuickBooks Online OAuth client ID |
 | `QBO_CLIENT_SECRET` | QuickBooks Online OAuth client secret |
 | `QBO_REALM_ID` | QuickBooks company ID (realmId) |

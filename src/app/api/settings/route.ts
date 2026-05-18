@@ -100,13 +100,6 @@ export async function GET(request: NextRequest) {
       settings.smtpPassword
     )
 
-    // Dropbox storage status (env-var driven, read-only)
-    const dropboxConfigured = Boolean(
-      process.env.DROPBOX_APP_KEY?.trim()
-      && process.env.DROPBOX_APP_SECRET?.trim()
-      && process.env.DROPBOX_REFRESH_TOKEN?.trim()
-    )
-
     const s3Configured = process.env.STORAGE_PROVIDER === 's3'
       && Boolean(process.env.S3_ENDPOINT?.trim())
       && Boolean(process.env.S3_ACCESS_KEY_ID?.trim())
@@ -117,8 +110,6 @@ export async function GET(request: NextRequest) {
       ...decryptedSettings,
       security: securitySettings,
       smtpConfigured,
-      dropboxConfigured,
-      dropboxRootPath: process.env.DROPBOX_ROOT_PATH?.trim() || '',
       s3Configured,
     })
     response.headers.set('Cache-Control', 'no-store')

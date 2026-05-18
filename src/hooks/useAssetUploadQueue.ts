@@ -313,7 +313,7 @@ export function useAssetUploadQueue({
       }
 
       // -----------------------------------------------------------------------
-      // TUS mode: local/Dropbox storage — upload via TUS protocol
+      // TUS mode: local storage — upload via TUS protocol
       // -----------------------------------------------------------------------
 
       // Start TUS upload

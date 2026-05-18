@@ -312,7 +312,7 @@ export function useAlbumPhotoUploadQueue({
         }
 
         // -----------------------------------------------------------------------
-        // TUS mode: local/Dropbox storage
+        // TUS mode: local storage
         // -----------------------------------------------------------------------
 
         const startTime = Date.now()

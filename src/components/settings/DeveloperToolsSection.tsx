@@ -84,6 +84,9 @@ type LocalToS3DryRunResult = {
   existingLocalFiles: number
   missingLocalFiles: number
   totalBytes: number
+  alreadyInS3?: number
+  wouldCopy?: number
+  wouldCopyBytes?: number
   sampleKeys: string[]
   missingKeys: string[]
 }
@@ -265,7 +268,14 @@ export function DeveloperToolsSection({
     setS3DryRunLoading(true)
     setS3MigrationMessage(null)
     try {
-      const result = await apiPost('/api/settings/migrate-local-to-s3/dry-run', {})
+      const result = await apiPost('/api/settings/migrate-local-to-s3/dry-run', {
+        endpoint: s3Endpoint,
+        bucket: s3Bucket,
+        region: s3Region,
+        accessKeyId: s3AccessKeyId,
+        secretAccessKey: s3SecretAccessKey,
+        forcePathStyle: s3ForcePathStyle,
+      })
       setS3DryRunResult(result as LocalToS3DryRunResult)
     } catch (error: any) {
       setS3MigrationMessage(error?.message || 'Dry run failed')
@@ -564,12 +574,22 @@ export function DeveloperToolsSection({
                 <div className="text-xs text-muted-foreground">Dry run summary</div>
                 <div className="text-xs text-muted-foreground">Referenced paths: {s3DryRunResult.discoveredPaths}</div>
                 <div className="text-xs text-muted-foreground">Existing local files: {s3DryRunResult.existingLocalFiles}</div>
+                {s3DryRunResult.alreadyInS3 != null ? (
+                  <div className="text-xs text-muted-foreground">Already in S3 (would skip): {s3DryRunResult.alreadyInS3}</div>
+                ) : null}
                 <div className="text-xs text-muted-foreground">Missing local files: {s3DryRunResult.missingLocalFiles}</div>
-                <div className="text-xs text-muted-foreground">Total bytes to copy: {formatBytes(s3DryRunResult.totalBytes)}</div>
+                <div className="text-xs text-muted-foreground">
+                  {s3DryRunResult.wouldCopy != null
+                    ? <>Files to copy: {s3DryRunResult.wouldCopy}</>
+                    : <>Total local files: {s3DryRunResult.existingLocalFiles}</>}
+                </div>
+                <div className="text-xs text-muted-foreground">Total bytes to copy: {formatBytes(s3DryRunResult.wouldCopyBytes ?? s3DryRunResult.totalBytes)}</div>
                 {s3DryRunResult.sampleKeys?.length ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                      Show sample files to copy (first {s3DryRunResult.sampleKeys.length})
+                      {s3DryRunResult.wouldCopy != null
+                        ? <>Show new files to copy (first {s3DryRunResult.sampleKeys.length})</>
+                        : <>Show sample files to copy (first {s3DryRunResult.sampleKeys.length})</>}
                     </summary>
                     <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
                       {s3DryRunResult.sampleKeys.join('\n')}

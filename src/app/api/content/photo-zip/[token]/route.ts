@@ -8,7 +8,6 @@ import { Readable } from 'stream'
 import { getAlbumZipFileName, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { getClientIpAddress } from '@/lib/utils'
 import { getSecuritySettings } from '@/lib/video-access'
-import { createTemporaryDropboxLink } from '@/lib/storage-provider-dropbox'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isS3Mode, s3FileExists, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
@@ -48,7 +47,6 @@ export async function GET(
     }
 
     const variant: 'full' | 'social' = tokenData.variant || 'full'
-    const forceLocal = request.nextUrl.searchParams.get('forceLocal') === 'true'
 
     const album = await prisma.album.findUnique({
       where: { id: tokenData.albumId },
@@ -57,11 +55,6 @@ export async function GET(
         projectId: true,
         name: true,
         storageFolderName: true,
-        dropboxEnabled: true,
-        fullZipDropboxStatus: true,
-        fullZipDropboxPath: true,
-        socialZipDropboxStatus: true,
-        socialZipDropboxPath: true,
         project: {
           select: {
             storagePath: true,
@@ -79,39 +72,6 @@ export async function GET(
     const projectStoragePath = album.project.storagePath
       || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
     const albumFolderName = album.storageFolderName || album.name
-
-    // If Dropbox copy is complete, redirect to Dropbox for direct download
-    const dbxStatus = variant === 'full' ? album.fullZipDropboxStatus : album.socialZipDropboxStatus
-    const dbxPath = variant === 'full' ? album.fullZipDropboxPath : album.socialZipDropboxPath
-    if (!forceLocal && album.dropboxEnabled && dbxStatus === 'COMPLETE' && dbxPath) {
-      try {
-        const settings = await getSecuritySettings()
-        if (settings.trackAnalytics && tokenData.sessionId && !tokenData.sessionId.startsWith('admin:')) {
-          await prisma.albumAnalytics.create({
-            data: {
-              projectId: album.projectId,
-              albumId: album.id,
-              eventType: 'ALBUM_DOWNLOAD',
-              variant,
-              sessionId: tokenData.sessionId,
-              ipAddress: getClientIpAddress(request) || undefined,
-              details: { source: 'Dropbox' },
-            },
-          }).catch(() => {})
-        }
-
-        const dropboxUrl = await createTemporaryDropboxLink('', dbxPath)
-        return NextResponse.redirect(dropboxUrl, {
-          status: 307,
-          headers: {
-            'Cache-Control': 'private, no-store, must-revalidate',
-            'Referrer-Policy': 'strict-origin-when-cross-origin',
-          },
-        })
-      } catch {
-        // Fall through to local streaming if Dropbox link fails
-      }
-    }
 
     const zipStoragePath = getAlbumZipStoragePath({
       projectStoragePath,

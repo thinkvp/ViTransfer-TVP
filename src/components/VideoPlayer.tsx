@@ -675,14 +675,8 @@ export default function VideoPlayer({
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
   const isProjectApproved = projectStatus === 'APPROVED' || projectStatus === 'SHARE_ONLY'
   const approvedDownloadUrl = (selectedVideo as any)?.downloadUrl as string | null | undefined
-  const isDropboxStillUploading =
-    (selectedVideo as any)?.dropboxEnabled === true &&
-    ((selectedVideo as any)?.dropboxUploadStatus === 'PENDING' ||
-      (selectedVideo as any)?.dropboxUploadStatus === 'UPLOADING')
   const canShowApprovedDownload =
-    !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && Boolean(approvedDownloadUrl) && !isDropboxStillUploading
-  const canShowDropboxUploadingButton =
-    !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && isDropboxStillUploading
+    !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && Boolean(approvedDownloadUrl)
 
   const approvedVideoName = String((selectedVideo as any)?.name || 'Video')
   const approvedVideoVersionLabel = String((selectedVideo as any)?.versionLabel || (selectedVideo as any)?.version || '')
@@ -2017,18 +2011,6 @@ export default function VideoPlayer({
                 {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
               </Button>
 
-              {canShowDropboxUploadingButton && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled
-                  title="The original file is still uploading — download will be available shortly"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                  Uploading…
-                </Button>
-              )}
               {canShowApprovedDownload && approvedDownloadUrl && (
                 <Button
                   type="button"
@@ -2183,18 +2165,6 @@ export default function VideoPlayer({
                   {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </Button>
 
-                {canShowDropboxUploadingButton && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    disabled
-                    title="The original file is still uploading — download will be available shortly"
-                    className="h-8 w-8"
-                  >
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  </Button>
-                )}
                 {canShowApprovedDownload && approvedDownloadUrl && (
                   <Button
                     type="button"
@@ -2267,8 +2237,6 @@ export default function VideoPlayer({
           onClose={() => setShowApprovedDownloadOptions(false)}
           shareToken={shareToken}
           isAdmin={isAdmin}
-          dropboxEnabled={(selectedVideo as any)?.dropboxEnabled === true}
-          videoDropboxUploadStatus={(selectedVideo as any)?.dropboxUploadStatus ?? null}
         />
       ) : null}
     </div>

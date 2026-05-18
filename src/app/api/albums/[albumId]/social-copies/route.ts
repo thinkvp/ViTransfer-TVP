@@ -3,10 +3,9 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { getAlbumZipStoragePath, getAlbumZipJobId, albumZipExists } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
+import { getAlbumZipStoragePath, getAlbumZipJobId } from '@/lib/album-photo-zip'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { deleteFile, getFilePath } from '@/lib/storage'
-import { isDropboxStorageConfigured, deleteDropboxFile } from '@/lib/storage-provider-dropbox'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import fs from 'fs'
@@ -59,8 +58,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       name: true,
       storageFolderName: true,
       socialCopiesEnabled: true,
-      dropboxEnabled: true,
-      socialZipDropboxPath: true,
     },
   })
 
@@ -111,30 +108,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // ZIP may not exist
     }
 
-    // 2. If Dropbox enabled, delete social ZIP from Dropbox
-    if (album.dropboxEnabled && album.socialZipDropboxPath) {
-      await deleteDropboxFile('', album.socialZipDropboxPath).catch(() => {})
-    }
-
-    // 3. Update album: disable social downloads, clear social ZIP tracking
+    // 2. Update album: disable social downloads, clear social ZIP tracking
     await prisma.album.update({
       where: { id: album.id },
       data: {
         socialCopiesEnabled: false,
         socialZipFileSize: BigInt(0),
-        socialZipDropboxStatus: null,
-        socialZipDropboxProgress: 0,
-        socialZipDropboxError: null,
-        socialZipDropboxPath: null,
       },
     })
 
-    // 4. Adjust project total bytes
+    // 3. Adjust project total bytes
     if (freedBytes > BigInt(0)) {
       await adjustProjectTotalBytes(album.projectId, -freedBytes)
     }
 
-    // 5. Sync sizes
+    // 4. Sync sizes
     await syncAlbumZipSizes({ albumId: album.id, projectId: album.projectId }).catch(() => {})
 
     return NextResponse.json({ ok: true, enabled: false })

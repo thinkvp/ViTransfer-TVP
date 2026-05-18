@@ -9,12 +9,10 @@ import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
   buildProjectStorageRoot,
-  buildVideoDropboxRoot,
   buildVideoStorageRoot,
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
-import { moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 export const runtime = 'nodejs'
 
 
@@ -70,48 +68,6 @@ export async function PATCH(request: NextRequest) {
     }
 
     const trimmedName = name.trim()
-
-    // Before bulk update, handle Dropbox renames for videos that have a dropboxPath
-    const videosWithDropbox = await prisma.video.findMany({
-      where: { id: { in: videoIds }, dropboxPath: { not: null } },
-      select: { id: true, name: true, dropboxPath: true, project: { select: { title: true, storagePath: true, companyName: true, client: { select: { name: true } } } } },
-    })
-    for (const v of videosWithDropbox) {
-      if (v.name === trimmedName) continue
-      const clientName = v.project.client?.name || v.project.companyName || 'Client'
-      const projectFolderName = getStoragePathBasename(v.project.storagePath) || v.project.title
-      const oldVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, v.name)
-      const newVideoFolder = buildVideoDropboxRoot(clientName, projectFolderName, trimmedName)
-      if (oldVideoFolder !== newVideoFolder && isDropboxStorageConfigured()) {
-        void moveDropboxPath(oldVideoFolder, newVideoFolder).catch(() => {})
-        // Update dropboxPath for this video and its sibling versions
-        const siblings = await prisma.video.findMany({
-          where: { dropboxPath: { startsWith: oldVideoFolder + '/' } },
-          select: { id: true, dropboxPath: true },
-        })
-        for (const sib of siblings) {
-          if (sib.dropboxPath) {
-            await prisma.video.update({
-              where: { id: sib.id },
-              data: { dropboxPath: newVideoFolder + sib.dropboxPath.slice(oldVideoFolder.length) },
-            })
-          }
-        }
-        // Update asset dropboxPaths
-        const assets = await prisma.videoAsset.findMany({
-          where: { dropboxPath: { startsWith: oldVideoFolder + '/' } },
-          select: { id: true, dropboxPath: true },
-        })
-        for (const a of assets) {
-          if (a.dropboxPath) {
-            await prisma.videoAsset.update({
-              where: { id: a.id },
-              data: { dropboxPath: newVideoFolder + a.dropboxPath.slice(oldVideoFolder.length) },
-            })
-          }
-        }
-      }
-    }
 
     const selectedVideos = await prisma.video.findMany({
       where: { id: { in: videoIds } },

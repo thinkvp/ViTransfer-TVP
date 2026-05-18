@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X, Cloud } from 'lucide-react'
+import { Upload, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -28,7 +28,6 @@ type QueuedVideo = {
   versionLabel: string
   videoNotes: string
   allowApproval: boolean
-  dropboxEnabled: boolean
   status: UploadStatus
   error: string | null
 }
@@ -83,14 +82,12 @@ export default function MultiVideoUploadModal({
   projectId,
   canFullControl,
   onUploadComplete,
-  dropboxConfigured = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
   canFullControl: boolean
   onUploadComplete?: () => void
-  dropboxConfigured?: boolean
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addUpload } = useUploadManagerActions()
@@ -160,7 +157,6 @@ export default function MultiVideoUploadModal({
           versionLabel: '',
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
-          dropboxEnabled: false,
           status: 'pending',
           error: null,
         })
@@ -283,7 +279,6 @@ export default function MultiVideoUploadModal({
             versionLabel: trimmedVersionLabel,
             videoNotes: trimmedVideoNotes,
             allowApproval: item.allowApproval === true,
-            dropboxEnabled: item.dropboxEnabled === true,
             originalFileName: item.file.name,
             originalFileSize: item.file.size,
             name: trimmedVideoName,
@@ -450,13 +445,7 @@ export default function MultiVideoUploadModal({
                           <div className="flex items-center gap-2 h-10">
                             <Checkbox
                               checked={item.allowApproval}
-                              onCheckedChange={(v) => {
-                                const checked = Boolean(v)
-                                const patch: Partial<QueuedVideo> = { allowApproval: checked }
-                                // If disabling approval, also disable Dropbox
-                                if (!checked) patch.dropboxEnabled = false
-                                updateItem(item.id, patch)
-                              }}
+                              onCheckedChange={(v) => updateItem(item.id, { allowApproval: Boolean(v) })}
                               disabled={item.status !== 'pending'}
                               aria-label="Allow approval of version"
                             />
@@ -465,24 +454,6 @@ export default function MultiVideoUploadModal({
                             </span>
                           </div>
                         </div>
-
-                        {dropboxConfigured && (
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Upload to Dropbox</div>
-                            <div className="flex items-center gap-2 h-10">
-                              <Checkbox
-                                checked={item.dropboxEnabled}
-                                onCheckedChange={(v) => updateItem(item.id, { dropboxEnabled: Boolean(v) })}
-                                disabled={item.status !== 'pending' || !item.allowApproval}
-                                aria-label="Upload to Dropbox"
-                              />
-                              <Cloud className={`w-4 h-4 ${item.dropboxEnabled && item.allowApproval ? 'text-primary' : 'text-muted-foreground/50'}`} />
-                              <span className={item.dropboxEnabled && item.allowApproval ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
-                                {!item.allowApproval ? 'Requires approval enabled' : item.dropboxEnabled ? 'Download will be served from Dropbox' : 'Local storage only'}
-                              </span>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )}
 

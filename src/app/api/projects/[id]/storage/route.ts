@@ -5,8 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { isDropboxStorageConfigured, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { buildProjectStorageRoot, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -76,10 +75,6 @@ function asNumberBigInt(v: unknown): number {
 async function computeStorageEntrySizeBytes(storagePath: string | null | undefined): Promise<number> {
   if (!storagePath) return 0
 
-  // Strip the dropbox: prefix so we resolve to the local copy of the file.
-  // Files with Dropbox enabled are stored locally AND uploaded to Dropbox;
-  // the DB path carries the dropbox: prefix but the local file exists at the
-  // same relative path without that prefix.
   const localPath = stripDropboxStoragePrefix(storagePath)
   if (!localPath) return 0
 
@@ -93,11 +88,6 @@ async function computeStorageEntrySizeBytes(storagePath: string | null | undefin
 async function sumStorageEntrySizes(paths: Array<string | null | undefined>): Promise<number> {
   const sizes = await Promise.all(paths.map((storagePath) => computeStorageEntrySizeBytes(storagePath)))
   return sizes.reduce((total, size) => total + size, 0)
-}
-
-function hasStoredDropboxCopy(dropboxPath: string | null | undefined, uploadStatus: string | null | undefined): boolean {
-  if (!dropboxPath) return false
-  return uploadStatus !== 'PENDING' && uploadStatus !== 'UPLOADING'
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -131,7 +121,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const includeDisk = !isS3Provider && url.searchParams.get('includeDisk') === '1'
 
     const storageRoot = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
-    const includeDropbox = includeDisk && isDropboxStorageConfigured()
 
     // Use stored project totalBytes for consistency with the dashboard.
     // Breakdown is computed from DB fields for UI display.
@@ -145,9 +134,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       projectEmailAttachmentAgg,
       albumPhotoAgg,
       albumAgg,
-      dropboxVideos,
-      dropboxAssets,
-      dropboxAlbums,
     ] = await Promise.all([
       prisma.project.findUnique({
         where: { id: projectId },
@@ -168,39 +154,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
       prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true } }),
       prisma.album.aggregate({ where: { projectId }, _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
-      includeDropbox
-        ? prisma.video.findMany({
-            where: { projectId, dropboxEnabled: true },
-            select: {
-              originalFileSize: true,
-              dropboxPath: true,
-              dropboxUploadStatus: true,
-            },
-          })
-        : Promise.resolve([]),
-      includeDropbox
-        ? prisma.videoAsset.findMany({
-            where: { video: { projectId }, dropboxEnabled: true },
-            select: {
-              fileSize: true,
-              dropboxPath: true,
-              dropboxUploadStatus: true,
-            },
-          })
-        : Promise.resolve([]),
-      includeDropbox
-        ? prisma.album.findMany({
-            where: { projectId, dropboxEnabled: true },
-            select: {
-              fullZipFileSize: true,
-              fullZipDropboxPath: true,
-              fullZipDropboxStatus: true,
-              socialZipFileSize: true,
-              socialZipDropboxPath: true,
-              socialZipDropboxStatus: true,
-            },
-          })
-        : Promise.resolve([]),
     ])
 
     const videosBytes = asNumberBigInt(videoAgg._sum.originalFileSize)
@@ -239,26 +192,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const previewBytesDelta = isS3Provider ? s3VideoPreviewsBytes : 0
     const totalBytes = Math.max(0, totalBytesStored + previewBytesDelta)
     const storedDiskBytes = asNumberBigInt(project?.diskBytes)
-    const dropboxBytes = includeDropbox
-      ? dropboxVideos.reduce((total, video) => {
-          if (!hasStoredDropboxCopy(video.dropboxPath, video.dropboxUploadStatus)) return total
-          return total + asNumberBigInt(video.originalFileSize)
-        }, 0)
-        + dropboxAssets.reduce((total, asset) => {
-          if (!hasStoredDropboxCopy(asset.dropboxPath, asset.dropboxUploadStatus)) return total
-          return total + asNumberBigInt(asset.fileSize)
-        }, 0)
-        + dropboxAlbums.reduce((total, album) => {
-          let albumTotal = total
-          if (hasStoredDropboxCopy(album.fullZipDropboxPath, album.fullZipDropboxStatus)) {
-            albumTotal += asNumberBigInt(album.fullZipFileSize)
-          }
-          if (hasStoredDropboxCopy(album.socialZipDropboxPath, album.socialZipDropboxStatus)) {
-            albumTotal += asNumberBigInt(album.socialZipFileSize)
-          }
-          return albumTotal
-        }, 0)
-      : 0
 
     // Optional: compute on-disk totals by walking the project directory.
     // This matches the bytes you see in the volume (including derived/transcoded files
@@ -445,12 +378,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({
       projectId,
-      provider: isS3Provider ? 's3' : includeDropbox ? 'dropbox' : 'local',
+      provider: isS3Provider ? 's3' : 'local',
       totalBytes,
       diskTotalBytes,
       diskOtherBytes,
-      dropboxConfigured: includeDropbox,
-      dropboxBytes: includeDropbox ? dropboxBytes : null,
       capacityBytes,
       availableBytes,
       breakdown: {

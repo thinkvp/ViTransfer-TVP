@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 
 type StorageOverview = {
-  provider?: 'local' | 'dropbox' | 's3'
+  provider?: 'local' | 's3'
   totalBytes: number
   capacityBytes: number | null
   availableBytes: number | null
@@ -284,7 +284,6 @@ export function StorageOverviewSection({
   const providerLabel = useMemo(() => {
     const provider = data?.provider
     if (provider === 's3') return 'S3'
-    if (provider === 'dropbox') return 'Local & Dropbox'
     return 'Local'
   }, [data])
 

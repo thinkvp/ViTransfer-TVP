@@ -121,7 +121,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      provider: storageProvider === 'dropbox' ? 'dropbox' : isS3Provider ? 's3' : 'local',
+      provider: isS3Provider ? 's3' : 'local',
       totalBytes,
       capacityBytes,
       availableBytes,

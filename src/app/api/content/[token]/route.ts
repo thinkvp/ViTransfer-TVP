@@ -4,8 +4,7 @@ import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import {
   buildVideoAssetStoragePath,
@@ -24,10 +23,6 @@ import { createWebReadableStream } from '@/lib/stream-utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-type WithOptionalDropboxPath = {
-  dropboxPath?: string | null
-}
 
 function buildCanonicalFallbackPath(params: {
   video: any
@@ -241,7 +236,6 @@ export async function GET(
     let filePath: string | null = null
     let filename: string | null = null
     let contentType = 'video/mp4'
-    let activeDropboxPath: string | null = null
     let selectedAsset: { fileName: string } | null = null
     const canServeOriginal = Boolean(originalPath && (isAdminRequest || video.approved))
 
@@ -268,7 +262,6 @@ export async function GET(
       contentType = isValidMimeType(asset.fileType)
         ? asset.fileType
         : 'application/octet-stream'
-      activeDropboxPath = (asset as WithOptionalDropboxPath).dropboxPath ?? null
     } else {
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
@@ -301,7 +294,6 @@ export async function GET(
       } else if (verifiedToken.quality === 'original' || verifiedToken.quality === 'download') {
         if (canServeOriginal) {
           filePath = originalPath
-          activeDropboxPath = (video as WithOptionalDropboxPath).dropboxPath ?? null
         }
       } else if (verifiedToken.quality === '1080p') {
         filePath = video.preview1080Path || video.preview720Path || (video as any).preview480Path || (canServeOriginal ? originalPath : null)
@@ -354,8 +346,8 @@ export async function GET(
     // S3 mode: redirect to presigned R2 URL — no local file access needed
     // ---------------------------------------------------------------------------
     if (isS3Mode()) {
-      // Storage paths for assets/thumbnails set while Dropbox was active may have a
-      // 'dropbox:' prefix stored in the DB.  Strip it before looking up the S3 key.
+      // Legacy storage rows may still retain a 'dropbox:' prefix. Strip it before
+      // looking up the S3 key.
       if (isDropboxStoragePath(filePath)) {
         filePath = stripDropboxStoragePrefix(filePath)
       }
@@ -415,13 +407,8 @@ export async function GET(
       })
     }
 
-    const forceLocal = searchParams.get('forceLocal') === 'true'
-    const resolvedTarget = await resolveStorageDownloadTarget(filePath, {
-      preferDropbox: isDownload && !forceLocal,
-      dropboxPath: activeDropboxPath,
-    })
-    let effectiveResolvedTarget = resolvedTarget
-    if (effectiveResolvedTarget.kind === 'local-file' && !existsSync(effectiveResolvedTarget.absolutePath)) {
+    let fullPath = getFilePath(isDropboxStoragePath(filePath) ? stripDropboxStoragePrefix(filePath) : filePath)
+    if (!existsSync(fullPath)) {
       const fallbackPath = buildCanonicalFallbackPath({
         video,
         quality: verifiedToken.quality,
@@ -430,46 +417,16 @@ export async function GET(
       })
 
       if (fallbackPath && fallbackPath !== filePath) {
-        const fallbackTarget = await resolveStorageDownloadTarget(fallbackPath, {
-          preferDropbox: isDownload && !forceLocal,
-          dropboxPath: activeDropboxPath,
-        })
-        if (fallbackTarget.kind === 'local-file' ? existsSync(fallbackTarget.absolutePath) : true) {
-          effectiveResolvedTarget = fallbackTarget
-          filePath = fallbackPath
+        const normalizedFallbackPath = isDropboxStoragePath(fallbackPath)
+          ? stripDropboxStoragePrefix(fallbackPath)
+          : fallbackPath
+        const fallbackFullPath = getFilePath(normalizedFallbackPath)
+        if (existsSync(fallbackFullPath)) {
+          fullPath = fallbackFullPath
+          filePath = normalizedFallbackPath
         }
       }
     }
-    if (effectiveResolvedTarget.kind === 'redirect') {
-      // Record analytics event for Dropbox downloads (we can't track transfer progress)
-      if (isDownload && !isAdminRequest && !isProbe) {
-        const settings = await getSecuritySettings()
-        if (settings.trackAnalytics) {
-          await prisma.videoAnalytics.create({
-            data: {
-              videoId: video.id,
-              projectId: video.projectId,
-              eventType: 'DOWNLOAD_SUCCEEDED',
-              assetId: assetId || undefined,
-              ipAddress: getClientIpAddress(request) || undefined,
-              sessionId,
-              details: { source: 'Dropbox' },
-            },
-          }).catch(() => undefined)
-        }
-      }
-
-      return NextResponse.redirect(effectiveResolvedTarget.url, {
-        status: 307,
-        headers: {
-          'Cache-Control': 'private, no-store, must-revalidate',
-          Pragma: 'no-cache',
-          'Referrer-Policy': 'strict-origin-when-cross-origin',
-        },
-      })
-    }
-
-    const fullPath = effectiveResolvedTarget.absolutePath
     if (!existsSync(fullPath)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 404 })
     }
@@ -647,12 +604,6 @@ export async function GET(
       },
     })
   } catch (error) {
-    if (error instanceof DropboxPreferredDownloadError) {
-      return NextResponse.json(
-        { error: 'Dropbox download is unavailable right now. Retry later or use Force Local if you want to bypass Dropbox.' },
-        { status: 502 }
-      )
-    }
     // Stream errors are technical issues, not security events
     console.error('[STREAM] Video streaming error:', error)
 

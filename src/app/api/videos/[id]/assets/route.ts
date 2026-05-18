@@ -6,8 +6,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { isDropboxStorageConfigured, toDropboxStoragePath } from '@/lib/storage-provider-dropbox'
-import { buildProjectStorageRoot, buildVideoAssetDropboxPath, buildVideoAssetStoragePath, getStoragePathBasename } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -217,20 +216,7 @@ export async function POST(
     const versionLabel = video.versionLabel || `v${video.version}`
     const localPath = buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, sanitizedFileName)
 
-    // Auto-enable Dropbox for new assets when the video already has Dropbox enabled
-    const autoDropbox = video.dropboxEnabled === true && isDropboxStorageConfigured()
-    const storagePath = autoDropbox ? toDropboxStoragePath(localPath) : localPath
-
-    // Build human-friendly Dropbox path for assets: {Project}/{Video}/Assets/{filename}
-    const assetDropboxPath = autoDropbox
-      ? buildVideoAssetDropboxPath(
-          video.project.client?.name || video.project.companyName || 'Client',
-          getStoragePathBasename(projectStoragePath) || video.project.title,
-          videoFolderName,
-          versionLabel,
-          sanitizedFileName,
-        )
-      : null
+    const storagePath = localPath
 
     // Use detected category if not provided
     const finalCategory = normalizedCategory || assetValidation.detectedCategory || 'other'
@@ -246,12 +232,6 @@ export async function POST(
         storagePath,
         category: finalCategory,
         uploadedByName: currentUser.name || currentUser.email,
-        ...(autoDropbox ? {
-          dropboxEnabled: true,
-          dropboxPath: assetDropboxPath,
-          dropboxUploadStatus: 'PENDING',
-          dropboxUploadProgress: 0,
-        } : {}),
       },
     })
 

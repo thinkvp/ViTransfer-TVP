@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Cloud, Download, Server } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import Image from 'next/image'
 import ThemeToggle from '@/components/ThemeToggle'
 import { apiFetch } from '@/lib/api-client'
@@ -60,7 +60,6 @@ type ShareAlbum = {
   name: string
   notes: string | null
   socialCopiesEnabled?: boolean
-  dropboxEnabled?: boolean
   zip?: {
     fullReady: boolean
     socialReady: boolean
@@ -97,7 +96,6 @@ export function ShareAlbumViewer({
   const zipPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [viewerPhoto, setViewerPhoto] = useState<ShareAlbumPhoto | null>(null)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
-  const [useLocalServer, setUseLocalServer] = useState(false)
 
   const headers = useMemo(() => {
     const authToken = shareToken
@@ -195,7 +193,7 @@ export function ShareAlbumViewer({
     }
   }, [album?.zip, album?.socialCopiesEnabled, albumId, headers, loading, photos.length, shareSlug])
 
-  const requestZip = async (variant: 'full' | 'social', forceLocal = false) => {
+  const requestZip = async (variant: 'full' | 'social') => {
     try {
       const res = await apiFetch(`/api/share/${shareSlug}/albums/${albumId}/download-zip-token`, {
         method: 'POST',
@@ -214,11 +212,7 @@ export function ShareAlbumViewer({
 
       const data = await res.json()
       if (data?.url) {
-        let downloadUrl: string = data.url
-        if (forceLocal && album?.dropboxEnabled) {
-          downloadUrl += (downloadUrl.includes('?') ? '&' : '?') + 'forceLocal=true'
-        }
-        triggerDownload(downloadUrl)
+        triggerDownload(data.url)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
@@ -457,10 +451,7 @@ export function ShareAlbumViewer({
         open={showDownloadModal}
         onOpenChange={(open) => {
           setShowDownloadModal(open)
-          if (!open) {
-            setUseLocalServer(false)
-            setError(null)
-          }
+          if (!open) setError(null)
         }}
       >
         <DialogContent className="max-w-lg">
@@ -469,49 +460,11 @@ export function ShareAlbumViewer({
             {album?.name && <DialogDescription>{album.name}</DialogDescription>}
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {/* Dropbox / Local Server toggle — shown only when Dropbox is configured for this album */}
-            {album?.dropboxEnabled && (
-              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                <p className="text-sm font-medium">Downloading from:</p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setUseLocalServer(false)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      !useLocalServer
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground hover:bg-accent'
-                    }`}
-                  >
-                    <Cloud className="h-4 w-4" />
-                    Dropbox
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUseLocalServer(true)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      useLocalServer
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground hover:bg-accent'
-                    }`}
-                  >
-                    <Server className="h-4 w-4" />
-                    Local Server
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {useLocalServer
-                    ? 'Downloading from our Local Server. Switch to Dropbox for generally higher speeds and more concurrent downloads.'
-                    : 'Downloading from Dropbox will generally produce higher speeds and more concurrent downloads. Change to our Local Server and restart the download if you are having issues downloading from Dropbox.'}
-                </p>
-              </div>
-            )}
-
             {/* Download items */}
             <div className="space-y-3">
               <button
                 type="button"
-                onClick={() => void requestZip('full', useLocalServer)}
+                onClick={() => void requestZip('full')}
                 disabled={!album?.zip?.fullReady || photos.length === 0}
                 className={`w-full p-4 border-2 border-border rounded-lg text-left transition-colors ${
                   !album?.zip?.fullReady || photos.length === 0
@@ -535,7 +488,7 @@ export function ShareAlbumViewer({
               {album?.socialCopiesEnabled !== false && (
                 <button
                   type="button"
-                  onClick={() => void requestZip('social', useLocalServer)}
+                  onClick={() => void requestZip('social')}
                   disabled={!album?.zip?.socialReady || photos.length === 0}
                   className={`w-full p-4 border-2 border-border rounded-lg text-left transition-colors ${
                     !album?.zip?.socialReady || photos.length === 0

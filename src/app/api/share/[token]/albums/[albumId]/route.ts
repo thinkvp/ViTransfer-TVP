@@ -53,7 +53,6 @@ export async function GET(
       createdAt: true,
       storageFolderName: true,
       socialCopiesEnabled: true,
-      dropboxEnabled: true,
       project: {
         select: {
           storagePath: true,
@@ -155,7 +154,6 @@ export async function GET(
       createdAt: album.createdAt,
       photoCount: photos.length,
       socialCopiesEnabled: album.socialCopiesEnabled,
-      dropboxEnabled: album.dropboxEnabled,
       zip: {
         fullReady: fullZipReady,
         socialReady: socialZipReady,

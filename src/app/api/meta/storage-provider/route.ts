@@ -2,7 +2,7 @@
  * GET /api/meta/storage-provider
  *
  * Returns the active storage provider at runtime so client-side code can
- * branch between TUS (local/Dropbox) and browser-direct S3 multipart uploads.
+ * branch between TUS (local) and browser-direct S3 multipart uploads.
  *
  * This endpoint exists because NEXT_PUBLIC_* variables are baked into the JS
  * bundle at build time.  Pre-built Docker images cannot reflect a user's
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const raw = (process.env.STORAGE_PROVIDER ?? 'local').toLowerCase()
-  const provider: 'local' | 's3' | 'dropbox' = raw === 's3' ? 's3' : raw === 'dropbox' ? 'dropbox' : 'local'
+  const provider: 'local' | 's3' = raw === 's3' ? 's3' : 'local'
 
   const response = NextResponse.json({ provider })
   // Cache for up to 5 minutes — the value never changes while the container is

@@ -1,7 +1,11 @@
 import { existsSync } from 'fs'
 import { getFilePath } from '@/lib/storage'
-import { buildProjectStorageRoot, buildVideoOriginalStoragePath } from '@/lib/project-storage-paths'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import {
+  buildProjectStorageRoot,
+  buildVideoOriginalStoragePath,
+  isDropboxStoragePath,
+  stripDropboxStoragePrefix,
+} from '@/lib/project-storage-paths'
 
 /**
  * Check whether a storage path (local or dropbox:-prefixed) exists on the local filesystem.

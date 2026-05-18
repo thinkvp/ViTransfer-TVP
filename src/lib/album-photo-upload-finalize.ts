@@ -5,7 +5,6 @@ import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { buildAlbumPhotoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumPhotoSocialQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
-import { isDropboxStorageConfigured, deleteDropboxFile } from '@/lib/storage-provider-dropbox'
 
 export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: true } | { ok: false; reason: 'not-found' }> {
   const photo = await prisma.albumPhoto.findUnique({
@@ -75,31 +74,6 @@ export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: t
         variant: 'social',
       })
       await deleteFile(socialZipPath).catch(() => {})
-    }
-
-    if (photo.album.dropboxEnabled) {
-      const dbxPaths = [
-        photo.album.fullZipDropboxPath,
-        ...(photo.album.socialCopiesEnabled ? [photo.album.socialZipDropboxPath] : []),
-      ].filter(Boolean) as string[]
-      if (isDropboxStorageConfigured()) {
-        await Promise.allSettled(dbxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
-      }
-      await prisma.album.update({
-        where: { id: photo.albumId },
-        data: {
-          fullZipDropboxStatus: null,
-          fullZipDropboxProgress: 0,
-          fullZipDropboxError: null,
-          fullZipDropboxPath: null,
-          ...(photo.album.socialCopiesEnabled ? {
-            socialZipDropboxStatus: null,
-            socialZipDropboxProgress: 0,
-            socialZipDropboxError: null,
-            socialZipDropboxPath: null,
-          } : {}),
-        },
-      }).catch(() => {})
     }
 
     await syncAlbumZipSizes({ albumId: photo.albumId, projectId: photo.album.projectId }).catch(() => {})

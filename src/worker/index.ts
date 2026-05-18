@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, DropboxUploadJob, AlbumZipDropboxUploadJob, FolderRenameJobPayload } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -15,8 +15,6 @@ import { processProjectEmail } from './project-email-processor'
 import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoThumbnail } from './album-photo-thumbnail-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
-import { processDropboxUpload } from './dropbox-upload-processor'
-import { processAlbumZipDropboxUpload } from './album-zip-dropbox-upload-processor'
 import { processFolderRename } from './folder-rename-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
@@ -34,12 +32,10 @@ import { getQuickBooksDailyPullSettings, parseDailyTimeToCronPattern, recordQuic
 import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 import { reconcileAccountingFilesBytes } from '@/lib/accounting/file-storage'
-import { runDropboxStorageConsistencyScanAndSyncNotification } from '@/lib/dropbox-storage-consistency'
 import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 import { processAccountingReminders } from '@/lib/accounting-reminders'
-import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { isS3Mode, s3AbortIncompleteMultipartUploadsOlderThan } from '@/lib/s3-storage'
 import { runS3LocalBackup, getS3LocalBackupSettings, formatBackupResultSummary } from '@/lib/s3-local-backup'
 import { upsertS3BackupFailureNotification } from '@/lib/s3-backup-failure-notifications'
@@ -360,44 +356,6 @@ async function main() {
 
   console.log('[WORKER] Album photo ZIP generation worker started')
 
-  // Create Dropbox background upload worker
-  const dropboxUploadWorker = new Worker<DropboxUploadJob>('dropbox-upload', processDropboxUpload, {
-    connection: getRedisForQueue(),
-    concurrency: 2,
-    lockDuration: 10 * 60 * 1000,
-    stalledInterval: 5 * 60 * 1000,
-    maxStalledCount: 2,
-  })
-
-  dropboxUploadWorker.on('completed', (job) => {
-    console.log(`[WORKER] Dropbox upload job ${job.id} completed successfully`)
-  })
-
-  dropboxUploadWorker.on('failed', (job, err) => {
-    console.error(`[WORKER ERROR] Dropbox upload job ${job?.id} failed:`, err)
-  })
-
-  console.log('[WORKER] Dropbox upload worker started')
-
-  // Create album ZIP Dropbox upload worker
-  const albumZipDropboxUploadWorker = new Worker<AlbumZipDropboxUploadJob>('album-zip-dropbox-upload', processAlbumZipDropboxUpload, {
-    connection: getRedisForQueue(),
-    concurrency: 2,
-    lockDuration: 10 * 60 * 1000,
-    stalledInterval: 5 * 60 * 1000,
-    maxStalledCount: 2,
-  })
-
-  albumZipDropboxUploadWorker.on('completed', (job) => {
-    console.log(`[WORKER] Album ZIP Dropbox upload job ${job.id} completed successfully`)
-  })
-
-  albumZipDropboxUploadWorker.on('failed', (job, err) => {
-    console.error(`[WORKER ERROR] Album ZIP Dropbox upload job ${job?.id} failed:`, err)
-  })
-
-  console.log('[WORKER] Album ZIP Dropbox upload worker started')
-
   // Create folder rename worker (S3 copy + delete for project/client renames)
   const folderRenameWorker = new Worker<FolderRenameJobPayload>('folder-rename', processFolderRename, {
     connection: getRedisForQueue(),
@@ -442,7 +400,6 @@ async function main() {
       if (job.name === 'project-key-date-reminders') return true
       if (job.name === 'user-key-date-reminders') return true
       if (job.name === 'auto-start-projects-on-shooting-key-date') return true
-      if (job.name === 'dropbox-storage-consistency-scan') return true
       if (job.name === 'orphan-project-files-scan') return true
       if (job.name === 'notification-log-cleanup') return true
       if (job.name === 'accounting-reminders') return true
@@ -590,24 +547,6 @@ async function main() {
     }
   } catch (e) {
     console.warn('[QBO] Failed to evaluate token refresh schedule (continuing):', e instanceof Error ? e.message : e)
-  }
-
-  // Dropbox storage consistency scan (hourly at :15, offset from notifications at :00)
-  // Only schedule if Dropbox is configured; the scan itself also checks isDropboxStorageConfigured()
-  // to handle cases where Dropbox is disabled after the worker started
-  if (isDropboxStorageConfigured()) {
-    await notificationQueue.add(
-      'dropbox-storage-consistency-scan',
-      {},
-      {
-        repeat: {
-          pattern: '15 * * * *',
-        },
-        jobId: 'dropbox-storage-consistency-scan',
-        removeOnComplete: true,
-        removeOnFail: true,
-      }
-    )
   }
 
   // S3 multipart upload cleanup — abort incomplete uploads older than 24 hours (daily @ 05:00)
@@ -800,20 +739,6 @@ async function main() {
           const msg = e instanceof Error ? e.message : String(e)
           await recordQuickBooksDailyPullAttempt({ attemptedAt, succeeded: false, message: msg })
           console.warn('[QBO] Daily pull errored:', msg)
-        }
-        return
-      }
-
-      if (job.name === 'dropbox-storage-consistency-scan') {
-        try {
-          const result = await runDropboxStorageConsistencyScanAndSyncNotification()
-          if (result.skippedReason) {
-            console.log(`[CONSISTENCY] Dropbox scan skipped: ${result.skippedReason}`)
-          } else {
-            console.log(`[CONSISTENCY] Dropbox scan completed (checked=${result.checkedCount}, issues=${result.inconsistencyCount})`)
-          }
-        } catch (e) {
-          console.error('[CONSISTENCY] Dropbox storage consistency scan failed:', e)
         }
         return
       }

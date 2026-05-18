@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react'
 
-type StorageProvider = 'local' | 's3' | 'dropbox'
+type StorageProvider = 'local' | 's3'
 
 // Build-time hint from NEXT_PUBLIC_STORAGE_PROVIDER (may be stale for pre-built images).
 // Used only as the initial synchronous value before the API response arrives.
@@ -45,7 +45,7 @@ async function fetchStorageProvider(): Promise<StorageProvider> {
         if (!r.ok) return BUILD_TIME_PROVIDER
         const data = await r.json()
         const p = data?.provider
-        return (p === 's3' || p === 'dropbox' ? p : 'local') as StorageProvider
+        return (p === 's3' ? p : 'local') as StorageProvider
       })
       .catch(() => BUILD_TIME_PROVIDER)
       .then((value) => {

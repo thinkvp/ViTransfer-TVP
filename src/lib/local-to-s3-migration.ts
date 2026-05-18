@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { getFilePath } from '@/lib/storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
@@ -36,6 +36,12 @@ export type S3MigrationDryRunResult = {
   existingLocalFiles: number
   missingLocalFiles: number
   totalBytes: number
+  /** Set when S3 credentials were provided: files that already exist in S3 at the correct size and would be skipped. */
+  alreadyInS3?: number
+  /** Set when S3 credentials were provided: files that do not yet exist in S3 and would actually be uploaded. */
+  wouldCopy?: number
+  /** Bytes for the wouldCopy set only (0 if all already in S3). */
+  wouldCopyBytes?: number
   sampleKeys: string[]
   missingKeys: string[]
 }
@@ -545,9 +551,58 @@ export async function validateS3MigrationConfig(input: Partial<S3MigrationConfig
   }
 }
 
-export async function dryRunLocalToS3Migration(): Promise<S3MigrationDryRunResult> {
+async function checkEntriesAgainstS3(
+  entries: LocalEntry[],
+  client: S3Client,
+  bucket: string,
+  concurrency = 20,
+): Promise<boolean[]> {
+  const results = new Array<boolean>(entries.length).fill(false)
+  let nextIndex = 0
+  const worker = async () => {
+    while (true) {
+      const i = nextIndex++
+      if (i >= entries.length) return
+      results[i] = await objectMatchesSize(client, bucket, entries[i].key, entries[i].size)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, entries.length || 1) }, () => worker()))
+  return results
+}
+
+export async function dryRunLocalToS3Migration(credentials?: Partial<S3MigrationConfig>): Promise<S3MigrationDryRunResult> {
   const { entries, discoveredPaths, missingLocalFiles, missingKeys } = await buildLocalManifest()
   const totalBytes = entries.reduce((total, entry) => total + entry.size, 0)
+
+  if (credentials) {
+    let config: S3MigrationConfig | undefined
+    try {
+      config = getConfig(credentials)
+    } catch {
+      // Incomplete credentials — skip S3 check and fall through to local-only result
+    }
+
+    if (config) {
+      const client = makeClient(config)
+      const matchResults = await checkEntriesAgainstS3(entries, client, config.bucket)
+      const alreadyInS3 = matchResults.filter(Boolean).length
+      const wouldCopyEntries = entries.filter((_, i) => !matchResults[i])
+      const wouldCopyBytes = wouldCopyEntries.reduce((total, entry) => total + entry.size, 0)
+
+      return {
+        ok: true,
+        discoveredPaths,
+        existingLocalFiles: entries.length,
+        missingLocalFiles,
+        totalBytes,
+        alreadyInS3,
+        wouldCopy: wouldCopyEntries.length,
+        wouldCopyBytes,
+        sampleKeys: wouldCopyEntries.slice(0, 20).map((entry) => entry.key),
+        missingKeys,
+      }
+    }
+  }
 
   return {
     ok: true,

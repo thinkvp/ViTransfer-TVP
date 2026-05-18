@@ -3,7 +3,7 @@ import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
 import { videoQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import path from 'path'
 import fs from 'fs'
 import { Readable } from 'stream'
@@ -324,13 +324,11 @@ async function handleVideoUploadFinish(
 
   // Update video status to QUEUED — upload is complete and the job is waiting in the worker queue.
   // The worker will advance this to PROCESSING when it actually begins work.
-  const isDropbox = isDropboxStoragePath(video.originalStoragePath)
   await prisma.video.update({
     where: { id: videoId },
     data: {
       status: 'QUEUED',
       processingProgress: 0,
-      ...(isDropbox ? { dropboxUploadStatus: 'PENDING' } : {}),
     },
   })
 
@@ -358,21 +356,6 @@ async function handleVideoUploadFinish(
     console.log(`[UPLOAD] Video ${videoId} is in a closed project with auto-delete previews enabled; queued for thumbnail-only processing`)
   } else {
     console.log(`[UPLOAD] Video ${videoId} queued for worker processing`)
-  }
-
-  // Enqueue background Dropbox upload (runs in parallel with video processing)
-  if (isDropbox) {
-    const localPath = stripDropboxStoragePrefix(video.originalStoragePath)
-    const { getDropboxUploadQueue } = await import('@/lib/queue')
-    const dropboxQueue = getDropboxUploadQueue()
-    await dropboxQueue.add('upload-to-dropbox', {
-      videoId: video.id,
-      localPath,
-      dropboxPath: video.originalStoragePath,
-      dropboxRelPath: video.dropboxPath,
-      fileSizeBytes: fileSize,
-    })
-    console.log(`[UPLOAD] Video ${videoId} queued for Dropbox upload`)
   }
 
   return {}
@@ -420,22 +403,6 @@ async function handleAssetUploadFinish(
     storagePath: asset.storagePath,
     expectedCategory: asset.category ?? undefined,
   })
-
-  // Enqueue background Dropbox upload for asset (runs after/concurrent with validation)
-  if (isDropboxStoragePath(asset.storagePath)) {
-    const { getDropboxUploadQueue } = await import('@/lib/queue')
-    const { stripDropboxStoragePrefix } = await import('@/lib/storage-provider-dropbox')
-    const dropboxQueue = getDropboxUploadQueue()
-    await dropboxQueue.add('upload-asset-to-dropbox', {
-      videoId: asset.videoId,
-      localPath: stripDropboxStoragePrefix(asset.storagePath),
-      dropboxPath: asset.storagePath,
-      dropboxRelPath: asset.dropboxPath,
-      fileSizeBytes: fileSize,
-      assetId: asset.id,
-    })
-    console.log(`[UPLOAD] Asset ${assetId} queued for Dropbox upload`)
-  }
 
   console.log(`[UPLOAD] Asset uploaded and queued for processing: ${assetId}`)
 

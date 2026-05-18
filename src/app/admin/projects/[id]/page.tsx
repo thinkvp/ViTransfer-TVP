@@ -54,7 +54,6 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
   const [companyName, setCompanyName] = useState('Studio')
-  const [dropboxConfigured, setDropboxConfigured] = useState(false)
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [adminUser, setAdminUser] = useState<any>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
@@ -408,7 +407,6 @@ export default function ProjectPage() {
         if (response.ok) {
           const data = await response.json()
           setCompanyName(data.companyName || 'Studio')
-          setDropboxConfigured(data.dropboxConfigured === true)
         }
       } catch (error) {
         console.error('Error fetching company name:', error)
@@ -852,7 +850,6 @@ export default function ProjectPage() {
                   projectStatus={project.status}
                   restrictToLatestVersion={project.restrictCommentsToLatestVersion}
                   companyName={companyName}
-                  dropboxConfigured={dropboxConfigured}
                   canFullControl={canDeleteInternalFiles}
                   onVideoSelect={handleVideoSelect}
                   onRefresh={() => {
@@ -879,7 +876,6 @@ export default function ProjectPage() {
                 <AdminAlbumManager
                   projectId={project.id}
                   projectStatus={project.status}
-                  dropboxConfigured={dropboxConfigured}
                   canDelete={canDeleteInternalFiles}
                   onProjectDataChanged={bumpProjectStorageRefresh}
                 />

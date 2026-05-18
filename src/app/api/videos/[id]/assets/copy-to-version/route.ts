@@ -7,16 +7,12 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import {
-  isDropboxStorageConfigured,
   isDropboxStoragePath,
   stripDropboxStoragePrefix,
-  toDropboxStoragePath,
-} from '@/lib/storage-provider-dropbox'
+} from '@/lib/project-storage-paths'
 import {
   buildVideoAssetStoragePath,
-  buildVideoAssetDropboxPath,
   buildProjectStorageRoot,
-  getStoragePathBasename,
 } from '@/lib/project-storage-paths'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { z } from 'zod'
@@ -114,7 +110,6 @@ export async function POST(
         storageFolderName: true,
         version: true,
         versionLabel: true,
-        dropboxEnabled: true,
       },
     })
 
@@ -148,7 +143,6 @@ export async function POST(
       buildProjectStorageRoot(clientName, project.title)
     const targetVideoFolderName = targetVideo.storageFolderName || targetVideo.name
     const targetVersionLabel = targetVideo.versionLabel || `v${targetVideo.version}`
-    const autoDropbox = targetVideo.dropboxEnabled === true && isDropboxStorageConfigured()
 
     // Physically copy each asset file to the target version's assets folder
     const copiedAssets = await Promise.all(
@@ -173,20 +167,7 @@ export async function POST(
         await fs.promises.copyFile(sourceAbsPath, targetAbsPath)
 
         // Determine the storage path for the new DB record
-        const newStoragePath = autoDropbox
-          ? toDropboxStoragePath(targetLocalRelPath)
-          : targetLocalRelPath
-
-        // Build Dropbox human-friendly path if applicable
-        const newDropboxPath = autoDropbox
-          ? buildVideoAssetDropboxPath(
-              clientName,
-              getStoragePathBasename(projectStoragePath) || project.title,
-              targetVideoFolderName,
-              targetVersionLabel,
-              asset.fileName,
-            )
-          : null
+        const newStoragePath = targetLocalRelPath
 
         // Create the new asset DB record pointing to the copied file
         return prisma.videoAsset.create({
@@ -198,38 +179,10 @@ export async function POST(
             storagePath: newStoragePath,
             category: asset.category,
             uploadedByName: asset.uploadedByName,
-            ...(autoDropbox
-              ? {
-                  dropboxEnabled: true,
-                  dropboxPath: newDropboxPath,
-                  dropboxUploadStatus: 'PENDING',
-                  dropboxUploadProgress: 0,
-                }
-              : {}),
           },
         })
       })
     )
-
-    // Queue Dropbox uploads for copied assets if applicable
-    if (autoDropbox) {
-      const { getDropboxUploadQueue } = await import('@/lib/queue')
-      const dropboxQueue = getDropboxUploadQueue()
-      await Promise.all(
-        copiedAssets.map((newAsset) =>
-          dropboxQueue.add('upload-asset-to-dropbox', {
-            videoId: targetVideoId,
-            localPath: isDropboxStoragePath(newAsset.storagePath)
-              ? stripDropboxStoragePrefix(newAsset.storagePath)
-              : newAsset.storagePath,
-            dropboxPath: newAsset.storagePath,
-            dropboxRelPath: newAsset.dropboxPath,
-            fileSizeBytes: Number(newAsset.fileSize),
-            assetId: newAsset.id,
-          })
-        )
-      )
-    }
 
     await recalculateAndStoreProjectTotalBytes(sourceVideo.projectId)
 

@@ -15,7 +15,6 @@ function getDownloadDetails(value: unknown): {
   bytesTransferred: number | null
   durationMs: number | null
   failed: boolean
-  fromDropbox: boolean
 } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {
@@ -23,7 +22,6 @@ function getDownloadDetails(value: unknown): {
       bytesTransferred: null,
       durationMs: null,
       failed: false,
-      fromDropbox: false,
     }
   }
 
@@ -39,7 +37,6 @@ function getDownloadDetails(value: unknown): {
       ? details.durationMs
       : null,
     failed: details.failed === true,
-    fromDropbox: details.source === 'Dropbox',
   }
 }
 
@@ -356,7 +353,6 @@ export async function GET(
         averageMbps: details.averageMbps,
         bytesTransferred: details.bytesTransferred,
         durationMs: details.durationMs,
-        fromDropbox: details.fromDropbox,
         email: access?.accessMethod === 'OTP' ? access.email || null : null,
         accessMethod: access?.accessMethod || null,
         ipAddress: download.ipAddress || null,
@@ -455,7 +451,6 @@ export async function GET(
         albumName: event.album?.name || 'Album',
         photoFileName: event.photo?.fileName || null,
         variant: event.variant || 'full',
-        fromDropbox: eventDetails?.source === 'Dropbox',
         email: access?.accessMethod === 'OTP' ? access.email || null : null,
         accessMethod: access?.accessMethod || null,
         ipAddress: event.ipAddress || null,

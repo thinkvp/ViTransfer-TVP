@@ -11,8 +11,6 @@ let projectEmailQueueInstance: Queue<ProjectEmailProcessingJob> | null = null
 let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
 let albumPhotoThumbnailQueueInstance: Queue<AlbumPhotoThumbnailJob> | null = null
 let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
-let dropboxUploadQueueInstance: Queue<DropboxUploadJob> | null = null
-let albumZipDropboxUploadQueueInstance: Queue<AlbumZipDropboxUploadJob> | null = null
 let folderRenameQueueInstance: Queue<FolderRenameJobPayload> | null = null
 
 export interface VideoProcessingJob {
@@ -72,23 +70,6 @@ export interface AlbumPhotoThumbnailJob {
 export interface AlbumPhotoZipJob {
   albumId: string
   variant: 'full' | 'social'
-}
-
-export interface DropboxUploadJob {
-  videoId: string
-  localPath: string
-  dropboxPath: string
-  dropboxRelPath?: string | null // Human-friendly path relative to Dropbox root
-  fileSizeBytes: number
-  assetId?: string // When set, this is an asset upload (not a video original)
-}
-
-export interface AlbumZipDropboxUploadJob {
-  albumId: string
-  variant: 'full' | 'social'
-  localPath: string
-  dropboxPath: string // Human-friendly path relative to Dropbox root
-  fileSizeBytes: number
 }
 
 /** Payload for a background S3 folder rename job (copy + delete). */
@@ -336,60 +317,6 @@ export function getAlbumPhotoZipQueue(): Queue<AlbumPhotoZipJob> {
   }
 
   return albumPhotoZipQueueInstance
-}
-
-export function getDropboxUploadQueue(): Queue<DropboxUploadJob> {
-  if (process.env.NEXT_PHASE === 'phase-production-build') {
-    throw new Error('Queue not available during build phase')
-  }
-
-  if (!dropboxUploadQueueInstance) {
-    dropboxUploadQueueInstance = new Queue<DropboxUploadJob>('dropbox-upload', {
-      connection: getRedisForQueue(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 5000,
-        },
-        removeOnComplete: {
-          age: 3600,
-        },
-        removeOnFail: {
-          age: 86400,
-        },
-      },
-    })
-  }
-
-  return dropboxUploadQueueInstance
-}
-
-export function getAlbumZipDropboxUploadQueue(): Queue<AlbumZipDropboxUploadJob> {
-  if (process.env.NEXT_PHASE === 'phase-production-build') {
-    throw new Error('Queue not available during build phase')
-  }
-
-  if (!albumZipDropboxUploadQueueInstance) {
-    albumZipDropboxUploadQueueInstance = new Queue<AlbumZipDropboxUploadJob>('album-zip-dropbox-upload', {
-      connection: getRedisForQueue(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 5000,
-        },
-        removeOnComplete: {
-          age: 3600,
-        },
-        removeOnFail: {
-          age: 86400,
-        },
-      },
-    })
-  }
-
-  return albumZipDropboxUploadQueueInstance
 }
 
 export function getFolderRenameQueue(): Queue<FolderRenameJobPayload> {

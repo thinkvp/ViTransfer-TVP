@@ -61,7 +61,6 @@ interface DownloadActivity {
   averageMbps?: number | null
   bytesTransferred?: number | null
   durationMs?: number | null
-  fromDropbox?: boolean
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   ipAddress: string | null
@@ -73,7 +72,6 @@ interface AlbumDownloadActivity {
   type: 'ALBUM_DOWNLOAD'
   albumName: string
   variant: string | null
-  fromDropbox?: boolean
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
   ipAddress: string | null
@@ -696,8 +694,6 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                         {pagedActivity.map((event) => {
                         const hasDetails = hasExpandableDetails(event)
                         const mainText = getMainText(event)
-                        const showDropboxCloud = (event.type === 'DOWNLOAD' || event.type === 'ALBUM_DOWNLOAD')
-                          && !!(event as DownloadActivity | AlbumDownloadActivity).fromDropbox
                         const metaValue = getEventMetaValue(event)
                         const showMeta = metaValue !== '—'
                         const metaLabel = isIpAddress(metaValue) ? 'IP' : 'By'
@@ -878,15 +874,6 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                 <TruncatedText
                                   text={mainText}
                                   className="hidden sm:inline text-muted-foreground text-sm whitespace-normal break-words"
-                                  suffix={showDropboxCloud ? (
-                                    <span
-                                      className="inline-flex items-center whitespace-nowrap align-baseline ml-1"
-                                      title="Served from Dropbox"
-                                      aria-label="Served from Dropbox"
-                                    >
-                                      <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
-                                    </span>
-                                  ) : undefined}
                                 />
                               </td>
                               <td className="py-2 px-3 align-middle text-xs text-muted-foreground whitespace-nowrap tabular-nums hidden sm:table-cell">
@@ -913,15 +900,6 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                         <TruncatedText
                                           text={mainText}
                                           className="text-sm text-muted-foreground break-words"
-                                          suffix={showDropboxCloud ? (
-                                            <span
-                                              className="inline-flex items-center whitespace-nowrap align-baseline ml-1"
-                                              title="Served from Dropbox"
-                                              aria-label="Served from Dropbox"
-                                            >
-                                              <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
-                                            </span>
-                                          ) : undefined}
                                         />
                                       </div>
                                       {showMeta && (
@@ -945,15 +923,6 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                       <TruncatedText
                                         text={mainText}
                                         className="text-sm text-muted-foreground break-words"
-                                        suffix={showDropboxCloud ? (
-                                          <span
-                                            className="inline-flex items-center whitespace-nowrap align-baseline ml-1"
-                                            title="Served from Dropbox"
-                                            aria-label="Served from Dropbox"
-                                          >
-                                            <Cloud className="w-3 h-3 flex-shrink-0 text-sky-500" aria-hidden="true" />
-                                          </span>
-                                        ) : undefined}
                                       />
                                     </div>
                                     {showMeta && (

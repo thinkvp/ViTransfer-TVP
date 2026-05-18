@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X, XCircle } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
 import { InlineEdit } from './InlineEdit'
@@ -24,7 +24,6 @@ interface AdminVideoManagerProps {
   comments?: any[]
   restrictToLatestVersion?: boolean
   companyName?: string
-  dropboxConfigured?: boolean
   canFullControl?: boolean
   onVideoSelect?: (videoName: string, videos: any[]) => void
   onRefresh?: () => void
@@ -40,7 +39,6 @@ export default function AdminVideoManager({
   comments = [],
   restrictToLatestVersion = false,
   companyName = 'Studio',
-  dropboxConfigured = false,
   canFullControl = true,
   onVideoSelect,
   onRefresh,
@@ -166,7 +164,6 @@ export default function AdminVideoManager({
         const hasProcessing = groupVideos.some((v) => v?.status === 'PROCESSING')
         const hasQueued = groupVideos.some((v) => v?.status === 'QUEUED')
         const hasFailed = groupVideos.some((v) => v?.status === 'ERROR')
-        const hasDropboxError = groupVideos.some((v) => (v as any)?.dropboxUploadStatus === 'ERROR')
 
         return (
           <Card key={groupName} className="overflow-hidden">
@@ -250,12 +247,6 @@ export default function AdminVideoManager({
                         FAILED
                       </span>
                     )}
-                    {hasDropboxError && !hasFailed && (
-                      <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
-                        <XCircle className="w-3 h-3" />
-                        UPLOAD FAILED
-                      </span>
-                    )}
                     {isExpanded ? (
                       <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                     ) : (
@@ -301,7 +292,6 @@ export default function AdminVideoManager({
                           videoName={groupName}
                           allowApproval={canFullControl ? undefined : false}
                           showAllowApprovalField={canFullControl}
-                          dropboxConfigured={dropboxConfigured}
                           onUploadComplete={() => {
                             setShowNewVersionForGroup(null)
                             handleUploadComplete()
@@ -321,7 +311,6 @@ export default function AdminVideoManager({
                     canDelete={canFullControl}
                     canApprove={canFullControl}
                     canManageAllowApproval={canFullControl}
-                    dropboxConfigured={dropboxConfigured}
                   />
                 </div>
               </CardContent>
@@ -349,7 +338,6 @@ export default function AdminVideoManager({
             projectId={projectId}
             canFullControl={canFullControl}
             onUploadComplete={handleUploadComplete}
-            dropboxConfigured={dropboxConfigured}
           />
         </div>
       )}

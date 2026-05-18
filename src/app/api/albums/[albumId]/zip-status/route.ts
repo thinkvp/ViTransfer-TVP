@@ -5,7 +5,6 @@ import { rateLimit } from '@/lib/rate-limit'
 import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { getActiveDropboxStorageIssueEntities } from '@/lib/dropbox-storage-inconsistency-log'
 import { getAlbumPhotoZipQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
@@ -40,13 +39,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       storageFolderName: true,
       status: true,
       socialCopiesEnabled: true,
-      dropboxEnabled: true,
-      fullZipDropboxStatus: true,
-      socialZipDropboxStatus: true,
-      fullZipDropboxProgress: true,
-      socialZipDropboxProgress: true,
-      fullZipDropboxError: true,
-      socialZipDropboxError: true,
       project: {
         select: {
           storagePath: true,
@@ -158,11 +150,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  const activeDropboxIssues = await getActiveDropboxStorageIssueEntities(album.projectId)
-  const hasDropboxStorageIssue = activeDropboxIssues.some(
-    (entry) => entry.entityType === 'album-zip' && entry.entityId.startsWith(`${albumId}:`),
-  )
-
   return NextResponse.json({
     album: { status: albumStatus },
     socialCopiesEnabled: album.socialCopiesEnabled,
@@ -176,16 +163,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       socialReady: socialReadyCount,
       socialPending: socialPendingCount,
       socialError: socialErrorCount,
-    },
-    dropbox: {
-      enabled: album.dropboxEnabled,
-      fullStatus: album.fullZipDropboxStatus,
-      socialStatus: album.socialZipDropboxStatus,
-      fullProgress: album.fullZipDropboxProgress,
-      socialProgress: album.socialZipDropboxProgress,
-      fullError: album.fullZipDropboxError,
-      socialError: album.socialZipDropboxError,
-      hasStorageIssue: hasDropboxStorageIssue,
     },
   })
 }

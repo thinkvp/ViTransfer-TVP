@@ -2,15 +2,14 @@ import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
 import { downloadFile, getFilePath, uploadFile, deleteFile } from '../lib/storage'
 import type { AlbumPhotoZipJob } from '../lib/queue'
-import { getAlbumZipJobId, getAlbumZipStoragePath, getAlbumZipDropboxPath } from '../lib/album-photo-zip'
+import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import archiver from 'archiver'
-import { buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
-import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 
 const ZIP_RETRY_DELAY_MS = 30_000
 
@@ -348,52 +347,4 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
 
   await maybeMarkAlbumReady()
 
-  // If Dropbox is enabled for this album, queue upload of the new ZIP
-  try {
-    const freshAlbum = await prisma.album.findUnique({
-      where: { id: albumRowId },
-      select: { dropboxEnabled: true },
-    })
-    if (freshAlbum?.dropboxEnabled && isDropboxStorageConfigured()) {
-      const { getAlbumZipDropboxUploadQueue } = await import('../lib/queue')
-      const q = getAlbumZipDropboxUploadQueue()
-      const dropboxJobId = `album-zip-dropbox-${variant}-${albumRowId}`
-      const localPath = getAlbumZipStoragePath({ ...zipArgs, variant })
-      const dropboxPath = getAlbumZipDropboxPath({
-        clientName: album.project.client?.name || album.project.companyName || 'Client',
-        projectFolderName: getStoragePathBasename(album.project.storagePath) || projectTitle,
-        albumFolderName,
-        albumName,
-        variant,
-      })
-
-      let fileSizeBytes = 0
-      try {
-        fileSizeBytes = fs.statSync(getFilePath(localPath)).size
-      } catch {
-        fileSizeBytes = 0
-      }
-
-      await q.remove(dropboxJobId).catch(() => {})
-      await q.add(
-        'upload-album-zip-to-dropbox',
-        { albumId: albumRowId, variant, localPath, dropboxPath, fileSizeBytes },
-        { jobId: dropboxJobId }
-      )
-
-      const statusField = variant === 'full' ? 'fullZipDropboxStatus' : 'socialZipDropboxStatus'
-      const pathField = variant === 'full' ? 'fullZipDropboxPath' : 'socialZipDropboxPath'
-      await prisma.album.update({
-        where: { id: albumRowId },
-        data: {
-          [statusField]: 'PENDING',
-          [pathField]: dropboxPath,
-        },
-      })
-
-      console.log(`[WORKER] Queued Dropbox upload for album ${albumRowId} ${variant} ZIP`)
-    }
-  } catch (err) {
-    console.error(`[WORKER] Failed to queue Dropbox upload for album ${albumRowId} ${variant}:`, err)
-  }
 }

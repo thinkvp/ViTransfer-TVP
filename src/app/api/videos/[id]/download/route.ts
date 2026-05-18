@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { sanitizeFilenameForHeader } from '@/lib/storage'
-import { DropboxPreferredDownloadError, resolveStorageDownloadTarget } from '@/lib/storage-provider'
+import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
@@ -68,22 +68,7 @@ export async function GET(
     const originalFilename = video.originalFileName || 'video.mp4'
     const safeFilename = sanitizeFilenameForHeader(originalFilename)
 
-    // Resolve storage target — prefer Dropbox redirect for downloads
-    const resolvedTarget = await resolveStorageDownloadTarget(filePath, { preferDropbox: true, dropboxPath: video.dropboxPath })
-
-    if (resolvedTarget.kind === 'redirect') {
-      return NextResponse.redirect(resolvedTarget.url, {
-        status: 307,
-        headers: {
-          'Cache-Control': 'private, no-store, must-revalidate',
-          Pragma: 'no-cache',
-          'Referrer-Policy': 'strict-origin-when-cross-origin',
-        },
-      })
-    }
-
-    // Get the full file path
-    const fullPath = resolvedTarget.absolutePath
+    const fullPath = getFilePath(stripDropboxStoragePrefix(filePath))
 
     // Check if file exists and get stats
     const stat = await fs.promises.stat(fullPath)
@@ -166,12 +151,6 @@ export async function GET(
       },
     })
   } catch (error) {
-    if (error instanceof DropboxPreferredDownloadError) {
-      return NextResponse.json(
-        { error: 'Dropbox download is unavailable right now. Retry later or switch to local if you intentionally want to bypass Dropbox.' },
-        { status: 502 }
-      )
-    }
     console.error('Download error:', error)
     return NextResponse.json(
       { error: 'Failed to download file' },

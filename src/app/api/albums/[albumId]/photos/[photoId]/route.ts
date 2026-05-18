@@ -7,7 +7,6 @@ import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
-import { isDropboxStorageConfigured, deleteDropboxFile } from '@/lib/storage-provider-dropbox'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -122,7 +121,7 @@ export async function DELETE(
     try {
       const albumRow = await prisma.album.findUnique({
         where: { id: albumId },
-        select: { socialCopiesEnabled: true, dropboxEnabled: true, fullZipDropboxPath: true, socialZipDropboxPath: true },
+        select: { socialCopiesEnabled: true },
       })
 
       await prisma.album.update({
@@ -149,31 +148,10 @@ export async function DELETE(
         await deleteFile(socialZipPath).catch(() => {})
       }
 
-      // Delete old Dropbox copies and reset tracking so re-upload queues after new ZIPs are ready
-      if (albumRow?.dropboxEnabled) {
-        const dbxPaths = [
-          albumRow.fullZipDropboxPath,
-          ...(albumRow.socialCopiesEnabled ? [albumRow.socialZipDropboxPath] : []),
-        ].filter(Boolean) as string[]
-        if (isDropboxStorageConfigured()) {
-          await Promise.allSettled(dbxPaths.map((p) => deleteDropboxFile('', p).catch(() => {})))
-        }
-        await prisma.album.update({
-          where: { id: albumId },
-          data: {
-            fullZipDropboxStatus: null,
-            fullZipDropboxProgress: 0,
-            fullZipDropboxError: null,
-            fullZipDropboxPath: null,
-            ...(albumRow.socialCopiesEnabled ? {
-              socialZipDropboxStatus: null,
-              socialZipDropboxProgress: 0,
-              socialZipDropboxError: null,
-              socialZipDropboxPath: null,
-            } : {}),
-          },
-        }).catch(() => {})
-      }
+      await prisma.album.update({
+        where: { id: albumId },
+        data: {},
+      }).catch(() => {})
 
       await syncAlbumZipSizes({ albumId, projectId: photo.album.projectId }).catch(() => {})
 

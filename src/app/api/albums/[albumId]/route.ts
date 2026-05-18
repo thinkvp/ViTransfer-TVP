@@ -9,13 +9,10 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAcc
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import {
   allocateUniqueStorageName,
-  buildAlbumDropboxRoot,
   buildAlbumStorageRoot,
   buildProjectStorageRoot,
-  getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
-import { moveDropboxPath, isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -59,9 +56,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       projectId: true,
       name: true,
       storageFolderName: true,
-      dropboxEnabled: true,
-      fullZipDropboxPath: true,
-      socialZipDropboxPath: true,
       project: { select: { title: true, companyName: true, storagePath: true, client: { select: { name: true } } } },
     },
   })
@@ -189,29 +183,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     return updatedAlbum
   })
-
-  // Rename Dropbox folder when album name changes
-  if (data.name && data.name !== album.name && album.dropboxEnabled && isDropboxStorageConfigured()) {
-    const clientName = album.project.client?.name || album.project.companyName || 'Client'
-    const projectFolderName = getStoragePathBasename(album.project.storagePath) || album.project.title
-    const oldAlbumFolder = buildAlbumDropboxRoot(clientName, projectFolderName, album.name)
-    const newAlbumFolder = buildAlbumDropboxRoot(clientName, projectFolderName, data.name)
-    if (oldAlbumFolder !== newAlbumFolder) {
-      void moveDropboxPath(oldAlbumFolder, newAlbumFolder).catch(() => {})
-      // Update stored album ZIP dropbox paths
-      const pathData: Record<string, string> = {}
-      if (album.fullZipDropboxPath?.startsWith(oldAlbumFolder + '/')) {
-        pathData.fullZipDropboxPath = newAlbumFolder + album.fullZipDropboxPath.slice(oldAlbumFolder.length)
-      }
-      if (album.socialZipDropboxPath?.startsWith(oldAlbumFolder + '/')) {
-        pathData.socialZipDropboxPath = newAlbumFolder + album.socialZipDropboxPath.slice(oldAlbumFolder.length)
-      }
-      if (Object.keys(pathData).length > 0) {
-        await prisma.album.update({ where: { id: albumId }, data: pathData })
-      }
-    }
-  }
-
   return NextResponse.json({ album: updated })
 }
 
