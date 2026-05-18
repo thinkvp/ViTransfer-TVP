@@ -2,6 +2,7 @@ import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { isS3Mode, s3FileExists } from '../lib/s3-storage'
+import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus } from '@prisma/client'
 import {
@@ -139,9 +140,23 @@ export interface VideoInfo {
 }
 
 async function resolveExistingVideoOriginalPath(videoId: string, storagePath: string): Promise<string> {
-  // In S3 mode the storagePath IS the S3 key — no local filesystem resolution needed
-  if (isS3Mode()) {
-    return storagePath
+  const trimmedStoragePath = storagePath.trim()
+  const candidates: string[] = []
+  const seenCandidates = new Set<string>()
+
+  const pushCandidate = (candidate: string | null | undefined) => {
+    const trimmedCandidate = candidate?.trim()
+    if (!trimmedCandidate || seenCandidates.has(trimmedCandidate)) {
+      return
+    }
+
+    seenCandidates.add(trimmedCandidate)
+    candidates.push(trimmedCandidate)
+  }
+
+  pushCandidate(trimmedStoragePath)
+  if (isDropboxStoragePath(trimmedStoragePath)) {
+    pushCandidate(stripDropboxStoragePrefix(trimmedStoragePath))
   }
 
   const video = await prisma.video.findUnique({
@@ -166,7 +181,40 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
   })
 
   if (!video) {
-    return storagePath
+    if (isS3Mode()) {
+      for (const candidate of candidates) {
+        if (await s3FileExists(candidate)) {
+          return candidate
+        }
+      }
+    }
+
+    return candidates[0] || trimmedStoragePath
+  }
+
+  const projectStoragePath = video.project.storagePath
+    || buildProjectStorageRoot(
+      video.project.client?.name || video.project.companyName || 'Client',
+      video.project.title,
+    )
+
+  pushCandidate(
+    buildVideoOriginalStoragePath(
+      projectStoragePath,
+      video.storageFolderName || video.name,
+      video.versionLabel,
+      video.originalFileName,
+    )
+  )
+
+  if (isS3Mode()) {
+    for (const candidate of candidates) {
+      if (await s3FileExists(candidate)) {
+        return candidate
+      }
+    }
+
+    return candidates[0] || trimmedStoragePath
   }
 
   return resolveVideoOriginalPath(video) || storagePath

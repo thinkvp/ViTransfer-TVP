@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-05-18
+
+### Fixed
+- **Video reprocess in S3 mode now recovers legacy Dropbox-backed original paths** — the worker no longer assumes the stored `originalStoragePath` is always the live S3 key; for older videos that once used Dropbox-backed storage it now probes the stored key, the stripped local-relative key, and the canonical rebuilt original path before downloading, preventing `NoSuchKey` failures during preview reprocessing.
+- **Running Jobs no longer shows stale Dropbox entries when Dropbox is disabled or not configured** — Dropbox upload sections are now gated by current Dropbox configuration and `dropboxEnabled` on the underlying video or asset, so editing or reprocessing a project no longer resurrects old "Dropbox upload complete" or failed Dropbox rows unrelated to the current job.
+
 ## [1.8.0] - 2026-05-18
 
 ### Added

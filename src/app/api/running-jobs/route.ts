@@ -6,6 +6,7 @@ import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
 import { getRedis } from '@/lib/redis'
 import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { isDropboxStorageConfigured } from '@/lib/storage-provider-dropbox'
 
 export const runtime = 'nodejs'
 
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
     const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
     const permissions = getUserPermissions(authResult)
     const allowedStatuses = permissions.projectVisibility?.statuses ?? []
+    const dropboxConfigured = isDropboxStorageConfigured()
 
     const videos = await prisma.video.findMany({
       where: {
@@ -148,28 +150,31 @@ export async function GET(request: NextRequest) {
     })
 
     // Query active Dropbox uploads (separate from processing jobs)
-    const dropboxUploads = await prisma.video.findMany({
-      where: {
-        dropboxUploadStatus: { in: ['PENDING', 'UPLOADING'] },
-        project: {
-          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-          ...(isSystemAdmin
-            ? {}
-            : { assignedUsers: { some: { userId: authResult.id } } }),
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-        versionLabel: true,
-        originalFileSize: true,
-        dropboxUploadStatus: true,
-        dropboxUploadProgress: true,
-        projectId: true,
-        project: { select: { title: true } },
-      },
-      orderBy: { createdAt: 'asc' },
-    })
+    const dropboxUploads = dropboxConfigured
+      ? await prisma.video.findMany({
+          where: {
+            dropboxEnabled: true,
+            dropboxUploadStatus: { in: ['PENDING', 'UPLOADING'] },
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin
+                ? {}
+                : { assignedUsers: { some: { userId: authResult.id } } }),
+            },
+          },
+          select: {
+            id: true,
+            name: true,
+            versionLabel: true,
+            originalFileSize: true,
+            dropboxUploadStatus: true,
+            dropboxUploadProgress: true,
+            projectId: true,
+            project: { select: { title: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        })
+      : []
 
     const dropboxJobs = dropboxUploads.map((v) => ({
       id: v.id,
@@ -183,35 +188,38 @@ export async function GET(request: NextRequest) {
     }))
 
     // Query active Dropbox uploads for assets
-    const assetDropboxUploads = await prisma.videoAsset.findMany({
-      where: {
-        dropboxUploadStatus: { in: ['PENDING', 'UPLOADING'] },
-        video: {
-          project: {
-            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-            ...(isSystemAdmin
-              ? {}
-              : { assignedUsers: { some: { userId: authResult.id } } }),
+    const assetDropboxUploads = dropboxConfigured
+      ? await prisma.videoAsset.findMany({
+          where: {
+            dropboxEnabled: true,
+            dropboxUploadStatus: { in: ['PENDING', 'UPLOADING'] },
+            video: {
+              project: {
+                status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+                ...(isSystemAdmin
+                  ? {}
+                  : { assignedUsers: { some: { userId: authResult.id } } }),
+              },
+            },
           },
-        },
-      },
-      select: {
-        id: true,
-        fileName: true,
-        fileSize: true,
-        dropboxUploadStatus: true,
-        dropboxUploadProgress: true,
-        video: {
           select: {
-            name: true,
-            versionLabel: true,
-            projectId: true,
-            project: { select: { title: true } },
+            id: true,
+            fileName: true,
+            fileSize: true,
+            dropboxUploadStatus: true,
+            dropboxUploadProgress: true,
+            video: {
+              select: {
+                name: true,
+                versionLabel: true,
+                projectId: true,
+                project: { select: { title: true } },
+              },
+            },
           },
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    })
+          orderBy: { createdAt: 'asc' },
+        })
+      : []
 
     const assetDropboxJobs = assetDropboxUploads.map((a) => ({
       id: a.id,
@@ -226,33 +234,48 @@ export async function GET(request: NextRequest) {
 
     const recentDropboxCompletionCutoff = new Date(Date.now() - 30 * 60 * 1000)
 
-    const [completedDropboxVideos, completedDropboxAssets, erroredDropboxVideos, erroredDropboxAssets, completedProcessingVideos] = await Promise.all([
-      prisma.video.findMany({
-        where: {
-          dropboxUploadStatus: 'COMPLETE',
-          updatedAt: { gte: recentDropboxCompletionCutoff },
-          project: {
-            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-            ...(isSystemAdmin
-              ? {}
-              : { assignedUsers: { some: { userId: authResult.id } } }),
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          versionLabel: true,
-          projectId: true,
-          updatedAt: true,
-          project: { select: { title: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-      }),
-      prisma.videoAsset.findMany({
-        where: {
-          dropboxUploadStatus: 'COMPLETE',
-          updatedAt: { gte: recentDropboxCompletionCutoff },
-          video: {
+    let completedDropboxVideos: Array<{
+      id: string
+      name: string
+      versionLabel: string
+      projectId: string
+      updatedAt: Date
+      project: { title: string }
+    }> = []
+    let completedDropboxAssets: Array<{
+      id: string
+      fileName: string
+      updatedAt: Date
+      video: {
+        projectId: string
+        project: { title: string }
+      }
+    }> = []
+    let erroredDropboxVideos: Array<{
+      id: string
+      name: string
+      versionLabel: string
+      projectId: string
+      updatedAt: Date
+      project: { title: string }
+    }> = []
+    let erroredDropboxAssets: Array<{
+      id: string
+      fileName: string
+      updatedAt: Date
+      video: {
+        projectId: string
+        project: { title: string }
+      }
+    }> = []
+
+    if (dropboxConfigured) {
+      [completedDropboxVideos, completedDropboxAssets, erroredDropboxVideos, erroredDropboxAssets] = await Promise.all([
+        prisma.video.findMany({
+          where: {
+            dropboxEnabled: true,
+            dropboxUploadStatus: 'COMPLETE',
+            updatedAt: { gte: recentDropboxCompletionCutoff },
             project: {
               status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
               ...(isSystemAdmin
@@ -260,46 +283,47 @@ export async function GET(request: NextRequest) {
                 : { assignedUsers: { some: { userId: authResult.id } } }),
             },
           },
-        },
-        select: {
-          id: true,
-          fileName: true,
-          updatedAt: true,
-          video: {
-            select: {
-              projectId: true,
-              project: { select: { title: true } },
+          select: {
+            id: true,
+            name: true,
+            versionLabel: true,
+            projectId: true,
+            updatedAt: true,
+            project: { select: { title: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        prisma.videoAsset.findMany({
+          where: {
+            dropboxEnabled: true,
+            dropboxUploadStatus: 'COMPLETE',
+            updatedAt: { gte: recentDropboxCompletionCutoff },
+            video: {
+              project: {
+                status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+                ...(isSystemAdmin
+                  ? {}
+                  : { assignedUsers: { some: { userId: authResult.id } } }),
+              },
             },
           },
-        },
-        orderBy: { updatedAt: 'desc' },
-      }),
-      // Errored Dropbox video uploads (no time cutoff — persist until resolved)
-      prisma.video.findMany({
-        where: {
-          dropboxUploadStatus: 'ERROR',
-          project: {
-            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-            ...(isSystemAdmin
-              ? {}
-              : { assignedUsers: { some: { userId: authResult.id } } }),
+          select: {
+            id: true,
+            fileName: true,
+            updatedAt: true,
+            video: {
+              select: {
+                projectId: true,
+                project: { select: { title: true } },
+              },
+            },
           },
-        },
-        select: {
-          id: true,
-          name: true,
-          versionLabel: true,
-          projectId: true,
-          updatedAt: true,
-          project: { select: { title: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-      }),
-      // Errored Dropbox asset uploads (no time cutoff — persist until resolved)
-      prisma.videoAsset.findMany({
-        where: {
-          dropboxUploadStatus: 'ERROR',
-          video: {
+          orderBy: { updatedAt: 'desc' },
+        }),
+        prisma.video.findMany({
+          where: {
+            dropboxEnabled: true,
+            dropboxUploadStatus: 'ERROR',
             project: {
               status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
               ...(isSystemAdmin
@@ -307,44 +331,68 @@ export async function GET(request: NextRequest) {
                 : { assignedUsers: { some: { userId: authResult.id } } }),
             },
           },
-        },
-        select: {
-          id: true,
-          fileName: true,
-          updatedAt: true,
-          video: {
-            select: {
-              projectId: true,
-              project: { select: { title: true } },
+          select: {
+            id: true,
+            name: true,
+            versionLabel: true,
+            projectId: true,
+            updatedAt: true,
+            project: { select: { title: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        prisma.videoAsset.findMany({
+          where: {
+            dropboxEnabled: true,
+            dropboxUploadStatus: 'ERROR',
+            video: {
+              project: {
+                status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+                ...(isSystemAdmin
+                  ? {}
+                  : { assignedUsers: { some: { userId: authResult.id } } }),
+              },
             },
           },
-        },
-        orderBy: { updatedAt: 'desc' },
-      }),
-      prisma.video.findMany({
-        where: {
-          status: 'READY',
-          processingPhase: null,
-          processingProgress: 100,
-          updatedAt: { gte: recentDropboxCompletionCutoff },
-          project: {
-            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-            ...(isSystemAdmin
-              ? {}
-              : { assignedUsers: { some: { userId: authResult.id } } }),
+          select: {
+            id: true,
+            fileName: true,
+            updatedAt: true,
+            video: {
+              select: {
+                projectId: true,
+                project: { select: { title: true } },
+              },
+            },
           },
+          orderBy: { updatedAt: 'desc' },
+        }),
+      ])
+    }
+
+    const completedProcessingVideos = await prisma.video.findMany({
+      where: {
+        status: 'READY',
+        processingPhase: null,
+        processingProgress: 100,
+        updatedAt: { gte: recentDropboxCompletionCutoff },
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin
+            ? {}
+            : { assignedUsers: { some: { userId: authResult.id } } }),
         },
-        select: {
-          id: true,
-          name: true,
-          versionLabel: true,
-          projectId: true,
-          updatedAt: true,
-          project: { select: { title: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-      }),
-    ])
+      },
+      select: {
+        id: true,
+        name: true,
+        versionLabel: true,
+        projectId: true,
+        updatedAt: true,
+        project: { select: { title: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
 
     const completedDropboxJobs = [
       ...completedDropboxVideos.map((video) => ({
