@@ -85,6 +85,7 @@ type LocalToS3DryRunResult = {
   missingLocalFiles: number
   totalBytes: number
   sampleKeys: string[]
+  missingKeys: string[]
 }
 
 type LocalToS3StatusResult = {
@@ -112,6 +113,22 @@ type LocalToS3StatusResult = {
     multipartPartSizeMB: number
     multipartQueueSize: number
   } | null
+}
+
+type NormalizeAccountingAttachmentPathsResult = {
+  ok: true
+  dryRun: boolean
+  legacyRows: number
+  normalizedRows: number
+  invalidRows: number
+  sample: Array<{
+    id: string
+    from: string
+    to: string | null
+    originalName: string
+    error: string | null
+  }>
+  sampleTruncated: boolean
 }
 
 interface DeveloperToolsSectionProps {
@@ -193,6 +210,10 @@ export function DeveloperToolsSection({
   const [s3MigrationLoading, setS3MigrationLoading] = useState(false)
   const [s3MigrationMessage, setS3MigrationMessage] = useState<string | null>(null)
   const [s3Status, setS3Status] = useState<LocalToS3StatusResult | null>(null)
+
+  const [accountingPathRepairLoading, setAccountingPathRepairLoading] = useState(false)
+  const [accountingPathRepairResult, setAccountingPathRepairResult] = useState<NormalizeAccountingAttachmentPathsResult | null>(null)
+  const [accountingPathRepairError, setAccountingPathRepairError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -292,6 +313,19 @@ export function DeveloperToolsSection({
     }
   }
 
+  async function runAccountingPathRepair(dryRun: boolean) {
+    setAccountingPathRepairLoading(true)
+    setAccountingPathRepairError(null)
+    try {
+      const result = await apiPost('/api/settings/normalize-accounting-attachment-paths', { dryRun })
+      setAccountingPathRepairResult(result as NormalizeAccountingAttachmentPathsResult)
+    } catch (error: any) {
+      setAccountingPathRepairError(error?.message || 'Failed to normalize accounting attachment paths')
+    } finally {
+      setAccountingPathRepairLoading(false)
+    }
+  }
+
   async function runBullmqPurge(dryRun: boolean) {
     setBullmqPurgeLoading(true)
     setBullmqPurgeError(null)
@@ -347,6 +381,13 @@ export function DeveloperToolsSection({
     const summary = entry.summary ? ` | ${entry.summary}` : ''
     const lastError = entry.lastError ? ` | lastError=${entry.lastError}` : ''
     return `${createdAt} | ${entry.type} | project=${projectLabel} | pending=${pendingTargets} | attempts=c${entry.attempts.clients}/a${entry.attempts.admins}${summary}${lastError}`
+  }
+
+  function formatAccountingPathRepairSample(entry: NormalizeAccountingAttachmentPathsResult['sample'][number]) {
+    if (entry.error) {
+      return `[INVALID] ${entry.id} | ${entry.from} | error=${entry.error} | name=${entry.originalName}`
+    }
+    return `[NORMALIZE] ${entry.id} | ${entry.from} -> ${entry.to} | name=${entry.originalName}`
   }
 
   return (
@@ -528,10 +569,20 @@ export function DeveloperToolsSection({
                 {s3DryRunResult.sampleKeys?.length ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                      Show sample object keys
+                      Show sample files to copy (first {s3DryRunResult.sampleKeys.length})
                     </summary>
                     <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
                       {s3DryRunResult.sampleKeys.join('\n')}
+                    </pre>
+                  </details>
+                ) : null}
+                {s3DryRunResult.missingKeys?.length ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs text-destructive hover:text-destructive/80">
+                      Show missing local files ({s3DryRunResult.missingKeys.length}) — DB-referenced paths not found on disk
+                    </summary>
+                    <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive">
+                      {s3DryRunResult.missingKeys.join('\n')}
                     </pre>
                   </details>
                 ) : null}
@@ -569,6 +620,72 @@ export function DeveloperToolsSection({
                 ) : null}
               </div>
             ) : null}
+          </div>
+
+          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <Label>Normalize accounting attachment paths</Label>
+                <p className="text-xs text-muted-foreground">
+                  Repairs legacy AccountingAttachment rows stored as <strong>accounting/FY...</strong> so they use the canonical bare <strong>FY...</strong> format.
+                  This only rewrites database paths; files stay where they are on local storage and in S3.
+                  Run a dry run first to preview affected rows.
+                </p>
+
+                {accountingPathRepairError ? (
+                  <p className="text-xs text-destructive">{accountingPathRepairError}</p>
+                ) : null}
+
+                {accountingPathRepairResult ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Legacy prefixed rows found: {accountingPathRepairResult.legacyRows}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {accountingPathRepairResult.dryRun ? 'Rows that would be normalized' : 'Rows normalized'}: {accountingPathRepairResult.normalizedRows}
+                      {accountingPathRepairResult.normalizedRows === 0 ? ' — none found ✓' : ''}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Invalid rows skipped: {accountingPathRepairResult.invalidRows}
+                    </p>
+
+                    {accountingPathRepairResult.sample.length ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show sample rows{accountingPathRepairResult.sampleTruncated ? ' (first 50)' : ''}
+                        </summary>
+                        <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                          {accountingPathRepairResult.sample.map((entry) => formatAccountingPathRepairSample(entry)).join('\n')}
+                        </pre>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={accountingPathRepairLoading}
+                  onClick={() => void runAccountingPathRepair(true)}
+                >
+                  {accountingPathRepairLoading ? 'Running…' : 'Dry run'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={accountingPathRepairLoading}
+                  onClick={() => {
+                    if (!confirm('Rewrite legacy accounting attachment storagePath values from accounting/FY... to FY...? Files are not moved; only DB rows are updated.')) return
+                    void runAccountingPathRepair(false)
+                  }}
+                >
+                  {accountingPathRepairLoading ? 'Running…' : 'Normalize rows'}
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">

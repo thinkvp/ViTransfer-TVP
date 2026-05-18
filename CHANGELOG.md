@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-05-18
+
+### Added
+- **Accounting attachment path normalization tool** — Admin Settings > Developer Tools now includes a dry-run + repair action backed by `POST /api/settings/normalize-accounting-attachment-paths`, allowing legacy `AccountingAttachment.storagePath` rows stored as `accounting/FY...` to be previewed and normalized back to the canonical `FY...` format without moving files.
+- **Local-to-S3 dry run now shows missing DB-referenced files** — `dryRunLocalToS3Migration()` now returns `missingKeys` in addition to counts, and the Developer Tools UI renders a dedicated sample list for storage paths referenced in the database but missing on local disk.
+
+### Changed
+- **Accounting path handling is now canonical across repair, backup, and migration flows** — `normalizeAccountingStoragePath()` centralizes legacy-path cleanup, strips any `accounting/` prefix safely, and is now used by `resolveAccountingFilePath()`, S3 local backup key generation, and local-to-S3 migration so old rows continue to resolve consistently while new rows remain in bare relative-path form.
+
+### Fixed
+- **Legacy accounting attachment rows no longer disappear from migration/backup scans** — local-to-S3 migration and S3-to-local backup now resolve `accounting/...`-prefixed database paths through the shared accounting path normalizer, so valid files are included instead of being treated as missing due to duplicated prefix handling.
+- **Timeline sprite integrity scan recognizes both historical filename patterns** — missing-file checks now treat both `sprite-###.jpg` and `timeline-#.jpg` as valid sprite files in S3 and local storage, preventing false positives when older and newer sprite naming schemes coexist.
+
 ## [1.7.9] - 2026-05-18
 
 ### Added

@@ -189,6 +189,10 @@ function normalizeStoredReferencePath(storagePath: string | null | undefined): s
     : trimmed
 }
 
+function isTimelineSpriteFileName(fileName: string): boolean {
+  return /^(?:sprite-\d{3}|timeline-\d+)\.jpg$/i.test(fileName)
+}
+
 function addResolvedFilePath(target: Set<string>, storagePath: string | null | undefined) {
   const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
   if (!normalizedStoragePath) return
@@ -687,11 +691,13 @@ async function checkMissingFiles(
     }
     const spritePrefixesOnStorage = new Set<string>()
     for (const key of s3KeySet) {
-      const match = key.match(/^(.*)\/timeline-\d+\.jpg$/i)
+      const fileName = path.posix.basename(key)
+      if (!isTimelineSpriteFileName(fileName)) continue
+      const match = key.match(/^(.*)\/[^/]+$/)
       if (match?.[1]) spritePrefixesOnStorage.add(match[1])
     }
     for (const prefix of timelineSpritePrefixes) {
-      if (!spritePrefixesOnStorage.has(prefix)) missing.push(`${prefix}/timeline-*.jpg`)
+      if (!spritePrefixesOnStorage.has(prefix)) missing.push(`${prefix}/sprite-*.jpg`)
     }
   } else {
     // Local mode — fs.access per path
@@ -708,8 +714,8 @@ async function checkMissingFiles(
     for (const prefix of timelineSpritePrefixes) {
       const absDir = path.join(STORAGE_ROOT, prefix)
       const names = await fs.promises.readdir(absDir).catch(() => [] as string[])
-      const hasSprites = names.some((name) => /^timeline-\d+\.jpg$/i.test(name))
-      if (!hasSprites) missing.push(`${prefix}/timeline-*.jpg`)
+      const hasSprites = names.some(isTimelineSpriteFileName)
+      if (!hasSprites) missing.push(`${prefix}/sprite-*.jpg`)
     }
   }
 

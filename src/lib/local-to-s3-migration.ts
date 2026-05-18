@@ -5,7 +5,7 @@ import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { getFilePath } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/storage-provider-dropbox'
-import { ACCOUNTING_STORAGE_ROOT, ACCOUNTING_S3_PREFIX } from '@/lib/accounting/file-storage'
+import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 
@@ -37,6 +37,7 @@ export type S3MigrationDryRunResult = {
   missingLocalFiles: number
   totalBytes: number
   sampleKeys: string[]
+  missingKeys: string[]
 }
 
 export type S3MigrationRunStatus = 'PREPARING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
@@ -351,45 +352,50 @@ async function collectReferencedPaths(): Promise<Set<string>> {
  * Build local entries for accounting attachments.
  * These live under ACCOUNTING_STORAGE_ROOT and are uploaded to S3 under the 'accounting/' prefix.
  */
-async function buildAccountingLocalEntries(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number }> {
+async function buildAccountingLocalEntries(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number; missingKeys: string[] }> {
   const attachments = await prisma.accountingAttachment.findMany({ select: { storagePath: true } })
   const entries: LocalEntry[] = []
   let missingLocalFiles = 0
+  const missingKeys: string[] = []
 
   for (const attachment of attachments) {
     const relPath = attachment.storagePath?.trim()
     if (!relPath) continue
 
-    // Prevent path traversal
     const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
-    if (normalized.startsWith('..') || normalized.includes('/../')) {
+    let absPath: string
+    let key: string
+    try {
+      absPath = resolveAccountingFilePath(relPath)
+      key = toAccountingS3Key(normalized)
+    } catch {
       missingLocalFiles++
+      missingKeys.push(toAccountingS3Key(normalized))
       continue
     }
 
-    const absPath = path.join(ACCOUNTING_STORAGE_ROOT, normalized)
     let stats: fs.Stats
     try {
       stats = await fs.promises.stat(absPath)
     } catch {
       missingLocalFiles++
+      missingKeys.push(key)
       continue
     }
 
     if (!stats.isFile()) {
       missingLocalFiles++
+      missingKeys.push(key)
       continue
     }
 
-    // S3 key for accounting files uses the 'accounting/' prefix
-    const key = `${ACCOUNTING_S3_PREFIX}/${normalized}`
     entries.push({ key, absPath, size: stats.size })
   }
 
-  return { entries, discoveredPaths: attachments.length, missingLocalFiles }
+  return { entries, discoveredPaths: attachments.length, missingLocalFiles, missingKeys }
 }
 
-async function buildLocalManifest(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number }> {
+async function buildLocalManifest(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number; missingKeys: string[] }> {
   const referencedKeys = await collectReferencedPaths()
   const [mainEntries, accountingResult] = await Promise.all([
     buildMainLocalEntries(referencedKeys),
@@ -403,12 +409,14 @@ async function buildLocalManifest(): Promise<{ entries: LocalEntry[]; discovered
     entries,
     discoveredPaths: referencedKeys.size + accountingResult.discoveredPaths,
     missingLocalFiles: mainEntries.missingLocalFiles + accountingResult.missingLocalFiles,
+    missingKeys: [...mainEntries.missingKeys, ...accountingResult.missingKeys],
   }
 }
 
-async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ entries: LocalEntry[]; missingLocalFiles: number }> {
+async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ entries: LocalEntry[]; missingLocalFiles: number; missingKeys: string[] }> {
   const entries: LocalEntry[] = []
   let missingLocalFiles = 0
+  const missingKeys: string[] = []
 
   for (const key of referencedKeys) {
     let absPath: string
@@ -416,6 +424,7 @@ async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ ent
       absPath = getFilePath(key)
     } catch {
       missingLocalFiles++
+      missingKeys.push(key)
       continue
     }
 
@@ -424,6 +433,7 @@ async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ ent
       stats = await fs.promises.stat(absPath)
     } catch {
       missingLocalFiles++
+      missingKeys.push(key)
       continue
     }
 
@@ -448,19 +458,21 @@ async function buildMainLocalEntries(referencedKeys: Set<string>): Promise<{ ent
       } catch {
         // If readdir fails, count as missing rather than crashing the whole run.
         missingLocalFiles++
+        missingKeys.push(key)
       }
       continue
     }
 
     if (!stats.isFile()) {
       missingLocalFiles++
+      missingKeys.push(key)
       continue
     }
 
     entries.push({ key, absPath, size: stats.size })
   }
 
-  return { entries, missingLocalFiles }
+  return { entries, missingLocalFiles, missingKeys }
 }
 
 async function objectMatchesSize(client: S3Client, bucket: string, key: string, size: number): Promise<boolean> {
@@ -534,7 +546,7 @@ export async function validateS3MigrationConfig(input: Partial<S3MigrationConfig
 }
 
 export async function dryRunLocalToS3Migration(): Promise<S3MigrationDryRunResult> {
-  const { entries, discoveredPaths, missingLocalFiles } = await buildLocalManifest()
+  const { entries, discoveredPaths, missingLocalFiles, missingKeys } = await buildLocalManifest()
   const totalBytes = entries.reduce((total, entry) => total + entry.size, 0)
 
   return {
@@ -544,6 +556,7 @@ export async function dryRunLocalToS3Migration(): Promise<S3MigrationDryRunResul
     missingLocalFiles,
     totalBytes,
     sampleKeys: entries.slice(0, 20).map((entry) => entry.key),
+    missingKeys,
   }
 }
 

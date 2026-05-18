@@ -172,6 +172,24 @@ export interface AccountingStoragePath {
   absolutePath: string
 }
 
+export type AccountingAttachmentPathNormalizationSample = {
+  id: string
+  from: string
+  to: string | null
+  originalName: string
+  error: string | null
+}
+
+export type NormalizeAccountingAttachmentStoragePathsResult = {
+  ok: true
+  dryRun: boolean
+  legacyRows: number
+  normalizedRows: number
+  invalidRows: number
+  sample: AccountingAttachmentPathNormalizationSample[]
+  sampleTruncated: boolean
+}
+
 /**
  * Build the storage path for an accounting file.
  *
@@ -208,20 +226,33 @@ export async function buildAccountingFilePath(
   return { relativePath, absolutePath }
 }
 
-/**
- * Resolve a stored relative path back to an absolute path.
- * Returns null if the file doesn't exist.
- */
-export function resolveAccountingFilePath(relativePath: string): string {
+export function normalizeAccountingStoragePath(relativePath: string): string {
   if (!relativePath) throw new Error('Empty accounting file path')
 
-  // Reject traversal
   if (relativePath.includes('\0')) throw new Error('Invalid path')
-  const normalised = path.posix.normalize(relativePath)
-  if (normalised.startsWith('..') || normalised.includes('/../') || normalised.startsWith('/')) {
+
+  const stripped = relativePath
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+
+  const withoutPrefix = stripped.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
+    ? stripped.slice(ACCOUNTING_S3_PREFIX.length + 1)
+    : stripped
+
+  const normalised = path.posix.normalize(withoutPrefix)
+  if (!normalised || normalised === '.' || normalised.startsWith('..') || normalised.includes('/../') || normalised.startsWith('/')) {
     throw new Error('Invalid accounting file path')
   }
 
+  return normalised
+}
+
+/**
+ * Resolve a stored relative path back to an absolute path.
+ * Accepts both canonical `FY...` DB paths and legacy `accounting/FY...` values.
+ */
+export function resolveAccountingFilePath(relativePath: string): string {
+  const normalised = normalizeAccountingStoragePath(relativePath)
   const fullPath = path.join(ACCOUNTING_STORAGE_ROOT, normalised)
   validateAccountingPath(fullPath)
   return fullPath
@@ -505,6 +536,82 @@ export async function adjustAccountingFilesBytes(deltaBytes: number): Promise<vo
     }
   } catch {
     // Ignore — the daily reconcile will correct the value next run
+  }
+}
+
+export async function normalizeAccountingAttachmentStoragePaths(
+  dryRun: boolean,
+): Promise<NormalizeAccountingAttachmentStoragePathsResult> {
+  const rows = await prisma.accountingAttachment.findMany({
+    where: {
+      OR: [
+        { storagePath: { startsWith: `${ACCOUNTING_S3_PREFIX}/` } },
+        { storagePath: { startsWith: `${ACCOUNTING_S3_PREFIX}\\` } },
+      ],
+    },
+    select: {
+      id: true,
+      storagePath: true,
+      originalName: true,
+      uploadedAt: true,
+    },
+    orderBy: { uploadedAt: 'desc' },
+  })
+
+  const sampleLimit = 50
+  const sample: AccountingAttachmentPathNormalizationSample[] = []
+  const updates: Array<{ id: string; storagePath: string }> = []
+  let invalidRows = 0
+
+  for (const row of rows) {
+    try {
+      const normalized = normalizeAccountingStoragePath(row.storagePath)
+      updates.push({ id: row.id, storagePath: normalized })
+
+      if (sample.length < sampleLimit) {
+        sample.push({
+          id: row.id,
+          from: row.storagePath,
+          to: normalized,
+          originalName: row.originalName,
+          error: null,
+        })
+      }
+    } catch (error: any) {
+      invalidRows++
+      if (sample.length < sampleLimit) {
+        sample.push({
+          id: row.id,
+          from: row.storagePath,
+          to: null,
+          originalName: row.originalName,
+          error: error?.message || 'Invalid accounting file path',
+        })
+      }
+    }
+  }
+
+  if (!dryRun && updates.length > 0) {
+    const batchSize = 100
+    for (let index = 0; index < updates.length; index += batchSize) {
+      const batch = updates.slice(index, index + batchSize)
+      await prisma.$transaction(
+        batch.map((row) => prisma.accountingAttachment.update({
+          where: { id: row.id },
+          data: { storagePath: row.storagePath },
+        })),
+      )
+    }
+  }
+
+  return {
+    ok: true,
+    dryRun,
+    legacyRows: rows.length,
+    normalizedRows: updates.length,
+    invalidRows,
+    sample,
+    sampleTruncated: rows.length > sample.length,
   }
 }
 

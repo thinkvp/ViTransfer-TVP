@@ -30,7 +30,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
-import { ACCOUNTING_STORAGE_ROOT, ACCOUNTING_S3_PREFIX } from '@/lib/accounting/file-storage'
+import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildAlbumZipStoragePath, buildAlbumPhotoPreviewStoragePath } from '@/lib/project-storage-paths'
 
@@ -185,9 +185,8 @@ async function collectAccountingKeys(): Promise<FileEntry[]> {
   for (const row of rows) {
     const rel = normalizeKey(row.storagePath)
     if (!rel) continue
-    // In S3, accounting paths are prefixed with `accounting/`
-    const s3Key = rel.startsWith(`${ACCOUNTING_S3_PREFIX}/`) ? rel : `${ACCOUNTING_S3_PREFIX}/${rel}`
-    const localPath = path.join(ACCOUNTING_STORAGE_ROOT, rel.startsWith(`${ACCOUNTING_S3_PREFIX}/`) ? rel.slice(ACCOUNTING_S3_PREFIX.length + 1) : rel)
+    const s3Key = toAccountingS3Key(rel)
+    const localPath = resolveAccountingFilePath(rel)
     entries.push({ key: s3Key, localPath })
   }
 
