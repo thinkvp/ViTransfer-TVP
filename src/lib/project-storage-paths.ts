@@ -35,9 +35,9 @@ export function sanitizeStorageName(name: string): string {
 function sanitizeAlbumZipName(albumName: string): string {
   const sanitized = albumName
     .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^[_\.-]+|[_\.-]+$/g, '')
+    .replace(/[^a-zA-Z0-9. _-]+/g, ' ')
+    .replace(/ +/g, ' ')
+    .replace(/^[ \.\-]+|[ \.\-]+$/g, '')
 
   return sanitized || 'Album'
 }
@@ -45,8 +45,8 @@ function sanitizeAlbumZipName(albumName: string): string {
 function getAlbumZipFileNameLocal(params: { albumName: string; variant: AlbumZipVariant }): string {
   const { albumName, variant } = params
   const baseName = sanitizeAlbumZipName(albumName)
-  const suffix = variant === 'social' ? 'Social_Sized' : 'Full_Res'
-  return `${baseName}_${suffix}.zip`
+  const suffix = variant === 'social' ? 'Social Sized' : 'Full Res'
+  return `${baseName} ${suffix}.zip`
 }
 
 export function allocateUniqueStorageName(baseName: string, existingNames: Iterable<string>): string {

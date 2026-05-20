@@ -345,8 +345,28 @@ async function buildAlbumThumbnailJobs() {
     processedBytes: job.processedBytes.toString(),
   }))
 
-  const completed = [
+  const latestCompletedByAlbum = new Map<string, {
+    id: string
+    type: 'albumThumbnail'
+    label: string
+    sublabel: string
+    projectId: string
+    completedAt: number
+    error?: true
+  }>()
+
+  const completedEntries: Array<{
+    albumId: string
+    id: string
+    type: 'albumThumbnail'
+    label: string
+    sublabel: string
+    projectId: string
+    completedAt: number
+    error?: true
+  }> = [
     ...completedJobs.map((job) => ({
+      albumId: job.albumId,
       id: job.id,
       type: 'albumThumbnail' as const,
       label: job.albumName,
@@ -355,15 +375,33 @@ async function buildAlbumThumbnailJobs() {
       completedAt: (job.completedAt ?? job.updatedAt).getTime(),
     })),
     ...failedJobs.map((job) => ({
+      albumId: job.albumId,
       id: job.id,
       type: 'albumThumbnail' as const,
       label: job.albumName,
       sublabel: `${job.projectName} · Album thumbnails failed`,
       projectId: job.projectId,
       completedAt: (job.completedAt ?? job.updatedAt).getTime(),
-      error: true,
+      error: true as const,
     })),
   ]
+
+  for (const entry of completedEntries) {
+    const existing = latestCompletedByAlbum.get(entry.albumId)
+    if (!existing || entry.completedAt > existing.completedAt) {
+      latestCompletedByAlbum.set(entry.albumId, {
+        id: entry.id,
+        type: entry.type,
+        label: entry.label,
+        sublabel: entry.sublabel,
+        projectId: entry.projectId,
+        completedAt: entry.completedAt,
+        error: entry.error,
+      })
+    }
+  }
+
+  const completed = [...latestCompletedByAlbum.values()]
 
   return { active, completed }
 }

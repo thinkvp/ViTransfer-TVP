@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom'
 type Comment = any
 type Video = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { CheckCircle2, ChevronDown, ChevronRight, Info, Share2, X } from 'lucide-react'
+import { CheckCircle2, Info, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import ThemeToggle from './ThemeToggle'
@@ -67,6 +67,8 @@ interface CommentSectionProps {
   showVideoNotes?: boolean
   showApproveButton?: boolean
   largeAvatars?: boolean
+  cardClassName?: string
+  hideVideoTitle?: boolean
 }
 
 type CommentManagement = ReturnType<typeof useCommentManagement>
@@ -188,6 +190,8 @@ export function CommentSectionView({
   showVideoNotes = true,
   showApproveButton = true,
   largeAvatars = false,
+  cardClassName,
+  hideVideoTitle = false,
   management,
 }: CommentSectionProps & { management: CommentManagement }) {
   const [isVideoFullscreen, setIsVideoFullscreen] = useState(false)
@@ -287,6 +291,29 @@ export function CommentSectionView({
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
   const showFrames = useFullTimecode
   const [showVideoInfo, setShowVideoInfo] = useState(false)
+
+  // Open video info dialog via custom event (triggered from page-level header)
+  useEffect(() => {
+    const handler = () => setShowVideoInfo(true)
+    window.addEventListener('openVideoInfoDialog', handler)
+    return () => window.removeEventListener('openVideoInfoDialog', handler)
+  }, [])
+
+  // Open guest link dialog via custom event (triggered from page-level header)
+  useEffect(() => {
+    const handler = () => {
+      setGuestLinkDialogOpen(true)
+      setGuestLinkUrl(null)
+      setGuestLinkExpiresAt(null)
+      setGuestLinkError(null)
+      setGuestLinkCheckedExisting(false)
+      setGuestLinkMissing(false)
+      setGuestLinkCopied(false)
+      setProjectGuestLinkCopied(false)
+    }
+    window.addEventListener('openGuestLinkDialog', handler)
+    return () => window.removeEventListener('openGuestLinkDialog', handler)
+  }, [])
   const [speedTestResult, setSpeedTestResult] = useState<VideoSpeedTestResult | null>(null)
   const [speedTestLoading, setSpeedTestLoading] = useState(false)
   const [speedTestError, setSpeedTestError] = useState<string | null>(null)
@@ -311,7 +338,6 @@ export function CommentSectionView({
   const [openDownloadAfterApprove, setOpenDownloadAfterApprove] = useState(false)
   // Optimistic local flag: remember which video was just approved until server data propagates.
   const [localApprovedVideoId, setLocalApprovedVideoId] = useState<string | null>(null)
-  const [videoNotesOpen, setVideoNotesOpen] = useState(true)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
 
@@ -839,11 +865,6 @@ export function CommentSectionView({
     }
   }
 
-  // Reset notes accordion when switching versions
-  useEffect(() => {
-    setVideoNotesOpen(true)
-  }, [selectedVideoId])
-
   const scrollToInput = () => {
     const el = document.getElementById('feedback-input')
     if (!el) return
@@ -1176,8 +1197,8 @@ export function CommentSectionView({
 
       // After approve, immediately update local state so the banner and download modal
       // appear without waiting for the async prop-refresh chain.
+      setLocalApprovedVideoId(video.id)
       if (!isAdminView) {
-        setLocalApprovedVideoId(video.id)
         setShowDownloadOptions(true)
       }
 
@@ -1261,10 +1282,11 @@ export function CommentSectionView({
   return (
     <>
       {fullscreenChatOverlay}
-      <Card className="bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden" data-comment-section>
+      <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden", cardClassName)} data-comment-section>
         <CardHeader className="border-b border-border flex-shrink-0 space-y-1">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 w-full">
+        <div className="flex items-start gap-4">
+          {!hideVideoTitle && (
+          <div className="min-w-0 flex-1">
             <CardTitle className="text-lg font-semibold text-foreground whitespace-normal break-words leading-snug">
               {headerVideoName}
             </CardTitle>
@@ -1295,57 +1317,12 @@ export function CommentSectionView({
                 </div>
               )}
 
-              {showVideoActions || guestModeEnabled ? (
-                <div className="ml-auto flex items-center gap-2">
+            </div>
+          </div>
+          )}
+          {showVideoActions || guestModeEnabled ? (
+            <div className={cn("flex items-center gap-2 flex-shrink-0", hideVideoTitle && "ml-auto")}>
                   {guestModeEnabled ? (
-                    <>
-                      {/* Mobile: icon-only */}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 sm:hidden"
-                        onClick={() => {
-                          setGuestLinkDialogOpen(true)
-                          setGuestLinkUrl(null)
-                          setGuestLinkExpiresAt(null)
-                          setGuestLinkError(null)
-                          setGuestLinkCheckedExisting(false)
-                          setGuestLinkMissing(false)
-                          setGuestLinkCopied(false)
-                          setProjectGuestLinkCopied(false)
-                        }}
-                        disabled={!selectedVideoId}
-                        aria-label="Share"
-                        title="Share"
-                      >
-                        <Share2 className="w-4 h-4" />
-                      </Button>
-
-                      {/* Desktop: icon + text */}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="hidden sm:inline-flex h-8"
-                        onClick={() => {
-                          setGuestLinkDialogOpen(true)
-                          setGuestLinkUrl(null)
-                          setGuestLinkExpiresAt(null)
-                          setGuestLinkError(null)
-                          setGuestLinkCheckedExisting(false)
-                          setGuestLinkMissing(false)
-                          setGuestLinkCopied(false)
-                          setProjectGuestLinkCopied(false)
-                        }}
-                        disabled={!selectedVideoId}
-                        aria-label="Share"
-                        title="Share"
-                      >
-                        <Share2 className="w-4 h-4 mr-2" />
-                        Share
-                      </Button>
-
                       <Dialog open={guestLinkDialogOpen} onOpenChange={setGuestLinkDialogOpen}>
                         <DialogContent className="max-h-[85dvh] overflow-y-auto">
                           <DialogHeader>
@@ -1436,24 +1413,12 @@ export function CommentSectionView({
                           </div>
                         </DialogContent>
                       </Dialog>
-                    </>
                   ) : null}
 
                   {showVideoActions ? (
-                    <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setShowVideoInfo(true)}
-                        title="Info"
-                        aria-label="Info"
-                      >
-                        <Info className="w-4 h-4" />
-                      </Button>
-
-                      <DialogContent className="max-w-[95vw] sm:max-w-md">
+                    <>
+                      <Dialog open={showVideoInfo} onOpenChange={setShowVideoInfo}>
+                        <DialogContent className="max-w-[95vw] sm:max-w-md">
                         <DialogHeader>
                           <DialogTitle>Video Information</DialogTitle>
                           <DialogDescription className="text-muted-foreground">
@@ -1555,53 +1520,13 @@ export function CommentSectionView({
                         ) : null}
                       </DialogContent>
                     </Dialog>
+                    </>
                   ) : null}
-                </div>
-              ) : null}
             </div>
-          </div>
+          ) : null}
         </div>
 
-        {showOlderVersionNote ? (
-          <div className="mt-2 mb-2">
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
-              <span>Note: Newer version available.</span>
-              <button
-                type="button"
-                className="underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 rounded-sm"
-                onClick={() => {
-                  if (!latestSelectableVideo) return
-                  handleSelectVideoVersion(latestSelectableVideo.id)
-                }}
-              >
-                Click here to view.
-              </button>
-            </div>
-          </div>
-        ) : null}
 
-        {showVideoNotes && headerVideo?.videoNotes ? (
-          <div className="border border-border rounded-lg bg-muted/20 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setVideoNotesOpen((v) => !v)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-              aria-expanded={videoNotesOpen}
-            >
-              <span className="font-medium text-foreground">Version Notes</span>
-              {videoNotesOpen ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-            </button>
-            {videoNotesOpen ? (
-              <div className="px-3 pb-3 text-sm text-foreground whitespace-pre-wrap break-words">
-                {headerVideo.videoNotes}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
 
         {null}
         </CardHeader>
@@ -1743,10 +1668,11 @@ export function CommentSectionView({
             </div>
           </div>
 
-          {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              If no changes are needed, click Approve Video to download this version.
-            </p>
+          {showVideoNotes && headerVideo?.videoNotes ? (
+            <div className="mt-2 space-y-0.5">
+              <p className="text-xs font-medium text-muted-foreground">Version Notes</p>
+              <p className="text-sm text-foreground whitespace-pre-wrap break-words">{(headerVideo as any).videoNotes}</p>
+            </div>
           ) : null}
 
           <Dialog open={showApproveConfirm} onOpenChange={(open) => { if (!approving) setShowApproveConfirm(open) }}>
@@ -1785,7 +1711,11 @@ export function CommentSectionView({
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
               <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />
-              <p className="text-muted-foreground">No messages yet. Start the conversation!</p>
+              <p className="text-muted-foreground">
+                {commentsDisabled
+                  ? 'This video has been approved. Comments are now closed.'
+                  : 'No messages yet. Start the conversation!'}
+              </p>
             </div>
           ) : (
             <>

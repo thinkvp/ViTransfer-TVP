@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import Image from 'next/image'
 // Avoid importing Prisma runtime types in client components.
 type Video = any
@@ -334,6 +334,10 @@ export default function VideoPlayer({
   const currentTimeRef = useRef(0)
   const selectedVideoIdRef = useRef<string | null>(null)
   const hasTrustedAspectRatioRef = useRef(false)
+  const holdBoostPointerIdRef = useRef<number | null>(null)
+  const holdBoostStartMsRef = useRef(0)
+  const isHoldBoostingRef = useRef(false)
+  const suppressNextToggleRef = useRef(false)
 
   // If ANY video is approved, only show approved videos (for both admin and client)
   const hasAnyApprovedVideo = videos.some((v: any) => v.approved === true)
@@ -1323,6 +1327,11 @@ export default function VideoPlayer({
   }
 
   const togglePlayPause = async () => {
+    if (suppressNextToggleRef.current) {
+      suppressNextToggleRef.current = false
+      return
+    }
+
     const video = videoRef.current
     if (!video) return
     try {
@@ -1336,6 +1345,64 @@ export default function VideoPlayer({
       // ignore
     }
   }
+
+  const stopHoldSpeedBoost = useCallback((pointerId?: number) => {
+    if (typeof pointerId === 'number' && holdBoostPointerIdRef.current !== pointerId) return
+
+    const wasBoosting = isHoldBoostingRef.current
+    holdBoostPointerIdRef.current = null
+    isHoldBoostingRef.current = false
+
+    if (!wasBoosting) return
+
+    setPlaybackSpeed(1.0)
+
+    // Prevent the release click from toggling play/pause after a deliberate hold gesture.
+    if (Date.now() - holdBoostStartMsRef.current > 180) {
+      suppressNextToggleRef.current = true
+    }
+  }, [])
+
+  const handleVideoPointerDown = useCallback((e: React.PointerEvent<HTMLVideoElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+
+    const video = videoRef.current
+    if (!video || video.paused) return
+
+    holdBoostPointerIdRef.current = e.pointerId
+    holdBoostStartMsRef.current = Date.now()
+    isHoldBoostingRef.current = true
+    setPlaybackSpeed(2.0)
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // ignore pointer capture failures
+    }
+  }, [])
+
+  const handleVideoPointerUp = useCallback((e: React.PointerEvent<HTMLVideoElement>) => {
+    stopHoldSpeedBoost(e.pointerId)
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      // ignore pointer capture release failures
+    }
+  }, [stopHoldSpeedBoost])
+
+  const handleVideoPointerCancel = useCallback((e: React.PointerEvent<HTMLVideoElement>) => {
+    stopHoldSpeedBoost(e.pointerId)
+  }, [stopHoldSpeedBoost])
+
+  const handleVideoLostPointerCapture = useCallback((e: React.PointerEvent<HTMLVideoElement>) => {
+    stopHoldSpeedBoost(e.pointerId)
+  }, [stopHoldSpeedBoost])
+
+  useEffect(() => {
+    if (!isPlaying && isHoldBoostingRef.current) {
+      stopHoldSpeedBoost()
+    }
+  }, [isPlaying, stopHoldSpeedBoost])
 
   useEffect(() => {
     if (volume > 0) {
@@ -1562,6 +1629,10 @@ export default function VideoPlayer({
                 crossOrigin="anonymous"
                 playsInline
                 preload={!isAdmin || hideDownloadButton ? 'auto' : 'metadata'}
+                onPointerDown={handleVideoPointerDown}
+                onPointerUp={handleVideoPointerUp}
+                onPointerCancel={handleVideoPointerCancel}
+                onLostPointerCapture={handleVideoLostPointerCapture}
                 onClick={togglePlayPause}
                 style={{
                   objectFit: 'contain',
@@ -1603,11 +1674,11 @@ export default function VideoPlayer({
           style={!isInFullscreen && controlsBottomPadding ? { paddingBottom: controlsBottomPadding } : undefined}
         >
           <div
-            className="flex flex-col gap-2 pt-4 lg:pt-0 lg:flex-row lg:items-center lg:gap-3"
+            className="flex flex-col gap-2 pt-4 lg:pt-0"
             onPointerDownCapture={handleControlsPointerDownCapture}
           >
-            {/* Desktop/tablet: left controls — Play, Volume, Speed, Time */}
-            <div className="hidden lg:flex items-center gap-3">
+            {/* Desktop/tablet: left controls — hidden; controls are now rendered below the timeline */}
+            <div className="hidden">
               <Button
                 type="button"
                 variant="outline"
@@ -1705,8 +1776,8 @@ export default function VideoPlayer({
               </div>
             </div>
 
-            {/* Timeline (mobile row 1) */}
-            <div className="flex-1 relative">
+            {/* Timeline */}
+            <div className="relative">
               <div
                 ref={scrubBarRef}
                 className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible touch-none select-none"
@@ -1780,10 +1851,7 @@ export default function VideoPlayer({
                       const avatarName = (m.authorName || '').trim() || (m.isInternal ? 'Admin' : 'Client')
 
                       const position = (() => {
-                        // On mobile, clamp markers at the edges so the circle never renders off-screen.
-                        if (!isMobileViewport) {
-                          return { left: `${leftPct}%`, transform: 'translate(-50%, -50%)' }
-                        }
+                        // Clamp markers at timeline edges so avatar circles are not cut off.
                         if (leftPct <= 2) {
                           return { left: '0%', transform: 'translate(0%, -50%)' }
                         }
@@ -1933,96 +2001,198 @@ export default function VideoPlayer({
               )}
             </div>
 
-            {/* Desktop/tablet: right controls — Quality, Comments (fullscreen), Fullscreen, Download */}
-            <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
-              {/* Quality selector */}
-              {showQualitySelector && (
-                <div ref={desktopQualityControlsRef} className="relative flex-shrink-0">
+            {/* Desktop: controls row below timeline — left / centre / right */}
+            <div className="hidden lg:grid lg:grid-cols-[1fr_auto_1fr] items-center gap-[6px]">
+              {/* Left: Play, Volume, Speed */}
+              <div className="flex items-center gap-[6px]">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={togglePlayPause}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                >
+                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                </Button>
+
+                <div
+                  className="relative flex-shrink-0"
+                  data-volume-control="true"
+                  onMouseEnter={openVolumeSlider}
+                  onMouseLeave={scheduleCloseVolumeSlider}
+                >
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={hasOriginalOnly ? undefined : () => setShowQualityMenu((v) => !v)}
-                    aria-label="Select quality"
-                    className="text-xs px-2"
+                    onClick={toggleMute}
+                    aria-label={isMuted ? 'Unmute' : 'Mute'}
+                    className="relative overflow-hidden w-14 px-0"
                   >
-                    {qualityLabel}
+                    {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-0 left-0 bg-primary/30"
+                        style={{ width: `${Math.round(volume * 100)}%` }}
+                      />
+                    )}
+                    <span className="relative z-10">
+                      {isMuted ? <VolumeX className="w-4 h-4 text-destructive" /> : <Volume2 className="w-4 h-4" />}
+                    </span>
                   </Button>
 
-                  {showQualityMenu && !hasOriginalOnly && (
+                  {showVolumeSlider && (
                     <div
-                      className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 rounded-lg border border-border bg-card p-2 shadow-elevation-sm"
+                      onMouseEnter={openVolumeSlider}
+                      onMouseLeave={scheduleCloseVolumeSlider}
                     >
-                      <button
-                        type="button"
-                        className={cn(
-                          'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
-                          selectedQuality === 'auto' && 'bg-accent font-medium'
-                        )}
-                        onClick={() => { setSelectedQuality('auto'); setShowQualityMenu(false) }}
-                      >
-                        Auto {selectedQuality === 'auto' && `(${autoResolvedQuality})`}
-                      </button>
-                      {qualityMenuOptions.map((q) =>
-                        availableQualities.includes(q) ? (
-                          <button
-                            key={q}
-                            type="button"
-                            className={cn(
-                              'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
-                              selectedQuality === q && 'bg-accent font-medium'
-                            )}
-                            onClick={() => { setSelectedQuality(q); setShowQualityMenu(false) }}
-                          >
-                            {q}
-                          </button>
-                        ) : null
-                      )}
+                      <div className="h-28 w-10 flex items-center justify-center">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={Math.round(volume * 100)}
+                          onChange={(e) => {
+                            const next = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0))
+                            const nextVolume = next / 100
+                            setVolume(nextVolume)
+                            if (nextVolume > 0) {
+                              setIsMuted(false)
+                            }
+                          }}
+                          className="w-28 h-4 -rotate-90 accent-primary touch-none"
+                          style={{ touchAction: 'none' }}
+                          aria-label="Volume"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
-              )}
 
-              {isInFullscreen && canShowTimelineHover && !disableCommentsUI && !disableFullscreenCommentsUI && !isGuest && (
+                {!shouldHideSpeedControls && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDecreaseSpeed}
+                      aria-label="Decrease playback speed"
+                      className={cn(playbackSpeed !== 1.0 && playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                    >
+                      <Rewind className="w-4 h-4" />
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleIncreaseSpeed}
+                      aria-label="Increase playback speed"
+                      className={cn(playbackSpeed !== 1.0 && playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                    >
+                      <FastForward className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {/* Centre: Time */}
+              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap text-center">
+                {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
+                {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
+              </div>
+
+              {/* Right: Quality, Comments (fullscreen), Fullscreen, Download */}
+              <div className="flex items-center gap-[6px] justify-end">
+                {showQualitySelector && (
+                  <div ref={desktopQualityControlsRef} className="relative flex-shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={hasOriginalOnly ? undefined : () => setShowQualityMenu((v) => !v)}
+                      aria-label="Select quality"
+                      className="text-xs px-2"
+                    >
+                      {qualityLabel}
+                    </Button>
+
+                    {showQualityMenu && !hasOriginalOnly && (
+                      <div
+                        className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
+                      >
+                        <button
+                          type="button"
+                          className={cn(
+                            'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                            selectedQuality === 'auto' && 'bg-accent font-medium'
+                          )}
+                          onClick={() => { setSelectedQuality('auto'); setShowQualityMenu(false) }}
+                        >
+                          Auto {selectedQuality === 'auto' && `(${autoResolvedQuality})`}
+                        </button>
+                        {qualityMenuOptions.map((q) =>
+                          availableQualities.includes(q) ? (
+                            <button
+                              key={q}
+                              type="button"
+                              className={cn(
+                                'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                                selectedQuality === q && 'bg-accent font-medium'
+                              )}
+                              onClick={() => { setSelectedQuality(q); setShowQualityMenu(false) }}
+                            >
+                              {q}
+                            </button>
+                          ) : null
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isInFullscreen && canShowTimelineHover && !disableCommentsUI && !disableFullscreenCommentsUI && !isGuest && (
+                  <Button
+                    type="button"
+                    variant={isFullscreenChatOpen ? 'default' : 'outline'}
+                    size="sm"
+                    aria-label={isFullscreenChatOpen ? 'Hide comments' : 'Show comments'}
+                    onClick={() => {
+                      window.dispatchEvent(
+                        new CustomEvent('fullscreenChatSetOpen', {
+                          detail: { open: !isFullscreenChatOpen },
+                        })
+                      )
+                    }}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                  </Button>
+                )}
+
                 <Button
                   type="button"
-                  variant={isFullscreenChatOpen ? 'default' : 'outline'}
+                  variant="outline"
                   size="sm"
-                  aria-label={isFullscreenChatOpen ? 'Hide comments' : 'Show comments'}
-                  onClick={() => {
-                    window.dispatchEvent(
-                      new CustomEvent('fullscreenChatSetOpen', {
-                        detail: { open: !isFullscreenChatOpen },
-                      })
-                    )
-                  }}
+                  onClick={toggleFullscreen}
+                  aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
                 >
-                  <MessageSquare className="w-4 h-4" />
+                  {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </Button>
-              )}
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={toggleFullscreen}
-                aria-label={isInFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              >
-                {isInFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-              </Button>
-
-              {canShowApprovedDownload && approvedDownloadUrl && (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  aria-label="Download approved video"
-                  title="Download approved video"
-                  onClick={() => void handleApprovedDownloadClick()}
-                >
-                  Download
-                </Button>
-              )}
+                {canShowApprovedDownload && approvedDownloadUrl && (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    aria-label="Download approved video"
+                    title="Download approved video"
+                    onClick={() => void handleApprovedDownloadClick()}
+                  >
+                    Download
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Mobile: row 2 controls (left: play/time, right: volume/speed/fullscreen) */}

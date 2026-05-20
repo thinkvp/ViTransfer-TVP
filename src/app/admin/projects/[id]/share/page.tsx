@@ -6,17 +6,18 @@ import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
-import { GripVertical } from 'lucide-react'
 import VideoSidebar from '@/components/VideoSidebar'
 import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ArrowLeft, Info, Share2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
+import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 
 type DraftNavigationGuard = {
   confirmDiscardDraft: () => boolean
@@ -51,7 +52,10 @@ export default function AdminSharePage() {
   const [adminUser, setAdminUser] = useState<any>(null)
   const [albums, setAlbums] = useState<any[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [downloadableFiles, setDownloadableFiles] = useState<DownloadableGroup[] | null>(null)
+  const [hasApprovableVideos, setHasApprovableVideos] = useState(false)
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
+  const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
@@ -62,6 +66,29 @@ export default function AdminSharePage() {
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
     return guard ? guard.confirmDiscardDraft() : true
+  }, [])
+
+  // Reset header version when active video changes
+  useEffect(() => {
+    setHeaderVersionId(null)
+  }, [activeVideoName])
+
+  // Sync header version from VideoPlayer / CommentSection events
+  useEffect(() => {
+    const handleVideoChanged = (e: Event) => {
+      const videoId = (e as CustomEvent).detail?.videoId
+      if (videoId) setHeaderVersionId(videoId)
+    }
+    const handleSelectVideo = (e: Event) => {
+      const videoId = (e as CustomEvent).detail?.videoId
+      if (videoId) setHeaderVersionId(videoId)
+    }
+    window.addEventListener('videoChanged', handleVideoChanged)
+    window.addEventListener('selectVideoForComments', handleSelectVideo)
+    return () => {
+      window.removeEventListener('videoChanged', handleVideoChanged)
+      window.removeEventListener('selectVideoForComments', handleSelectVideo)
+    }
   }, [])
 
   // Fetch comments separately for security (same pattern as public share)
@@ -360,11 +387,51 @@ export default function AdminSharePage() {
     }
   }, [project?.enablePhotos])
 
+  const fetchDownloadableFiles = useCallback(async () => {
+    if (!project?.slug) return
+    try {
+      const res = await apiFetch(`/api/share/${project.slug}/downloadable-files`)
+      if (res.ok) {
+        const data = await res.json()
+        setDownloadableFiles(Array.isArray(data.groups) ? data.groups : [])
+        setHasApprovableVideos(!!data.hasApprovableVideos)
+      }
+    } catch {
+      // ignore
+    }
+  }, [project?.slug])
+
   // Fetch albums once the project is loaded (admin sessions can use the share endpoints without a bearer token).
   useEffect(() => {
     if (!project?.slug) return
     void fetchAlbums(String(project.slug))
   }, [fetchAlbums, project?.slug])
+
+  // Fetch downloadable files once the project is loaded.
+  useEffect(() => {
+    if (!project?.slug) return
+    void fetchDownloadableFiles()
+  }, [project?.slug, fetchDownloadableFiles])
+
+  // Refresh downloadable files when a video is approved.
+  useEffect(() => {
+    const handleApprovalChanged = (e: Event) => {
+      const videoId = (e as CustomEvent).detail?.videoId
+      if (videoId) {
+        tokenCacheRef.current.delete(videoId)
+        sidebarVideoCacheRef.current.delete(videoId)
+        setActiveVideos((prev) => prev.map((video: any) => (
+          video.id === videoId ? { ...video, approved: true } : video
+        )))
+        setActiveVideosRaw((prev) => prev.map((video: any) => (
+          video.id === videoId ? { ...video, approved: true } : video
+        )))
+      }
+      void fetchDownloadableFiles()
+    }
+    window.addEventListener('videoApprovalChanged', handleApprovalChanged)
+    return () => window.removeEventListener('videoApprovalChanged', handleApprovalChanged)
+  }, [fetchDownloadableFiles])
 
   // If photos are disabled, ensure we can't be stuck in an album view.
   useEffect(() => {
@@ -538,6 +605,38 @@ export default function AdminSharePage() {
     setActiveAlbumId(albumId)
   }
 
+  const handleDownloadFile = useCallback(async (file: DownloadableFile) => {
+    const sessionId = sessionIdRef.current
+    try {
+      let url: string
+      if (file.type === 'video') {
+        const r = await apiFetch(`/api/admin/video-token?videoId=${file.videoId}&projectId=${id}&quality=original&sessionId=${sessionId}`)
+        const data = await r.json()
+        url = `/api/content/${data.token}?download=true`
+      } else if (file.type === 'asset') {
+        const r = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, { method: 'POST' })
+        const data = await r.json()
+        url = data.url
+      } else {
+        const r = await apiFetch(`/api/share/${project?.slug}/albums/${file.albumId}/download-zip-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variant: file.variant }),
+        })
+        const data = await r.json()
+        url = data.url
+      }
+      const a = document.createElement('a')
+      a.href = url
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch {
+      // ignore
+    }
+  }, [id, project?.slug])
+
   // Photos-only projects: default to first album once albums load.
   useEffect(() => {
     if (!project) return
@@ -603,45 +702,147 @@ export default function AdminSharePage() {
     return project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
   })()
 
+  // Header breadcrumb computed values
+  const activeAlbum = albums.find((a: any) => String(a.id) === activeAlbumId) || null
+  const headerVersion = readyVideos.find((v: any) => v.id === headerVersionId) || readyVideos[0] || null
+  const isOlderVersionSelected = readyVideos.length > 1 && headerVersionId !== null && headerVersionId !== readyVideos[0]?.id
+  const videoNames = project.videosByName ? (() => {
+    const names = Object.keys(project.videosByName)
+    const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+    const isApprovedGroup = (n: string) => (project.videosByName[n] || []).some((v: any) => v?.approved === true)
+    const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
+    const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
+    return [...forReview, ...approved]
+  })() : []
+  const mediaOptions = [
+    ...videoNames.map((name) => ({ value: `video:${name}`, label: name })),
+    ...albums.map((a: any) => ({ value: `album:${String(a.id)}`, label: String(a.name || '') })),
+  ]
+  const selectedMediaValue = activeAlbumId ? `album:${activeAlbumId}` : `video:${activeVideoName}`
+
   return (
     <div className="flex-1 min-h-0 bg-background flex flex-col overflow-y-auto lg:overflow-hidden">
-      {/* Subheader (match Project page back-row styling) */}
-      <div className="flex-shrink-0">
-        <div className="max-w-screen-2xl mx-auto w-full px-3 sm:px-4 lg:px-6 pt-3 sm:pt-6">
-          <div className="mb-3 sm:mb-4">
-            <div className="flex items-center gap-2">
-              <div className="flex-shrink-0">
-                <Link href={projectUrl}>
-                  <Button variant="ghost" size="default" className="justify-start px-3">
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    <span className="hidden sm:inline">Back to Project</span>
-                    <span className="sm:hidden">Back</span>
-                  </Button>
-                </Link>
-              </div>
+      {/* Compact breadcrumb header */}
+      <div className="flex-shrink-0 h-11 border-b border-border bg-card flex items-center px-4 gap-1.5 text-sm overflow-x-auto z-40">
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-end lg:justify-center gap-2 sm:gap-3 min-w-0">
-                  <span className="text-lg sm:text-xl font-semibold text-foreground truncate">
-                    {project.title}
-                  </span>
-                  <span className="text-sm sm:text-lg font-medium text-muted-foreground flex-shrink-0">
-                    Share view
-                  </span>
-                </div>
-              </div>
+        {/* Back to Project */}
+        <Link href={projectUrl} className="flex-shrink-0">
+          <Button variant="ghost" size="sm" className="h-7 px-2 gap-1">
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Back</span>
+          </Button>
+        </Link>
+        <span className="text-muted-foreground flex-shrink-0">/</span>
 
-              {/* Spacer to keep the title truly centered on desktop */}
-              <div className="hidden lg:block flex-shrink-0 opacity-0 pointer-events-none" aria-hidden="true">
-                <Button variant="ghost" size="default" className="justify-start px-3" tabIndex={-1}>
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">Back to Project</span>
-                  <span className="sm:hidden">Back</span>
+        {/* Project name (static — no cross-project switching on admin page) */}
+        <span className="text-foreground font-medium whitespace-nowrap flex-shrink-0 max-w-[25%] truncate" title={project.title}>{project.title}</span>
+
+        {/* Video / Album section */}
+        {(activeVideoName || activeAlbumId) && (
+          <>
+            <span className="text-muted-foreground flex-shrink-0">/</span>
+            {mediaOptions.length > 1 ? (
+              <Select
+                value={selectedMediaValue}
+                onValueChange={(value) => {
+                  if (value.startsWith('video:')) {
+                    handleVideoSelect(value.slice(6))
+                    return
+                  }
+                  if (value.startsWith('album:')) {
+                    handleAlbumSelect(value.slice(6))
+                  }
+                }}
+              >
+                <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {mediaOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : !activeAlbumId ? (
+              <span className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[30%] truncate" title={activeVideoName}>{activeVideoName}</span>
+            ) : (
+              <span className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[30%] truncate" title={activeAlbum?.name}>{activeAlbum?.name}</span>
+            )}
+          </>
+        )}
+
+        {/* Version section */}
+        {!activeAlbumId && readyVideos.length > 0 && (
+          <>
+            <span className="text-muted-foreground flex-shrink-0">/</span>
+            {readyVideos.length > 1 ? (
+              <Select
+                value={headerVersionId || readyVideos[0].id}
+                onValueChange={(videoId) => {
+                  setHeaderVersionId(videoId)
+                  window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
+                  window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId } }))
+                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId, videoVersion: null } }))
+                }}
+              >
+                <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {readyVideos.map((v: any) => (
+                    <SelectItem key={v.id} value={v.id}>{v.versionLabel}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="text-foreground whitespace-nowrap flex-shrink-0">{headerVersion?.versionLabel || '\u2014'}</span>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={() => window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))}
+              title="Video Information"
+              aria-label="Video Information"
+            >
+              <Info className="w-3.5 h-3.5" />
+            </Button>
+            {project.guestMode && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 flex-shrink-0 sm:hidden"
+                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  title="Share"
+                  aria-label="Share"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
                 </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 flex-shrink-0 hidden sm:inline-flex"
+                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  title="Share"
+                  aria-label="Share"
+                >
+                  <Share2 className="w-3.5 h-3.5 mr-1.5" />
+                  Share
+                </Button>
+              </>
+            )}
+            {isOlderVersionSelected && (
+              <span className="text-amber-600 dark:text-amber-400 text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
+            )}
+          </>
+        )}
+
+        {/* Admin indicator */}
+        <span className="ml-auto flex-shrink-0 text-xs text-muted-foreground hidden sm:inline">Share view</span>
       </div>
 
       {/* Content */}
@@ -662,6 +863,9 @@ export default function AdminSharePage() {
           showVideos={project.enableVideos !== false}
           showAlbums={project.enablePhotos !== false}
           className="flex-shrink-0 h-[calc(100dvh-var(--admin-header-height))]"
+          downloadableFiles={downloadableFiles}
+          onDownloadFile={handleDownloadFile}
+          hasApprovableVideos={hasApprovableVideos}
         />
 
         {/* Main Content Area */}
@@ -822,7 +1026,7 @@ function AdminShareFeedbackGrid({
       const needed = Math.round(el.scrollWidth)
 
       if (Number.isFinite(available) && Number.isFinite(needed) && needed > available + 1) {
-        setCommentInputMinWidth((prev) => Math.max(prev ?? 352, needed))
+        setCommentInputMinWidth((prev) => Math.max(prev ?? 380, needed))
       }
     })
 
@@ -858,7 +1062,7 @@ function AdminShareFeedbackGrid({
     const savedWidth = localStorage.getItem('share_comments_width')
     if (savedWidth) {
       const width = parseInt(savedWidth, 10)
-      if (Number.isFinite(width) && width >= 352 && width <= window.innerWidth * 0.6) {
+      if (Number.isFinite(width) && width >= 380 && width <= window.innerWidth * 0.6) {
         setCommentsWidth(width)
       }
     }
@@ -872,7 +1076,7 @@ function AdminShareFeedbackGrid({
 
       const rect = feedbackContainerRef.current.getBoundingClientRect()
       const nextWidth = rect.right - e.clientX
-      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 352
+      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 380
       const maxWidth = Math.min(rect.width * 0.6, window.innerWidth * 0.6)
 
       const clamped = Math.max(minWidth, Math.min(maxWidth, nextWidth))
@@ -1075,7 +1279,7 @@ function AdminShareFeedbackGrid({
             />
           </div>
 
-          {!commentInputInRightColumn && (
+          {!commentInputInRightColumn && !commentsDisabled && (
             <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
@@ -1138,16 +1342,9 @@ function AdminShareFeedbackGrid({
           {/* Horizontal resize handle (desktop only) */}
           <div
             onMouseDown={startResizeComments}
-            className={cn(
-              'hidden lg:block',
-              'absolute left-0 top-0 bottom-0 w-1 cursor-col-resize select-none z-10',
-              'hover:bg-primary transition-colors',
-              'group'
-            )}
+            className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-border hover:bg-primary/20 cursor-col-resize select-none z-10 group transition-colors"
           >
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 translate-x-1/2">
-              <GripVertical className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-            </div>
+            <div className="h-8 w-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
           </div>
 
           <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
@@ -1177,12 +1374,13 @@ function AdminShareFeedbackGrid({
               hideInput={true}
               showApproveButton={false}
               largeAvatars={true}
+              cardClassName={commentInputInRightColumn && !commentsDisabled ? 'rounded-b-none' : undefined}
               management={management as any}
             />
           </div>
 
           {commentInputInRightColumn && !commentsDisabled ? (
-            <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
+            <div ref={commentInputMeasureRef} className="flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
                 onCommentChange={management.handleCommentChange}
@@ -1211,7 +1409,7 @@ function AdminShareFeedbackGrid({
                 commentsDisabled={commentsDisabled}
                 showShortcutsButton={true}
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
-                containerClassName="border border-border rounded-lg"
+                containerClassName="border border-border rounded-b-lg rounded-t-none border-t-0"
                 showTopBorder={false}
                 onMoveColumn={() => {
                   setCommentInputPlacementManuallySet(true)

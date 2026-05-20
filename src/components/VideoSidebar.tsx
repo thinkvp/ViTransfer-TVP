@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState, useEffect, useRef } from 'react'
-import { Play, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, GripVertical, CheckCircle2, Images, Check } from 'lucide-react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { Play, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, Images, Check, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
 import { useTheme } from '@/hooks/useTheme'
+import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 
 interface VideoGroup {
   name: string
@@ -34,6 +35,12 @@ interface VideoSidebarProps {
   showProjectHeadingLabel?: boolean
   showProjectSwitcher?: boolean
   onProjectSwitcherOpen?: () => void
+  /** Structured list of downloadable files. Pass null/undefined to hide the FILES section (e.g. for guests). */
+  downloadableFiles?: DownloadableGroup[] | null
+  /** Called when the user clicks a file to download. Should fetch a token and trigger the download. */
+  onDownloadFile?: (file: DownloadableFile) => Promise<void>
+  /** Whether the project has any videos with allowApproval=true, used for empty state messages. */
+  hasApprovableVideos?: boolean
 }
 
 // Helper function to calculate thumbnail dimensions maintaining aspect ratio within 16:9
@@ -89,6 +96,9 @@ export default function VideoSidebar({
   showProjectHeadingLabel = false,
   showProjectSwitcher = false,
   onProjectSwitcherOpen,
+  downloadableFiles,
+  onDownloadFile,
+  hasApprovableVideos = false,
 }: VideoSidebarProps) {
   const { isDark } = useTheme()
   const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
@@ -96,7 +106,15 @@ export default function VideoSidebar({
   const [isMobileCollapsed, setIsMobileCollapsed] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(256) // Default 256px (w-64)
   const [isResizing, setIsResizing] = useState(false)
+  const [filesRatio, setFilesRatio] = useState(0.35)
+  const [hasManualRatio, setHasManualRatio] = useState(false)
+  const [isDraggingDivider, setIsDraggingDivider] = useState(false)
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false)
+  const [desktopActiveTab, setDesktopActiveTab] = useState<'for-review' | 'files'>('for-review')
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const sidebarRef = useRef<HTMLElement>(null)
+  const splitContainerRef = useRef<HTMLDivElement>(null)
+  const mobileContainerRef = useRef<HTMLDivElement>(null)
   const [thumbnailDimensions, setThumbnailDimensions] = useState<Record<string, any>>({})
 
   const safeVideosByName = videosByName || {}
@@ -164,7 +182,7 @@ export default function VideoSidebar({
       if (!isResizing) return
 
       const newWidth = e.clientX
-      const minWidth = 200
+      const minWidth = 270
       const maxWidth = window.innerWidth * 0.3
 
       if (newWidth >= minWidth && newWidth <= maxWidth) {
@@ -194,12 +212,342 @@ export default function VideoSidebar({
     }
   }, [isResizing, sidebarWidth])
 
+  // Vertical split divider drag for FILES section
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingDivider || !splitContainerRef.current) return
+      const rect = splitContainerRef.current.getBoundingClientRect()
+      const newRatio = 1 - (e.clientY - rect.top) / rect.height
+      setHasManualRatio(true)
+      setFilesRatio(Math.max(0.1, Math.min(0.85, newRatio)))
+    }
+    const handleMouseUp = () => {
+      if (isDraggingDivider) setIsDraggingDivider(false)
+    }
+    if (isDraggingDivider) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDraggingDivider])
+
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     setIsResizing(true)
   }
 
+  // Collapse mobile sidebar when clicking outside
+  useEffect(() => {
+    if (isMobileCollapsed) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mobileContainerRef.current && !mobileContainerRef.current.contains(e.target as Node)) {
+        setIsMobileCollapsed(true)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isMobileCollapsed])
+
+  const handleDownloadAll = useCallback(async () => {
+    if (!downloadableFiles || !onDownloadFile) return
+    setIsDownloadingAll(true)
+    try {
+      const allFiles: DownloadableFile[] = downloadableFiles.flatMap((g) => [
+        ...(g.mainFile ? [g.mainFile] : []),
+        ...g.subFiles,
+      ])
+      for (const file of allFiles) {
+        await onDownloadFile(file)
+        await new Promise<void>((r) => setTimeout(r, 500))
+      }
+    } finally {
+      setIsDownloadingAll(false)
+    }
+  }, [downloadableFiles, onDownloadFile])
+
+  const handleDownloadSelected = useCallback(async () => {
+    if (!downloadableFiles || !onDownloadFile || selectedFileIds.size === 0) return
+    setIsDownloadingAll(true)
+    try {
+      const allFiles: DownloadableFile[] = downloadableFiles.flatMap((g) => [
+        ...(g.mainFile ? [g.mainFile] : []),
+        ...g.subFiles,
+      ])
+      const toDownload = allFiles.filter((file) => {
+        const key = file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName)
+        return selectedFileIds.has(key)
+      })
+      await Promise.all(toDownload.map((file) => onDownloadFile(file).catch(() => undefined)))
+    } finally {
+      setIsDownloadingAll(false)
+    }
+  }, [downloadableFiles, onDownloadFile, selectedFileIds])
+
+  const handleSelectAll = useCallback(() => {
+    if (!downloadableFiles) return
+    const allKeys = downloadableFiles
+      .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
+      .map((file) => file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName))
+    setSelectedFileIds(new Set(allKeys))
+  }, [downloadableFiles])
+
+  const handleClearSelected = useCallback(() => {
+    setSelectedFileIds(new Set())
+  }, [])
+
+  const showFiles = downloadableFiles !== undefined && downloadableFiles !== null
+
   const canOpenProjectSwitcher = showProjectSwitcher && typeof onProjectSwitcherOpen === 'function'
+
+  // Desktop sidebar: computed groups and render helpers (mobile section is unchanged)
+  const forReviewGroups = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
+  const approvedGroups = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
+  const flatAlphabeticalGroups = sortedVideoGroups(videoGroups)
+  // Show bottom section: FILES for hideApprovalGrouping; APPROVED section whenever there are approved videos, albums, or downloadable files
+  const showBottomSection = hideApprovalGrouping ? showFiles : (approvedGroups.length > 0 || hasAlbums || showFiles)
+
+  // Auto-size the split ratio based on item counts (resets on content change unless user has manually dragged)
+  useEffect(() => {
+    if (hasManualRatio || hideApprovalGrouping) return
+    const topCount = Math.max(forReviewGroups.length, 1)
+    const bottomCount = approvedGroups.length + albumsList.length
+    if (bottomCount === 0) return
+    // Bottom items are taller (thumbnail + name + file listings) — weight ~3x
+    const bottomWeight = bottomCount * 3
+    const newRatio = bottomWeight / (topCount + bottomWeight)
+    setFilesRatio(Math.max(0.2, Math.min(0.8, newRatio)))
+  }, [forReviewGroups.length, approvedGroups.length, albumsList.length, hideApprovalGrouping, hasManualRatio])
+
+  const renderVideoButton = (group: VideoGroup, showDownloadFiles = false) => {
+    const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
+    const isActive = !activeAlbumId && activeVideoName === group.name
+    const latestVideo = group.videos[0]
+    const approvedVideo = group.videos.find((v: any) => v.approved === true)
+    const displayVideo = approvedVideo || latestVideo
+    const thumbnailUrl = displayVideo?.thumbnailUrl
+    const dims = thumbnailDimensions[group.name]
+    const availableContentWidth = sidebarWidth - 48
+    const containerWidth = Math.max(120, availableContentWidth - 16)
+    const containerHeight = Math.round(containerWidth * 9 / 16)
+
+    const downloadGroup = showDownloadFiles && downloadableFiles
+      ? downloadableFiles.find(dg => dg.name === group.name)
+      : null
+    const downloadFiles = downloadGroup
+      ? [...(downloadGroup.mainFile ? [downloadGroup.mainFile] : []), ...downloadGroup.subFiles]
+      : []
+
+    const thumbnailEl = thumbnailUrl && dims ? (
+      <div
+        className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto relative"
+        style={{ width: containerWidth, height: containerHeight }}
+      >
+        <div className="relative" style={{ width: dims.width, height: dims.height }}>
+          <Image
+            src={thumbnailUrl}
+            alt={group.name}
+            fill
+            className="object-cover"
+            unoptimized
+            onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
+          />
+        </div>
+      </div>
+    ) : null
+
+    const titleEl = (
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
+            {!showDownloadFiles && (
+              <p className="text-xs text-muted-foreground">
+                {hideApprovalGrouping && latestVideo?.versionLabel
+                  ? latestVideo.versionLabel
+                  : `${group.versionCount} ${group.versionCount === 1 ? 'version' : 'versions'}`}
+              </p>
+            )}
+          </div>
+        </div>
+        {isActive && !showDownloadFiles && (
+          hasApprovedVideo ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
+          ) : (
+            <Play className="w-4 h-4 shrink-0 text-primary" fill="currentColor" />
+          )
+        )}
+      </div>
+    )
+
+    if (showDownloadFiles) {
+      return (
+        <div
+          key={group.name}
+          className={cn(
+            'rounded-lg overflow-hidden transition-all duration-200',
+            isActive ? 'bg-primary/10 border border-primary/20' : ''
+          )}
+        >
+          <button
+            onClick={() => onVideoSelect(group.name)}
+            className={cn(
+              'w-full text-left p-3 flex flex-col gap-2',
+              'hover:bg-accent hover:text-accent-foreground transition-colors',
+              isActive ? 'text-primary font-medium' : 'text-foreground'
+            )}
+          >
+            {thumbnailEl}
+            {titleEl}
+          </button>
+          {downloadFiles.length > 0 && (
+            <div className="px-3 pb-2 space-y-0.5">
+              {downloadFiles.map(file => (
+                <button
+                  key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                  onClick={() => void onDownloadFile?.(file)}
+                  className="w-full text-left text-xs text-muted-foreground hover:text-foreground truncate flex items-center gap-1.5 py-0.5 transition-colors"
+                  title={file.fileName}
+                >
+                  <Download className="w-3 h-3 shrink-0" />
+                  {file.fileName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <button
+        key={group.name}
+        onClick={() => onVideoSelect(group.name)}
+        className={cn(
+          'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
+          'hover:bg-accent hover:text-accent-foreground',
+          isActive
+            ? 'bg-primary/10 text-primary font-medium border border-primary/20'
+            : 'text-foreground'
+        )}
+      >
+        {thumbnailEl}
+        {titleEl}
+      </button>
+    )
+  }
+
+  const renderAlbumButton = (a: typeof albumsList[0], showDownloadFiles = false) => {
+    const isActive = activeAlbumId === a.id
+    const previewUrl = (a as any)?.thumbnailPhotoUrl as string | null | undefined
+    const availableContentWidth = sidebarWidth - 48
+    const containerWidth = Math.max(120, availableContentWidth - 16)
+    const containerHeight = Math.round(containerWidth * 9 / 16)
+
+    const downloadGroup = showDownloadFiles && downloadableFiles
+      ? downloadableFiles.find(dg => dg.name === a.name)
+      : null
+    const downloadFiles = downloadGroup
+      ? [...(downloadGroup.mainFile ? [downloadGroup.mainFile] : []), ...downloadGroup.subFiles]
+      : []
+
+    const thumbnailEl = previewUrl ? (
+      <div
+        className="bg-black rounded overflow-hidden relative mx-auto"
+        style={{ width: containerWidth, height: containerHeight }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={previewUrl}
+          alt={a.name}
+          className="w-full h-full object-cover"
+          loading={isActive ? 'eager' : 'lazy'}
+        />
+      </div>
+    ) : (
+      <div
+        className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center mx-auto"
+        style={{ width: containerWidth, height: containerHeight }}
+      >
+        <Images className="w-6 h-6 text-muted-foreground" />
+      </div>
+    )
+
+    const titleEl = (
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-snug line-clamp-2 break-words">{a.name}</p>
+          {!showDownloadFiles && (
+            <p className="text-xs text-muted-foreground">
+              {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+
+    if (showDownloadFiles) {
+      return (
+        <div
+          key={a.id}
+          className={cn(
+            'rounded-lg overflow-hidden transition-all duration-200',
+            isActive ? 'bg-primary/10 border border-primary/20' : ''
+          )}
+        >
+          <button
+            onClick={() => onAlbumSelect?.(a.id)}
+            className={cn(
+              'w-full text-left p-3 flex flex-col gap-2',
+              'hover:bg-accent hover:text-accent-foreground transition-colors',
+              isActive ? 'text-primary font-medium' : 'text-foreground'
+            )}
+          >
+            {thumbnailEl}
+            {titleEl}
+          </button>
+          {downloadFiles.length > 0 && (
+            <div className="px-3 pb-2 space-y-0.5">
+              {downloadFiles.map(file => (
+                <button
+                  key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                  onClick={() => void onDownloadFile?.(file)}
+                  className="w-full text-left text-xs text-muted-foreground hover:text-foreground truncate flex items-center gap-1.5 py-0.5 transition-colors"
+                  title={file.fileName}
+                >
+                  <Download className="w-3 h-3 shrink-0" />
+                  {file.fileName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <button
+        key={a.id}
+        onClick={() => onAlbumSelect?.(a.id)}
+        className={cn(
+          'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
+          'hover:bg-accent hover:text-accent-foreground',
+          isActive
+            ? 'bg-primary/10 text-primary font-medium border border-primary/20'
+            : 'text-foreground'
+        )}
+      >
+        {thumbnailEl}
+        {titleEl}
+      </button>
+    )
+  }
 
   return (
     <>
@@ -217,258 +565,450 @@ export default function VideoSidebar({
           'hidden lg:flex lg:flex-col'
         )}
       >
-        <div className="flex-1 min-h-0 max-h-full overflow-y-auto overflow-x-hidden">
-          {hasLogo && (
-            <div className="p-4 border-b border-border">
-              {mainCompanyDomain ? (
-                <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={logoSrc}
-                    alt="Company logo"
-                    className="w-full max-h-16 h-auto object-contain"
-                  />
-                </a>
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
+        {hasLogo && (
+          <div className="p-4 border-b border-border flex-shrink-0">
+            {mainCompanyDomain ? (
+              <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={logoSrc}
                   alt="Company logo"
                   className="w-full max-h-16 h-auto object-contain"
                 />
-              )}
-            </div>
-          )}
-          {heading && (
-            <div className="p-4 border-b border-border space-y-3">
-              {showProjectHeadingLabel && (
-                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Project:
+              </a>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoSrc}
+                alt="Company logo"
+                className="w-full max-h-16 h-auto object-contain"
+              />
+            )}
+          </div>
+        )}
+        {heading && (
+          <div className="p-4 border-b border-border space-y-3 flex-shrink-0">
+            {showProjectHeadingLabel && (
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Project:
+              </div>
+            )}
+            <h2 className="text-base font-semibold text-foreground truncate" title={heading}>
+              {heading}
+            </h2>
+            {canOpenProjectSwitcher && (
+              <button
+                type="button"
+                onClick={onProjectSwitcherOpen}
+                className="w-full rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground uppercase tracking-wider transition-colors hover:bg-primary/90"
+              >
+                Change Project
+              </button>
+            )}
+          </div>
+        )}
+
+        <div ref={splitContainerRef} className="flex flex-col flex-1 min-h-0">
+          {hideApprovalGrouping ? (
+            /* ── GUEST / PUBLIC: flat list + split FILES section ── */
+            <>
+              <div
+                className="flex flex-col"
+                style={{ height: showBottomSection ? `${(1 - filesRatio) * 100}%` : '100%' }}
+              >
+                <div className="overflow-y-auto overflow-x-hidden flex-1 mr-[5px]">
+                  <nav className="p-3">
+                    {flatAlphabeticalGroups.length > 0 && (
+                      <div className="space-y-1 mb-4">
+                        {flatAlphabeticalGroups.map(g => renderVideoButton(g))}
+                      </div>
+                    )}
+                    {shouldShowAlbums && (
+                      <>
+                        <div className="border-t border-border my-3" />
+                        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                          <Images className="w-3 h-3" />
+                          Albums
+                        </div>
+                        <div className="space-y-1">
+                          {albumsList.map(a => renderAlbumButton(a))}
+                        </div>
+                      </>
+                    )}
+                  </nav>
                 </div>
+              </div>
+
+              {showBottomSection && (
+                <>
+                  <div
+                    className="flex-shrink-0 h-[5px] bg-border hover:bg-primary/20 cursor-row-resize flex items-center justify-center group transition-colors"
+                    onMouseDown={(e) => { e.preventDefault(); setIsDraggingDivider(true) }}
+                  >
+                    <div className="w-8 h-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
+                  </div>
+                  <div
+                    className="flex flex-col"
+                    style={{ height: `${filesRatio * 100}%` }}
+                  >
+                    <div className="flex-shrink-0 bg-card px-3 py-2 flex items-center justify-between border-b border-border">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
+                      {downloadableFiles && downloadableFiles.length > 0 && onDownloadFile && (
+                        <button
+                          onClick={handleDownloadAll}
+                          disabled={isDownloadingAll}
+                          className="text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {isDownloadingAll ? 'Downloading...' : 'Download All'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="overflow-y-auto overflow-x-hidden flex-1 mr-[5px]">
+                      {downloadableFiles && downloadableFiles.length === 0 && (
+                        <p className="px-3 py-4 text-xs text-muted-foreground">
+                          {hasApprovableVideos
+                            ? 'No videos have been approved for download'
+                            : 'No content currently available for download'}
+                        </p>
+                      )}
+                      {downloadableFiles && downloadableFiles.length > 0 && (
+                        <div className="py-2">
+                          {downloadableFiles.map((group) => (
+                            <div key={group.name}>
+                              <div className="px-3 pt-2 pb-0.5 text-xs font-semibold text-foreground">{group.name}</div>
+                              {group.mainFile && (
+                                <button
+                                  onClick={() => void onDownloadFile?.(group.mainFile!)}
+                                  className="w-full text-left px-3 py-1 text-xs text-muted-foreground hover:bg-accent truncate block transition-colors"
+                                  title={group.mainFile.fileName}
+                                >
+                                  {group.mainFile.fileName}
+                                </button>
+                              )}
+                              {group.subFiles.map((file) => (
+                                <button
+                                  key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                                  onClick={() => void onDownloadFile?.(file)}
+                                  className={cn(
+                                    'w-full text-left py-1 text-xs text-muted-foreground hover:bg-accent truncate block transition-colors',
+                                    group.groupType === 'video' ? 'pl-6 pr-3' : 'px-3'
+                                  )}
+                                  title={file.fileName}
+                                >
+                                  {group.groupType === 'video' ? `- ${file.fileName}` : file.fileName}
+                                </button>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
-              <h2 className="text-base font-semibold text-foreground truncate" title={heading}>
-                {heading}
-              </h2>
-              {canOpenProjectSwitcher && (
+            </>
+          ) : (
+            /* ── ADMIN / REVIEW: tab-based layout ── */
+            <>
+              {/* Tab bar — two equal-width tabs */}
+              <div className="flex flex-shrink-0">
                 <button
                   type="button"
-                  onClick={onProjectSwitcherOpen}
-                  className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  View Other Projects
-                </button>
-              )}
-            </div>
-          )}
-
-          <nav className="p-3">
-          {(() => {
-            // Split videos into For Review and Approved groups.
-            // Note: on some share modes (e.g. guest), approval flags may be hidden; allow callers to disable grouping.
-            const forReview = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
-            const approved = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
-            const flatAlphabetical = sortedVideoGroups(videoGroups)
-
-            const renderVideoButton = (group: VideoGroup) => {
-              const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
-              const isActive = !activeAlbumId && activeVideoName === group.name
-              const latestVideo = group.videos[0]
-              const approvedVideo = group.videos.find((v: any) => v.approved === true)
-              const displayVideo = approvedVideo || latestVideo
-              const thumbnailUrl = displayVideo?.thumbnailUrl
-              const dims = thumbnailDimensions[group.name]
-              // Account for nav + button padding, plus a small inset so the thumbnail
-              // isn't visually hard up against the selected-state highlight on desktop.
-              const availableContentWidth = sidebarWidth - 48
-              // Empirically, an extra ~8px total inset looks more balanced on desktop.
-              const containerWidth = Math.max(120, availableContentWidth - 16)
-              const containerHeight = Math.round(containerWidth * 9 / 16)
-
-              return (
-                <button
-                  key={group.name}
-                  onClick={() => onVideoSelect(group.name)}
+                  onClick={() => setDesktopActiveTab('for-review')}
                   className={cn(
-                    'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
-                    'hover:bg-accent hover:text-accent-foreground',
-                    isActive
-                      ? 'bg-primary/10 text-primary font-medium border border-primary/20'
-                      : 'text-foreground'
+                    'flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors',
+                    desktopActiveTab === 'for-review'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
-                  {/* Thumbnail */}
-                  {thumbnailUrl && dims && (
-                    <div
-                      className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto"
-                      style={{
-                        width: containerWidth,
-                        height: containerHeight,
-                      }}
-                    >
-                      <div
-                        className="relative"
-                        style={{
-                          width: dims.width,
-                          height: dims.height,
-                        }}
-                      >
-                        <Image
-                          src={thumbnailUrl}
-                          alt={group.name}
-                          fill
-                          className="object-cover"
-                          unoptimized
-                          onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
-                        />
+                  View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDesktopActiveTab('files')}
+                  className={cn(
+                    'flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors border-l border-border/50',
+                    desktopActiveTab === 'files'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  Files
+                </button>
+              </div>
+
+              {/* FOR REVIEW tab */}
+              {desktopActiveTab === 'for-review' && (
+                <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 mr-[5px]">
+                  <nav className="p-3">
+                    {/* FOR REVIEW videos — no heading, the tab label is enough */}
+                    {forReviewGroups.length > 0 && (
+                      <div className="space-y-1">
+                        {forReviewGroups.map(g => renderVideoButton(g))}
                       </div>
+                    )}
+
+                    {/* APPROVED section */}
+                    {approvedGroups.length > 0 && (
+                      <div className={cn(forReviewGroups.length > 0 ? 'mt-4' : '')}>
+                        <div
+                          className={cn(
+                            'px-3 py-2 text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-2',
+                            forReviewGroups.length > 0 ? 'border-t border-border pt-3' : ''
+                          )}
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          Approved
+                        </div>
+                        <div className="space-y-1">
+                          {approvedGroups.map(g => renderVideoButton(g))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ALBUMS section */}
+                    {hasAlbums && (
+                      <div className="mt-4">
+                        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 border-t border-border pt-3">
+                          <Images className="w-3 h-3" />
+                          Albums
+                        </div>
+                        <div className="space-y-1">
+                          {albumsList.map(a => renderAlbumButton(a))}
+                        </div>
+                      </div>
+                    )}
+                  </nav>
+                </div>
+              )}
+
+              {/* FILES tab */}
+              {desktopActiveTab === 'files' && (
+                <div className="flex flex-col flex-1 min-h-0">
+                  {/* Scrollable file list */}
+                  <div className="overflow-y-auto overflow-x-hidden flex-1 mr-[5px]">
+                    {!hasVideos && !hasAlbums ? (
+                      <p className="px-3 py-4 text-xs text-muted-foreground">No content available for download.</p>
+                    ) : (
+                      <div className="py-2">
+                        {/* All videos */}
+                        {sortedVideoGroups(videoGroups).map((vg) => {
+                          const dlGroup = downloadableFiles?.find((g) => g.name === vg.name && g.groupType === 'video') ?? null
+                          const groupFiles: DownloadableFile[] = dlGroup
+                            ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
+                            : []
+                          const groupFileKeys = groupFiles.map((f) =>
+                            f.assetId ?? (f.albumId ? `${f.albumId}-${f.variant}` : f.videoId ?? f.fileName)
+                          )
+                          const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIds.has(k))
+                          const someGroupSelected = groupFileKeys.some((k) => selectedFileIds.has(k))
+                          return (
+                            <div key={vg.name}>
+                              {/* Group header */}
+                              <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+                                <input
+                                  type="checkbox"
+                                  checked={allGroupSelected}
+                                  disabled={groupFileKeys.length === 0}
+                                  ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
+                                  onChange={() => {
+                                    setSelectedFileIds((prev) => {
+                                      const next = new Set(prev)
+                                      if (allGroupSelected) {
+                                        groupFileKeys.forEach((k) => next.delete(k))
+                                      } else {
+                                        groupFileKeys.forEach((k) => next.add(k))
+                                      }
+                                      return next
+                                    })
+                                  }}
+                                  className={cn(
+                                    'w-3.5 h-3.5 shrink-0 rounded accent-primary',
+                                    groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                                  )}
+                                />
+                                <span className="text-xs font-semibold text-foreground truncate">{vg.name}</span>
+                              </div>
+                              {groupFiles.length === 0 ? (
+                                <p className="pl-8 pr-3 pb-2 text-xs text-muted-foreground/70 italic">Video is not approved.</p>
+                              ) : (
+                                groupFiles.map((file) => {
+                                  const fileKey = file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName)
+                                  const isChecked = selectedFileIds.has(fileKey)
+                                  const isSubFile = file !== dlGroup?.mainFile
+                                  return (
+                                    <div
+                                      key={fileKey}
+                                      className={cn(
+                                        'flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors',
+                                        isSubFile && dlGroup?.groupType === 'video' ? 'pl-8' : 'pl-6'
+                                      )}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => {
+                                          setSelectedFileIds((prev) => {
+                                            const next = new Set(prev)
+                                            if (next.has(fileKey)) next.delete(fileKey)
+                                            else next.add(fileKey)
+                                            return next
+                                          })
+                                        }}
+                                        className="w-3.5 h-3.5 shrink-0 rounded accent-primary cursor-pointer"
+                                      />
+                                      <span
+                                        className="flex-1 text-xs text-muted-foreground truncate py-0.5 cursor-default"
+                                        title={file.fileName}
+                                      >
+                                        {file.fileName}
+                                      </span>
+                                    </div>
+                                  )
+                                })
+                              )}
+                            </div>
+                          )
+                        })}
+
+                        {/* All albums */}
+                        {hasAlbums && albumsList.map((a) => {
+                          const dlGroup = downloadableFiles?.find((g) => g.name === a.name && g.groupType === 'album') ?? null
+                          const groupFiles: DownloadableFile[] = dlGroup
+                            ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
+                            : []
+                          const groupFileKeys = groupFiles.map((f) =>
+                            f.assetId ?? (f.albumId ? `${f.albumId}-${f.variant}` : f.videoId ?? f.fileName)
+                          )
+                          const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIds.has(k))
+                          const someGroupSelected = groupFileKeys.some((k) => selectedFileIds.has(k))
+                          return (
+                            <div key={a.id}>
+                              {/* Album header */}
+                              <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+                                <input
+                                  type="checkbox"
+                                  checked={allGroupSelected}
+                                  disabled={groupFileKeys.length === 0}
+                                  ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
+                                  onChange={() => {
+                                    setSelectedFileIds((prev) => {
+                                      const next = new Set(prev)
+                                      if (allGroupSelected) {
+                                        groupFileKeys.forEach((k) => next.delete(k))
+                                      } else {
+                                        groupFileKeys.forEach((k) => next.add(k))
+                                      }
+                                      return next
+                                    })
+                                  }}
+                                  className={cn(
+                                    'w-3.5 h-3.5 shrink-0 rounded accent-primary',
+                                    groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                                  )}
+                                />
+                                <span className="text-xs font-semibold text-foreground truncate">{a.name}</span>
+                              </div>
+                              {groupFiles.length === 0 ? (
+                                <p className="pl-8 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                              ) : (
+                                groupFiles.map((file) => {
+                                  const fileKey = file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName)
+                                  const isChecked = selectedFileIds.has(fileKey)
+                                  return (
+                                    <div
+                                      key={fileKey}
+                                      className="flex items-center gap-2 py-0.5 pl-6 pr-3 hover:bg-accent transition-colors"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => {
+                                          setSelectedFileIds((prev) => {
+                                            const next = new Set(prev)
+                                            if (next.has(fileKey)) next.delete(fileKey)
+                                            else next.add(fileKey)
+                                            return next
+                                          })
+                                        }}
+                                        className="w-3.5 h-3.5 shrink-0 rounded accent-primary cursor-pointer"
+                                      />
+                                      <span
+                                        className="flex-1 text-xs text-muted-foreground truncate py-0.5 cursor-default"
+                                        title={file.fileName}
+                                      >
+                                        {file.fileName}
+                                      </span>
+                                    </div>
+                                  )
+                                })
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fixed bottom: SELECT ALL / CLEAR + DOWNLOAD button */}
+                  {downloadableFiles && downloadableFiles.length > 0 && onDownloadFile && (
+                    <div className="flex-shrink-0 border-t border-border bg-card p-2 space-y-1.5">
+                      {/* SELECT ALL / CLEAR SELECTED */}
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={handleSelectAll}
+                          className="flex-1 py-1 text-xs font-semibold uppercase tracking-wider border border-border rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearSelected}
+                          className="flex-1 py-1 text-xs font-semibold uppercase tracking-wider border border-border rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        >
+                          Clear Selected
+                        </button>
+                      </div>
+                      {/* DOWNLOAD button */}
+                      <button
+                        type="button"
+                        onClick={selectedFileIds.size > 0 ? handleDownloadSelected : undefined}
+                        disabled={isDownloadingAll || selectedFileIds.size === 0}
+                        className={cn(
+                          'w-full py-2 text-xs font-bold uppercase tracking-widest rounded transition-colors',
+                          selectedFileIds.size > 0 && !isDownloadingAll
+                            ? 'bg-green-500 hover:bg-green-600 text-white'
+                            : 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
+                        )}
+                      >
+                        {isDownloadingAll
+                          ? 'Downloading...'
+                          : selectedFileIds.size > 0
+                          ? `Download (${selectedFileIds.size})`
+                          : 'Download'}
+                      </button>
                     </div>
                   )}
-
-                  {/* Video Info */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {hideApprovalGrouping && latestVideo?.versionLabel
-                            ? latestVideo.versionLabel
-                            : `${group.versionCount} ${group.versionCount === 1 ? 'version' : 'versions'}`}
-                        </p>
-                      </div>
-                    </div>
-                    {isActive && (
-                      hasApprovedVideo ? (
-                        <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
-                      ) : (
-                        <Play className="w-4 h-4 shrink-0 text-primary" fill="currentColor" />
-                      )
-                    )}
-                  </div>
-                </button>
-              )
-            }
-
-            return (
-              <>
-                {hideApprovalGrouping && flatAlphabetical.length > 0 && (
-                  <div className="space-y-1 mb-4">
-                    {flatAlphabetical.map(renderVideoButton)}
-                  </div>
-                )}
-
-                {!hideApprovalGrouping && forReview.length > 0 && (
-                  <>
-                    <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      For Review
-                    </div>
-                    <div className="space-y-1 mb-4">
-                      {forReview.map(renderVideoButton)}
-                    </div>
-                  </>
-                )}
-
-                {!hideApprovalGrouping && approved.length > 0 && (
-                  <>
-                    {forReview.length > 0 && (
-                      <div className="border-t border-border my-3" />
-                    )}
-                    <div className="px-3 py-2 text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-2">
-                      <CheckCircle2 className="w-3 h-3" />
-                      Approved
-                    </div>
-                    <div className="space-y-1">
-                      {approved.map(renderVideoButton)}
-                    </div>
-                  </>
-                )}
-
-                {shouldShowAlbums && (
-                  <>
-                    <div className="border-t border-border my-3" />
-                    <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                      <Images className="w-3 h-3" />
-                      Albums
-                    </div>
-                    <div className="space-y-1">
-                      {albumsList.map((a) => {
-                        const isActive = activeAlbumId === a.id
-                        const previewUrl = (a as any)?.thumbnailPhotoUrl as string | null | undefined
-                        const availableContentWidth = sidebarWidth - 48
-                        const containerWidth = Math.max(120, availableContentWidth - 16)
-                        const containerHeight = Math.round(containerWidth * 9 / 16)
-                        return (
-                          <button
-                            key={a.id}
-                            onClick={() => onAlbumSelect?.(a.id)}
-                            className={cn(
-                              'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
-                              'hover:bg-accent hover:text-accent-foreground',
-                              isActive
-                                ? 'bg-primary/10 text-primary font-medium border border-primary/20'
-                                : 'text-foreground'
-                            )}
-                          >
-                            {previewUrl ? (
-                              <div
-                                className="bg-black rounded overflow-hidden relative mx-auto"
-                                style={{ width: containerWidth, height: containerHeight }}
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={previewUrl}
-                                  alt={a.name}
-                                  className="w-full h-full object-cover"
-                                  loading={isActive ? 'eager' : 'lazy'}
-                                />
-                              </div>
-                            ) : (
-                              <div
-                                className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center mx-auto"
-                                style={{ width: containerWidth, height: containerHeight }}
-                              >
-                                <Images className="w-6 h-6 text-muted-foreground" />
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm leading-snug line-clamp-2 break-words">{a.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
-                                </p>
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </>
-                )}
-              </>
-            )
-          })()}
-          </nav>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Resize Handle */}
         <div
           onMouseDown={handleMouseDown}
-          className={cn(
-            'absolute right-0 top-0 bottom-0 w-1 cursor-col-resize',
-            'hover:bg-primary transition-colors',
-            'group'
-          )}
+          className="absolute right-0 top-0 bottom-0 w-[5px] z-20 bg-border hover:bg-primary/20 cursor-col-resize flex items-center justify-center group transition-colors"
         >
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2">
-            <GripVertical className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-          </div>
+          <div className="h-8 w-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
         </div>
       </aside>
 
       {/* Mobile Horizontal Scrollable Row */}
-      <div className="lg:hidden sticky top-0 z-30">
-        <div className="bg-card border-y border-border overflow-hidden">
-          {/* Always-visible heading row */}
+      <div ref={mobileContainerRef} className="lg:hidden sticky top-0 z-30 bg-card border-y border-border">
+          {/* Always-visible heading row — outside overflow-hidden so it is never clipped by the scrollbar */}
           <div className="px-4 py-2 flex items-center justify-between bg-accent/30">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -550,8 +1090,8 @@ export default function VideoSidebar({
 
           {/* Collapsible thumbnails area */}
           <div className={cn(
-            'overflow-hidden transition-all duration-200',
-            isMobileCollapsed ? 'max-h-0 opacity-0' : 'max-h-[500px] opacity-100'
+            'overflow-hidden transition-all duration-200 border-t border-border',
+            isMobileCollapsed ? 'max-h-0 opacity-0' : 'max-h-[800px] opacity-100'
           )}>
             {heading && showProjectHeadingLabel && (
               <div className="px-4 pt-4 pb-3 space-y-3 border-b border-border">
@@ -565,9 +1105,9 @@ export default function VideoSidebar({
                   <button
                     type="button"
                     onClick={onProjectSwitcherOpen}
-                    className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    className="w-full rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground uppercase tracking-wider transition-colors hover:bg-primary/90"
                   >
-                    View Other Projects
+                    Change Project
                   </button>
                 )}
               </div>
@@ -703,8 +1243,59 @@ export default function VideoSidebar({
               })}
             </div>
           </div>
+
+          {/* FILES section (mobile) */}
+          {showFiles && (
+            <div className="border-t border-border">
+              <div className="px-4 py-2 flex items-center justify-between bg-accent/30">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
+                {downloadableFiles && downloadableFiles.length > 0 && onDownloadFile && (
+                  <button
+                    onClick={handleDownloadAll}
+                    disabled={isDownloadingAll}
+                    className="text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground disabled:opacity-50 transition-colors"
+                  >
+                    {isDownloadingAll ? 'Downloading...' : 'Download All'}
+                  </button>
+                )}
+              </div>
+              <div className="max-h-[200px] overflow-y-auto px-4 pb-3">
+                {downloadableFiles && downloadableFiles.length === 0 && (
+                  <p className="text-xs text-muted-foreground py-2">
+                    {hasApprovableVideos
+                      ? 'No videos have been approved for download'
+                      : 'No content currently available for download'}
+                  </p>
+                )}
+                {downloadableFiles && downloadableFiles.length > 0 && downloadableFiles.map((group) => (
+                  <div key={group.name}>
+                    <p className="text-xs font-semibold text-foreground pt-2 pb-0.5">{group.name}</p>
+                    {group.mainFile && (
+                      <button
+                        onClick={() => void onDownloadFile?.(group.mainFile!)}
+                        className="w-full text-left text-xs text-foreground hover:underline truncate block py-0.5"
+                      >
+                        {group.mainFile.fileName}
+                      </button>
+                    )}
+                    {group.subFiles.map((file) => (
+                      <button
+                        key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                        onClick={() => void onDownloadFile?.(file)}
+                        className={cn(
+                          'w-full text-left text-xs text-muted-foreground hover:underline truncate block py-0.5',
+                          group.groupType === 'video' ? 'pl-3' : ''
+                        )}
+                      >
+                        {group.groupType === 'video' ? `- ${file.fileName}` : file.fileName}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           </div>
-        </div>
       </div>
 
     </>

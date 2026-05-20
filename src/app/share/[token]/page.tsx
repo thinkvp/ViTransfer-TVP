@@ -7,7 +7,6 @@ import VideoPlayer from '@/components/VideoPlayer'
 export const dynamic = 'force-dynamic'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
-import { GripVertical } from 'lucide-react'
 import VideoSidebar from '@/components/VideoSidebar'
 import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { OTPInput } from '@/components/OTPInput'
@@ -16,7 +15,8 @@ import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Lock, Check, Mail, KeyRound } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Lock, Check, Mail, KeyRound, Info, Share2 } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -24,6 +24,7 @@ import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
+import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 
 type SwitchableProject = {
   id: string
@@ -82,6 +83,8 @@ export default function SharePage() {
   const [tokensLoading, setTokensLoading] = useState(false)
   const [albums, setAlbums] = useState<any[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [downloadableFiles, setDownloadableFiles] = useState<DownloadableGroup[] | null>(null)
+  const [hasApprovableVideos, setHasApprovableVideos] = useState(false)
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
@@ -92,6 +95,7 @@ export default function SharePage() {
   const [switchProjectsLoading, setSwitchProjectsLoading] = useState(false)
   const [switchProjectsError, setSwitchProjectsError] = useState<string | null>(null)
   const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null)
+  const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
@@ -117,6 +121,29 @@ export default function SharePage() {
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
     return guard ? guard.confirmDiscardDraft() : true
+  }, [])
+
+  // Reset header version when active video changes
+  useEffect(() => {
+    setHeaderVersionId(null)
+  }, [activeVideoName])
+
+  // Sync header version from VideoPlayer / CommentSection events
+  useEffect(() => {
+    const handleVideoChanged = (e: Event) => {
+      const videoId = (e as CustomEvent).detail?.videoId
+      if (videoId) setHeaderVersionId(videoId)
+    }
+    const handleSelectVideo = (e: Event) => {
+      const videoId = (e as CustomEvent).detail?.videoId
+      if (videoId) setHeaderVersionId(videoId)
+    }
+    window.addEventListener('videoChanged', handleVideoChanged)
+    window.addEventListener('selectVideoForComments', handleSelectVideo)
+    return () => {
+      window.removeEventListener('videoChanged', handleVideoChanged)
+      window.removeEventListener('selectVideoForComments', handleSelectVideo)
+    }
   }, [])
 
   // Detect admin session (JWT) so we don't accidentally use a cached guest share token.
@@ -367,6 +394,27 @@ export default function SharePage() {
     }
   }, [token, shareToken, isAdminSession, project, storageKey])
 
+  const fetchDownloadableFiles = useCallback(async (tokenOverride?: string | null) => {
+    if (isGuest) {
+      setDownloadableFiles(null)
+      return
+    }
+    const authToken = tokenOverride || shareToken
+    if (!isAdminSession && !authToken) return
+    try {
+      const res = await apiFetch(`/api/share/${token}/downloadable-files`, {
+        headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setDownloadableFiles(Array.isArray(data.groups) ? data.groups : [])
+        setHasApprovableVideos(!!data.hasApprovableVideos)
+      }
+    } catch {
+      // ignore
+    }
+  }, [token, shareToken, isAdminSession, isGuest])
+
   const fetchSwitchableProjects = useCallback(async (tokenOverride?: string | null) => {
     const authToken = tokenOverride || shareToken
 
@@ -490,6 +538,7 @@ export default function SharePage() {
       // Use the latest persisted token; fall back to current in-memory token.
       const persisted = loadShareToken(storageKey)
       fetchProjectData(persisted || shareToken)
+      void fetchDownloadableFiles(persisted || shareToken)
     }
 
     window.addEventListener('videoApprovalChanged', handleApprovalChanged)
@@ -497,7 +546,7 @@ export default function SharePage() {
       window.removeEventListener('videoApprovalChanged', handleApprovalChanged)
     }
     // Intentionally omit fetchProjectData from deps; it's stable enough for this usage and avoids re-binding.
-  }, [fetchProjectData, shareToken, storageKey])
+  }, [fetchProjectData, fetchDownloadableFiles, shareToken, storageKey])
 
   // Company name and default quality now loaded from project settings
   // This ensures they're only accessible after authentication
@@ -702,6 +751,44 @@ export default function SharePage() {
     const data = await response.json()
     return data.token || ''
   }, [token, shareToken, storageKey])
+
+  const handleDownloadFile = useCallback(async (file: DownloadableFile) => {
+    if (isGuest) return
+    const authHeader: Record<string, string> = !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}
+    try {
+      let url: string
+      if (file.type === 'video') {
+        const r = await apiFetch(`/api/share/${token}/video-token?videoId=${file.videoId}&quality=original`, {
+          headers: authHeader,
+        })
+        const data = await r.json()
+        url = `/api/content/${data.token}?download=true`
+      } else if (file.type === 'asset') {
+        const r = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, {
+          method: 'POST',
+          headers: authHeader,
+        })
+        const data = await r.json()
+        url = data.url
+      } else {
+        const r = await apiFetch(`/api/share/${token}/albums/${file.albumId}/download-zip-token`, {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variant: file.variant }),
+        })
+        const data = await r.json()
+        url = data.url
+      }
+      const a = document.createElement('a')
+      a.href = url
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch {
+      // ignore
+    }
+  }, [token, shareToken, isAdminSession, isGuest])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (project?.enableVideos === false) return videos
@@ -962,6 +1049,15 @@ export default function SharePage() {
     if (!project) return
     void fetchAlbums()
   }, [project, shareToken, fetchAlbums])
+
+  useEffect(() => {
+    if (!project || !isAuthenticated) return
+    if (isGuest) {
+      setDownloadableFiles(null)
+      return
+    }
+    void fetchDownloadableFiles()
+  }, [project, isAuthenticated, isGuest, shareToken, fetchDownloadableFiles])
 
   useEffect(() => {
     if (!project || !isAuthenticated) {
@@ -1413,23 +1509,197 @@ export default function SharePage() {
   // viewport minus the mobile sidebar height, preventing the bottom from being clipped.
   const isVideoOnlyShareMode = (project.hideFeedback || shareOnlyMode) || isGuest
 
+  // Header breadcrumb computed values
+  const activeAlbum = albums.find((a: any) => String(a.id) === activeAlbumId) || null
+  const headerVersion = readyVideos.find((v: any) => v.id === headerVersionId) || readyVideos[0] || null
+  const canSwitchProjects = switchableProjects.length > 0
+  const isOlderVersionSelected = readyVideos.length > 1 && headerVersionId !== null && headerVersionId !== readyVideos[0]?.id
+
+  // Sorted video names for the video dropdown (same order as sidebar)
+  const videoNames = project.videosByName ? (() => {
+    const names = Object.keys(project.videosByName)
+    const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+    const isApprovedGroup = (n: string) => (project.videosByName[n] || []).some((v: any) => v?.approved === true)
+    const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
+    const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
+    return [...forReview, ...approved]
+  })() : []
+  const mediaOptions = [
+    ...videoNames.map((name) => ({ value: `video:${name}`, label: name })),
+    ...albums.map((a: any) => ({ value: `album:${String(a.id)}`, label: String(a.name || '') })),
+  ]
+  const selectedMediaValue = activeAlbumId ? `album:${activeAlbumId}` : `video:${activeVideoName}`
+
   return (
-    <div className={cn(
-      'h-[100dvh] min-h-0 bg-background flex flex-col lg:flex-row lg:overflow-hidden',
-      isVideoOnlyShareMode ? 'overflow-hidden' : 'overflow-y-auto',
-    )}>
+    <div
+      className="h-[100dvh] min-h-0 bg-background flex flex-col overflow-hidden"
+      style={{ '--admin-header-height': '44px' } as React.CSSProperties}
+    >
+      {/* Sticky breadcrumb header — spans full width above sidebar + content */}
+      <div className="flex-shrink-0 h-11 border-b border-border bg-card flex items-center px-4 gap-1.5 text-sm overflow-x-auto z-40">
+
+        {/* Project section */}
+        <span className="text-muted-foreground whitespace-nowrap hidden sm:inline flex-shrink-0">Project:</span>
+        {canSwitchProjects ? (
+          <Select
+            value={String(project.id)}
+            onValueChange={(id) => {
+              if (id === String(project.id)) return
+              const target = switchableProjects.find((p) => p.id === id)
+              if (target) void handleProjectSwitch(target)
+            }}
+          >
+            <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+              <span className="truncate">{project.title}</span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={String(project.id)} disabled>
+                <span className="flex items-center gap-2">
+                  <span>{project.title}</span>
+                  <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', projectStatusBadgeClass(project.status))}>{projectStatusLabel(project.status)}</span>
+                </span>
+              </SelectItem>
+              {switchableProjects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  <span className="flex items-center gap-2">
+                    <span>{p.title}</span>
+                    <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', projectStatusBadgeClass(p.status))}>{projectStatusLabel(p.status)}</span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <span className="text-foreground font-medium whitespace-nowrap flex-shrink-0 max-w-[30%] truncate" title={project.title}>{project.title}</span>
+        )}
+
+        {/* Video / Album section */}
+        {(activeVideoName || activeAlbum) && (
+          <>
+            <span className="text-muted-foreground flex-shrink-0">/</span>
+            {mediaOptions.length > 1 ? (
+              <Select
+                value={selectedMediaValue}
+                onValueChange={(value) => {
+                  if (value.startsWith('video:')) {
+                    handleVideoSelect(value.slice(6))
+                    return
+                  }
+                  if (value.startsWith('album:')) {
+                    handleAlbumSelect(value.slice(6))
+                  }
+                }}
+              >
+                <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {mediaOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : !activeAlbum ? (
+              <span
+                className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[30%] truncate"
+                title={activeVideoName}
+              >
+                {activeVideoName}
+              </span>
+            ) : (
+              <span
+                className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[30%] truncate"
+                title={activeAlbum.name}
+              >
+                {activeAlbum.name}
+              </span>
+            )}
+          </>
+        )}
+
+        {/* Version section */}
+        {!activeAlbumId && readyVideos.length > 0 && (
+          <>
+            <span className="text-muted-foreground flex-shrink-0">/</span>
+            {readyVideos.length > 1 ? (
+              <Select
+                value={headerVersionId || readyVideos[0].id}
+                onValueChange={(videoId) => {
+                  setHeaderVersionId(videoId)
+                  window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
+                  window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId } }))
+                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId, videoVersion: null } }))
+                }}
+              >
+                <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {readyVideos.map((v: any) => (
+                    <SelectItem key={v.id} value={v.id}>{v.versionLabel}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="text-foreground whitespace-nowrap flex-shrink-0">{headerVersion?.versionLabel || '—'}</span>
+            )}
+            {!isVideoOnlyShareMode && (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 flex-shrink-0"
+                onClick={() => window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))}
+                title="Video Information"
+                aria-label="Video Information"
+              >
+                <Info className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            {!isVideoOnlyShareMode && project.guestMode && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 flex-shrink-0 sm:hidden"
+                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  title="Share"
+                  aria-label="Share"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 flex-shrink-0 hidden sm:inline-flex"
+                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  title="Share"
+                  aria-label="Share"
+                >
+                  <Share2 className="w-3.5 h-3.5 mr-1.5" />
+                  Share
+                </Button>
+              </>
+            )}
+            {isOlderVersionSelected && (
+              <span className="text-amber-600 dark:text-amber-400 text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Main content row: sidebar + content area */}
+      <div className={cn(
+        'flex-1 min-h-0 flex flex-col lg:flex-row lg:overflow-hidden',
+        isVideoOnlyShareMode ? 'overflow-hidden' : 'overflow-y-auto',
+      )}>
       {/* Video Sidebar - contains both desktop and mobile versions internally */}
       <VideoSidebar
         videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
         activeVideoName={activeVideoName}
         onVideoSelect={handleVideoSelect}
-        heading={project.title}
-        showProjectHeadingLabel={true}
-        showProjectSwitcher={switchableProjects.length > 0}
-        onProjectSwitcherOpen={() => {
-          setSwitchProjectsError(null)
-          setSwitchProjectsOpen(true)
-        }}
         hideApprovalGrouping={isGuest}
         albums={albums.map((a: any) => ({
           id: String(a.id),
@@ -1445,6 +1715,9 @@ export default function SharePage() {
         hasLogo={hasLogo}
         hasDarkLogo={hasDarkLogo}
         mainCompanyDomain={mainCompanyDomain}
+        downloadableFiles={isGuest ? null : downloadableFiles}
+        onDownloadFile={handleDownloadFile}
+        hasApprovableVideos={hasApprovableVideos}
       />
 
       {/* Main Content Area */}
@@ -1550,6 +1823,7 @@ export default function SharePage() {
             </div>
           )}
         </div>
+      </div>
       </div>
 
       <Dialog modal={false} open={switchProjectsOpen} onOpenChange={setSwitchProjectsOpen}>
@@ -1714,7 +1988,7 @@ function ShareFeedbackGrid({
       const needed = Math.round(el.scrollWidth)
 
       if (Number.isFinite(available) && Number.isFinite(needed) && needed > available + 1) {
-        setCommentInputMinWidth((prev) => Math.max(prev ?? 352, needed))
+        setCommentInputMinWidth((prev) => Math.max(prev ?? 380, needed))
       }
     })
 
@@ -1750,7 +2024,7 @@ function ShareFeedbackGrid({
     const savedWidth = localStorage.getItem('share_comments_width')
     if (savedWidth) {
       const width = parseInt(savedWidth, 10)
-      if (Number.isFinite(width) && width >= 352 && width <= window.innerWidth * 0.6) {
+      if (Number.isFinite(width) && width >= 380 && width <= window.innerWidth * 0.6) {
         setCommentsWidth(width)
       }
     }
@@ -1764,7 +2038,7 @@ function ShareFeedbackGrid({
 
       const rect = feedbackContainerRef.current.getBoundingClientRect()
       const nextWidth = rect.right - e.clientX
-      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 352
+      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 380
       const maxWidth = Math.min(rect.width * 0.6, window.innerWidth * 0.6)
 
       const clamped = Math.max(minWidth, Math.min(maxWidth, nextWidth))
@@ -1990,7 +2264,7 @@ function ShareFeedbackGrid({
             />
           </div>
 
-          {!commentInputInRightColumn && (
+          {!commentInputInRightColumn && !commentsDisabled && (
             <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
@@ -2057,16 +2331,9 @@ function ShareFeedbackGrid({
           {/* Horizontal resize handle (desktop only) */}
           <div
             onMouseDown={startResizeComments}
-            className={cn(
-              'hidden lg:block',
-              'absolute left-0 top-0 bottom-0 w-1 cursor-col-resize select-none z-10',
-              'hover:bg-primary transition-colors',
-              'group'
-            )}
+            className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-border hover:bg-primary/20 cursor-col-resize select-none z-10 group transition-colors"
           >
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 translate-x-1/2">
-              <GripVertical className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-            </div>
+            <div className="h-8 w-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
           </div>
 
           <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
@@ -2095,12 +2362,14 @@ function ShareFeedbackGrid({
               hideInput={true}
               showThemeToggle={true}
               largeAvatars={true}
+              hideVideoTitle={true}
+              cardClassName={commentInputInRightColumn && !commentsDisabled ? 'rounded-b-none' : undefined}
               management={management as any}
             />
           </div>
 
           {commentInputInRightColumn && !commentsDisabled ? (
-            <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
+            <div ref={commentInputMeasureRef} className="flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
                 onCommentChange={management.handleCommentChange}
@@ -2133,7 +2402,7 @@ function ShareFeedbackGrid({
                 commentsDisabled={commentsDisabled}
                 showShortcutsButton={true}
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
-                containerClassName="border border-border rounded-lg"
+                containerClassName="border border-border rounded-b-lg rounded-t-none border-t-0"
                 showTopBorder={false}
                 onMoveColumn={() => {
                   setCommentInputPlacementManuallySet(true)

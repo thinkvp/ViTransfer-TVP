@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath } from '@/lib/storage'
+import { isS3Mode, s3DownloadFile, s3FileExists } from '@/lib/s3-storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 import dns from 'dns/promises'
@@ -190,6 +191,39 @@ function serveLogo(
 }
 
 async function serveUploadedLogo(logoPath: string) {
+  if (isS3Mode()) {
+    const exists = await s3FileExists(logoPath)
+    if (!exists) {
+      return NextResponse.json({ error: 'Logo not found' }, { status: 404 })
+    }
+    const { stream: s3Stream, contentLength } = await s3DownloadFile(logoPath)
+    let closed = false
+    const readableStream = new ReadableStream({
+      start(controller) {
+        s3Stream.on('data', (chunk) => {
+          if (!closed) controller.enqueue(chunk)
+        })
+        s3Stream.on('end', () => {
+          if (!closed) { closed = true; controller.close() }
+        })
+        s3Stream.on('error', (err) => {
+          if (!closed) { closed = true; controller.error(err) }
+        })
+      },
+      cancel() {
+        closed = true
+        s3Stream.destroy()
+      },
+    })
+    const headers: Record<string, string> = {
+      'Content-Type': contentTypeFromPath(logoPath),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'public, max-age=3600',
+    }
+    if (contentLength > 0) headers['Content-Length'] = contentLength.toString()
+    return new NextResponse(readableStream, { headers })
+  }
+
   const fullPath = getFilePath(logoPath)
   const stat = await fs.promises.stat(fullPath).catch(() => null)
   if (!stat || !stat.isFile()) {

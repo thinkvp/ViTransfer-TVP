@@ -84,6 +84,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'Approval is disabled for this video version' }, { status: 403 })
     }
 
+    // Idempotency guard: if this exact video is already approved, return success without
+    // re-sending notifications. Prevents duplicate admin/client emails when the approve
+    // endpoint is called more than once for the same video (e.g. retry, double-click, or
+    // simultaneous sessions).
+    if ((selectedVideo as any).approved === true) {
+      console.log(`[APPROVAL] Video ${selectedVideoId} is already approved — skipping duplicate notification`)
+      return NextResponse.json({ message: 'Video already approved' })
+    }
+
     // IMPORTANT: When approving a video, unapprove all other versions of the SAME video
     // This ensures only ONE version per video name can be approved at a time
     await prisma.video.updateMany({

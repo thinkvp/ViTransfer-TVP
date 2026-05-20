@@ -67,6 +67,25 @@ async function resolveAlbumCandidates(albumId: string): Promise<AlbumPhotoCandid
   return candidates
 }
 
+async function rescheduleAlbumThumbnailJob(params: {
+  albumThumbnailJobId: string
+  albumId: string
+  delayMs: number
+}) {
+  const { albumThumbnailJobId, albumId, delayMs } = params
+
+  await prisma.albumThumbnailJob.update({
+    where: { id: albumThumbnailJobId },
+    data: {
+      status: 'PENDING',
+      error: null,
+      completedAt: null,
+    },
+  })
+
+  await enqueueAlbumThumbnailJob({ albumId, delayMs })
+}
+
 async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string): Promise<{ processedBytes: bigint; error?: string }> {
   const thumbnailStoragePath = photo.thumbnailStoragePath || buildAlbumPhotoThumbnailStoragePath(photo.storagePath)
 
@@ -225,7 +244,20 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
     },
   })
 
+  const uploadingCountAtStart = await prisma.albumPhoto.count({
+    where: { albumId: album.id, status: 'UPLOADING' },
+  })
+
   if (candidates.length === 0) {
+    if (uploadingCountAtStart > 0) {
+      await rescheduleAlbumThumbnailJob({
+        albumThumbnailJobId,
+        albumId: album.id,
+        delayMs: 2_000,
+      })
+      return
+    }
+
     await prisma.albumThumbnailJob.update({
       where: { id: albumThumbnailJobId },
       data: {
@@ -257,19 +289,35 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
     })
   }
 
-  const pendingCount = await prisma.albumPhoto.count({
-    where: {
+  const [uploadingCount, pendingCount] = await Promise.all([
+    prisma.albumPhoto.count({
+      where: { albumId: album.id, status: 'UPLOADING' },
+    }),
+    prisma.albumPhoto.count({
+      where: {
+        albumId: album.id,
+        status: 'READY',
+        OR: [
+          { thumbnailStatus: 'PENDING' },
+          { thumbnailStoragePath: null },
+        ],
+      },
+    }),
+  ])
+
+  if (uploadingCount > 0 || pendingCount > 0) {
+    await rescheduleAlbumThumbnailJob({
+      albumThumbnailJobId,
       albumId: album.id,
-      status: 'READY',
-      OR: [
-        { thumbnailStatus: 'PENDING' },
-        { thumbnailStoragePath: null },
-      ],
-    },
-  })
+      delayMs: 2_000,
+    })
+    return
+  }
 
   await prisma.albumThumbnailJob.update({
-    where: { id: albumThumbnailJobId },
+    where: {
+      id: albumThumbnailJobId,
+    },
     data: {
       status: failures.length > 0 ? 'FAILED' : 'COMPLETED',
       error: failures.length > 0 ? failures.slice(0, 10).join('\n').substring(0, 2000) : null,
@@ -278,8 +326,4 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
       completedAt: new Date(),
     },
   })
-
-  if (pendingCount > 0) {
-    await enqueueAlbumThumbnailJob({ albumId: album.id, delayMs: 2_000 }).catch(() => {})
-  }
 }

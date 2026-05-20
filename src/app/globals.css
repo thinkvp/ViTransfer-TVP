@@ -124,9 +124,9 @@ input.no-picker-icon::-webkit-inner-spin-button {
     --ring: 211 100% 50%;
 
     /* Border radius values */
-    --radius: 0.875rem;
-    --radius-sm: 0.5rem;
-    --radius-lg: 1.25rem;
+    --radius: 0.4375rem;
+    --radius-sm: 0.25rem;
+    --radius-lg: 0.625rem;
     --radius-full: 9999px;
 
     /* Shadow definitions - soft, refined */
