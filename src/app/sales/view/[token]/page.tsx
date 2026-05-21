@@ -159,20 +159,9 @@ export default async function SalesDocPublicViewPage(
     where: { id: 'default' },
     select: {
       companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true,
-      darkLogoEnabled: true, darkLogoPath: true, darkLogoMode: true, darkLogoUrl: true,
     },
   })
   const showLogo = hasConfiguredLogo(logoSettings)
-
-  // The invoice/quote header uses bg-foreground text-background, so it inverts
-  // with the theme: dark surface in light mode, light surface in dark mode.
-  // When a separate dark-mode logo exists we render both and CSS-toggle them:
-  //   Light mode (dark header) → show dark logo   (dark:hidden)
-  //   Dark mode (light header) → show normal logo (hidden dark:block)
-  const hasDarkLogo = !!(logoSettings?.darkLogoEnabled && (
-    logoSettings.darkLogoPath ||
-    (logoSettings.darkLogoMode === 'LINK' && typeof logoSettings.darkLogoUrl === 'string' && logoSettings.darkLogoUrl.trim())
-  ))
 
   const businessName = safeString(settings?.businessName) || 'Business'
   const address = safeString(settings?.address)
@@ -344,37 +333,14 @@ export default async function SalesDocPublicViewPage(
               <div className="min-w-0">
                 {showLogo && (
                   <div className="mb-3">
-                    {hasDarkLogo ? (
-                      <>
-                        {/* Light mode → dark header → show dark logo */}
-                        <Image
-                          src="/api/branding/dark-logo"
-                          alt="Company logo"
-                          width={264}
-                          height={88}
-                          className="h-11 w-auto object-contain dark:hidden"
-                          priority
-                        />
-                        {/* Dark mode → light header → show normal logo */}
-                        <Image
-                          src="/api/branding/logo"
-                          alt="Company logo"
-                          width={264}
-                          height={88}
-                          className="h-11 w-auto object-contain hidden dark:block"
-                          priority
-                        />
-                      </>
-                    ) : (
-                      <Image
-                        src="/api/branding/logo"
-                        alt="Company logo"
-                        width={264}
-                        height={88}
-                        className="h-11 w-auto object-contain"
-                        priority
-                      />
-                    )}
+                    <Image
+                      src="/api/branding/logo"
+                      alt="Company logo"
+                      width={264}
+                      height={88}
+                      className="h-11 w-auto object-contain"
+                      priority
+                    />
                   </div>
                 )}
                 <div className="text-lg font-semibold break-words">{businessName}</div>

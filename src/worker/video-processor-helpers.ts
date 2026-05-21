@@ -486,7 +486,8 @@ export async function processTimelinePreviews(
   metadata: VideoMetadata,
   tempFiles: TempFiles
 ): Promise<{ vttPath: string; spritesPath: string; ready: boolean } | null> {
-  const intervalSeconds = 10
+  // Capture timeline thumbnails twice as often for denser hover previews.
+  const intervalSeconds = 5
   const tileColumns = 10
   const tileRows = 10
   const framesPerSprite = tileColumns * tileRows

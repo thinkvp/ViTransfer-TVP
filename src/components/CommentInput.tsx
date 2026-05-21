@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
-import { Send, Paperclip, X, Clock, ChevronDown, Check, ArrowLeft, ArrowRight, Trash2 } from 'lucide-react'
+import { Send, Paperclip, X, Clock, ChevronDown, Check, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
@@ -69,10 +69,6 @@ interface CommentInputProps {
   containerStyle?: CSSProperties
   showTopBorder?: boolean
 
-  // Optional: move the comment input between columns (share pages, desktop only)
-  moveColumnDirection?: 'left' | 'right'
-  onMoveColumn?: () => void
-
   // Optional: portal dialogs into a specific container (needed for element fullscreen)
   dialogPortalContainer?: HTMLElement | null
 
@@ -116,8 +112,6 @@ export default function CommentInput({
   containerClassName,
   containerStyle,
   showTopBorder = true,
-  moveColumnDirection = 'right',
-  onMoveColumn,
   dialogPortalContainer = null,
   isInFullscreenMode = false,
 }: CommentInputProps) {
@@ -543,58 +537,7 @@ export default function CommentInput({
                 </DialogContent>
               </Dialog>
 
-              {onMoveColumn ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="hidden lg:inline-flex h-9 w-9 flex-shrink-0"
-                  onClick={onMoveColumn}
-                  aria-label={
-                    moveColumnDirection === 'right'
-                      ? 'Move comment box to right column'
-                      : 'Move comment box to left column'
-                  }
-                  title={
-                    moveColumnDirection === 'right'
-                      ? 'Move comment box to right column'
-                      : 'Move comment box to left column'
-                  }
-                >
-                  {moveColumnDirection === 'right' ? (
-                    <ArrowRight className="h-4 w-4" />
-                  ) : (
-                    <ArrowLeft className="h-4 w-4" />
-                  )}
-                </Button>
-              ) : null}
             </div>
-          ) : null}
-
-          {!showAuthorInput && onMoveColumn ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="ml-auto hidden lg:inline-flex h-9 w-9 flex-shrink-0"
-              onClick={onMoveColumn}
-              aria-label={
-                moveColumnDirection === 'right'
-                  ? 'Move comment box to right column'
-                  : 'Move comment box to left column'
-              }
-              title={
-                moveColumnDirection === 'right'
-                  ? 'Move comment box to right column'
-                  : 'Move comment box to left column'
-              }
-            >
-              {moveColumnDirection === 'right' ? (
-                <ArrowRight className="h-4 w-4" />
-              ) : (
-                <ArrowLeft className="h-4 w-4" />
-              )}
-            </Button>
           ) : null}
         </div>
       )}

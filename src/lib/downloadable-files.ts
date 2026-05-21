@@ -3,6 +3,10 @@ export type DownloadableFileType = 'video' | 'asset' | 'album-zip'
 export interface DownloadableFile {
   type: DownloadableFileType
   fileName: string
+  /** Optional file size in bytes. */
+  fileSizeBytes?: number | string
+  /** Optional media duration in seconds (videos). */
+  durationSeconds?: number
   /** Set for type 'video' and 'asset' */
   videoId?: string
   /** Set for type 'asset' */

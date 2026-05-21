@@ -688,6 +688,21 @@ export default function VideoPlayer({
   const handleApprovedDownloadClick = async () => {
     const video = selectedVideo
     if (!video?.id) return
+
+    // Share view: route users to Files and open the selected video's folder.
+    if (!isAdmin && !isGuest) {
+      const folderName = String((video as any)?.versionLabel || (video as any)?.name || '').trim()
+      if (!folderName) return
+
+      window.dispatchEvent(new CustomEvent('requestExitVideoFullscreen'))
+      window.dispatchEvent(
+        new CustomEvent('shareOpenFilesForVideo', {
+          detail: { folderName },
+        })
+      )
+      return
+    }
+
     if (!approvedDownloadUrl) return
 
     // Always show the modal so clients can clearly choose video-only vs assets.

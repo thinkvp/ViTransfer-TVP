@@ -1,16 +1,63 @@
 'use client'
 
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
-import { Play, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, Images, Check, Download } from 'lucide-react'
+import {
+  Play,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle2,
+  Images,
+  Check,
+  Download,
+  Folder,
+  File,
+  FileArchive,
+  FileAudio,
+  FileImage,
+  FileText,
+  FileVideo,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
-import { useTheme } from '@/hooks/useTheme'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
+import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 
 interface VideoGroup {
   name: string
   videos: any[]
   versionCount: number
+}
+
+// Keep thumbnails aspect-correct inside a 16:9 container.
+const calculateThumbnailDimensions = (
+  videoWidth: number | null,
+  videoHeight: number | null,
+  containerWidth: number,
+  containerHeight: number = Math.round(containerWidth * 9 / 16)
+): { width: number; height: number; top: number; left: number } => {
+  const vidWidth = videoWidth || 16
+  const vidHeight = videoHeight || 9
+
+  const videoAspectRatio = vidWidth / vidHeight
+  const containerAspectRatio = containerWidth / containerHeight
+
+  let finalWidth: number
+  let finalHeight: number
+
+  if (videoAspectRatio > containerAspectRatio) {
+    finalWidth = containerWidth
+    finalHeight = Math.round(containerWidth / videoAspectRatio)
+  } else {
+    finalHeight = containerHeight
+    finalWidth = Math.round(containerHeight * videoAspectRatio)
+  }
+
+  const top = Math.round((containerHeight - finalHeight) / 2)
+  const left = Math.round((containerWidth - finalWidth) / 2)
+
+  return { width: finalWidth, height: finalHeight, top, left }
 }
 
 interface VideoSidebarProps {
@@ -28,8 +75,6 @@ interface VideoSidebarProps {
   initialCollapsed?: boolean
   /** If true, show the company logo at the top of the desktop sidebar */
   hasLogo?: boolean
-  /** Whether a separate dark-mode logo has been configured */
-  hasDarkLogo?: boolean
   /** Main company domain — makes the logo a clickable link (opens in new tab) */
   mainCompanyDomain?: string | null
   showProjectHeadingLabel?: boolean
@@ -39,43 +84,22 @@ interface VideoSidebarProps {
   downloadableFiles?: DownloadableGroup[] | null
   /** Called when the user clicks a file to download. Should fetch a token and trigger the download. */
   onDownloadFile?: (file: DownloadableFile) => Promise<void>
+  /** Called when the user triggers a multi-file download. */
+  onDownloadFiles?: (files: DownloadableFile[]) => Promise<void>
   /** Whether the project has any videos with allowApproval=true, used for empty state messages. */
   hasApprovableVideos?: boolean
+  /** Whether the desktop tab bar should be rendered inside the sidebar. */
+  showDesktopTabBar?: boolean
+  /** Controlled desktop mode; when omitted, sidebar manages it internally. */
+  desktopActiveTab?: 'for-review' | 'files'
+  /** Controlled desktop mode setter. */
+  onDesktopActiveTabChange?: (tab: 'for-review' | 'files') => void
+  /** Controlled selected file IDs for files mode. */
+  selectedFileIds?: Set<string>
+  /** Controlled selected file IDs setter. */
+  onSelectedFileIdsChange?: React.Dispatch<React.SetStateAction<Set<string>>>
 }
 
-// Helper function to calculate thumbnail dimensions maintaining aspect ratio within 16:9
-const calculateThumbnailDimensions = (
-  videoWidth: number | null,
-  videoHeight: number | null,
-  containerWidth: number,
-  containerHeight: number = Math.round(containerWidth * 9 / 16)
-): { width: number; height: number; top: number; left: number } => {
-  // Default to 16:9 if dimensions not available
-  const vidWidth = videoWidth || 16
-  const vidHeight = videoHeight || 9
-
-  const videoAspectRatio = vidWidth / vidHeight
-  const containerAspectRatio = containerWidth / containerHeight
-
-  let finalWidth: number
-  let finalHeight: number
-
-  // If video is wider than container, constrain by width
-  if (videoAspectRatio > containerAspectRatio) {
-    finalWidth = containerWidth
-    finalHeight = Math.round(containerWidth / videoAspectRatio)
-  } else {
-    // If video is taller than container, constrain by height
-    finalHeight = containerHeight
-    finalWidth = Math.round(containerHeight * videoAspectRatio)
-  }
-
-  // Center the thumbnail within the container
-  const top = Math.round((containerHeight - finalHeight) / 2)
-  const left = Math.round((containerWidth - finalWidth) / 2)
-
-  return { width: finalWidth, height: finalHeight, top, left }
-}
 
 export default function VideoSidebar({
   videosByName,
@@ -91,17 +115,21 @@ export default function VideoSidebar({
   className,
   initialCollapsed = true,
   hasLogo = false,
-  hasDarkLogo = false,
   mainCompanyDomain,
   showProjectHeadingLabel = false,
   showProjectSwitcher = false,
   onProjectSwitcherOpen,
   downloadableFiles,
   onDownloadFile,
+  onDownloadFiles,
   hasApprovableVideos = false,
+  showDesktopTabBar = true,
+  desktopActiveTab,
+  onDesktopActiveTabChange,
+  selectedFileIds,
+  onSelectedFileIdsChange,
 }: VideoSidebarProps) {
-  const { isDark } = useTheme()
-  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
+  const logoSrc = '/api/branding/logo'
   const [isCollapsed, setIsCollapsed] = useState(initialCollapsed)
   const [isMobileCollapsed, setIsMobileCollapsed] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(256) // Default 256px (w-64)
@@ -110,12 +138,26 @@ export default function VideoSidebar({
   const [hasManualRatio, setHasManualRatio] = useState(false)
   const [isDraggingDivider, setIsDraggingDivider] = useState(false)
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
-  const [desktopActiveTab, setDesktopActiveTab] = useState<'for-review' | 'files'>('for-review')
-  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
+  const [localDesktopActiveTab, setLocalDesktopActiveTab] = useState<'for-review' | 'files'>('for-review')
+  const [localSelectedFileIds, setLocalSelectedFileIds] = useState<Set<string>>(new Set())
   const sidebarRef = useRef<HTMLElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const mobileContainerRef = useRef<HTMLDivElement>(null)
-  const [thumbnailDimensions, setThumbnailDimensions] = useState<Record<string, any>>({})
+
+  const desktopActiveTabValue = desktopActiveTab ?? localDesktopActiveTab
+  const setDesktopActiveTabValue = onDesktopActiveTabChange ?? setLocalDesktopActiveTab
+  const selectedFileIdsValue = selectedFileIds ?? localSelectedFileIds
+  const setSelectedFileIdsValue = onSelectedFileIdsChange ?? setLocalSelectedFileIds
+
+  const getFileIcon = (file: DownloadableFile) => {
+    const kind = getDownloadableFileKind(file)
+    if (kind === 'video') return FileVideo
+    if (kind === 'image') return FileImage
+    if (kind === 'audio') return FileAudio
+    if (kind === 'archive') return FileArchive
+    if (kind === 'document') return FileText
+    return File
+  }
 
   const safeVideosByName = videosByName || {}
   const videoGroups: VideoGroup[] = Object.entries(safeVideosByName).map(([name, videos]) => ({
@@ -153,28 +195,6 @@ export default function VideoSidebar({
       }
     }
   }, [])
-
-  // Calculate thumbnail dimensions when sidebar width changes
-  useEffect(() => {
-    const dims: Record<string, any> = {}
-    // Account for: nav padding (12px left + 12px right) + button padding (12px left + 12px right) = 48px
-    const containerWidth = sidebarWidth - 48
-    const containerHeight = Math.round(containerWidth * 9 / 16)
-
-    for (const [videoName, videos] of Object.entries(videosByName || {})) {
-      const approvedVideo = videos.find((v: any) => v.approved === true)
-      const displayVideo = approvedVideo || videos[0]
-      if (displayVideo) {
-        dims[videoName] = calculateThumbnailDimensions(
-          displayVideo.width || displayVideo.videoWidth,
-          displayVideo.height || displayVideo.videoHeight,
-          containerWidth,
-          containerHeight
-        )
-      }
-    }
-    setThumbnailDimensions(dims)
-  }, [sidebarWidth, videosByName])
 
   // Handle mouse move for resizing
   useEffect(() => {
@@ -255,25 +275,40 @@ export default function VideoSidebar({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isMobileCollapsed])
 
+  const queueSidebarDownloads = useCallback(async (files: DownloadableFile[]) => {
+    if (!files.length) return
+
+    if (onDownloadFiles) {
+      await onDownloadFiles(files)
+      return
+    }
+
+    if (!onDownloadFile) return
+
+    for (let i = 0; i < files.length; i += 1) {
+      await onDownloadFile(files[i])
+      if (i < files.length - 1) {
+        await new Promise<void>((r) => setTimeout(r, 350))
+      }
+    }
+  }, [onDownloadFile, onDownloadFiles])
+
   const handleDownloadAll = useCallback(async () => {
-    if (!downloadableFiles || !onDownloadFile) return
+    if (!downloadableFiles || (!onDownloadFile && !onDownloadFiles)) return
     setIsDownloadingAll(true)
     try {
       const allFiles: DownloadableFile[] = downloadableFiles.flatMap((g) => [
         ...(g.mainFile ? [g.mainFile] : []),
         ...g.subFiles,
       ])
-      for (const file of allFiles) {
-        await onDownloadFile(file)
-        await new Promise<void>((r) => setTimeout(r, 500))
-      }
+      await queueSidebarDownloads(allFiles)
     } finally {
       setIsDownloadingAll(false)
     }
-  }, [downloadableFiles, onDownloadFile])
+  }, [downloadableFiles, onDownloadFile, onDownloadFiles, queueSidebarDownloads])
 
   const handleDownloadSelected = useCallback(async () => {
-    if (!downloadableFiles || !onDownloadFile || selectedFileIds.size === 0) return
+    if (!downloadableFiles || (!onDownloadFile && !onDownloadFiles) || selectedFileIdsValue.size === 0) return
     setIsDownloadingAll(true)
     try {
       const allFiles: DownloadableFile[] = downloadableFiles.flatMap((g) => [
@@ -281,26 +316,26 @@ export default function VideoSidebar({
         ...g.subFiles,
       ])
       const toDownload = allFiles.filter((file) => {
-        const key = file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName)
-        return selectedFileIds.has(key)
+        const key = getDownloadableFileKey(file)
+        return selectedFileIdsValue.has(key)
       })
-      await Promise.all(toDownload.map((file) => onDownloadFile(file).catch(() => undefined)))
+      await queueSidebarDownloads(toDownload)
     } finally {
       setIsDownloadingAll(false)
     }
-  }, [downloadableFiles, onDownloadFile, selectedFileIds])
+  }, [downloadableFiles, onDownloadFile, onDownloadFiles, queueSidebarDownloads, selectedFileIdsValue])
 
   const handleSelectAll = useCallback(() => {
     if (!downloadableFiles) return
     const allKeys = downloadableFiles
       .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
-      .map((file) => file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName))
-    setSelectedFileIds(new Set(allKeys))
-  }, [downloadableFiles])
+      .map((file) => getDownloadableFileKey(file))
+    setSelectedFileIdsValue(new Set(allKeys))
+  }, [downloadableFiles, setSelectedFileIdsValue])
 
   const handleClearSelected = useCallback(() => {
-    setSelectedFileIds(new Set())
-  }, [])
+    setSelectedFileIdsValue(new Set())
+  }, [setSelectedFileIdsValue])
 
   const showFiles = downloadableFiles !== undefined && downloadableFiles !== null
 
@@ -332,7 +367,6 @@ export default function VideoSidebar({
     const approvedVideo = group.videos.find((v: any) => v.approved === true)
     const displayVideo = approvedVideo || latestVideo
     const thumbnailUrl = displayVideo?.thumbnailUrl
-    const dims = thumbnailDimensions[group.name]
     const availableContentWidth = sidebarWidth - 48
     const containerWidth = Math.max(120, availableContentWidth - 16)
     const containerHeight = Math.round(containerWidth * 9 / 16)
@@ -344,21 +378,19 @@ export default function VideoSidebar({
       ? [...(downloadGroup.mainFile ? [downloadGroup.mainFile] : []), ...downloadGroup.subFiles]
       : []
 
-    const thumbnailEl = thumbnailUrl && dims ? (
+    const thumbnailEl = thumbnailUrl ? (
       <div
         className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto relative"
         style={{ width: containerWidth, height: containerHeight }}
       >
-        <div className="relative" style={{ width: dims.width, height: dims.height }}>
-          <Image
-            src={thumbnailUrl}
-            alt={group.name}
-            fill
-            className="object-cover"
-            unoptimized
-            onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
-          />
-        </div>
+        <Image
+          src={thumbnailUrl}
+          alt={group.name}
+          fill
+          className="object-contain"
+          unoptimized
+          onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
+        />
       </div>
     ) : null
 
@@ -556,7 +588,7 @@ export default function VideoSidebar({
         ref={sidebarRef}
         style={{ width: `${sidebarWidth}px` }}
         className={cn(
-          'bg-card border border-border relative rounded-lg',
+          'bg-card border border-border relative rounded-none',
           'overflow-hidden min-h-0',
           // Default to full viewport height (minus admin header). Callers can override via className.
           'h-[calc(100dvh-var(--admin-header-height,0px))]',
@@ -653,7 +685,7 @@ export default function VideoSidebar({
                   >
                     <div className="flex-shrink-0 bg-card px-3 py-2 flex items-center justify-between border-b border-border">
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
-                      {downloadableFiles && downloadableFiles.length > 0 && onDownloadFile && (
+                      {downloadableFiles && downloadableFiles.length > 0 && (onDownloadFile || onDownloadFiles) && (
                         <button
                           onClick={handleDownloadAll}
                           disabled={isDownloadingAll}
@@ -710,36 +742,38 @@ export default function VideoSidebar({
           ) : (
             /* ── ADMIN / REVIEW: tab-based layout ── */
             <>
-              {/* Tab bar — two equal-width tabs */}
-              <div className="flex flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setDesktopActiveTab('for-review')}
-                  className={cn(
-                    'flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors',
-                    desktopActiveTab === 'for-review'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
-                  )}
-                >
-                  View
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDesktopActiveTab('files')}
-                  className={cn(
-                    'flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors border-l border-border/50',
-                    desktopActiveTab === 'files'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
-                  )}
-                >
-                  Files
-                </button>
-              </div>
+              {/* Optional tab bar — can be moved to page header via controlled props */}
+              {showDesktopTabBar && (
+                <div className="flex flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setDesktopActiveTabValue('for-review')}
+                    className={cn(
+                      'flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors',
+                      desktopActiveTabValue === 'for-review'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDesktopActiveTabValue('files')}
+                    className={cn(
+                      'flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors border-l border-border/50',
+                      desktopActiveTabValue === 'files'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    Files
+                  </button>
+                </div>
+              )}
 
               {/* FOR REVIEW tab */}
-              {desktopActiveTab === 'for-review' && (
+              {desktopActiveTabValue === 'for-review' && (
                 <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 mr-[5px]">
                   <nav className="p-3">
                     {/* FOR REVIEW videos — no heading, the tab label is enough */}
@@ -784,7 +818,7 @@ export default function VideoSidebar({
               )}
 
               {/* FILES tab */}
-              {desktopActiveTab === 'files' && (
+              {desktopActiveTabValue === 'files' && (
                 <div className="flex flex-col flex-1 min-h-0">
                   {/* Scrollable file list */}
                   <div className="overflow-y-auto overflow-x-hidden flex-1 mr-[5px]">
@@ -798,11 +832,9 @@ export default function VideoSidebar({
                           const groupFiles: DownloadableFile[] = dlGroup
                             ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                             : []
-                          const groupFileKeys = groupFiles.map((f) =>
-                            f.assetId ?? (f.albumId ? `${f.albumId}-${f.variant}` : f.videoId ?? f.fileName)
-                          )
-                          const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIds.has(k))
-                          const someGroupSelected = groupFileKeys.some((k) => selectedFileIds.has(k))
+                          const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
+                          const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
+                          const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
                           return (
                             <div key={vg.name}>
                               {/* Group header */}
@@ -813,7 +845,7 @@ export default function VideoSidebar({
                                   disabled={groupFileKeys.length === 0}
                                   ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
                                   onChange={() => {
-                                    setSelectedFileIds((prev) => {
+                                    setSelectedFileIdsValue((prev) => {
                                       const next = new Set(prev)
                                       if (allGroupSelected) {
                                         groupFileKeys.forEach((k) => next.delete(k))
@@ -828,14 +860,16 @@ export default function VideoSidebar({
                                     groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                                   )}
                                 />
+                                <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
                                 <span className="text-xs font-semibold text-foreground truncate">{vg.name}</span>
                               </div>
                               {groupFiles.length === 0 ? (
                                 <p className="pl-8 pr-3 pb-2 text-xs text-muted-foreground/70 italic">Video is not approved.</p>
                               ) : (
                                 groupFiles.map((file) => {
-                                  const fileKey = file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName)
-                                  const isChecked = selectedFileIds.has(fileKey)
+                                  const fileKey = getDownloadableFileKey(file)
+                                  const isChecked = selectedFileIdsValue.has(fileKey)
+                                  const FileIcon = getFileIcon(file)
                                   const isSubFile = file !== dlGroup?.mainFile
                                   return (
                                     <div
@@ -849,7 +883,7 @@ export default function VideoSidebar({
                                         type="checkbox"
                                         checked={isChecked}
                                         onChange={() => {
-                                          setSelectedFileIds((prev) => {
+                                          setSelectedFileIdsValue((prev) => {
                                             const next = new Set(prev)
                                             if (next.has(fileKey)) next.delete(fileKey)
                                             else next.add(fileKey)
@@ -858,6 +892,7 @@ export default function VideoSidebar({
                                         }}
                                         className="w-3.5 h-3.5 shrink-0 rounded accent-primary cursor-pointer"
                                       />
+                                      <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                                       <span
                                         className="flex-1 text-xs text-muted-foreground truncate py-0.5 cursor-default"
                                         title={file.fileName}
@@ -878,11 +913,9 @@ export default function VideoSidebar({
                           const groupFiles: DownloadableFile[] = dlGroup
                             ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                             : []
-                          const groupFileKeys = groupFiles.map((f) =>
-                            f.assetId ?? (f.albumId ? `${f.albumId}-${f.variant}` : f.videoId ?? f.fileName)
-                          )
-                          const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIds.has(k))
-                          const someGroupSelected = groupFileKeys.some((k) => selectedFileIds.has(k))
+                          const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
+                          const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
+                          const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
                           return (
                             <div key={a.id}>
                               {/* Album header */}
@@ -893,7 +926,7 @@ export default function VideoSidebar({
                                   disabled={groupFileKeys.length === 0}
                                   ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
                                   onChange={() => {
-                                    setSelectedFileIds((prev) => {
+                                    setSelectedFileIdsValue((prev) => {
                                       const next = new Set(prev)
                                       if (allGroupSelected) {
                                         groupFileKeys.forEach((k) => next.delete(k))
@@ -908,14 +941,16 @@ export default function VideoSidebar({
                                     groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                                   )}
                                 />
+                                <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
                                 <span className="text-xs font-semibold text-foreground truncate">{a.name}</span>
                               </div>
                               {groupFiles.length === 0 ? (
                                 <p className="pl-8 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                               ) : (
                                 groupFiles.map((file) => {
-                                  const fileKey = file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant}` : file.videoId ?? file.fileName)
-                                  const isChecked = selectedFileIds.has(fileKey)
+                                  const fileKey = getDownloadableFileKey(file)
+                                  const isChecked = selectedFileIdsValue.has(fileKey)
+                                  const FileIcon = getFileIcon(file)
                                   return (
                                     <div
                                       key={fileKey}
@@ -925,7 +960,7 @@ export default function VideoSidebar({
                                         type="checkbox"
                                         checked={isChecked}
                                         onChange={() => {
-                                          setSelectedFileIds((prev) => {
+                                          setSelectedFileIdsValue((prev) => {
                                             const next = new Set(prev)
                                             if (next.has(fileKey)) next.delete(fileKey)
                                             else next.add(fileKey)
@@ -934,6 +969,7 @@ export default function VideoSidebar({
                                         }}
                                         className="w-3.5 h-3.5 shrink-0 rounded accent-primary cursor-pointer"
                                       />
+                                      <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                                       <span
                                         className="flex-1 text-xs text-muted-foreground truncate py-0.5 cursor-default"
                                         title={file.fileName}
@@ -952,7 +988,7 @@ export default function VideoSidebar({
                   </div>
 
                   {/* Fixed bottom: SELECT ALL / CLEAR + DOWNLOAD button */}
-                  {downloadableFiles && downloadableFiles.length > 0 && onDownloadFile && (
+                  {downloadableFiles && downloadableFiles.length > 0 && (onDownloadFile || onDownloadFiles) && (
                     <div className="flex-shrink-0 border-t border-border bg-card p-2 space-y-1.5">
                       {/* SELECT ALL / CLEAR SELECTED */}
                       <div className="flex gap-1">
@@ -974,19 +1010,19 @@ export default function VideoSidebar({
                       {/* DOWNLOAD button */}
                       <button
                         type="button"
-                        onClick={selectedFileIds.size > 0 ? handleDownloadSelected : undefined}
-                        disabled={isDownloadingAll || selectedFileIds.size === 0}
+                        onClick={selectedFileIdsValue.size > 0 ? handleDownloadSelected : undefined}
+                        disabled={isDownloadingAll || selectedFileIdsValue.size === 0}
                         className={cn(
                           'w-full py-2 text-xs font-bold uppercase tracking-widest rounded transition-colors',
-                          selectedFileIds.size > 0 && !isDownloadingAll
-                            ? 'bg-green-500 hover:bg-green-600 text-white'
+                          selectedFileIdsValue.size > 0 && !isDownloadingAll
+                            ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
                             : 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
                         )}
                       >
                         {isDownloadingAll
                           ? 'Downloading...'
-                          : selectedFileIds.size > 0
-                          ? `Download (${selectedFileIds.size})`
+                          : selectedFileIdsValue.size > 0
+                          ? `Download (${selectedFileIdsValue.size})`
                           : 'Download'}
                       </button>
                     </div>
@@ -1000,9 +1036,9 @@ export default function VideoSidebar({
         {/* Resize Handle */}
         <div
           onMouseDown={handleMouseDown}
-          className="absolute right-0 top-0 bottom-0 w-[5px] z-20 bg-border hover:bg-primary/20 cursor-col-resize flex items-center justify-center group transition-colors"
+          className="absolute right-0 top-0 bottom-0 w-[5px] z-20 bg-transparent hover:bg-primary/15 cursor-col-resize flex items-center justify-center group transition-colors"
         >
-          <div className="h-8 w-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
+          <div className="h-8 w-0.5 rounded-full bg-primary/45 opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
       </aside>
 
@@ -1161,7 +1197,7 @@ export default function VideoSidebar({
                             src={thumbnailUrl}
                             alt={group.name}
                             fill
-                            className="object-cover"
+                            className="object-contain"
                             unoptimized
                             onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
                           />
@@ -1249,7 +1285,7 @@ export default function VideoSidebar({
             <div className="border-t border-border">
               <div className="px-4 py-2 flex items-center justify-between bg-accent/30">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
-                {downloadableFiles && downloadableFiles.length > 0 && onDownloadFile && (
+                {downloadableFiles && downloadableFiles.length > 0 && (onDownloadFile || onDownloadFiles) && (
                   <button
                     onClick={handleDownloadAll}
                     disabled={isDownloadingAll}

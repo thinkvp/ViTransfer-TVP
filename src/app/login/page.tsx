@@ -11,7 +11,6 @@ import { Lock, Video, LogIn, Fingerprint } from 'lucide-react'
 import { startAuthentication } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser'
 import { setTokens, clearTokens } from '@/lib/token-store'
-import { useTheme } from '@/hooks/useTheme'
 
 function LoginForm() {
   const router = useRouter()
@@ -27,10 +26,8 @@ function LoginForm() {
   const [loading, setLoading] = useState(false)
   const [passkeyLoading, setPasskeyLoading] = useState(false)
   const [hasLogo, setHasLogo] = useState(false)
-  const [hasDarkLogo, setHasDarkLogo] = useState(false)
   const [mainCompanyDomain, setMainCompanyDomain] = useState<string | null>(null)
-  const { isDark } = useTheme()
-  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
+  const logoSrc = '/api/branding/logo'
 
   useEffect(() => {
     fetch('/api/branding/info')
@@ -38,7 +35,6 @@ function LoginForm() {
       .then(data => {
         if (data) {
           setHasLogo(data.hasLogo || false)
-          setHasDarkLogo(data.hasDarkLogo || false)
           setMainCompanyDomain(data.mainCompanyDomain || null)
         }
       })

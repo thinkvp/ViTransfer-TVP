@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2, Car } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import ThemeToggle from '@/components/ThemeToggle'
 import NotificationsBell from '@/components/NotificationsBell'
 import RunningJobsBell from '@/components/RunningJobsBell'
 import ClientActivityEye from '@/components/ClientActivityEye'
@@ -545,7 +544,6 @@ export default function AdminHeader() {
             >
               <User className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-            <ThemeToggle buttonClassName="w-9 sm:w-10" iconClassName="h-4 w-4 sm:h-5 sm:w-5" />
             {user.isSystemAdmin && <ClientActivityEye />}
             <RunningJobsBell />
             <NotificationsBell />

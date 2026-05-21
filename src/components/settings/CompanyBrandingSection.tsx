@@ -17,15 +17,6 @@ interface CompanyBrandingSectionProps {
   companyLogoConfigured: boolean
   companyLogoUrl: string | null
   onCompanyLogoUploaded: () => void
-  darkLogoEnabled: boolean
-  setDarkLogoEnabled: (value: boolean) => void
-  darkLogoMode: 'NONE' | 'UPLOAD' | 'LINK'
-  setDarkLogoMode: (value: 'NONE' | 'UPLOAD' | 'LINK') => void
-  darkLogoLinkUrl: string
-  setDarkLogoLinkUrl: (value: string) => void
-  darkLogoConfigured: boolean
-  darkLogoUrl: string | null
-  onDarkLogoUploaded: () => void
   companyFaviconMode: 'NONE' | 'UPLOAD' | 'LINK'
   setCompanyFaviconMode: (value: 'NONE' | 'UPLOAD' | 'LINK') => void
   companyFaviconLinkUrl: string
@@ -41,10 +32,6 @@ interface CompanyBrandingSectionProps {
   setEmailHeaderColor: (value: string) => void
   emailHeaderTextMode: 'LIGHT' | 'DARK'
   setEmailHeaderTextMode: (value: 'LIGHT' | 'DARK') => void
-  defaultTheme: 'LIGHT' | 'DARK' | 'AUTO'
-  setDefaultTheme: (value: 'LIGHT' | 'DARK' | 'AUTO') => void
-  allowThemeToggle: boolean
-  setAllowThemeToggle: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
   hideCollapse?: boolean
@@ -66,15 +53,6 @@ export function CompanyBrandingSection({
   companyLogoConfigured,
   companyLogoUrl,
   onCompanyLogoUploaded,
-  darkLogoEnabled,
-  setDarkLogoEnabled,
-  darkLogoMode,
-  setDarkLogoMode,
-  darkLogoLinkUrl,
-  setDarkLogoLinkUrl,
-  darkLogoConfigured,
-  darkLogoUrl,
-  onDarkLogoUploaded,
   companyFaviconMode,
   setCompanyFaviconMode,
   companyFaviconLinkUrl,
@@ -90,10 +68,6 @@ export function CompanyBrandingSection({
   setEmailHeaderColor,
   emailHeaderTextMode,
   setEmailHeaderTextMode,
-  defaultTheme,
-  setDefaultTheme,
-  allowThemeToggle,
-  setAllowThemeToggle,
   show,
   setShow,
   hideCollapse,
@@ -101,10 +75,6 @@ export function CompanyBrandingSection({
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
   const [logoSuccess, setLogoSuccess] = useState<string | null>(null)
-
-  const [darkLogoUploading, setDarkLogoUploading] = useState(false)
-  const [darkLogoError, setDarkLogoError] = useState<string | null>(null)
-  const [darkLogoSuccess, setDarkLogoSuccess] = useState<string | null>(null)
 
   const [faviconUploading, setFaviconUploading] = useState(false)
   const [faviconError, setFaviconError] = useState<string | null>(null)
@@ -188,48 +158,6 @@ export function CompanyBrandingSection({
       setLogoError('Failed to upload logo')
     } finally {
       setLogoUploading(false)
-    }
-  }
-
-  async function handleDarkLogoSelected(file: File | null) {
-    setDarkLogoError(null)
-    setDarkLogoSuccess(null)
-    if (!file) return
-
-    const type = (file.type || '').toLowerCase()
-    if (type !== 'image/png' && type !== 'image/jpeg') {
-      setDarkLogoError('Invalid file type. Please upload a PNG or JPG.')
-      return
-    }
-
-    const dimCheck = await validateDimensions(file)
-    if (!dimCheck.ok) {
-      setDarkLogoError(dimCheck.error || 'Invalid image dimensions.')
-      return
-    }
-
-    try {
-      setDarkLogoUploading(true)
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await apiFetch('/api/settings/dark-logo', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const data = await response.json().catch(() => null)
-      if (!response.ok) {
-        setDarkLogoError(data?.error || 'Failed to upload dark logo')
-        return
-      }
-
-      setDarkLogoSuccess('Dark logo uploaded successfully.')
-      onDarkLogoUploaded()
-    } catch {
-      setDarkLogoError('Failed to upload dark logo')
-    } finally {
-      setDarkLogoUploading(false)
     }
   }
 
@@ -391,80 +319,6 @@ export function CompanyBrandingSection({
               ) : null}
             </div>
 
-            <div className="pt-3 border-t space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="darkLogoToggle">Use separate Company Logo for Dark Mode</Label>
-                <Switch
-                  id="darkLogoToggle"
-                  checked={darkLogoEnabled}
-                  onCheckedChange={(checked) => {
-                    setDarkLogoEnabled(checked)
-                    setDarkLogoError(null)
-                    setDarkLogoSuccess(null)
-                  }}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                When enabled, a separate logo will be used when the application is in dark mode. The Company Logo above will still be used for light mode and email communications.
-              </p>
-
-              {darkLogoEnabled ? (
-                <>
-                  <select
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={darkLogoMode}
-                    onChange={(e) => {
-                      setDarkLogoError(null)
-                      setDarkLogoSuccess(null)
-                      const value = e.target.value
-                      if (value === 'NONE' || value === 'UPLOAD' || value === 'LINK') {
-                        setDarkLogoMode(value)
-                      }
-                    }}
-                  >
-                    <option value="NONE">None</option>
-                    <option value="UPLOAD">Upload</option>
-                  </select>
-
-                  {darkLogoMode === 'UPLOAD' ? (
-                    <div className="space-y-2">
-                      <Input
-                        id="darkLogo"
-                        type="file"
-                        accept="image/png,image/jpeg"
-                        disabled={darkLogoUploading}
-                        onChange={(e) => handleDarkLogoSelected(e.target.files?.[0] || null)}
-                      />
-                      <p className="text-xs text-muted-foreground">{uploadHelpText}</p>
-                    </div>
-                  ) : null}
-
-                  {darkLogoMode !== 'NONE' && darkLogoUrl ? (
-                    <div className="mt-2 rounded-md border bg-background p-3 dark:bg-zinc-900">
-                      <p className="text-xs text-muted-foreground mb-2">Dark logo preview</p>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={darkLogoUrl}
-                        alt="Dark mode company logo"
-                        style={{ width: 'auto', height: 'auto', maxWidth: 300, maxHeight: 120 }}
-                      />
-                    </div>
-                  ) : null}
-
-                  {darkLogoError ? <p className="text-xs text-destructive">{darkLogoError}</p> : null}
-                  {darkLogoSuccess ? <p className="text-xs text-success">{darkLogoSuccess}</p> : null}
-
-                  {darkLogoMode !== 'NONE' ? (
-                    <div className="flex items-center gap-2">
-                      <Button type="button" variant="secondary" disabled={darkLogoUploading} onClick={() => onDarkLogoUploaded()}>
-                        Refresh Preview
-                      </Button>
-                      {darkLogoUploading ? <p className="text-xs text-muted-foreground">Uploading…</p> : null}
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
 
             <div className="pt-3 border-t space-y-2">
               <Label htmlFor="companyFavicon">Favicon</Label>
@@ -614,47 +468,7 @@ export function CompanyBrandingSection({
               <p className="text-xs text-muted-foreground">Background colour for the header section of email templates. Leave empty for default dark (#1F1F1F). Header text controls the title and subtitle text colour in the email header (Light = white, Dark = near-black).</p>
             </div>
 
-            <div className="pt-3 border-t space-y-2">
-              <Label>Default theme</Label>
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="inline-flex rounded-md border border-input overflow-hidden">
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${defaultTheme === 'LIGHT' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-                    onClick={() => setDefaultTheme('LIGHT')}
-                  >
-                    Light
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${defaultTheme === 'DARK' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-                    onClick={() => setDefaultTheme('DARK')}
-                  >
-                    Dark
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${defaultTheme === 'AUTO' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-                    onClick={() => setDefaultTheme('AUTO')}
-                  >
-                    Auto
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">Default colour theme for new visitors. Auto uses the visitor&apos;s system preference.</p>
-            </div>
 
-            <div className="pt-3 border-t space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="allowThemeToggle">Allow clients and users to change theme</Label>
-                <Switch
-                  id="allowThemeToggle"
-                  checked={allowThemeToggle}
-                  onCheckedChange={setAllowThemeToggle}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">When disabled, the theme toggle button is hidden throughout the app and all users see the default theme above.</p>
-            </div>
           </div>
         </CardContent>
       )}

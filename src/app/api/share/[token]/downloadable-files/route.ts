@@ -100,12 +100,15 @@ export async function GET(
         type: 'video',
         videoId: video.id,
         fileName: video.originalFileName,
+        fileSizeBytes: Number(video.originalFileSize),
+        durationSeconds: Number(video.duration),
       },
       subFiles: video.assets.map((asset): DownloadableFile => ({
         type: 'asset',
         videoId: video.id,
         assetId: asset.id,
         fileName: asset.fileName,
+        fileSizeBytes: Number(asset.fileSize),
       })),
     })
   }
@@ -125,6 +128,7 @@ export async function GET(
         albumId: album.id,
         variant: 'full',
         fileName: getAlbumZipFileName({ albumName: album.name, variant: 'full' }),
+        fileSizeBytes: Number(album.fullZipFileSize),
       })
     }
 
@@ -134,6 +138,7 @@ export async function GET(
         albumId: album.id,
         variant: 'social',
         fileName: getAlbumZipFileName({ albumName: album.name, variant: 'social' }),
+        fileSizeBytes: Number(album.socialZipFileSize),
       })
     }
 

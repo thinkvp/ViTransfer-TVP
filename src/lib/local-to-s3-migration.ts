@@ -250,7 +250,6 @@ async function collectReferencedPaths(): Promise<Set<string>> {
       where: { id: 'default' },
       select: {
         companyLogoPath: true,
-        darkLogoPath: true,
         companyFaviconPath: true,
       },
     }),
@@ -343,7 +342,6 @@ async function collectReferencedPaths(): Promise<Set<string>> {
 
   const brandCandidates = [
     settings?.companyLogoPath,
-    settings?.darkLogoPath,
     settings?.companyFaviconPath,
   ]
   for (const candidate of brandCandidates) {

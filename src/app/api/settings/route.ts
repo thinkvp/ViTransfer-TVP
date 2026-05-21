@@ -146,9 +146,6 @@ export async function PATCH(request: NextRequest) {
       companyLogoUrl,
       companyFaviconMode,
       companyFaviconUrl,
-      darkLogoEnabled,
-      darkLogoMode,
-      darkLogoUrl,
       smtpServer,
       smtpPort,
       smtpUsername,
@@ -193,8 +190,6 @@ export async function PATCH(request: NextRequest) {
       accentTextMode,
       emailHeaderColor,
       emailHeaderTextMode,
-      defaultTheme,
-      allowThemeToggle,
       s3LocalBackupEnabled,
       s3LocalBackupCategories,
     } = body
@@ -285,43 +280,6 @@ export async function PATCH(request: NextRequest) {
       } catch {
         return NextResponse.json(
           { error: 'Invalid companyFaviconUrl. Please enter a valid URL.' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // SECURITY: Validate darkLogoMode
-    if (darkLogoMode !== undefined && darkLogoMode !== null) {
-      const validModes = ['NONE', 'UPLOAD', 'LINK']
-      if (!validModes.includes(darkLogoMode)) {
-        return NextResponse.json(
-          { error: 'Invalid darkLogoMode. Must be NONE, UPLOAD, or LINK.' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // SECURITY: Validate darkLogoUrl when using LINK mode
-    if (darkLogoMode === 'LINK') {
-      const url = typeof darkLogoUrl === 'string' ? darkLogoUrl.trim() : ''
-      if (!url) {
-        return NextResponse.json(
-          { error: 'darkLogoUrl is required when darkLogoMode is LINK.' },
-          { status: 400 }
-        )
-      }
-
-      try {
-        const parsed = new URL(url)
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          return NextResponse.json(
-            { error: 'darkLogoUrl must start with http:// or https://.' },
-            { status: 400 }
-          )
-        }
-      } catch {
-        return NextResponse.json(
-          { error: 'Invalid darkLogoUrl. Please enter a valid URL.' },
           { status: 400 }
         )
       }
@@ -494,12 +452,6 @@ export async function PATCH(request: NextRequest) {
         companyFaviconMode === 'LINK'
           ? (typeof companyFaviconUrl === 'string' ? companyFaviconUrl.trim() : null)
           : (companyFaviconMode !== undefined ? null : undefined),
-      darkLogoEnabled: darkLogoEnabled !== undefined ? Boolean(darkLogoEnabled) : undefined,
-      darkLogoMode: darkLogoMode !== undefined ? darkLogoMode : undefined,
-      darkLogoUrl:
-        darkLogoMode === 'LINK'
-          ? (typeof darkLogoUrl === 'string' ? darkLogoUrl.trim() : null)
-          : (darkLogoMode !== undefined ? null : undefined),
       smtpServer,
       smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,
       smtpUsername,
@@ -544,8 +496,6 @@ export async function PATCH(request: NextRequest) {
       accentTextMode: accentTextMode === 'LIGHT' || accentTextMode === 'DARK' ? accentTextMode : undefined,
       emailHeaderColor: typeof emailHeaderColor === 'string' ? (emailHeaderColor.trim() || null) : emailHeaderColor,
       emailHeaderTextMode: emailHeaderTextMode === 'LIGHT' || emailHeaderTextMode === 'DARK' ? emailHeaderTextMode : undefined,
-      defaultTheme: defaultTheme === 'LIGHT' || defaultTheme === 'DARK' || defaultTheme === 'AUTO' ? defaultTheme : undefined,
-      allowThemeToggle: typeof allowThemeToggle === 'boolean' ? allowThemeToggle : undefined,
       s3LocalBackupEnabled: typeof s3LocalBackupEnabled === 'boolean' ? s3LocalBackupEnabled : undefined,
       s3LocalBackupCategories: Array.isArray(s3LocalBackupCategories) ? JSON.stringify(s3LocalBackupCategories) : undefined,
     }
@@ -571,12 +521,6 @@ export async function PATCH(request: NextRequest) {
         companyFaviconUrl:
           companyFaviconMode === 'LINK'
             ? (typeof companyFaviconUrl === 'string' ? companyFaviconUrl.trim() : null)
-            : null,
-        darkLogoEnabled: darkLogoEnabled !== undefined ? Boolean(darkLogoEnabled) : false,
-        darkLogoMode: darkLogoMode || 'NONE',
-        darkLogoUrl:
-          darkLogoMode === 'LINK'
-            ? (typeof darkLogoUrl === 'string' ? darkLogoUrl.trim() : null)
             : null,
         smtpServer,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,

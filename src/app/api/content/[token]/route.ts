@@ -376,8 +376,23 @@ export async function GET(
         const dlContentType = isThumbnail ? 'image/jpeg' : contentType
         presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, dlContentType)
       } else if (isThumbnail || isTimelineAsset) {
-        // Short-lived URL for thumbnails and sprites
+        // Keep timeline/thumbnail requests same-origin to avoid browser CORS issues
+        // when these assets are fetched from JS (timeline VTT/sprites, hover thumbnails).
         presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, contentType)
+
+        const upstream = await fetch(presignedUrl, { cache: 'no-store' })
+        if (!upstream.ok || !upstream.body) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+        }
+
+        return new NextResponse(upstream.body, {
+          status: 200,
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'private, no-store, must-revalidate',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
       } else {
         // Long-lived URL for video streaming — allows browser to seek/scrub via range requests directly on R2
         presignedUrl = await s3GetPresignedStreamUrl(filePath, 14400, contentType)

@@ -107,7 +107,7 @@ export default async function RootLayout({
 }>) {
   noStore()
 
-  // Read accent colour and theme settings from database.
+  // Read accent colour from database.
   const brandingSettings = await getBrandingSettingsSnapshot()
 
   const accentCss = brandingSettings?.accentColor
@@ -116,51 +116,13 @@ export default async function RootLayout({
       ? `:root, .dark { --primary-foreground: 220 14% 7%; }`
       : null
 
-  const defaultTheme = brandingSettings?.defaultTheme || 'DARK'
-  const allowThemeToggle = brandingSettings?.allowThemeToggle ?? true
-
+  // Always use dark theme
   return (
-    <html lang="en" suppressHydrationWarning className={inter.variable}>
+    <html lang="en" suppressHydrationWarning className={inter.variable + ' dark'}>
       <head>
         {accentCss && (
           <style dangerouslySetInnerHTML={{ __html: accentCss }} />
         )}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                try {
-                  window.__THEME_CONFIG__ = { defaultTheme: ${JSON.stringify(defaultTheme)}, allowToggle: ${JSON.stringify(allowThemeToggle)} };
-                  var theme = localStorage.getItem('theme');
-                  if (!${JSON.stringify(allowThemeToggle)}) {
-                    // Theme toggle disabled — always use the admin-configured default
-                    localStorage.removeItem('theme');
-                    theme = null;
-                  }
-                  if (theme === 'dark') {
-                    document.documentElement.classList.add('dark');
-                  } else if (theme === 'light') {
-                    document.documentElement.classList.remove('dark');
-                  } else {
-                    // No saved preference: use admin default
-                    var def = ${JSON.stringify(defaultTheme)};
-                    if (def === 'AUTO') {
-                      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                        document.documentElement.classList.add('dark');
-                      } else {
-                        document.documentElement.classList.remove('dark');
-                      }
-                    } else if (def === 'LIGHT') {
-                      document.documentElement.classList.remove('dark');
-                    } else {
-                      document.documentElement.classList.add('dark');
-                    }
-                  }
-                } catch (e) {}
-              })();
-            `,
-          }}
-        />
       </head>
       <body className="flex flex-col min-h-dvh overflow-x-hidden">
         <main className="flex-1 min-h-0 flex flex-col">{children}</main>

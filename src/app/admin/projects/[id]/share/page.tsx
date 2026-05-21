@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
 import VideoSidebar from '@/components/VideoSidebar'
+import { ShareFilesBrowser } from '@/components/ShareFilesBrowser'
+import { ShareProjectSwitcher, type ShareProjectOption } from '@/components/ShareProjectSwitcher'
 import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -18,9 +20,20 @@ import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
+import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
+import { queueDownloads, type DownloadQueueItem } from '@/lib/download-queue'
 
 type DraftNavigationGuard = {
   confirmDiscardDraft: () => boolean
+}
+
+type AdminSwitchableProject = {
+  id: string
+  slug: string
+  title: string
+  status: string
+  updatedAt: string
+  clientName?: string | null
 }
 
 const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
@@ -54,6 +67,12 @@ export default function AdminSharePage() {
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [downloadableFiles, setDownloadableFiles] = useState<DownloadableGroup[] | null>(null)
   const [hasApprovableVideos, setHasApprovableVideos] = useState(false)
+  const [desktopContentTab, setDesktopContentTab] = useState<'view' | 'files'>('view')
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
+  const [switchableProjects, setSwitchableProjects] = useState<AdminSwitchableProject[]>([])
+  const [switchProjectsLoading, setSwitchProjectsLoading] = useState(false)
+  const [switchProjectsError, setSwitchProjectsError] = useState<string | null>(null)
+  const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null)
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
@@ -62,6 +81,12 @@ export default function AdminSharePage() {
   const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
   const sidebarThumbnailRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
+
+  const availableFileCount = useMemo(() => {
+    return (downloadableFiles || []).reduce((total, group) => {
+      return total + (group.mainFile ? 1 : 0) + group.subFiles.length
+    }, 0)
+  }, [downloadableFiles])
 
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
@@ -252,6 +277,7 @@ export default function AdminSharePage() {
 
   const fetchSidebarVideos = useCallback(async (videos: any[]) => {
     const sessionId = sessionIdRef.current
+    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -281,9 +307,29 @@ export default function AdminSharePage() {
               }
             }
 
+            let timelineVttUrl = null
+            let timelineSpriteUrl = null
+            if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+              const [responseVtt, responseSprite] = await Promise.all([
+                apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-vtt&sessionId=${sessionId}`),
+                apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-sprite&sessionId=${sessionId}`),
+              ])
+
+              if (responseVtt.ok) {
+                const dataVtt = await responseVtt.json()
+                timelineVttUrl = dataVtt.token ? `/api/content/${dataVtt.token}` : null
+              }
+              if (responseSprite.ok) {
+                const dataSprite = await responseSprite.json()
+                timelineSpriteUrl = dataSprite.token ? `/api/content/${dataSprite.token}` : null
+              }
+            }
+
             const sidebarVideo = {
               ...video,
               thumbnailUrl,
+              timelineVttUrl,
+              timelineSpriteUrl,
             }
 
             sidebarVideoCacheRef.current.set(video.id, sidebarVideo)
@@ -299,7 +345,7 @@ export default function AdminSharePage() {
         return request
       })
     )
-  }, [id])
+  }, [id, project?.timelinePreviewsEnabled])
 
   // Load project data, settings, and admin user
   useEffect(() => {
@@ -401,6 +447,64 @@ export default function AdminSharePage() {
     }
   }, [project?.slug])
 
+  const fetchSwitchableProjects = useCallback(async () => {
+    if (!project?.id) return
+
+    setSwitchProjectsLoading(true)
+    setSwitchProjectsError(null)
+    try {
+      const response = await apiFetch('/api/admin/share-projects', { cache: 'no-store' })
+      if (!response.ok) {
+        setSwitchProjectsError('Unable to load projects right now.')
+        setSwitchableProjects([])
+        return
+      }
+
+      const data = await response.json().catch(() => ({}))
+      const allProjects = Array.isArray((data as any)?.projects) ? (data as any).projects : []
+      setSwitchableProjects(allProjects.filter((entry: any) => String(entry?.id || '') !== String(project.id)))
+    } catch {
+      setSwitchProjectsError('Unable to load projects right now.')
+      setSwitchableProjects([])
+    } finally {
+      setSwitchProjectsLoading(false)
+    }
+  }, [project?.id])
+
+  const handleProjectSwitch = useCallback(async (targetProject: AdminSwitchableProject) => {
+    if (!targetProject?.id) return
+    if (targetProject.id === String(project?.id || '')) return
+    if (!confirmShareDraftNavigation()) return
+
+    setSwitchingProjectId(targetProject.id)
+    try {
+      router.push(`/admin/projects/${targetProject.id}/share`)
+    } finally {
+      setSwitchingProjectId(null)
+    }
+  }, [confirmShareDraftNavigation, project?.id, router])
+
+  useEffect(() => {
+    const allKeys = new Set(
+      (downloadableFiles || [])
+        .flatMap((group) => [
+          ...(group.mainFile ? [group.mainFile] : []),
+          ...group.subFiles,
+        ])
+        .map((file) => getDownloadableFileKey(file))
+    )
+
+    setSelectedFileIds((prev) => {
+      if (prev.size === 0) return prev
+      const next = new Set(Array.from(prev).filter((key) => allKeys.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+
+    if (downloadableFiles === null) {
+      setDesktopContentTab('view')
+    }
+  }, [downloadableFiles])
+
   // Fetch albums once the project is loaded (admin sessions can use the share endpoints without a bearer token).
   useEffect(() => {
     if (!project?.slug) return
@@ -412,6 +516,15 @@ export default function AdminSharePage() {
     if (!project?.slug) return
     void fetchDownloadableFiles()
   }, [project?.slug, fetchDownloadableFiles])
+
+  useEffect(() => {
+    if (!project?.id) {
+      setSwitchableProjects([])
+      setSwitchProjectsError(null)
+      return
+    }
+    void fetchSwitchableProjects()
+  }, [project?.id, fetchSwitchableProjects])
 
   // Refresh downloadable files when a video is approved.
   useEffect(() => {
@@ -605,7 +718,7 @@ export default function AdminSharePage() {
     setActiveAlbumId(albumId)
   }
 
-  const handleDownloadFile = useCallback(async (file: DownloadableFile) => {
+  const resolveDownloadTarget = useCallback(async (file: DownloadableFile): Promise<DownloadQueueItem | null> => {
     const sessionId = sessionIdRef.current
     try {
       let url: string
@@ -626,16 +739,78 @@ export default function AdminSharePage() {
         const data = await r.json()
         url = data.url
       }
-      const a = document.createElement('a')
-      a.href = url
-      a.style.display = 'none'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      return { url, fileName: file.fileName }
     } catch {
-      // ignore
+      return null
     }
   }, [id, project?.slug])
+
+  const handleDownloadFile = useCallback(async (file: DownloadableFile) => {
+    const target = await resolveDownloadTarget(file)
+    if (!target) return
+    await queueDownloads([target])
+  }, [resolveDownloadTarget])
+
+  const handleDownloadFiles = useCallback(async (files: DownloadableFile[]) => {
+    if (!files.length) return
+
+    const targets = await Promise.all(files.map((file) => resolveDownloadTarget(file)))
+    await queueDownloads(targets.filter((item): item is DownloadQueueItem => Boolean(item)))
+  }, [resolveDownloadTarget])
+
+  const sidebarVideosByName = useMemo(() => {
+    return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
+  }, [allVideosByName, project?.videosByName])
+
+  const filePreviewByVideoId = useMemo(() => {
+    const map = new Map<string, string>()
+    Object.values(sidebarVideosByName).forEach((versions: any) => {
+      for (const version of versions as any[]) {
+        if (version?.id && typeof version.thumbnailUrl === 'string' && version.thumbnailUrl) {
+          map.set(String(version.id), version.thumbnailUrl)
+        }
+      }
+    })
+    return map
+  }, [sidebarVideosByName])
+
+  const folderPreviewByName = useMemo(() => {
+    const map: Record<string, string | null> = {}
+
+    Object.entries(sidebarVideosByName).forEach(([name, versions]: any) => {
+      const approved = (versions as any[]).find((v: any) => v?.approved === true)
+      const displayVideo = approved || (versions as any[])[0]
+      map[name] = displayVideo?.thumbnailUrl || null
+    })
+
+    albums.forEach((album: any) => {
+      const name = String(album?.name || '')
+      if (!name || map[name]) return
+      map[name] = (album as any)?.thumbnailPhotoUrl || null
+    })
+
+    return map
+  }, [albums, sidebarVideosByName])
+
+  const resolveDownloadablePreviewUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    if (file.type === 'video' && file.videoId) {
+      return filePreviewByVideoId.get(file.videoId) || null
+    }
+
+    if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
+    if (!isImageFileName(file.fileName)) return null
+
+    try {
+      const response = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, {
+        method: 'POST',
+      })
+      if (!response.ok) return null
+      const data = await response.json().catch(() => ({}))
+      return typeof (data as any)?.url === 'string' ? String((data as any).url) : null
+    } catch {
+      return null
+    }
+  }, [filePreviewByVideoId])
 
   // Photos-only projects: default to first album once albums load.
   useEffect(() => {
@@ -706,6 +881,13 @@ export default function AdminSharePage() {
   const activeAlbum = albums.find((a: any) => String(a.id) === activeAlbumId) || null
   const headerVersion = readyVideos.find((v: any) => v.id === headerVersionId) || readyVideos[0] || null
   const isOlderVersionSelected = readyVideos.length > 1 && headerVersionId !== null && headerVersionId !== readyVideos[0]?.id
+  const canSwitchProjects = switchableProjects.length > 0
+  const adminSwitcherProjects: ShareProjectOption[] = switchableProjects.map((projectItem) => ({
+    id: String(projectItem.id),
+    title: String(projectItem.title || ''),
+    status: String(projectItem.status || ''),
+    clientName: projectItem.clientName || null,
+  }))
   const videoNames = project.videosByName ? (() => {
     const names = Object.keys(project.videosByName)
     const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
@@ -723,7 +905,7 @@ export default function AdminSharePage() {
   return (
     <div className="flex-1 min-h-0 bg-background flex flex-col overflow-y-auto lg:overflow-hidden">
       {/* Compact breadcrumb header */}
-      <div className="flex-shrink-0 h-11 border-b border-border bg-card flex items-center px-4 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="flex-shrink-0 h-11 border-b border-border bg-card flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Back to Project */}
         <Link href={projectUrl} className="flex-shrink-0">
@@ -734,8 +916,29 @@ export default function AdminSharePage() {
         </Link>
         <span className="text-muted-foreground flex-shrink-0">/</span>
 
-        {/* Project name (static — no cross-project switching on admin page) */}
-        <span className="text-foreground font-medium whitespace-nowrap flex-shrink-0 max-w-[25%] truncate" title={project.title}>{project.title}</span>
+        {/* Project selector */}
+        {canSwitchProjects ? (
+          <ShareProjectSwitcher
+            currentProjectId={String(project.id)}
+            currentProjectTitle={String(project.title || '')}
+            currentProjectStatus={String(project.status || '')}
+            currentProjectClientName={String(project.client?.name || '')}
+            projects={adminSwitcherProjects}
+            loading={switchProjectsLoading || Boolean(switchingProjectId)}
+            error={switchProjectsError}
+            includeClientName={true}
+            searchPlaceholder="Search projects or clients..."
+            triggerClassName="lg:max-w-[720px]"
+            onSelectProject={(target) => {
+              const projectToOpen = switchableProjects.find((item) => item.id === target.id)
+              if (projectToOpen) {
+                void handleProjectSwitch(projectToOpen)
+              }
+            }}
+          />
+        ) : (
+          <span className="text-foreground font-medium whitespace-nowrap flex-shrink-0 max-w-[25%] truncate" title={project.title}>{project.title}</span>
+        )}
 
         {/* Video / Album section */}
         {(activeVideoName || activeAlbumId) && (
@@ -801,7 +1004,7 @@ export default function AdminSharePage() {
               type="button"
               variant="outline"
               size="icon"
-              className="h-7 w-7 flex-shrink-0"
+              className="h-7 w-7 flex-shrink-0 ml-2"
               onClick={() => window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))}
               title="Video Information"
               aria-label="Video Information"
@@ -841,15 +1044,36 @@ export default function AdminSharePage() {
           </>
         )}
 
-        {/* Admin indicator */}
-        <span className="ml-auto flex-shrink-0 text-xs text-muted-foreground hidden sm:inline">Share view</span>
+        {downloadableFiles !== null && (
+          <div className="ml-auto hidden lg:flex items-stretch self-stretch gap-0 flex-shrink-0">
+            <span className="text-muted-foreground whitespace-nowrap hidden lg:inline flex-shrink-0 self-center px-2">Mode:</span>
+            <Button
+              type="button"
+              variant={desktopContentTab === 'view' ? 'default' : 'outline'}
+              size="default"
+              className="h-full rounded-none border-y-0 border-l border-r-0 px-4"
+              onClick={() => setDesktopContentTab('view')}
+            >
+              VIEW
+            </Button>
+            <Button
+              type="button"
+              variant={desktopContentTab === 'files' ? 'default' : 'outline'}
+              size="default"
+              className="h-full rounded-none border-y-0 border-l px-4"
+              onClick={() => setDesktopContentTab('files')}
+            >
+              FILES ({availableFileCount})
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         {/* Video Sidebar */}
         <VideoSidebar
-          videosByName={Object.keys(allVideosByName).length > 0 ? allVideosByName : (project.videosByName || {})}
+          videosByName={sidebarVideosByName}
           activeVideoName={activeVideoName}
           onVideoSelect={handleVideoSelect}
           albums={albums.map((a: any) => ({
@@ -865,14 +1089,31 @@ export default function AdminSharePage() {
           className="flex-shrink-0 h-[calc(100dvh-var(--admin-header-height))]"
           downloadableFiles={downloadableFiles}
           onDownloadFile={handleDownloadFile}
+          onDownloadFiles={handleDownloadFiles}
           hasApprovableVideos={hasApprovableVideos}
+          showDesktopTabBar={false}
+          desktopActiveTab={desktopContentTab === 'files' ? 'files' : 'for-review'}
+          onDesktopActiveTabChange={(tab) => setDesktopContentTab(tab === 'files' ? 'files' : 'view')}
+          selectedFileIds={selectedFileIds}
+          onSelectedFileIdsChange={setSelectedFileIds}
         />
 
         {/* Main Content Area */}
         <div className={cn('flex-1 flex flex-col min-w-0 overflow-x-hidden', activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto')}>
           <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
             {/* Main Content */}
-            {activeAlbumId ? (
+            {desktopContentTab === 'files' ? (
+              <ShareFilesBrowser
+                groups={downloadableFiles || []}
+                selectedFileIds={selectedFileIds}
+                setSelectedFileIds={setSelectedFileIds}
+                onDownloadFile={handleDownloadFile}
+                onDownloadFiles={handleDownloadFiles}
+                onCloseFilesView={() => setDesktopContentTab('view')}
+                folderPreviewByName={folderPreviewByName}
+                resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
+              />
+            ) : activeAlbumId ? (
               <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} />
             ) : project.enableVideos === false ? (
               <Card className="bg-card border-border rounded-lg">
@@ -973,13 +1214,8 @@ function AdminShareFeedbackGrid({
   const [isDesktop, setIsDesktop] = useState(false)
   const [commentsWidth, setCommentsWidth] = useState(420)
   const [isResizingComments, setIsResizingComments] = useState(false)
-  const [commentInputInRightColumn, setCommentInputInRightColumn] = useState(false)
-  const [commentInputPlacementManuallySet, setCommentInputPlacementManuallySet] = useState(false)
-  const [commentInputMinWidth, setCommentInputMinWidth] = useState<number | null>(null)
 
   const feedbackContainerRef = useRef<HTMLDivElement>(null)
-  const leftPaneRef = useRef<HTMLDivElement>(null)
-  const commentInputMeasureRef = useRef<HTMLDivElement>(null)
 
   const [serverComments, setServerComments] = useState<any[]>(filteredComments)
 
@@ -1000,43 +1236,9 @@ function AdminShareFeedbackGrid({
     return () => media.removeListener(update)
   }, [])
 
-  // Desktop-only: if we leave desktop, always return input to the left.
-  useEffect(() => {
-    if (isDesktop) return
-    setCommentInputInRightColumn(false)
-    setCommentInputPlacementManuallySet(false)
-  }, [isDesktop])
-
-  useEffect(() => {
-    if (!isDesktop) return
-    // Re-measure when the input moves between columns.
-    setCommentInputMinWidth(null)
-  }, [isDesktop, commentInputInRightColumn])
-
-  // Desktop/right-column only: if the comment input overflows horizontally, lock the panel's minimum width
-  // to whatever is required to avoid clipping.
-  useEffect(() => {
-    if (!isDesktop || !commentInputInRightColumn) return
-
-    const raf = window.requestAnimationFrame(() => {
-      const el = commentInputMeasureRef.current
-      if (!el) return
-
-      const available = Math.round(el.clientWidth)
-      const needed = Math.round(el.scrollWidth)
-
-      if (Number.isFinite(available) && Number.isFinite(needed) && needed > available + 1) {
-        setCommentInputMinWidth((prev) => Math.max(prev ?? 380, needed))
-      }
-    })
-
-    return () => window.cancelAnimationFrame(raf)
-  }, [isDesktop, commentInputInRightColumn, commentsWidth])
-
   useEffect(() => {
     if (!isDesktop) return
     const onResize = () => {
-      setCommentInputMinWidth(null)
       // Clamp comments width so it never exceeds 60% of the viewport on resize.
       setCommentsWidth((prev) => {
         const max = Math.floor(window.innerWidth * 0.6)
@@ -1046,15 +1248,6 @@ function AdminShareFeedbackGrid({
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [isDesktop])
-
-  // If the input is in the right column, ensure the column width is at least the measured minimum.
-  useEffect(() => {
-    if (!isDesktop) return
-    if (!commentInputInRightColumn) return
-    if (commentInputMinWidth === null) return
-    if (commentsWidth >= commentInputMinWidth) return
-    setCommentsWidth(commentInputMinWidth)
-  }, [isDesktop, commentInputInRightColumn, commentInputMinWidth, commentsWidth])
 
   // Load saved sizes (desktop only)
   useEffect(() => {
@@ -1076,7 +1269,7 @@ function AdminShareFeedbackGrid({
 
       const rect = feedbackContainerRef.current.getBoundingClientRect()
       const nextWidth = rect.right - e.clientX
-      const minWidth = commentInputInRightColumn && commentInputMinWidth ? commentInputMinWidth : 380
+      const minWidth = 380
       const maxWidth = Math.min(rect.width * 0.6, window.innerWidth * 0.6)
 
       const clamped = Math.max(minWidth, Math.min(maxWidth, nextWidth))
@@ -1103,7 +1296,7 @@ function AdminShareFeedbackGrid({
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [isResizingComments, commentsWidth, commentInputInRightColumn, commentInputMinWidth])
+  }, [isResizingComments, commentsWidth])
 
   const startResizeComments = (e: React.MouseEvent) => {
     if (!isDesktop) return
@@ -1207,32 +1400,6 @@ function AdminShareFeedbackGrid({
   const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
   const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved || !canManageShareComments)
 
-  // Desktop-only: default placement based on selected video aspect ratio.
-  // - Between 16:9 and 1:1 (inclusive of 1:1): keep under video player (left column)
-  // - Taller than 1:1 (e.g., 4:5, 9:16): place under comments (right column)
-  // Manual moves override this for the rest of the session.
-  useEffect(() => {
-    if (!isDesktop) return
-    if (commentInputPlacementManuallySet) return
-    if (!selectedVideo) return
-
-    const width = Number(
-      (selectedVideo as any).width ??
-        (selectedVideo as any).videoWidth ??
-        (selectedVideo as any).metadata?.width
-    )
-    const height = Number(
-      (selectedVideo as any).height ??
-        (selectedVideo as any).videoHeight ??
-        (selectedVideo as any).metadata?.height
-    )
-
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
-
-    const aspect = width / height
-    setCommentInputInRightColumn(aspect < 1)
-  }, [isDesktop, commentInputPlacementManuallySet, selectedVideo])
-
   const currentVideoRestricted = Boolean(
     project.restrictCommentsToLatestVersion &&
       management.selectedVideoId &&
@@ -1249,7 +1416,6 @@ function AdminShareFeedbackGrid({
     <>
       <div ref={feedbackContainerRef} className="flex flex-col lg:flex-row flex-1 lg:min-h-0 gap-4 sm:gap-6 lg:gap-0 lg:overflow-hidden">
         <div
-          ref={leftPaneRef}
           className="lg:flex-1 lg:min-h-0 min-w-0 flex flex-col lg:pl-8 lg:pr-8 lg:py-8 lg:overflow-hidden lg:h-[calc(100dvh-var(--admin-header-height,0px))]"
         >
           <div
@@ -1275,50 +1441,9 @@ function AdminShareFeedbackGrid({
               commentsForTimeline={management.comments as any}
               disableFullscreenCommentsUI={commentsDisabled}
               fillContainer
-              pinControlsToBottom={!commentInputInRightColumn && !commentsDisabled}
+              pinControlsToBottom={false}
             />
           </div>
-
-          {!commentInputInRightColumn && !commentsDisabled && (
-            <div ref={commentInputMeasureRef} className="mt-4 flex-shrink-0">
-              <CommentInput
-                newComment={management.newComment}
-                onCommentChange={management.handleCommentChange}
-                onSubmit={management.handleSubmitComment}
-                loading={management.loading}
-                uploadProgress={management.uploadProgress}
-                uploadStatusText={management.uploadStatusText}
-                onFileSelect={management.onFileSelect}
-                attachedFiles={management.attachedFiles}
-                onRemoveFile={management.onRemoveFile}
-                allowFileUpload={true}
-                clientUploadQuota={management.clientUploadQuota}
-                onRefreshUploadQuota={management.refreshClientUploadQuota}
-                selectedTimestamp={management.selectedTimestamp}
-                onClearTimestamp={management.handleClearTimestamp}
-                selectedVideoFps={management.selectedVideoFps}
-                useFullTimecode={Boolean(project?.useFullTimecode)}
-                replyingToComment={management.replyingToComment}
-                onCancelReply={management.handleCancelReply}
-                showAuthorInput={false}
-                authorName={management.authorName}
-                onAuthorNameChange={management.setAuthorName}
-                recipients={project.recipients || []}
-                currentVideoRestricted={currentVideoRestricted}
-                restrictionMessage={restrictionMessage}
-                commentsDisabled={commentsDisabled}
-                showShortcutsButton={true}
-                onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
-                containerClassName="border border-border rounded-lg"
-                showTopBorder={false}
-                onMoveColumn={() => {
-                  setCommentInputPlacementManuallySet(true)
-                  setCommentInputInRightColumn(true)
-                }}
-                moveColumnDirection="right"
-              />
-            </div>
-          )}
         </div>
 
         <div
@@ -1331,10 +1456,6 @@ function AdminShareFeedbackGrid({
               ? {
                   width: `${Math.round(commentsWidth)}px`,
                   maxWidth: '60%',
-                  minWidth:
-                    commentInputInRightColumn && commentInputMinWidth
-                      ? `${Math.round(commentInputMinWidth)}px`
-                      : undefined,
                 }
               : undefined
           }
@@ -1342,9 +1463,9 @@ function AdminShareFeedbackGrid({
           {/* Horizontal resize handle (desktop only) */}
           <div
             onMouseDown={startResizeComments}
-            className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-border hover:bg-primary/20 cursor-col-resize select-none z-10 group transition-colors"
+            className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-transparent hover:bg-primary/15 cursor-col-resize select-none z-10 group transition-colors"
           >
-            <div className="h-8 w-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
+            <div className="h-8 w-0.5 rounded-full bg-primary/45 opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
 
           <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
@@ -1374,13 +1495,13 @@ function AdminShareFeedbackGrid({
               hideInput={true}
               showApproveButton={false}
               largeAvatars={true}
-              cardClassName={commentInputInRightColumn && !commentsDisabled ? 'rounded-b-none' : undefined}
+              cardClassName={!commentsDisabled ? 'rounded-b-none' : undefined}
               management={management as any}
             />
           </div>
 
-          {commentInputInRightColumn && !commentsDisabled ? (
-            <div ref={commentInputMeasureRef} className="flex-shrink-0">
+          {!commentsDisabled ? (
+            <div className="flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
                 onCommentChange={management.handleCommentChange}
@@ -1411,11 +1532,6 @@ function AdminShareFeedbackGrid({
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-b-lg rounded-t-none border-t-0"
                 showTopBorder={false}
-                onMoveColumn={() => {
-                  setCommentInputPlacementManuallySet(true)
-                  setCommentInputInRightColumn(false)
-                }}
-                moveColumnDirection="left"
               />
             </div>
           ) : null}

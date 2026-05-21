@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import VideoPlayer from '@/components/VideoPlayer'
 import { cn, formatDateTime } from '@/lib/utils'
-import { useTheme } from '@/hooks/useTheme'
 
 type ResolvePayload = {
   expiresAt: string
@@ -46,10 +45,8 @@ export function GuestVideoViewer({ token }: { token: string }) {
   const [data, setData] = useState<ResolvePayload | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'expired' | 'notfound' | 'error'>('loading')
   const [hasLogo, setHasLogo] = useState(false)
-  const [hasDarkLogo, setHasDarkLogo] = useState(false)
   const [mainCompanyDomain, setMainCompanyDomain] = useState<string | null>(null)
-  const { isDark } = useTheme()
-  const logoSrc = isDark && hasDarkLogo ? '/api/branding/dark-logo' : '/api/branding/logo'
+  const logoSrc = '/api/branding/logo'
 
   useEffect(() => {
     let cancelled = false
@@ -103,7 +100,6 @@ export function GuestVideoViewer({ token }: { token: string }) {
       .then((d) => {
         if (d) {
           setHasLogo(d.hasLogo || false)
-          setHasDarkLogo(d.hasDarkLogo || false)
           setMainCompanyDomain(d.mainCompanyDomain || null)
         }
       })

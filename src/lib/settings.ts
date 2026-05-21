@@ -28,8 +28,6 @@ type BrandingSettingsSnapshot = {
   updatedAt: Date | null
   accentColor: string | null
   accentTextMode: string | null
-  defaultTheme: string | null
-  allowThemeToggle: boolean | null
 }
 const cachedBrandingSettings: CachedValue<BrandingSettingsSnapshot | null> = {
   value: null,
@@ -89,8 +87,6 @@ export async function getBrandingSettingsSnapshot(): Promise<BrandingSettingsSna
         updatedAt: true,
         accentColor: true,
         accentTextMode: true,
-        defaultTheme: true,
-        allowThemeToggle: true,
       },
     })
 

@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { CheckCircle2, Info, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
-import ThemeToggle from './ThemeToggle'
 import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
@@ -63,7 +62,6 @@ interface CommentSectionProps {
   allowCommentFileUpload?: boolean
   hideInput?: boolean
   showVideoActions?: boolean
-  showThemeToggle?: boolean
   showVideoNotes?: boolean
   showApproveButton?: boolean
   largeAvatars?: boolean
@@ -186,7 +184,6 @@ export function CommentSectionView({
   allowCommentFileUpload = allowClientUploadFiles || isAdminView,
   hideInput = false,
   showVideoActions = true,
-  showThemeToggle = false,
   showVideoNotes = true,
   showApproveButton = true,
   largeAvatars = false,
@@ -909,6 +906,7 @@ export function CommentSectionView({
   const latestSelectableVideo = sortedVideoVersions[0] || null
   const headerVideo = currentVideo || latestSelectableVideo
   const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
+  const headerVideoNotes = String((headerVideo as any)?.videoNotes || '').trim()
   const isHeaderVideoLocallyApproved = Boolean(headerVideo?.id && localApprovedVideoId === headerVideo.id)
   const approvalEnabledForHeaderVideo = Boolean((headerVideo as any)?.allowApproval)
   const speedTestStorageKey = useMemo(() => {
@@ -988,6 +986,15 @@ export function CommentSectionView({
     const video = headerVideo
     if (!video) return
     if (!(video as any).approved && !isApproved && !isHeaderVideoLocallyApproved) return
+
+    if (!isAdminView) {
+      const folderName = String((video as any)?.name || headerVideoName || '').trim()
+      window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+        detail: { folderName },
+      }))
+      return
+    }
+
     setShowDownloadOptions(true)
   }
 
@@ -1199,7 +1206,10 @@ export function CommentSectionView({
       // appear without waiting for the async prop-refresh chain.
       setLocalApprovedVideoId(video.id)
       if (!isAdminView) {
-        setShowDownloadOptions(true)
+        const folderName = String((video as any)?.name || headerVideoName || '').trim()
+        window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+          detail: { folderName },
+        }))
       }
 
       window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: { videoId: video.id } }))
@@ -1282,7 +1292,8 @@ export function CommentSectionView({
   return (
     <>
       {fullscreenChatOverlay}
-      <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden", cardClassName)} data-comment-section>
+      <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-xl lg:rounded-none overflow-hidden", cardClassName)} data-comment-section>
+        {!hideVideoTitle ? (
         <CardHeader className="border-b border-border flex-shrink-0 space-y-1">
         <div className="flex items-start gap-4">
           {!hideVideoTitle && (
@@ -1525,13 +1536,42 @@ export function CommentSectionView({
             </div>
           ) : null}
         </div>
-
-
-
-        {null}
         </CardHeader>
+        ) : null}
 
       <CardContent className="flex-1 flex flex-col !p-0 overflow-hidden min-h-0">
+        <Dialog open={showApproveConfirm} onOpenChange={setShowApproveConfirm}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Approve Video</DialogTitle>
+              <DialogDescription>
+                {headerVideo
+                  ? `Approve ${(headerVideo as any).versionLabel || 'this version'} for ${headerVideoName}? This will lock further feedback and make it downloadable.`
+                  : 'Approve this version? This will lock further feedback and make it downloadable.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowApproveConfirm(false)}
+                disabled={approving}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => void handleApproveSelected()}
+                disabled={approving}
+                className="bg-green-500 hover:bg-green-600 text-white"
+              >
+                {approving ? 'Approving...' : 'Approve'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {headerVideo && ((headerVideo as any)?.approved || isApproved || isHeaderVideoLocallyApproved) ? (
           <VideoAssetDownloadModal
             videoId={headerVideo.id}
@@ -1558,8 +1598,8 @@ export function CommentSectionView({
                     {isApproved
                       ? 'The final version is ready for download.'
                       : approvedVideo
-                      ? `${approvedVideo.versionLabel} of this video has been approved and is ready for download.`
-                      : 'A version of this video has been approved and is ready for download.'}
+                      ? `${approvedVideo.versionLabel} is ready for download from the Files section.`
+                      : 'A version is ready for download from the Files section.'}
                   </p>
                 </div>
               </div>
@@ -1611,6 +1651,13 @@ export function CommentSectionView({
           />
         )}
 
+        {showVideoNotes && headerVideoNotes ? (
+          <div className="px-4 sm:px-6 py-3 border-b border-border bg-muted/20 flex-shrink-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Version Notes</p>
+            <p className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">{headerVideoNotes}</p>
+          </div>
+        ) : null}
+
         {/* List Controls (directly above the message list) */}
         <div className="px-4 sm:px-6 py-2 border-b border-border bg-card flex-shrink-0">
           <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -1626,30 +1673,18 @@ export function CommentSectionView({
                   {exportingSrt ? 'Exporting...' : 'Export Comments'}
                 </Button>
               )}
-
-              {showVideoActions && (
-                <>
-                  {showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
-                    <Button
-                      variant="success"
-                      size="sm"
-                      onClick={() => setShowApproveConfirm(true)}
-                      disabled={approving}
-                      className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
-                    >
-                      Approve Video
-                    </Button>
-                  ) : null}
-
-                  {showThemeToggle && !isAdminView ? (
-                    <div className="shrink-0">
-                      <ThemeToggle buttonClassName="h-8 w-8" iconClassName="w-4 h-4" />
-                    </div>
-                  ) : null}
-                </>
-              )}
+              {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
+                <Button
+                  variant="success"
+                  size="sm"
+                  onClick={() => setShowApproveConfirm(true)}
+                  disabled={approving}
+                  className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
+                >
+                  Approve Video
+                </Button>
+              ) : null}
             </div>
-
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <div className="flex-shrink-0">
                 <Select
@@ -1667,43 +1702,6 @@ export function CommentSectionView({
               </div>
             </div>
           </div>
-
-          {showVideoNotes && headerVideo?.videoNotes ? (
-            <div className="mt-2 space-y-0.5">
-              <p className="text-xs font-medium text-muted-foreground">Version Notes</p>
-              <p className="text-sm text-foreground whitespace-pre-wrap break-words">{(headerVideo as any).videoNotes}</p>
-            </div>
-          ) : null}
-
-          <Dialog open={showApproveConfirm} onOpenChange={(open) => { if (!approving) setShowApproveConfirm(open) }}>
-            <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Approve this video?</DialogTitle>
-                <DialogDescription asChild>
-                  <div className="space-y-2 text-sm text-muted-foreground">
-                    <p>Approve this video to download.  You will no longer be able to leave comments/feedback or access other versions of this video.</p>
-                    <p>If there are multiple versions of this video, make sure you&apos;re approving the correct version.</p>
-                    {(headerVideo as any)?.versionLabel ? (
-                      <p className="text-foreground font-medium">Version: {(headerVideo as any).versionLabel}</p>
-                    ) : null}
-                  </div>
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex gap-2 mt-2 justify-end">
-                <Button variant="outline" onClick={() => setShowApproveConfirm(false)} disabled={approving}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="success"
-                  onClick={handleApproveSelected}
-                  disabled={approving}
-                  className="!bg-green-500 hover:!bg-green-600 text-white hover:opacity-100"
-                >
-                  {approving ? 'Approving…' : 'Approve'}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
         </div>
 
         {/* Messages Area - Threaded Conversations */}

@@ -35,10 +35,6 @@ interface Settings {
   companyFaviconMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
   companyFaviconPath?: string | null
   companyFaviconUrl?: string | null
-  darkLogoEnabled?: boolean | null
-  darkLogoMode?: 'NONE' | 'UPLOAD' | 'LINK' | null
-  darkLogoPath?: string | null
-  darkLogoUrl?: string | null
   smtpServer: string | null
   smtpPort: number | null
   smtpUsername: string | null
@@ -151,16 +147,10 @@ export default function GlobalSettingsPage() {
   const [companyFaviconVersion, setCompanyFaviconVersion] = useState(0)
   const [companyFaviconMode, setCompanyFaviconMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
   const [companyFaviconUrl, setCompanyFaviconUrl] = useState('')
-  const [darkLogoEnabled, setDarkLogoEnabled] = useState(false)
-  const [darkLogoVersion, setDarkLogoVersion] = useState(0)
-  const [darkLogoMode, setDarkLogoMode] = useState<'NONE' | 'UPLOAD' | 'LINK'>('NONE')
-  const [darkLogoUrl, setDarkLogoUrl] = useState('')
   const [accentColor, setAccentColor] = useState('')
   const [accentTextMode, setAccentTextMode] = useState<'LIGHT' | 'DARK'>('LIGHT')
   const [emailHeaderColor, setEmailHeaderColor] = useState('')
   const [emailHeaderTextMode, setEmailHeaderTextMode] = useState<'LIGHT' | 'DARK'>('LIGHT')
-  const [defaultTheme, setDefaultTheme] = useState<'LIGHT' | 'DARK' | 'AUTO'>('DARK')
-  const [allowThemeToggle, setAllowThemeToggle] = useState(true)
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
@@ -310,8 +300,7 @@ export default function GlobalSettingsPage() {
   const [dataLoaded, setDataLoaded] = useState(false)
   const settingsSnapshot = JSON.stringify({
     companyName, companyLogoMode, companyLogoUrl, companyFaviconMode, companyFaviconUrl,
-    darkLogoEnabled, darkLogoMode, darkLogoUrl, accentColor, accentTextMode,
-    emailHeaderColor, emailHeaderTextMode, defaultTheme, allowThemeToggle,
+    accentColor, accentTextMode, emailHeaderColor, emailHeaderTextMode,
     smtpServer, smtpPort, smtpUsername, smtpPassword, emailTrackingPixelsEnabled,
     emailCustomFooterText, smtpFromAddress, smtpSecure, appDomain, mainCompanyDomain,
     defaultPreviewResolutions, defaultWatermarkEnabled, defaultTimelinePreviewsEnabled,
@@ -366,19 +355,10 @@ export default function GlobalSettingsPage() {
           setCompanyFaviconMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
         }
         setCompanyFaviconUrl(data.companyFaviconUrl || '')
-        setDarkLogoEnabled(data.darkLogoEnabled || false)
-        setDarkLogoVersion(Date.now())
-        {
-          const value = data.darkLogoMode
-          setDarkLogoMode(value === 'NONE' || value === 'UPLOAD' || value === 'LINK' ? value : 'NONE')
-        }
-        setDarkLogoUrl(data.darkLogoUrl || '')
         setAccentColor(data.accentColor || '')
         setAccentTextMode(data.accentTextMode === 'DARK' ? 'DARK' : 'LIGHT')
         setEmailHeaderColor(data.emailHeaderColor || '')
         setEmailHeaderTextMode(data.emailHeaderTextMode === 'DARK' ? 'DARK' : 'LIGHT')
-        setDefaultTheme(data.defaultTheme === 'LIGHT' || data.defaultTheme === 'AUTO' ? data.defaultTheme : 'DARK')
-        setAllowThemeToggle(data.allowThemeToggle ?? true)
         setSmtpServer(data.smtpServer || '')
         setSmtpPort(data.smtpPort?.toString() || '587')
         setSmtpUsername(data.smtpUsername || '')
@@ -707,15 +687,10 @@ export default function GlobalSettingsPage() {
         companyLogoUrl: companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null,
         companyFaviconMode: companyFaviconMode || 'NONE',
         companyFaviconUrl: companyFaviconMode === 'LINK' ? (companyFaviconUrl || null) : null,
-        darkLogoEnabled,
-        darkLogoMode: darkLogoEnabled ? (darkLogoMode || 'NONE') : 'NONE',
-        darkLogoUrl: darkLogoEnabled && darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null,
         accentColor: accentColor.trim() || null,
         accentTextMode,
         emailHeaderColor: emailHeaderColor.trim() || null,
         emailHeaderTextMode,
-        defaultTheme,
-        allowThemeToggle,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
@@ -846,9 +821,6 @@ export default function GlobalSettingsPage() {
         setCompanyLogoUrl(refreshedData.companyLogoUrl || '')
         setCompanyFaviconMode((refreshedData.companyFaviconMode as any) || 'NONE')
         setCompanyFaviconUrl(refreshedData.companyFaviconUrl || '')
-        setDarkLogoEnabled(refreshedData.darkLogoEnabled || false)
-        setDarkLogoMode((refreshedData.darkLogoMode as any) || 'NONE')
-        setDarkLogoUrl(refreshedData.darkLogoUrl || '')
         setSmtpServer(refreshedData.smtpServer || '')
         setSmtpPort(refreshedData.smtpPort?.toString() || '587')
         setSmtpUsername(refreshedData.smtpUsername || '')
@@ -1066,31 +1038,6 @@ export default function GlobalSettingsPage() {
                 ? (settings?.companyLogoPath ? `/api/branding/logo?v=${companyLogoVersion}` : null)
                 : (companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null)
             }
-            darkLogoEnabled={darkLogoEnabled}
-            setDarkLogoEnabled={setDarkLogoEnabled}
-            darkLogoMode={darkLogoMode}
-            setDarkLogoMode={setDarkLogoMode}
-            darkLogoLinkUrl={darkLogoUrl}
-            setDarkLogoLinkUrl={setDarkLogoUrl}
-            darkLogoConfigured={darkLogoMode === 'UPLOAD' && !!settings?.darkLogoPath}
-            darkLogoUrl={
-              darkLogoMode === 'UPLOAD'
-                ? (settings?.darkLogoPath ? `/api/branding/dark-logo?v=${darkLogoVersion}` : null)
-                : (darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null)
-            }
-            onDarkLogoUploaded={() => {
-              setDarkLogoVersion(Date.now())
-              apiFetch('/api/settings')
-                .then((r) => r.ok ? r.json() : null)
-                .then((d) => {
-                  if (!d) return
-                  setSettings(d)
-                  setDarkLogoEnabled(!!d.darkLogoEnabled)
-                  setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
-                  setDarkLogoUrl(d.darkLogoUrl || '')
-                })
-                .catch(() => {})
-            }}
             companyFaviconMode={companyFaviconMode}
             setCompanyFaviconMode={setCompanyFaviconMode}
             companyFaviconLinkUrl={companyFaviconUrl}
@@ -1114,9 +1061,6 @@ export default function GlobalSettingsPage() {
                   setCompanyLogoUrl(d.companyLogoUrl || '')
                   setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
                   setCompanyFaviconUrl(d.companyFaviconUrl || '')
-                  setDarkLogoEnabled(!!d.darkLogoEnabled)
-                  setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
-                  setDarkLogoUrl(d.darkLogoUrl || '')
                 })
                 .catch(() => {})
             }}
@@ -1141,10 +1085,6 @@ export default function GlobalSettingsPage() {
             setEmailHeaderColor={setEmailHeaderColor}
             emailHeaderTextMode={emailHeaderTextMode}
             setEmailHeaderTextMode={setEmailHeaderTextMode}
-            defaultTheme={defaultTheme}
-            setDefaultTheme={setDefaultTheme}
-            allowThemeToggle={allowThemeToggle}
-            setAllowThemeToggle={setAllowThemeToggle}
             show={showCompanyBranding}
             setShow={setShowCompanyBranding}
           />
@@ -1421,31 +1361,6 @@ export default function GlobalSettingsPage() {
                     ? (settings?.companyLogoPath ? `/api/branding/logo?v=${companyLogoVersion}` : null)
                     : (companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null)
                 }
-                darkLogoEnabled={darkLogoEnabled}
-                setDarkLogoEnabled={setDarkLogoEnabled}
-                darkLogoMode={darkLogoMode}
-                setDarkLogoMode={setDarkLogoMode}
-                darkLogoLinkUrl={darkLogoUrl}
-                setDarkLogoLinkUrl={setDarkLogoUrl}
-                darkLogoConfigured={darkLogoMode === 'UPLOAD' && !!settings?.darkLogoPath}
-                darkLogoUrl={
-                  darkLogoMode === 'UPLOAD'
-                    ? (settings?.darkLogoPath ? `/api/branding/dark-logo?v=${darkLogoVersion}` : null)
-                    : (darkLogoMode === 'LINK' ? (darkLogoUrl || null) : null)
-                }
-                onDarkLogoUploaded={() => {
-                  setDarkLogoVersion(Date.now())
-                  apiFetch('/api/settings')
-                    .then((r) => r.ok ? r.json() : null)
-                    .then((d) => {
-                      if (!d) return
-                      setSettings(d)
-                      setDarkLogoEnabled(!!d.darkLogoEnabled)
-                      setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
-                      setDarkLogoUrl(d.darkLogoUrl || '')
-                    })
-                    .catch(() => {})
-                }}
                 companyFaviconMode={companyFaviconMode}
                 setCompanyFaviconMode={setCompanyFaviconMode}
                 companyFaviconLinkUrl={companyFaviconUrl}
@@ -1468,9 +1383,6 @@ export default function GlobalSettingsPage() {
                       setCompanyLogoUrl(d.companyLogoUrl || '')
                       setCompanyFaviconMode((d.companyFaviconMode as any) || 'NONE')
                       setCompanyFaviconUrl(d.companyFaviconUrl || '')
-                      setDarkLogoEnabled(!!d.darkLogoEnabled)
-                      setDarkLogoMode((d.darkLogoMode as any) || 'NONE')
-                      setDarkLogoUrl(d.darkLogoUrl || '')
                     })
                     .catch(() => {})
                 }}
@@ -1494,10 +1406,6 @@ export default function GlobalSettingsPage() {
                 setEmailHeaderColor={setEmailHeaderColor}
                 emailHeaderTextMode={emailHeaderTextMode}
                 setEmailHeaderTextMode={setEmailHeaderTextMode}
-                defaultTheme={defaultTheme}
-                setDefaultTheme={setDefaultTheme}
-                allowThemeToggle={allowThemeToggle}
-                setAllowThemeToggle={setAllowThemeToggle}
                 show={true}
                 setShow={() => {}}
                 hideCollapse

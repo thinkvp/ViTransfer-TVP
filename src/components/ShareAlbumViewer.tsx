@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from '@/lib/utils'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import Image from 'next/image'
-import ThemeToggle from '@/components/ThemeToggle'
 import { apiFetch } from '@/lib/api-client'
 
 function LazyAlbumThumbnail({ src, alt }: { src: string; alt: string }) {
@@ -81,12 +80,10 @@ export function ShareAlbumViewer({
   shareSlug,
   shareToken,
   albumId,
-  showThemeToggle = false,
 }: {
   shareSlug: string
   shareToken: string | null
   albumId: string
-  showThemeToggle?: boolean
 }) {
   const [album, setAlbum] = useState<ShareAlbum | null>(null)
   const [photos, setPhotos] = useState<ShareAlbumPhoto[]>([])
@@ -280,20 +277,6 @@ export function ShareAlbumViewer({
           <h2 className="text-xl font-semibold truncate">{album?.name || 'Album'}</h2>
           {album?.notes && <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{album.notes}</p>}
         </div>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {showThemeToggle && <ThemeToggle />}
-          <Button
-            type="button"
-            variant="default"
-            onClick={() => { setError(null); setShowDownloadModal(true) }}
-            disabled={photos.length === 0}
-            className="whitespace-nowrap"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Download
-          </Button>
-        </div>
       </div>
 
       {error && (
@@ -312,9 +295,21 @@ export function ShareAlbumViewer({
         </div>
       ) : (
         <div className="border border-border rounded-lg bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
-          <div className="px-6 py-4 border-b border-border flex items-center justify-between gap-3">
+          <div className="px-6 py-4 border-b border-border flex items-center gap-3">
             <div className="text-base font-semibold">
               {photos.length} photo{photos.length === 1 ? '' : 's'}
+            </div>
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => { setError(null); setShowDownloadModal(true) }}
+                disabled={photos.length === 0}
+                className="whitespace-nowrap"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download
+              </Button>
             </div>
           </div>
 

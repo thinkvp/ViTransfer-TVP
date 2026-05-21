@@ -214,10 +214,6 @@ export async function GET(
           companyLogoPath: true,
           companyLogoUrl: true,
           mainCompanyDomain: true,
-          darkLogoEnabled: true,
-          darkLogoMode: true,
-          darkLogoPath: true,
-          darkLogoUrl: true,
         },
       }),
       getPrimaryRecipient(project.id)
@@ -334,13 +330,6 @@ export async function GET(
           : globalSettings?.companyLogoMode === 'LINK'
             ? Boolean(globalSettings.companyLogoUrl)
             : false,
-        hasDarkLogo: globalSettings?.darkLogoEnabled
-          ? (globalSettings.darkLogoMode === 'UPLOAD'
-            ? Boolean(globalSettings.darkLogoPath)
-            : globalSettings.darkLogoMode === 'LINK'
-              ? Boolean(globalSettings.darkLogoUrl)
-              : false)
-          : false,
         mainCompanyDomain: globalSettings?.mainCompanyDomain || null,
       },
     }

@@ -270,7 +270,6 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
       where: { id: 'default' },
       select: {
         companyLogoPath: true,
-        darkLogoPath: true,
         companyFaviconPath: true,
       },
     }),
@@ -338,7 +337,6 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const user of users) addResolvedFilePath(exactFilePaths, user.avatarPath)
 
   addResolvedFilePath(exactFilePaths, settings?.companyLogoPath)
-  addResolvedFilePath(exactFilePaths, settings?.darkLogoPath)
   addResolvedFilePath(exactFilePaths, settings?.companyFaviconPath)
 
   for (const album of albums) {
@@ -587,7 +585,6 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
       where: { id: 'default' },
       select: {
         companyLogoPath: true,
-        darkLogoPath: true,
         companyFaviconPath: true,
       },
     }),
@@ -649,7 +646,6 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   for (const u of userFiles) addMain(u.storagePath)
   for (const u of users) addMain(u.avatarPath)
   addMain(settings?.companyLogoPath)
-  addMain(settings?.darkLogoPath)
   addMain(settings?.companyFaviconPath)
 
   for (const a of accountingAttachments) {
