@@ -337,7 +337,9 @@ export default function VideoPlayer({
   const holdBoostPointerIdRef = useRef<number | null>(null)
   const holdBoostStartMsRef = useRef(0)
   const isHoldBoostingRef = useRef(false)
+  const holdBoostTimeoutRef = useRef<number | null>(null)
   const suppressNextToggleRef = useRef(false)
+  const HOLD_SPEED_BOOST_DELAY_MS = 220
 
   // If ANY video is approved, only show approved videos (for both admin and client)
   const hasAnyApprovedVideo = videos.some((v: any) => v.approved === true)
@@ -1364,6 +1366,11 @@ export default function VideoPlayer({
   const stopHoldSpeedBoost = useCallback((pointerId?: number) => {
     if (typeof pointerId === 'number' && holdBoostPointerIdRef.current !== pointerId) return
 
+    if (holdBoostTimeoutRef.current !== null) {
+      window.clearTimeout(holdBoostTimeoutRef.current)
+      holdBoostTimeoutRef.current = null
+    }
+
     const wasBoosting = isHoldBoostingRef.current
     holdBoostPointerIdRef.current = null
     isHoldBoostingRef.current = false
@@ -1373,10 +1380,10 @@ export default function VideoPlayer({
     setPlaybackSpeed(1.0)
 
     // Prevent the release click from toggling play/pause after a deliberate hold gesture.
-    if (Date.now() - holdBoostStartMsRef.current > 180) {
+    if (Date.now() - holdBoostStartMsRef.current > HOLD_SPEED_BOOST_DELAY_MS) {
       suppressNextToggleRef.current = true
     }
-  }, [])
+  }, [HOLD_SPEED_BOOST_DELAY_MS])
 
   const handleVideoPointerDown = useCallback((e: React.PointerEvent<HTMLVideoElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -1384,17 +1391,28 @@ export default function VideoPlayer({
     const video = videoRef.current
     if (!video || video.paused) return
 
+    if (holdBoostTimeoutRef.current !== null) {
+      window.clearTimeout(holdBoostTimeoutRef.current)
+      holdBoostTimeoutRef.current = null
+    }
+
     holdBoostPointerIdRef.current = e.pointerId
     holdBoostStartMsRef.current = Date.now()
-    isHoldBoostingRef.current = true
-    setPlaybackSpeed(2.0)
+    isHoldBoostingRef.current = false
+    holdBoostTimeoutRef.current = window.setTimeout(() => {
+      if (holdBoostPointerIdRef.current !== e.pointerId) return
+      if (!videoRef.current || videoRef.current.paused) return
+      isHoldBoostingRef.current = true
+      setPlaybackSpeed(2.0)
+      holdBoostTimeoutRef.current = null
+    }, HOLD_SPEED_BOOST_DELAY_MS)
 
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
       // ignore pointer capture failures
     }
-  }, [])
+  }, [HOLD_SPEED_BOOST_DELAY_MS])
 
   const handleVideoPointerUp = useCallback((e: React.PointerEvent<HTMLVideoElement>) => {
     stopHoldSpeedBoost(e.pointerId)
@@ -1418,6 +1436,15 @@ export default function VideoPlayer({
       stopHoldSpeedBoost()
     }
   }, [isPlaying, stopHoldSpeedBoost])
+
+  useEffect(() => {
+    return () => {
+      if (holdBoostTimeoutRef.current !== null) {
+        window.clearTimeout(holdBoostTimeoutRef.current)
+        holdBoostTimeoutRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (volume > 0) {

@@ -34,6 +34,7 @@
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.76.5",
     "class-variance-authority": "^0.7.1",
+    "client-zip": "^2.5.0",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.0",
     "file-type": "^21.3.2",

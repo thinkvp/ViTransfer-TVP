@@ -22,6 +22,7 @@ import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
 import { queueDownloads, type DownloadQueueItem } from '@/lib/download-queue'
+import { downloadFilesAsZip } from '@/lib/download-zip-stream'
 
 type DraftNavigationGuard = {
   confirmDiscardDraft: () => boolean
@@ -75,6 +76,7 @@ export default function AdminSharePage() {
   const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null)
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
+  const [requestedFilesFolderName, setRequestedFilesFolderName] = useState<string | null>(null)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
@@ -91,6 +93,70 @@ export default function AdminSharePage() {
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
     return guard ? guard.confirmDiscardDraft() : true
+  }, [])
+
+  const markVideoApproved = useCallback((videoId: string) => {
+    if (!videoId) return
+
+    const markApproved = (video: any) =>
+      video && video.id === videoId ? { ...video, approved: true } : video
+
+    setHeaderVersionId(videoId)
+    tokenCacheRef.current.delete(videoId)
+    sidebarVideoCacheRef.current.delete(videoId)
+
+    setActiveVideos((prev) => prev.map(markApproved))
+    setActiveVideosRaw((prev) => prev.map(markApproved))
+    setAllVideosByName((prev) => {
+      const entries = Object.entries(prev)
+      if (entries.length === 0) return prev
+
+      let changed = false
+      const next = Object.fromEntries(
+        entries.map(([name, videos]) => {
+          const updatedVideos = videos.map((video: any) => {
+            const updated = markApproved(video)
+            if (updated !== video) changed = true
+            return updated
+          })
+          return [name, updatedVideos]
+        })
+      )
+
+      return changed ? next : prev
+    })
+    setProject((prev: any) => {
+      if (!prev) return prev
+
+      let changed = false
+      const nextVideos = Array.isArray(prev.videos)
+        ? prev.videos.map((video: any) => {
+            const updated = markApproved(video)
+            if (updated !== video) changed = true
+            return updated
+          })
+        : prev.videos
+
+      const nextVideosByName = prev.videosByName && typeof prev.videosByName === 'object'
+        ? Object.fromEntries(
+            Object.entries(prev.videosByName).map(([name, videos]: [string, any]) => {
+              const updatedVideos = (Array.isArray(videos) ? videos : []).map((video: any) => {
+                const updated = markApproved(video)
+                if (updated !== video) changed = true
+                return updated
+              })
+              return [name, updatedVideos]
+            })
+          )
+        : prev.videosByName
+
+      if (!changed) return prev
+      return {
+        ...prev,
+        videos: nextVideos,
+        videosByName: nextVideosByName,
+      }
+    })
   }, [])
 
   // Reset header version when active video changes
@@ -526,25 +592,34 @@ export default function AdminSharePage() {
     void fetchSwitchableProjects()
   }, [project?.id, fetchSwitchableProjects])
 
+  useEffect(() => {
+    const handleOpenFilesForVideo = (event: Event) => {
+      const detail = (event as CustomEvent<{ folderName?: string }>).detail
+      const folderName = String(detail?.folderName || '').trim()
+      setDesktopContentTab('files')
+      if (folderName) {
+        setRequestedFilesFolderName(folderName)
+      }
+    }
+
+    window.addEventListener('shareOpenFilesForVideo', handleOpenFilesForVideo as EventListener)
+    return () => {
+      window.removeEventListener('shareOpenFilesForVideo', handleOpenFilesForVideo as EventListener)
+    }
+  }, [])
+
   // Refresh downloadable files when a video is approved.
   useEffect(() => {
     const handleApprovalChanged = (e: Event) => {
       const videoId = (e as CustomEvent).detail?.videoId
       if (videoId) {
-        tokenCacheRef.current.delete(videoId)
-        sidebarVideoCacheRef.current.delete(videoId)
-        setActiveVideos((prev) => prev.map((video: any) => (
-          video.id === videoId ? { ...video, approved: true } : video
-        )))
-        setActiveVideosRaw((prev) => prev.map((video: any) => (
-          video.id === videoId ? { ...video, approved: true } : video
-        )))
+        markVideoApproved(videoId)
       }
       void fetchDownloadableFiles()
     }
     window.addEventListener('videoApprovalChanged', handleApprovalChanged)
     return () => window.removeEventListener('videoApprovalChanged', handleApprovalChanged)
-  }, [fetchDownloadableFiles])
+  }, [fetchDownloadableFiles, markVideoApproved])
 
   // If photos are disabled, ensure we can't be stuck in an album view.
   useEffect(() => {
@@ -751,12 +826,34 @@ export default function AdminSharePage() {
     await queueDownloads([target])
   }, [resolveDownloadTarget])
 
-  const handleDownloadFiles = useCallback(async (files: DownloadableFile[]) => {
+  const handleDownloadFiles = useCallback(async (files: DownloadableFile[], onProgress?: (pct: number) => void) => {
     if (!files.length) return
 
     const targets = await Promise.all(files.map((file) => resolveDownloadTarget(file)))
-    await queueDownloads(targets.filter((item): item is DownloadQueueItem => Boolean(item)))
-  }, [resolveDownloadTarget])
+    const validTargets = targets.filter((item): item is DownloadQueueItem => Boolean(item))
+    if (!validTargets.length) return
+
+    if (validTargets.length === 1) {
+      await queueDownloads(validTargets)
+      return
+    }
+
+    const zipName = `${project?.title || 'Download'} Files.zip`
+    const entries = validTargets.map((t, i) => ({
+      url: t.url,
+      fileName: t.fileName || 'file',
+      fileSizeBytes: (() => {
+        const raw = files[i]?.fileSizeBytes
+        return raw != null ? Number(raw) : undefined
+      })(),
+    }))
+
+    await downloadFilesAsZip(
+      entries,
+      zipName,
+      onProgress ? (loaded, total) => onProgress(total > 0 ? Math.round((loaded / total) * 100) : 0) : undefined
+    )
+  }, [resolveDownloadTarget, project?.title])
 
   const sidebarVideosByName = useMemo(() => {
     return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
@@ -905,7 +1002,7 @@ export default function AdminSharePage() {
   return (
     <div className="flex-1 min-h-0 bg-background flex flex-col overflow-y-auto lg:overflow-hidden">
       {/* Compact breadcrumb header */}
-      <div className="flex-shrink-0 h-11 border-b border-border bg-card flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="flex-shrink-0 h-12 my-[2px] border border-border bg-card rounded-lg flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Back to Project */}
         <Link href={projectUrl} className="flex-shrink-0">
@@ -1005,7 +1102,16 @@ export default function AdminSharePage() {
               variant="outline"
               size="icon"
               className="h-7 w-7 flex-shrink-0 ml-2"
-              onClick={() => window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))}
+              onClick={() => {
+                if (desktopContentTab !== 'view') {
+                  setDesktopContentTab('view')
+                  setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
+                  }, 0)
+                  return
+                }
+                window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
+              }}
               title="Video Information"
               aria-label="Video Information"
             >
@@ -1018,7 +1124,16 @@ export default function AdminSharePage() {
                   variant="outline"
                   size="icon"
                   className="h-7 w-7 flex-shrink-0 sm:hidden"
-                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  onClick={() => {
+                    if (desktopContentTab !== 'view') {
+                      setDesktopContentTab('view')
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                      }, 0)
+                      return
+                    }
+                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                  }}
                   title="Share"
                   aria-label="Share"
                 >
@@ -1029,7 +1144,16 @@ export default function AdminSharePage() {
                   variant="outline"
                   size="sm"
                   className="h-7 flex-shrink-0 hidden sm:inline-flex"
-                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  onClick={() => {
+                    if (desktopContentTab !== 'view') {
+                      setDesktopContentTab('view')
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                      }, 0)
+                      return
+                    }
+                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                  }}
                   title="Share"
                   aria-label="Share"
                 >
@@ -1068,6 +1192,31 @@ export default function AdminSharePage() {
           </div>
         )}
       </div>
+
+      {downloadableFiles !== null && (
+        <div className="lg:hidden flex-shrink-0 my-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={desktopContentTab === 'view' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full"
+              onClick={() => setDesktopContentTab('view')}
+            >
+              VIEW
+            </Button>
+            <Button
+              type="button"
+              variant={desktopContentTab === 'files' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full"
+              onClick={() => setDesktopContentTab('files')}
+            >
+              FILES ({availableFileCount})
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
@@ -1110,6 +1259,7 @@ export default function AdminSharePage() {
                 onDownloadFile={handleDownloadFile}
                 onDownloadFiles={handleDownloadFiles}
                 onCloseFilesView={() => setDesktopContentTab('view')}
+                requestedOpenFolderName={requestedFilesFolderName}
                 folderPreviewByName={folderPreviewByName}
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
               />
@@ -1444,6 +1594,42 @@ function AdminShareFeedbackGrid({
               pinControlsToBottom={false}
             />
           </div>
+
+          {!commentsDisabled ? (
+            <div className="mt-3 lg:hidden">
+              <CommentInput
+                newComment={management.newComment}
+                onCommentChange={management.handleCommentChange}
+                onSubmit={management.handleSubmitComment}
+                loading={management.loading}
+                uploadProgress={management.uploadProgress}
+                uploadStatusText={management.uploadStatusText}
+                onFileSelect={management.onFileSelect}
+                attachedFiles={management.attachedFiles}
+                onRemoveFile={management.onRemoveFile}
+                allowFileUpload={true}
+                clientUploadQuota={management.clientUploadQuota}
+                onRefreshUploadQuota={management.refreshClientUploadQuota}
+                selectedTimestamp={management.selectedTimestamp}
+                onClearTimestamp={management.handleClearTimestamp}
+                selectedVideoFps={management.selectedVideoFps}
+                useFullTimecode={Boolean(project?.useFullTimecode)}
+                replyingToComment={management.replyingToComment}
+                onCancelReply={management.handleCancelReply}
+                showAuthorInput={false}
+                authorName={management.authorName}
+                onAuthorNameChange={management.setAuthorName}
+                recipients={project.recipients || []}
+                currentVideoRestricted={currentVideoRestricted}
+                restrictionMessage={restrictionMessage}
+                commentsDisabled={commentsDisabled}
+                showShortcutsButton={true}
+                onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
+                containerClassName="border border-border rounded-lg"
+                showTopBorder={false}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div
@@ -1495,13 +1681,13 @@ function AdminShareFeedbackGrid({
               hideInput={true}
               showApproveButton={false}
               largeAvatars={true}
-              cardClassName={!commentsDisabled ? 'rounded-b-none' : undefined}
+              cardClassName={!commentsDisabled && isDesktop ? 'rounded-b-none' : undefined}
               management={management as any}
             />
           </div>
 
           {!commentsDisabled ? (
-            <div className="flex-shrink-0">
+            <div className="hidden lg:block flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
                 onCommentChange={management.handleCommentChange}

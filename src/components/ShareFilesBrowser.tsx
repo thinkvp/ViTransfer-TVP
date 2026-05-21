@@ -24,7 +24,7 @@ type ShareFilesBrowserProps = {
   selectedFileIds: Set<string>
   setSelectedFileIds: React.Dispatch<React.SetStateAction<Set<string>>>
   onDownloadFile: (file: DownloadableFile) => Promise<void>
-  onDownloadFiles?: (files: DownloadableFile[]) => Promise<void>
+  onDownloadFiles?: (files: DownloadableFile[], onProgress?: (pct: number) => void) => Promise<void>
   onCloseFilesView?: () => void
   requestedOpenFolderName?: string | null
   folderPreviewByName?: Record<string, string | null>
@@ -70,6 +70,19 @@ function formatDuration(value: number | undefined): string | null {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
+function getFileExtensionLabel(fileName: string): string | null {
+  const trimmed = String(fileName || '').trim()
+  if (!trimmed) return null
+
+  const dotIndex = trimmed.lastIndexOf('.')
+  if (dotIndex <= 0 || dotIndex === trimmed.length - 1) return null
+
+  const ext = trimmed.slice(dotIndex + 1).toUpperCase()
+  if (!ext) return null
+
+  return ext.length > 6 ? ext.slice(0, 6) : ext
+}
+
 export function ShareFilesBrowser({
   groups,
   selectedFileIds,
@@ -83,6 +96,7 @@ export function ShareFilesBrowser({
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
   const [previewUrlByFileKey, setPreviewUrlByFileKey] = useState<Record<string, string | null>>({})
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
@@ -245,39 +259,57 @@ export function ShareFilesBrowser({
     if (!selectedFiles.length) return
 
     setIsDownloadingSelected(true)
+    setDownloadProgress(null)
     try {
       if (onDownloadFiles) {
-        await onDownloadFiles(selectedFiles)
+        await onDownloadFiles(selectedFiles, (pct) => setDownloadProgress(pct))
       } else {
         await Promise.all(selectedFiles.map((file) => onDownloadFile(file).catch(() => undefined)))
       }
     } finally {
       setIsDownloadingSelected(false)
+      setDownloadProgress(null)
     }
   }
 
   return (
     <div className="border border-border rounded-lg bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          {openFolder ? (
-            <div className="flex items-center gap-2 min-w-0">
-              <Button type="button" variant="outline" size="sm" onClick={() => setOpenFolderName(null)}>
-                <ArrowLeft className="w-4 h-4" />
-                Back
-              </Button>
-              <span className="text-sm text-muted-foreground">/</span>
-              <span className="text-sm font-semibold text-foreground truncate">{openFolder.name}</span>
-            </div>
-          ) : (
-            <h3 className="text-sm font-semibold text-foreground">Files</h3>
-          )}
+      <div className="px-4 py-3 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex items-center justify-between gap-2 sm:flex-1">
+          <div className="min-w-0">
+            {openFolder ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <Button type="button" variant="outline" size="sm" className="px-2 sm:px-3" onClick={() => setOpenFolderName(null)}>
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Back</span>
+                </Button>
+                <span className="text-sm text-muted-foreground">/</span>
+                <span className="text-sm font-semibold text-foreground truncate">{openFolder.name}</span>
+              </div>
+            ) : (
+              <h3 className="text-sm font-semibold text-foreground">Files</h3>
+            )}
+          </div>
+          {onCloseFilesView ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="icon"
+              className="h-8 w-8 sm:hidden"
+              onClick={onCloseFilesView}
+              aria-label="Close files view"
+              title="Close files view"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          ) : null}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-nowrap items-center gap-2 shrink-0 sm:ml-auto sm:w-auto">
           <Button
             type="button"
             variant="outline"
             size="sm"
+            className="flex-[30] min-w-0 sm:flex-none sm:w-auto"
             onClick={selectAllVisible}
             disabled={visibleFiles.length === 0}
           >
@@ -287,6 +319,7 @@ export function ShareFilesBrowser({
             type="button"
             variant="outline"
             size="sm"
+            className="flex-[25] min-w-0 sm:flex-none sm:w-auto"
             onClick={() => setSelectedFileIds(new Set())}
             disabled={selectedCount === 0}
           >
@@ -295,18 +328,23 @@ export function ShareFilesBrowser({
           <Button
             type="button"
             size="sm"
+            className="flex-[45] min-w-0 sm:flex-none sm:w-auto"
             onClick={downloadSelected}
             disabled={selectedCount === 0 || isDownloadingSelected}
           >
             <Download className="w-4 h-4" />
-            {isDownloadingSelected ? 'Downloading...' : `Download (${selectedCount})`}
+            {isDownloadingSelected
+              ? downloadProgress !== null
+                ? `Zipping… ${Math.round(downloadProgress)}%`
+                : 'Preparing…'
+              : `Download (${selectedCount})`}
           </Button>
           {onCloseFilesView ? (
             <Button
               type="button"
-              variant="outline"
+              variant="destructive"
               size="icon"
-              className="h-8 w-8"
+              className="hidden h-8 w-8 sm:inline-flex"
               onClick={onCloseFilesView}
               aria-label="Close files view"
               title="Close files view"
@@ -443,9 +481,14 @@ export function ShareFilesBrowser({
               const showVideoPreview = file.type === 'video' && Boolean(folderPreviewByName?.[openFolder.name])
               const sizeLabel = formatFileSize(file.fileSizeBytes)
               const durationLabel = fileKind === 'video' ? formatDuration(file.durationSeconds) : null
+              const fileExtensionLabel = getFileExtensionLabel(file.fileName)
 
               return (
-                <div key={fileKey} className="rounded-xl border border-border/80 bg-card hover:border-primary/40 transition-colors overflow-hidden shadow-sm">
+                <div
+                  key={fileKey}
+                  className="rounded-xl border border-border/80 bg-card hover:border-primary/40 transition-colors overflow-hidden shadow-sm"
+                  onDoubleClick={() => void onDownloadFile(file)}
+                >
                   <div className="relative p-3 pb-2 bg-gradient-to-b from-muted/65 to-muted/30">
                     <div className="absolute left-4 top-1 h-2.5 w-20 rounded-t-md border border-b-0 border-border/70 bg-muted" />
                     <div className="relative rounded-lg border border-border/70 bg-card/70 p-1.5 shadow-inner">
@@ -462,8 +505,11 @@ export function ShareFilesBrowser({
                             loading="lazy"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
                             <FileTypeIcon className="w-10 h-10" />
+                            {fileExtensionLabel ? (
+                              <span className="text-[11px] font-semibold tracking-wide text-foreground/80">{fileExtensionLabel}</span>
+                            ) : null}
                           </div>
                         )}
 
@@ -479,6 +525,7 @@ export function ShareFilesBrowser({
                           type="checkbox"
                           checked={isSelected}
                           onChange={(event) => toggleFile(fileKey, event.target.checked)}
+                          onDoubleClick={(event) => event.stopPropagation()}
                           className="w-4 h-4 rounded accent-primary"
                           aria-label={`Select ${file.fileName}`}
                         />
@@ -498,6 +545,7 @@ export function ShareFilesBrowser({
                         size="icon"
                         className="h-7 w-7 shrink-0"
                         onClick={() => void onDownloadFile(file)}
+                        onDoubleClick={(event) => event.stopPropagation()}
                         aria-label={`Download ${file.fileName}`}
                         title={`Download ${file.fileName}`}
                       >

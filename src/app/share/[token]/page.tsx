@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 import CommentInput from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
 import VideoSidebar from '@/components/VideoSidebar'
-import { ShareFilesBrowser } from '@/components/ShareFilesBrowser'
+import { ShareFilesBrowser } from '../../../components/ShareFilesBrowser'
 import { ShareProjectSwitcher, type ShareProjectOption } from '@/components/ShareProjectSwitcher'
 import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { OTPInput } from '@/components/OTPInput'
@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
 import { queueDownloads, type DownloadQueueItem } from '@/lib/download-queue'
+import { downloadFilesAsZip } from '@/lib/download-zip-stream'
 
 type SwitchableProject = {
   id: string
@@ -128,6 +129,70 @@ export default function SharePage() {
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
     return guard ? guard.confirmDiscardDraft() : true
+  }, [])
+
+  const markVideoApproved = useCallback((videoId: string) => {
+    if (!videoId) return
+
+    const markApproved = (video: any) =>
+      video && video.id === videoId ? { ...video, approved: true } : video
+
+    setHeaderVersionId(videoId)
+    tokenCacheRef.current.delete(videoId)
+    sidebarVideoCacheRef.current.delete(videoId)
+
+    setActiveVideos((prev) => prev.map(markApproved))
+    setActiveVideosRaw((prev) => prev.map(markApproved))
+    setAllVideosByName((prev) => {
+      const entries = Object.entries(prev)
+      if (entries.length === 0) return prev
+
+      let changed = false
+      const next = Object.fromEntries(
+        entries.map(([name, videos]) => {
+          const updatedVideos = videos.map((video: any) => {
+            const updated = markApproved(video)
+            if (updated !== video) changed = true
+            return updated
+          })
+          return [name, updatedVideos]
+        })
+      )
+
+      return changed ? next : prev
+    })
+    setProject((prev: any) => {
+      if (!prev) return prev
+
+      let changed = false
+      const nextVideos = Array.isArray(prev.videos)
+        ? prev.videos.map((video: any) => {
+            const updated = markApproved(video)
+            if (updated !== video) changed = true
+            return updated
+          })
+        : prev.videos
+
+      const nextVideosByName = prev.videosByName && typeof prev.videosByName === 'object'
+        ? Object.fromEntries(
+            Object.entries(prev.videosByName).map(([name, videos]: [string, any]) => {
+              const updatedVideos = (Array.isArray(videos) ? videos : []).map((video: any) => {
+                const updated = markApproved(video)
+                if (updated !== video) changed = true
+                return updated
+              })
+              return [name, updatedVideos]
+            })
+          )
+        : prev.videosByName
+
+      if (!changed) return prev
+      return {
+        ...prev,
+        videos: nextVideos,
+        videosByName: nextVideosByName,
+      }
+    })
   }, [])
 
   // Reset header version when active video changes
@@ -570,11 +635,9 @@ export default function SharePage() {
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
     const handleApprovalChanged = (e: Event) => {
-      // Optimistically mark the approved video immediately so banner/modal show without
-      // waiting for the full async token-fetch chain to complete.
       const videoId = (e as CustomEvent).detail?.videoId
       if (videoId) {
-        setActiveVideos(prev => prev.map((v: any) => v.id === videoId ? { ...v, approved: true } : v))
+        markVideoApproved(videoId)
       }
       // Use the latest persisted token; fall back to current in-memory token.
       const persisted = loadShareToken(storageKey)
@@ -587,7 +650,7 @@ export default function SharePage() {
       window.removeEventListener('videoApprovalChanged', handleApprovalChanged)
     }
     // Intentionally omit fetchProjectData from deps; it's stable enough for this usage and avoids re-binding.
-  }, [fetchProjectData, fetchDownloadableFiles, shareToken, storageKey])
+  }, [fetchProjectData, fetchDownloadableFiles, markVideoApproved, shareToken, storageKey])
 
   // Company name and default quality now loaded from project settings
   // This ensures they're only accessible after authentication
@@ -831,12 +894,34 @@ export default function SharePage() {
     await queueDownloads([target])
   }, [resolveDownloadTarget])
 
-  const handleDownloadFiles = useCallback(async (files: DownloadableFile[]) => {
+  const handleDownloadFiles = useCallback(async (files: DownloadableFile[], onProgress?: (pct: number) => void) => {
     if (!files.length) return
 
     const targets = await Promise.all(files.map((file) => resolveDownloadTarget(file)))
-    await queueDownloads(targets.filter((item): item is DownloadQueueItem => Boolean(item)))
-  }, [resolveDownloadTarget])
+    const validTargets = targets.filter((item): item is DownloadQueueItem => Boolean(item))
+    if (!validTargets.length) return
+
+    if (validTargets.length === 1) {
+      await queueDownloads(validTargets)
+      return
+    }
+
+    const zipName = `${project?.title || 'Download'} Files.zip`
+    const entries = validTargets.map((t, i) => ({
+      url: t.url,
+      fileName: t.fileName || 'file',
+      fileSizeBytes: (() => {
+        const raw = files[i]?.fileSizeBytes
+        return raw != null ? Number(raw) : undefined
+      })(),
+    }))
+
+    await downloadFilesAsZip(
+      entries,
+      zipName,
+      onProgress ? (loaded, total) => onProgress(total > 0 ? Math.round((loaded / total) * 100) : 0) : undefined
+    )
+  }, [resolveDownloadTarget, project?.title])
 
   const sidebarVideosByName = useMemo(() => {
     return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
@@ -1659,10 +1744,10 @@ export default function SharePage() {
   return (
     <div
       className="h-[100dvh] min-h-0 bg-background flex flex-col overflow-hidden"
-      style={{ '--admin-header-height': '44px' } as React.CSSProperties}
+      style={{ '--admin-header-height': '56px' } as React.CSSProperties}
     >
       {/* Sticky breadcrumb header — spans full width above sidebar + content */}
-      <div className="flex-shrink-0 h-11 border-b border-border bg-card flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="flex-shrink-0 h-12 my-[4px] border border-border bg-card rounded-lg flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Project section */}
         <span className="text-muted-foreground whitespace-nowrap hidden sm:inline flex-shrink-0">Project:</span>
@@ -1762,7 +1847,16 @@ export default function SharePage() {
                 variant="outline"
                 size="icon"
                 className="h-7 w-7 flex-shrink-0 ml-2"
-                onClick={() => window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))}
+                onClick={() => {
+                  if (desktopContentTab !== 'view') {
+                    setDesktopContentTab('view')
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
+                    }, 0)
+                    return
+                  }
+                  window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
+                }}
                 title="Video Information"
                 aria-label="Video Information"
               >
@@ -1776,7 +1870,16 @@ export default function SharePage() {
                   variant="outline"
                   size="icon"
                   className="h-7 w-7 flex-shrink-0 sm:hidden"
-                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  onClick={() => {
+                    if (desktopContentTab !== 'view') {
+                      setDesktopContentTab('view')
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                      }, 0)
+                      return
+                    }
+                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                  }}
                   title="Share"
                   aria-label="Share"
                 >
@@ -1787,7 +1890,16 @@ export default function SharePage() {
                   variant="outline"
                   size="sm"
                   className="h-7 flex-shrink-0 hidden sm:inline-flex"
-                  onClick={() => window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))}
+                  onClick={() => {
+                    if (desktopContentTab !== 'view') {
+                      setDesktopContentTab('view')
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                      }, 0)
+                      return
+                    }
+                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
+                  }}
                   title="Share"
                   aria-label="Share"
                 >
@@ -1834,6 +1946,31 @@ export default function SharePage() {
           </div>
         )}
       </div>
+
+      {downloadableFiles !== null && (
+        <div className="lg:hidden flex-shrink-0 my-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={desktopContentTab === 'view' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full"
+              onClick={() => setDesktopContentTab('view')}
+            >
+              VIEW
+            </Button>
+            <Button
+              type="button"
+              variant={desktopContentTab === 'files' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full"
+              onClick={() => setDesktopContentTab('files')}
+            >
+              FILES ({availableFileCount})
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Main content row: sidebar + content area */}
       <div className={cn(
@@ -2282,6 +2419,46 @@ function ShareFeedbackGrid({
               pinControlsToBottom={false}
             />
           </div>
+
+          {!commentsDisabled ? (
+            <div className="mt-3 lg:hidden">
+              <CommentInput
+                newComment={management.newComment}
+                onCommentChange={management.handleCommentChange}
+                onSubmit={management.handleSubmitComment}
+                loading={management.loading}
+                shareSlug={shareSlug}
+                shareToken={shareToken}
+                uploadProgress={management.uploadProgress}
+                uploadStatusText={management.uploadStatusText}
+                onFileSelect={management.onFileSelect}
+                attachedFiles={management.attachedFiles}
+                onRemoveFile={management.onRemoveFile}
+                allowFileUpload={Boolean(project.allowClientUploadFiles)}
+                clientUploadQuota={management.clientUploadQuota}
+                onRefreshUploadQuota={management.refreshClientUploadQuota}
+                selectedTimestamp={management.selectedTimestamp}
+                onClearTimestamp={management.handleClearTimestamp}
+                selectedVideoFps={management.selectedVideoFps}
+                useFullTimecode={Boolean(project?.useFullTimecode)}
+                replyingToComment={management.replyingToComment}
+                onCancelReply={management.handleCancelReply}
+                showAuthorInput={Boolean(isPasswordProtected)}
+                authorName={management.authorName}
+                onAuthorNameChange={management.setAuthorName}
+                recipientId={management.recipientId}
+                onRecipientSelect={(name, id) => management.setRecipient(name, id)}
+                recipients={project.recipients || []}
+                currentVideoRestricted={currentVideoRestricted}
+                restrictionMessage={restrictionMessage}
+                commentsDisabled={commentsDisabled}
+                showShortcutsButton={true}
+                onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
+                containerClassName="border border-border rounded-lg"
+                showTopBorder={false}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div
@@ -2332,13 +2509,13 @@ function ShareFeedbackGrid({
               hideInput={true}
               largeAvatars={true}
               hideVideoTitle={true}
-              cardClassName={!commentsDisabled ? 'rounded-b-none' : undefined}
+              cardClassName={!commentsDisabled && isDesktop ? 'rounded-b-none' : undefined}
               management={management as any}
             />
           </div>
 
           {!commentsDisabled ? (
-            <div className="flex-shrink-0">
+            <div className="hidden lg:block flex-shrink-0">
               <CommentInput
                 newComment={management.newComment}
                 onCommentChange={management.handleCommentChange}

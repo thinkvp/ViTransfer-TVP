@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.3] - 2026-05-21
+
+### Added
+- **Authenticated share pages now include project switching and a dedicated Files view** — admin users can jump between share-enabled projects from the review page, authenticated clients can switch between their available projects from the public share flow, and both experiences now expose a new file browser for approved video masters, video assets, and album ZIP downloads with previews, folder grouping, and batch download support; guest sessions remain blocked from file downloads.
+
+### Changed
+- **The share experience has been reorganized around a cleaner review/download workflow** — the admin and client share pages now keep active-version state, sidebar selections, approval state, and downloadable-file lists in sync more tightly, add explicit View/Files tabs on desktop, and surface approved content as downloadable directly from the share UI instead of treating downloads as a separate flow.
+- **Branding/theme handling has been simplified to a single dark presentation** — the dark-logo variant and theme toggle have been removed, public branding endpoints now consistently use the primary logo/favicon configuration, and the app now renders against an always-dark theme with fewer branding branches to maintain.
+
+### Fixed
+- **Primary branding assets now load correctly in S3 mode** — the public logo and favicon routes now serve uploaded branding files from S3-backed storage instead of assuming local disk, preventing broken branding on login/share surfaces when local storage is not active.
+- **Approving a version now refreshes downloadable content without a page reload** — the share pages update local approval state immediately and refetch the downloadable-file inventory after approval, so the newly approved version becomes available in the Files view straight away.
+
 ## [1.8.2] - 2026-05-18
 
 ### Changed
