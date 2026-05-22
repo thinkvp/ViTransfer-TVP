@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Lock, Check, Mail, KeyRound, Info, Share2 } from 'lucide-react'
+import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -99,6 +99,7 @@ export default function SharePage() {
   const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null)
   const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
   const [requestedFilesFolderName, setRequestedFilesFolderName] = useState<string | null>(null)
+  const [requestedFilesFileKey, setRequestedFilesFileKey] = useState<string | null>(null)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
@@ -334,12 +335,14 @@ export default function SharePage() {
 
   useEffect(() => {
     const handleOpenFilesForVideo = (event: Event) => {
-      const detail = (event as CustomEvent<{ folderName?: string }>).detail
+      const detail = (event as CustomEvent<{ folderName?: string; fileKey?: string }>).detail
       const folderName = String(detail?.folderName || '').trim()
+      const fileKey = String(detail?.fileKey || '').trim()
       setDesktopContentTab('files')
       if (folderName) {
         setRequestedFilesFolderName(folderName)
       }
+      setRequestedFilesFileKey(fileKey || null)
     }
 
     window.addEventListener('shareOpenFilesForVideo', handleOpenFilesForVideo as EventListener)
@@ -1836,73 +1839,6 @@ export default function SharePage() {
             ) : (
               <span className="text-foreground whitespace-nowrap flex-shrink-0">{headerVersion?.versionLabel || '—'}</span>
             )}
-            {!isVideoOnlyShareMode && (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-7 w-7 flex-shrink-0 ml-2"
-                onClick={() => {
-                  if (desktopContentTab !== 'view') {
-                    setDesktopContentTab('view')
-                    setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
-                    }, 0)
-                    return
-                  }
-                  window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
-                }}
-                title="Video Information"
-                aria-label="Video Information"
-              >
-                <Info className="w-3.5 h-3.5" />
-              </Button>
-            )}
-            {!isVideoOnlyShareMode && project.guestMode && (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7 flex-shrink-0 sm:hidden"
-                  onClick={() => {
-                    if (desktopContentTab !== 'view') {
-                      setDesktopContentTab('view')
-                      setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                      }, 0)
-                      return
-                    }
-                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                  }}
-                  title="Share"
-                  aria-label="Share"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 flex-shrink-0 hidden sm:inline-flex"
-                  onClick={() => {
-                    if (desktopContentTab !== 'view') {
-                      setDesktopContentTab('view')
-                      setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                      }, 0)
-                      return
-                    }
-                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                  }}
-                  title="Share"
-                  aria-label="Share"
-                >
-                  <Share2 className="w-3.5 h-3.5 mr-1.5" />
-                  Share
-                </Button>
-              </>
-            )}
             {isOlderVersionSelected && (
               <span className="text-amber-600 dark:text-amber-400 text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
             )}
@@ -1996,11 +1932,6 @@ export default function SharePage() {
         onDownloadFiles={handleDownloadFiles}
         sharedDownloadProgress={transferSummary}
         isSharedDownloadActive={hasActiveTransfers}
-        transferItems={transferItems}
-        transferSummary={transferSummary}
-        transferPanelVersion={transferPanelVersion}
-        onCancelActiveTransfers={cancelActiveTransfers}
-        onClearCompletedTransfers={clearCompletedTransfers}
         hasApprovableVideos={hasApprovableVideos}
         showDesktopTabBar={false}
         desktopActiveTab={desktopContentTab === 'files' ? 'files' : 'for-review'}
@@ -2046,9 +1977,13 @@ export default function SharePage() {
               isSharedDownloadActive={hasActiveTransfers}
               onCloseFilesView={() => setDesktopContentTab('view')}
               requestedOpenFolderName={requestedFilesFolderName}
+              requestedOpenFileKey={requestedFilesFileKey}
+              onOpenFileKeyHandled={() => setRequestedFilesFileKey(null)}
               onOpenFolderNameChange={setRequestedFilesFolderName}
               folderPreviewByName={folderPreviewByName}
               resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
+              shareSlug={token}
+              shareToken={shareToken}
             />
           ) : activeAlbumId ? (
             <ShareAlbumViewer
@@ -2064,11 +1999,6 @@ export default function SharePage() {
             </Card>
           ) : readyVideos.length === 0 ? (
             <Card className="bg-card border-border flex-1 flex">
-              <CardContent className="flex-1 flex items-center justify-center text-center px-6 py-12">
-                <p className="text-muted-foreground">
-                  {tokensLoading ? 'Loading video...' : 'No content is ready for review yet. Please check back later.'}
-                </p>
-              </CardContent>
             </Card>
           ) : (
             <div
@@ -2534,7 +2464,6 @@ function ShareFeedbackGrid({
               allowCommentFileUpload={Boolean(project.allowClientUploadFiles)}
               hideInput={true}
               largeAvatars={true}
-              hideVideoTitle={true}
               cardClassName={!commentsDisabled && isDesktop ? 'rounded-b-none' : undefined}
               management={management as any}
             />

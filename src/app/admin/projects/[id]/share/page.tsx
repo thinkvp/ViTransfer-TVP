@@ -13,7 +13,7 @@ import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, Info, Share2 } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
@@ -77,6 +77,7 @@ export default function AdminSharePage() {
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
   const [requestedFilesFolderName, setRequestedFilesFolderName] = useState<string | null>(null)
+  const [requestedFilesFileKey, setRequestedFilesFileKey] = useState<string | null>(null)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
@@ -594,12 +595,14 @@ export default function AdminSharePage() {
 
   useEffect(() => {
     const handleOpenFilesForVideo = (event: Event) => {
-      const detail = (event as CustomEvent<{ folderName?: string }>).detail
+      const detail = (event as CustomEvent<{ folderName?: string; fileKey?: string }>).detail
       const folderName = String(detail?.folderName || '').trim()
+      const fileKey = String(detail?.fileKey || '').trim()
       setDesktopContentTab('files')
       if (folderName) {
         setRequestedFilesFolderName(folderName)
       }
+      setRequestedFilesFileKey(fileKey || null)
     }
 
     window.addEventListener('shareOpenFilesForVideo', handleOpenFilesForVideo as EventListener)
@@ -1091,71 +1094,6 @@ export default function AdminSharePage() {
             ) : (
               <span className="text-foreground whitespace-nowrap flex-shrink-0">{headerVersion?.versionLabel || '\u2014'}</span>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 flex-shrink-0 ml-2"
-              onClick={() => {
-                if (desktopContentTab !== 'view') {
-                  setDesktopContentTab('view')
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
-                  }, 0)
-                  return
-                }
-                window.dispatchEvent(new CustomEvent('openVideoInfoDialog'))
-              }}
-              title="Video Information"
-              aria-label="Video Information"
-            >
-              <Info className="w-3.5 h-3.5" />
-            </Button>
-            {project.guestMode && (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7 flex-shrink-0 sm:hidden"
-                  onClick={() => {
-                    if (desktopContentTab !== 'view') {
-                      setDesktopContentTab('view')
-                      setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                      }, 0)
-                      return
-                    }
-                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                  }}
-                  title="Share"
-                  aria-label="Share"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 flex-shrink-0 hidden sm:inline-flex"
-                  onClick={() => {
-                    if (desktopContentTab !== 'view') {
-                      setDesktopContentTab('view')
-                      setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                      }, 0)
-                      return
-                    }
-                    window.dispatchEvent(new CustomEvent('openGuestLinkDialog'))
-                  }}
-                  title="Share"
-                  aria-label="Share"
-                >
-                  <Share2 className="w-3.5 h-3.5 mr-1.5" />
-                  Share
-                </Button>
-              </>
-            )}
             {isOlderVersionSelected && (
               <span className="text-amber-600 dark:text-amber-400 text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
             )}
@@ -1235,11 +1173,6 @@ export default function AdminSharePage() {
           onDownloadFiles={handleDownloadFiles}
           sharedDownloadProgress={transferSummary}
           isSharedDownloadActive={hasActiveTransfers}
-          transferItems={transferItems}
-          transferSummary={transferSummary}
-          transferPanelVersion={transferPanelVersion}
-          onCancelActiveTransfers={cancelActiveTransfers}
-          onClearCompletedTransfers={clearCompletedTransfers}
           hasApprovableVideos={hasApprovableVideos}
           showDesktopTabBar={false}
           desktopActiveTab={desktopContentTab === 'files' ? 'files' : 'for-review'}
@@ -1284,9 +1217,13 @@ export default function AdminSharePage() {
                 isSharedDownloadActive={hasActiveTransfers}
                 onCloseFilesView={() => setDesktopContentTab('view')}
                 requestedOpenFolderName={requestedFilesFolderName}
+                requestedOpenFileKey={requestedFilesFileKey}
+                onOpenFileKeyHandled={() => setRequestedFilesFileKey(null)}
                 onOpenFolderNameChange={setRequestedFilesFolderName}
                 folderPreviewByName={folderPreviewByName}
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
+                shareSlug={String(project.slug)}
+                shareToken={null}
               />
             ) : activeAlbumId ? (
               <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} />

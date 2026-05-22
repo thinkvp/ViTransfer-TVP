@@ -1,5 +1,7 @@
+// Client-side ZIP creation is capped at 1GB across all browsers.
 export const ZIP_DOWNLOAD_THRESHOLD_BYTES = 1_000_000_000
-export const MANAGED_DOWNLOAD_CONCURRENCY = 2
+// Browser-managed multi-file dispatch is most reliable when serialized.
+export const MANAGED_DOWNLOAD_CONCURRENCY = 1
 
 export type TransferDirection = 'download' | 'upload'
 export type TransferKind = 'file' | 'zip'

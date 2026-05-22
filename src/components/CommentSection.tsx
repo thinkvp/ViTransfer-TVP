@@ -219,20 +219,21 @@ export function CommentSectionView({
   }, [])
 
   // Open guest link dialog via custom event (triggered from page-level header)
-  useEffect(() => {
-    const handler = () => {
-      setGuestLinkDialogOpen(true)
-      setGuestLinkUrl(null)
-      setGuestLinkExpiresAt(null)
-      setGuestLinkError(null)
-      setGuestLinkCheckedExisting(false)
-      setGuestLinkMissing(false)
-      setGuestLinkCopied(false)
-      setProjectGuestLinkCopied(false)
-    }
-    window.addEventListener('openGuestLinkDialog', handler)
-    return () => window.removeEventListener('openGuestLinkDialog', handler)
+  const openGuestLinkDialog = useCallback(() => {
+    setGuestLinkDialogOpen(true)
+    setGuestLinkUrl(null)
+    setGuestLinkExpiresAt(null)
+    setGuestLinkError(null)
+    setGuestLinkCheckedExisting(false)
+    setGuestLinkMissing(false)
+    setGuestLinkCopied(false)
+    setProjectGuestLinkCopied(false)
   }, [])
+
+  useEffect(() => {
+    window.addEventListener('openGuestLinkDialog', openGuestLinkDialog)
+    return () => window.removeEventListener('openGuestLinkDialog', openGuestLinkDialog)
+  }, [openGuestLinkDialog])
   const [guestLinkDialogOpen, setGuestLinkDialogOpen] = useState(false)
   const [guestLinkGenerating, setGuestLinkGenerating] = useState(false)
   const [guestLinkRefreshing, setGuestLinkRefreshing] = useState(false)
@@ -1013,7 +1014,7 @@ export function CommentSectionView({
       {fullscreenChatOverlay}
       <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden", cardClassName)} data-comment-section>
         {(!hideVideoTitle || showVideoActions || guestModeEnabled) ? (
-        <CardHeader className={cn("border-b border-border flex-shrink-0 space-y-1", hideVideoTitle && "hidden")}>
+        <CardHeader className={cn("border-b border-border flex-shrink-0 space-y-1", hideVideoTitle && !showVideoActions && !guestModeEnabled && "hidden")}>
         <div className="flex items-start gap-4">
           {!hideVideoTitle && (
           <div className="min-w-0 flex-1">
@@ -1023,30 +1024,49 @@ export function CommentSectionView({
 
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="flex-shrink-0">Version:</span>
-              {restrictToLatestVersion || sortedVideoVersions.length <= 1 ? (
-                <span className="text-foreground font-medium">
-                  {(headerVideo as any)?.versionLabel || '—'}
-                </span>
-              ) : (
-                <div className="flex-1 min-w-0 max-w-[180px] sm:max-w-[240px]">
-                  <Select
-                    value={selectedVideoId || latestSelectableVideo?.id || undefined}
-                    onValueChange={handleSelectVideoVersion}
+              <span className="text-foreground font-medium">
+                {(headerVideo as any)?.versionLabel || '—'}
+              </span>
+              {showVideoActions ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 flex-shrink-0"
+                  onClick={() => setShowVideoInfo(true)}
+                  title="Video Information"
+                  aria-label="Video Information"
+                >
+                  <Info className="w-3.5 h-3.5" />
+                </Button>
+              ) : null}
+              {showVideoActions && guestModeEnabled ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7 flex-shrink-0 sm:hidden"
+                    onClick={openGuestLinkDialog}
+                    title="Share"
+                    aria-label="Share"
                   >
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sortedVideoVersions.map((video) => (
-                        <SelectItem key={video.id} value={video.id}>
-                          {video.versionLabel}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
+                    <Share2 className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 flex-shrink-0 hidden sm:inline-flex"
+                    onClick={openGuestLinkDialog}
+                    title="Share"
+                    aria-label="Share"
+                  >
+                    <Share2 className="w-3.5 h-3.5 mr-1.5" />
+                    Share
+                  </Button>
+                </>
+              ) : null}
             </div>
           </div>
           )}

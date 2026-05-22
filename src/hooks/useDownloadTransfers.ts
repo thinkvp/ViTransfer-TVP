@@ -429,7 +429,9 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
 
     const allSizesKnown = knownByteSizes.length === files.length
     const totalKnownBytes = knownByteSizes.reduce((sum, value) => sum + value, 0)
-    const shouldZip = files.length > 1 && allSizesKnown && totalKnownBytes < ZIP_DOWNLOAD_THRESHOLD_BYTES
+    // Policy: only allow client-side ZIP generation when total known payload is <= 1GB.
+    // For larger or unknown totals, fall back to browser-managed per-file downloads.
+    const shouldZip = files.length > 1 && allSizesKnown && totalKnownBytes <= ZIP_DOWNLOAD_THRESHOLD_BYTES
 
     if (shouldZip) {
       await runZipDownload(files, onProgress)

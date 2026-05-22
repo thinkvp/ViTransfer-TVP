@@ -47,9 +47,13 @@ type ShareFilesBrowserProps = {
   isSharedDownloadActive?: boolean
   onCloseFilesView?: () => void
   requestedOpenFolderName?: string | null
+  requestedOpenFileKey?: string | null
+  onOpenFileKeyHandled?: () => void
   onOpenFolderNameChange?: (folderName: string | null) => void
   folderPreviewByName?: Record<string, string | null>
   resolveFilePreviewUrl?: (file: DownloadableFile) => Promise<string | null>
+  shareSlug?: string
+  shareToken?: string | null
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -125,9 +129,13 @@ export function ShareFilesBrowser({
   isSharedDownloadActive = false,
   onCloseFilesView,
   requestedOpenFolderName,
+  requestedOpenFileKey,
+  onOpenFileKeyHandled,
   onOpenFolderNameChange,
   folderPreviewByName,
   resolveFilePreviewUrl,
+  shareSlug,
+  shareToken,
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
@@ -135,6 +143,10 @@ export function ShareFilesBrowser({
   const [previewUrlByFileKey, setPreviewUrlByFileKey] = useState<Record<string, string | null>>({})
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
   const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
+  const [albumViewerState, setAlbumViewerState] = useState<{ images: DownloadableFile[]; currentIndex: number; albumId: string | null } | null>(null)
+  const [albumPhotoMetaByPhotoId, setAlbumPhotoMetaByPhotoId] = useState<Record<string, { socialDownloadUrl: string; socialReady: boolean }>>({})
+  const [albumSocialEnabledByAlbumId, setAlbumSocialEnabledByAlbumId] = useState<Record<string, boolean>>({})
+  const [albumMetaLoadedByAlbumId, setAlbumMetaLoadedByAlbumId] = useState<Record<string, boolean>>({})
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
 
   const sortedGroups = useMemo(() => {
@@ -247,7 +259,8 @@ export function ShareFilesBrowser({
     filesInOpenFolder.forEach((file) => {
       const fileKey = getDownloadableFileKey(file)
       if (previewUrlByFileKey[fileKey] !== undefined) return
-      if (getDownloadableFileKind(file) !== 'image') return
+      const fileKind = getDownloadableFileKind(file)
+      if (fileKind !== 'image' && fileKind !== 'video') return
 
       const embeddedPreview = file.thumbnailUrl || file.previewUrl || null
       if (embeddedPreview) {
@@ -431,6 +444,16 @@ export function ShareFilesBrowser({
     if (getDownloadableFileKind(file) !== 'image') return
     const imageOnly = imageList.filter((f) => getDownloadableFileKind(f) === 'image')
     const index = imageOnly.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+    if (file.type === 'album-photo') {
+      const albumPhotoList = imageOnly.filter((f) => f.type === 'album-photo')
+      const albumIndex = albumPhotoList.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+      setAlbumViewerState({
+        images: albumPhotoList,
+        currentIndex: Math.max(0, albumIndex),
+        albumId: typeof file.albumId === 'string' ? file.albumId : null,
+      })
+      return
+    }
     setLightboxState({ images: imageOnly, currentIndex: Math.max(0, index) })
   }
 
@@ -440,6 +463,64 @@ export function ShareFilesBrowser({
       const next = (prev.currentIndex + delta + prev.images.length) % prev.images.length
       return { ...prev, currentIndex: next }
     })
+  }
+
+  const albumViewerNavigate = (delta: number) => {
+    setAlbumViewerState((prev) => {
+      if (!prev) return prev
+      const next = (prev.currentIndex + delta + prev.images.length) % prev.images.length
+      return { ...prev, currentIndex: next }
+    })
+  }
+
+  const triggerDirectDownload = (url: string) => {
+    const link = document.createElement('a')
+    link.href = url
+    link.rel = 'noopener'
+    link.download = ''
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const loadAlbumPhotoMeta = async (albumId: string | null) => {
+    if (!albumId || !shareSlug) return
+    if (albumMetaLoadedByAlbumId[albumId]) return
+
+    try {
+      const res = await fetch(`/api/share/${encodeURIComponent(shareSlug)}/albums/${encodeURIComponent(albumId)}`, {
+        cache: 'no-store',
+        headers: shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined,
+      })
+      if (!res.ok) {
+        setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
+        return
+      }
+
+      const data = await res.json().catch(() => ({}))
+      const photos = Array.isArray((data as any)?.photos) ? (data as any).photos : []
+      const socialEnabled = (data as any)?.album?.socialCopiesEnabled !== false
+
+      setAlbumSocialEnabledByAlbumId((prev) => ({ ...prev, [albumId]: socialEnabled }))
+      setAlbumPhotoMetaByPhotoId((prev) => {
+        const next = { ...prev }
+        for (const photo of photos) {
+          const photoId = typeof photo?.id === 'string' ? photo.id : ''
+          const socialDownloadUrl = typeof photo?.socialDownloadUrl === 'string' ? photo.socialDownloadUrl : ''
+          if (!photoId || !socialDownloadUrl) continue
+          next[photoId] = {
+            socialDownloadUrl,
+            socialReady: photo?.socialReady === true,
+          }
+        }
+        return next
+      })
+    } catch {
+      // Ignore metadata fetch errors; full-resolution download remains available.
+    } finally {
+      setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
+    }
   }
 
   useEffect(() => {
@@ -453,6 +534,43 @@ export function ShareFilesBrowser({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightboxState !== null])
 
+  useEffect(() => {
+    if (!albumViewerState) return
+    void loadAlbumPhotoMeta(albumViewerState.albumId)
+  }, [albumViewerState, shareSlug, shareToken])
+
+  useEffect(() => {
+    if (!albumViewerState) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') albumViewerNavigate(-1)
+      else if (event.key === 'ArrowRight') albumViewerNavigate(1)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albumViewerState !== null])
+
+  useEffect(() => {
+    const requestedKey = String(requestedOpenFileKey || '').trim()
+    if (!requestedKey) return
+    if (!openFolder) return
+
+    const requestedFile = filesInOpenFolder.find((file) => getDownloadableFileKey(file) === requestedKey)
+    if (requestedFile && getDownloadableFileKind(requestedFile) === 'image') {
+      const imageList = requestedFile.type === 'album-photo' ? openFolderAlbumPhotos : openFolderVideoAssets
+      openImageLightbox(requestedFile, imageList)
+    }
+
+    onOpenFileKeyHandled?.()
+  }, [
+    requestedOpenFileKey,
+    openFolder,
+    filesInOpenFolder,
+    openFolderAlbumPhotos,
+    openFolderVideoAssets,
+    onOpenFileKeyHandled,
+  ])
+
   const renderOpenFolderFileCard = (file: DownloadableFile, compact = false, imageList: DownloadableFile[] = []) => {
     const fileKey = getDownloadableFileKey(file)
     const FileTypeIcon = getFileTypeIcon(file)
@@ -465,7 +583,11 @@ export function ShareFilesBrowser({
       ? resolvedPreview
       : (typeof inlinePreview === 'string' && inlinePreview.length > 0 ? inlinePreview : null)
     const showImagePreview = typeof previewSrc === 'string' && previewSrc.length > 0
-    const showVideoPreview = file.type === 'video' && Boolean(folderPreviewByName?.[openFolder?.name || ''])
+    const hasMultipleVideoVersionsInOpenFolder = openFolderVideoVersions.length > 1
+    const showVideoPreview =
+      file.type === 'video' &&
+      !hasMultipleVideoVersionsInOpenFolder &&
+      Boolean(folderPreviewByName?.[openFolder?.name || ''])
     const sizeLabel = formatFileSize(file.fileSizeBytes)
     const durationLabel = fileKind === 'video' ? formatDuration(file.durationSeconds) : null
     const fileExtensionLabel = getFileExtensionLabel(file.fileName)
@@ -478,6 +600,14 @@ export function ShareFilesBrowser({
       ? getDownloadableFileKey(openFolderVideoVersions[0])
       : null
     const showForReviewBadge = file.type === 'video' && file.isApproved === false && latestVideoVersionKey === fileKey
+    const videoVersionsInGroup = imageList.filter((entry) => entry.type === 'video')
+    const hasMultipleVideoVersions = videoVersionsInGroup.length > 1
+    const hasApprovedVideoVersionInGroup = videoVersionsInGroup.some((entry) => entry.isApproved === true)
+    const muteInactiveVideoVersion =
+      file.type === 'video' &&
+      hasMultipleVideoVersions &&
+      hasApprovedVideoVersionInGroup &&
+      file.isApproved !== true
 
     return (
       <div
@@ -485,14 +615,17 @@ export function ShareFilesBrowser({
         className={cn(
           'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
           isImageFile && 'cursor-zoom-in',
+          muteInactiveVideoVersion && 'opacity-55 saturate-0',
           isSelected
             ? 'border-2 border-primary/85 hover:border-primary'
             : 'border border-border hover:border-primary/45'
         )}
         onClick={() => {
+          if (muteInactiveVideoVersion) return
           openImageLightbox(file, imageList)
         }}
         onDoubleClick={() => {
+          if (muteInactiveVideoVersion) return
           if (file.type === 'video' && file.videoId && onOpenVideoVersion) {
             onOpenVideoVersion(file, openFolder?.name || null)
             return
@@ -558,9 +691,9 @@ export function ShareFilesBrowser({
               <input
                 type="checkbox"
                 checked={isSelected}
-                disabled={!canSelectFile}
+                disabled={!canSelectFile || muteInactiveVideoVersion}
                 onChange={(event) => {
-                  if (!canSelectFile) return
+                  if (!canSelectFile || muteInactiveVideoVersion) return
                   toggleFile(fileKey, event.target.checked)
                 }}
                 onDoubleClick={(event) => event.stopPropagation()}
@@ -568,7 +701,7 @@ export function ShareFilesBrowser({
                 className={cn(
                   'w-4 h-4',
                   FILES_CHECKBOX_CLASS,
-                  canSelectFile ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                  canSelectFile && !muteInactiveVideoVersion ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                 )}
                 aria-label={`Select ${file.fileName}`}
               />
@@ -588,6 +721,7 @@ export function ShareFilesBrowser({
                 variant="outline"
                 size="icon"
                 className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+                disabled={muteInactiveVideoVersion}
                 onClick={() => void onDownloadFile(file)}
                 onClickCapture={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -965,6 +1099,99 @@ export function ShareFilesBrowser({
                       </div>
                     </>
                   ) : null}
+                </div>
+              ) : null}
+            </DialogContent>
+          </Dialog>
+        )
+      })()}
+
+      {(() => {
+        const viewerFile = albumViewerState ? albumViewerState.images[albumViewerState.currentIndex] : null
+        const viewerSrc = viewerFile ? getLightboxUrl(viewerFile) : null
+        const hasMultiple = albumViewerState && albumViewerState.images.length > 1
+        const socialEnabled = viewerFile?.albumId ? albumSocialEnabledByAlbumId[viewerFile.albumId] !== false : false
+        const photoMeta = viewerFile?.photoId ? albumPhotoMetaByPhotoId[viewerFile.photoId] : null
+        const canDownloadSocial = Boolean(socialEnabled && photoMeta?.socialDownloadUrl && photoMeta?.socialReady)
+
+        return (
+          <Dialog open={Boolean(albumViewerState)} onOpenChange={(open) => { if (!open) setAlbumViewerState(null) }}>
+            <DialogContent className="max-w-none w-[95vw] h-[95vh] flex flex-col">
+              {viewerFile && viewerSrc ? (
+                <div className="flex-1 min-h-0 flex flex-col gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      This is a low resolution preview. Use the buttons to download the original versions.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center sm:gap-2 sm:shrink-0">
+                      {socialEnabled ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!canDownloadSocial}
+                          onClick={() => {
+                            if (!photoMeta?.socialDownloadUrl) return
+                            triggerDirectDownload(photoMeta.socialDownloadUrl)
+                          }}
+                          className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download Social Media Sized
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="default"
+                        onClick={() => void onDownloadFile(viewerFile)}
+                        className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Download Full Resolution
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg overflow-hidden border bg-muted/20">
+                    <div className="relative w-full h-[80dvh] group">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={viewerSrc}
+                        alt={viewerFile.fileName}
+                        className="w-full h-full object-contain"
+                        onContextMenu={(event) => event.preventDefault()}
+                      />
+
+                      {hasMultiple ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => albumViewerNavigate(-1)}
+                            aria-label="Previous photo"
+                            className="absolute left-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/60 hover:bg-background/80 backdrop-blur-sm opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+                          >
+                            <ChevronLeft className="w-5 h-5" />
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => albumViewerNavigate(1)}
+                            aria-label="Next photo"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/60 hover:bg-background/80 backdrop-blur-sm opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+                          >
+                            <ChevronRight className="w-5 h-5" />
+                          </Button>
+
+                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] text-white tabular-nums">
+                            {albumViewerState!.currentIndex + 1} / {albumViewerState!.images.length}
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </DialogContent>

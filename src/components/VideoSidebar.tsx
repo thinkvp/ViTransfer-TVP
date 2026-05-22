@@ -1026,6 +1026,7 @@ export default function VideoSidebar({
                       const isChecked = selectedFileIdsValue.has(fileKey)
                       const FileIcon = getFileIcon(file)
                       const isSubFile = file.type !== 'video'
+                      const isImageAsset = file.type === 'asset' && getDownloadableFileKind(file) === 'image'
                       const canCheckFile = isSelectableDownloadableFile(file)
                       const fileDisplayName = file.type === 'video'
                         ? `${vg.name} - ${file.versionLabel || file.fileName}`
@@ -1038,8 +1039,17 @@ export default function VideoSidebar({
                             isSubFile && dlGroup?.groupType === 'video' ? 'pl-11' : 'pl-9'
                           )}
                           onClick={() => {
-                            if (file.type !== 'video') return
-                            openVideoVersionInView(file)
+                            if (file.type === 'video') {
+                              openVideoVersionInView(file)
+                              return
+                            }
+                            if (!isImageAsset) return
+
+                            onVideoSelect(vg.name)
+                            setDesktopActiveTabValue('files')
+                            window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                              detail: { folderName: vg.name, fileKey },
+                            }))
                           }}
                         >
                           <input
@@ -1065,7 +1075,7 @@ export default function VideoSidebar({
                           <span
                             className={cn(
                               'flex-1 text-xs text-muted-foreground truncate py-0.5',
-                              file.type === 'video' ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
+                              file.type === 'video' || isImageAsset ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
                             )}
                             title={fileDisplayName}
                           >
@@ -1143,6 +1153,14 @@ export default function VideoSidebar({
                             'flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors',
                             isAlbumPhoto ? 'pl-11' : 'pl-9'
                           )}
+                          onClick={() => {
+                            if (!isAlbumPhoto) return
+                            onAlbumSelect?.(a.id)
+                            setDesktopActiveTabValue('files')
+                            window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                              detail: { folderName: a.name, fileKey },
+                            }))
+                          }}
                         >
                           <input
                             type="checkbox"
@@ -1155,11 +1173,12 @@ export default function VideoSidebar({
                                 return next
                               })
                             }}
+                            onClick={(event) => event.stopPropagation()}
                             className={cn(SIDEBAR_CHECKBOX_CLASS, 'cursor-pointer')}
                           />
                           <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <span
-                            className="flex-1 text-xs text-muted-foreground truncate py-0.5 cursor-default"
+                            className={cn('flex-1 text-xs text-muted-foreground truncate py-0.5', isAlbumPhoto ? 'cursor-pointer hover:text-foreground' : 'cursor-default')}
                             title={file.fileName}
                           >
                             {file.fileName}
