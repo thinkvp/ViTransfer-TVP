@@ -13,6 +13,7 @@ import { isS3Mode, s3InitiateMultipartUpload, s3GetPresignedPartUrl, S3_PRESIGNE
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 
@@ -129,16 +130,13 @@ export async function POST(
 
   // Enforce per-project allocation for clients
   if (isClient && (projectSettings.maxClientUploadAllocationMB ?? 0) > 0) {
-    const limitBytes = BigInt(projectSettings.maxClientUploadAllocationMB) * BigInt(1024 * 1024)
-    const used = await prisma.commentFile.aggregate({
-      where: { projectId: comment.projectId },
-      _sum: { fileSize: true },
-    })
-    const usedBytes = (used._sum.fileSize ?? BigInt(0)) as bigint
-    const incomingBytes = BigInt(fileSize)
-    if (usedBytes + incomingBytes > limitBytes) {
-      const remainingBytes = usedBytes >= limitBytes ? BigInt(0) : (limitBytes - usedBytes)
-      const remainingMB = Number(remainingBytes / BigInt(1024 * 1024))
+    const quota = await checkProjectUploadQuota(
+      comment.projectId,
+      projectSettings.maxClientUploadAllocationMB,
+      BigInt(fileSize),
+    )
+    if (!quota.allowed) {
+      const remainingMB = Number(quota.remainingBytes / BigInt(1024 * 1024))
       return NextResponse.json(
         { error: `Upload limit exceeded. Remaining allowance: ${remainingMB}MB.` },
         { status: 413 }

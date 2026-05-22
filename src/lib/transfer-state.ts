@@ -57,10 +57,41 @@ export function calculateTransferSummary(items: TransferItem[]): TransferSummary
     .map((item) => item.etaSeconds)
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
 
+  const estimatedRemainingBytes = activeItems
+    .map((item) => {
+      const rawSize = item.fileSizeBytes
+      const sizeBytes = typeof rawSize === 'number' && Number.isFinite(rawSize) && rawSize >= 0
+        ? rawSize
+        : null
+
+      if (sizeBytes != null) {
+        const progress = Math.max(0, Math.min(100, item.progressPercent)) / 100
+        return Math.max(0, sizeBytes * (1 - progress))
+      }
+
+      const speed = item.speedBytesPerSecond
+      const eta = item.etaSeconds
+      if (
+        typeof speed === 'number' && Number.isFinite(speed) && speed > 0
+        && typeof eta === 'number' && Number.isFinite(eta) && eta > 0
+      ) {
+        return speed * eta
+      }
+
+      return null
+    })
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+
+  const totalEstimatedRemainingBytes = estimatedRemainingBytes.reduce((sum, value) => sum + value, 0)
+  const totalKnownSpeed = knownSpeeds.reduce((sum, value) => sum + value, 0)
+  const aggregateEtaSeconds = totalEstimatedRemainingBytes > 0 && totalKnownSpeed > 0
+    ? totalEstimatedRemainingBytes / totalKnownSpeed
+    : null
+
   return {
     percent,
-    speedBytesPerSecond: knownSpeeds.length > 0 ? knownSpeeds.reduce((sum, value) => sum + value, 0) : null,
-    etaSeconds: knownEtas.length > 0 ? Math.max(...knownEtas) : null,
+    speedBytesPerSecond: totalKnownSpeed > 0 ? totalKnownSpeed : null,
+    etaSeconds: aggregateEtaSeconds ?? (knownEtas.length > 0 ? Math.max(...knownEtas) : null),
     activeCount: activeItems.length,
     totalCount: items.length,
   }

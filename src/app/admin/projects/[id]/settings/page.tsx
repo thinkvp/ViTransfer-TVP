@@ -1251,9 +1251,9 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="allowClientUploadFiles">Allow clients to upload files with comments</Label>
+                    <Label htmlFor="allowClientUploadFiles">Allow clients to upload files to Projects</Label>
                     <p className="text-xs text-muted-foreground">
-                      Clients can attach files to comments (up to 5 per comment). Supported: Images, Videos, PDFs, Documents, Fonts, Archives.
+                      Authenticated clients can upload files to the Share page UPLOADS root and subfolders. Supported: Images, Videos, PDFs, Documents, Fonts, Archives.
                     </p>
                   </div>
                   <Switch
@@ -1265,9 +1265,9 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="maxClientUploadAllocationMB">Max allowed data allocation for comment attachments</Label>
+                    <Label htmlFor="maxClientUploadAllocationMB">Max allowed data allocation for project uploads</Label>
                     <p className="text-xs text-muted-foreground">
-                      Comment attachments will be restricted to upload more than this amount for the entire project. Zero = no limit.
+                      Quota applies to total project uploads (comment attachments + UPLOADS files). Zero = no limit.
                     </p>
                   </div>
                   <div className="flex items-center justify-end gap-2">
@@ -1753,16 +1753,16 @@ export default function ProjectSettingsPage() {
 
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="allowClientUploadFiles-d">Allow clients to upload files with comments</Label>
-                        <p className="text-xs text-muted-foreground">Clients can attach files to comments (up to 5 per comment). Supported: Images, Videos, PDFs, Documents, Fonts, Archives.</p>
+                        <Label htmlFor="allowClientUploadFiles-d">Allow clients to upload files to Projects</Label>
+                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files to the Share page UPLOADS root and subfolders. Supported: Images, Videos, PDFs, Documents, Fonts, Archives.</p>
                       </div>
                       <Switch id="allowClientUploadFiles-d" checked={allowClientUploadFiles} onCheckedChange={setAllowClientUploadFiles} />
                     </div>
 
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="maxClientUploadAllocationMB-d">Max allowed data allocation for comment attachments</Label>
-                        <p className="text-xs text-muted-foreground">Comment attachments will be restricted to upload more than this amount for the entire project. Zero = no limit.</p>
+                        <Label htmlFor="maxClientUploadAllocationMB-d">Max allowed data allocation for project uploads</Label>
+                        <p className="text-xs text-muted-foreground">Quota applies to total project uploads (comment attachments + UPLOADS files). Zero = no limit.</p>
                       </div>
                       <div className="flex items-center justify-end gap-2">
                         <Input id="maxClientUploadAllocationMB-d" type="number" min={0} value={maxClientUploadAllocationMB} onChange={(e) => { const val = e.target.value; setMaxClientUploadAllocationMB(val === '' ? '' : Math.max(0, parseInt(val, 10) || 0)) }} className="w-20" />

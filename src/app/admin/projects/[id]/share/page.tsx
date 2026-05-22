@@ -14,7 +14,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowLeft } from 'lucide-react'
-import { apiFetch } from '@/lib/api-client'
+import { apiFetch, attemptRefresh } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
@@ -23,6 +23,10 @@ import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-fil
 import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
 import type { DownloadQueueItem } from '@/lib/download-queue'
 import { useDownloadTransfers } from '@/hooks/useDownloadTransfers'
+import { calculateTransferSummary, createTransferId, isTransferActive, type TransferItem } from '@/lib/transfer-state'
+import { getAccessToken } from '@/lib/token-store'
+import { isS3Mode } from '@/lib/storage-provider-client'
+import { extractUploadMediaMetadata } from '@/lib/upload-media-metadata-client'
 
 type DraftNavigationGuard = {
   confirmDiscardDraft: () => boolean
@@ -78,7 +82,11 @@ export default function AdminSharePage() {
   const [headerVersionId, setHeaderVersionId] = useState<string | null>(null)
   const [requestedFilesFolderName, setRequestedFilesFolderName] = useState<string | null>(null)
   const [requestedFilesFileKey, setRequestedFilesFileKey] = useState<string | null>(null)
+  const [uploadTransferItems, setUploadTransferItems] = useState<TransferItem[]>([])
+  const [uploadTransferPanelVersion, setUploadTransferPanelVersion] = useState(0)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
+  const uploadAbortControllersRef = useRef<Map<string, AbortController>>(new Map())
+  const uploadCancelRequestedRef = useRef(false)
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
@@ -87,9 +95,14 @@ export default function AdminSharePage() {
 
   const availableFileCount = useMemo(() => {
     return (downloadableFiles || []).reduce((total, group) => {
+      if (group.groupType === 'uploads') return total
       return total + (group.mainFile ? 1 : 0) + group.subFiles.length
     }, 0)
   }, [downloadableFiles])
+
+  const isUploadsFilesBrowse = desktopContentTab === 'files'
+    && String(requestedFilesFolderName || '').trim().startsWith('UPLOADS')
+  const uploadsHeaderPath = isUploadsFilesBrowse ? String(requestedFilesFolderName || '').trim() : ''
 
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
@@ -824,10 +837,20 @@ export default function AdminSharePage() {
         })
         const data = await r.json()
         url = data.url
+      } else if (file.type === 'upload-file') {
+        const r = await apiFetch(`/api/share/${project?.slug}/uploads/download-token`, {
+          method: 'POST',
+          signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileId: file.uploadFileId }),
+        })
+        const data = await r.json()
+        url = data.downloadUrl || data.url
       } else {
         if (!file.downloadUrl) return null
         url = file.downloadUrl
       }
+      if (!url || typeof url !== 'string') return null
       return { url, fileName: file.fileName }
     } catch {
       return null
@@ -847,6 +870,537 @@ export default function AdminSharePage() {
     projectTitle: project?.title,
     resolveDownloadTarget,
   })
+
+  const handleCreateUploadFolder = useCallback(async (parentPath: string, folderName: string) => {
+    if (!project?.slug) throw new Error('Project share link is unavailable')
+
+    const response = await apiFetch(`/api/share/${project.slug}/uploads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parentPath,
+        folderName,
+      }),
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(String((payload as any)?.error || 'Unable to create folder'))
+    }
+
+    await fetchDownloadableFiles()
+  }, [fetchDownloadableFiles, project?.slug])
+
+  const handleUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
+    if (!project?.slug) throw new Error('Project share link is unavailable')
+    if (!Array.isArray(files) || files.length === 0) return
+    uploadCancelRequestedRef.current = false
+
+    const useS3Multipart = await isS3Mode()
+
+    const performRequest = async (
+      url: string,
+      init: RequestInit,
+      retryOn401: boolean,
+    ): Promise<Response> => {
+      const withAccessToken = (token: string | null) => {
+        const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+        return apiFetch(url, {
+          ...init,
+          headers: {
+            ...authHeader,
+            ...(init.headers as Record<string, string> | undefined),
+          },
+        })
+      }
+
+      let response = await withAccessToken(getAccessToken())
+
+      if (retryOn401 && response.status === 401) {
+        const refreshed = await attemptRefresh()
+        if (refreshed) {
+          response = await withAccessToken(getAccessToken())
+        }
+      }
+
+      return response
+    }
+
+    const queuedItems: TransferItem[] = files.map((file) => ({
+      id: createTransferId('upload'),
+      direction: 'upload',
+      kind: 'file',
+      fileName: file.name,
+      progressPercent: 0,
+      status: 'queued',
+      fileSizeBytes: file.size,
+      speedBytesPerSecond: null,
+      etaSeconds: null,
+      errorMessage: null,
+    }))
+
+    setDownloadableFiles((prev) => {
+      if (!Array.isArray(prev)) return prev
+
+      const targetGroupName = folderPath ? `UPLOADS / ${folderPath}` : 'UPLOADS'
+      const optimisticFiles: DownloadableFile[] = files.map((file, index) => ({
+        type: 'upload-file',
+        uploadFileId: `pending-${queuedItems[index].id}`,
+        uploadFolderPath: folderPath,
+        fileName: file.name,
+        fileSizeBytes: file.size,
+      }))
+
+      const existingGroupIndex = prev.findIndex((group) => group.groupType === 'uploads' && group.name === targetGroupName)
+      if (existingGroupIndex === -1) {
+        return [
+          ...prev,
+          {
+            name: targetGroupName,
+            groupType: 'uploads',
+            subFiles: optimisticFiles,
+          },
+        ]
+      }
+
+      return prev.map((group, index) => {
+        if (index !== existingGroupIndex) return group
+        const existingKeys = new Set(group.subFiles.map((file) => `${file.fileName}:${String(file.fileSizeBytes || '')}`))
+        const nextOptimistic = optimisticFiles.filter((file) => !existingKeys.has(`${file.fileName}:${String(file.fileSizeBytes || '')}`))
+        if (nextOptimistic.length === 0) return group
+        return {
+          ...group,
+          subFiles: [...group.subFiles, ...nextOptimistic],
+        }
+      })
+    })
+
+    setUploadTransferPanelVersion((value) => value + 1)
+    setUploadTransferItems((prev) => [...prev, ...queuedItems])
+
+    let firstFailure: Error | null = null
+
+    for (let index = 0; index < files.length; index += 1) {
+      if (uploadCancelRequestedRef.current) {
+        setUploadTransferItems((prev) => prev.map((item) => (
+          ['queued', 'preparing', 'transferring'].includes(item.status)
+            ? { ...item, status: 'canceled', errorMessage: 'Canceled' }
+            : item
+        )))
+        break
+      }
+
+      const file = files[index]
+      const transferId = queuedItems[index].id
+      const transferStartedAtMs = Date.now()
+      let shouldStopProcessing = false
+
+      const speedState = {
+        lastLoadedBytes: 0,
+        lastTimestampMs: transferStartedAtMs,
+        smoothedSpeedBytesPerSecond: null as number | null,
+      }
+
+      const calculateUploadMetrics = (loadedBytes: number) => {
+        const now = Date.now()
+        const elapsedSeconds = Math.max((now - transferStartedAtMs) / 1000, 0)
+        const deltaBytes = Math.max(loadedBytes - speedState.lastLoadedBytes, 0)
+        const deltaSeconds = Math.max((now - speedState.lastTimestampMs) / 1000, 0)
+
+        if (deltaBytes > 0 && deltaSeconds >= 0.2) {
+          const instantSpeed = deltaBytes / deltaSeconds
+          speedState.smoothedSpeedBytesPerSecond = speedState.smoothedSpeedBytesPerSecond == null
+            ? instantSpeed
+            : (speedState.smoothedSpeedBytesPerSecond * 0.7) + (instantSpeed * 0.3)
+          speedState.lastLoadedBytes = loadedBytes
+          speedState.lastTimestampMs = now
+        }
+
+        const stableSpeed = elapsedSeconds >= 1.5
+          ? speedState.smoothedSpeedBytesPerSecond
+          : null
+        const remainingBytes = Math.max(file.size - loadedBytes, 0)
+        const etaSeconds = stableSpeed && stableSpeed > 0
+          ? remainingBytes / stableSpeed
+          : null
+
+        return {
+          speedBytesPerSecond: stableSpeed,
+          etaSeconds,
+        }
+      }
+
+      setUploadTransferItems((prev) => prev.map((item) => (
+        item.id === transferId
+          ? {
+              ...item,
+              status: 'preparing',
+              progressPercent: 10,
+              speedBytesPerSecond: null,
+              etaSeconds: null,
+              errorMessage: null,
+            }
+          : item
+      )))
+
+      const controller = new AbortController()
+      uploadAbortControllersRef.current.set(transferId, controller)
+
+      try {
+        const mediaMetadata = await extractUploadMediaMetadata(file).catch(() => null)
+
+        if (useS3Multipart) {
+          const presignRes = await performRequest(
+            `/api/share/${project.slug}/uploads/s3/presign`,
+            {
+              method: 'POST',
+              signal: controller.signal,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fileName: file.name,
+                fileSize: file.size,
+                contentType: file.type || 'application/octet-stream',
+                folderPath,
+              }),
+            },
+            true,
+          )
+
+          if (!presignRes.ok) {
+            const payload = await presignRes.json().catch(() => null)
+            throw new Error((payload && typeof payload?.error === 'string') ? payload.error : 'Upload failed')
+          }
+
+          const presignPayload = await presignRes.json()
+          const uploadId = String(presignPayload?.uploadId || '')
+          const key = String(presignPayload?.key || '')
+          const parts = Array.isArray(presignPayload?.parts) ? presignPayload.parts : []
+          const partSize = Number(presignPayload?.partSize || 0)
+
+          if (!uploadId || !key || !Array.isArray(parts) || parts.length === 0 || !Number.isFinite(partSize) || partSize <= 0) {
+            throw new Error('Upload presign response was invalid')
+          }
+
+          let totalSentBytes = 0
+          let nextPartIdx = 0
+          const completedParts: Array<{ partNumber: number; etag: string }> = new Array(parts.length)
+          const maxConcurrent = Math.min(4, parts.length)
+
+          const patchProgress = () => {
+            const progress = Math.floor((totalSentBytes / Math.max(file.size, 1)) * 100)
+            const metrics = calculateUploadMetrics(totalSentBytes)
+            setUploadTransferItems((prev) => prev.map((item) => (
+              item.id === transferId
+                ? {
+                    ...item,
+                    status: 'transferring',
+                    progressPercent: Math.min(99, Math.max(progress, item.progressPercent)),
+                    speedBytesPerSecond: metrics.speedBytesPerSecond,
+                    etaSeconds: metrics.etaSeconds,
+                    errorMessage: null,
+                  }
+                : item
+            )))
+          }
+
+          const uploadPart = async (part: any, chunk: Blob, chunkBytes: number): Promise<string> => {
+            const url = String(part?.url || '')
+            if (!url) throw new Error('Missing multipart URL')
+
+            return await new Promise<string>((resolve, reject) => {
+              if (controller.signal.aborted) {
+                reject(new DOMException('Aborted', 'AbortError'))
+                return
+              }
+
+              const xhr = new XMLHttpRequest()
+              xhr.open('PUT', url)
+              let lastLoaded = 0
+
+              xhr.upload.addEventListener('progress', (event) => {
+                const delta = event.loaded - lastLoaded
+                if (delta <= 0) return
+                lastLoaded = event.loaded
+                totalSentBytes = Math.min(totalSentBytes + delta, file.size)
+                patchProgress()
+              })
+
+              xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  const tail = chunkBytes - lastLoaded
+                  if (tail > 0) {
+                    totalSentBytes = Math.min(totalSentBytes + tail, file.size)
+                    patchProgress()
+                  }
+                  const etag = xhr.getResponseHeader('ETag') ?? xhr.getResponseHeader('etag')
+                  if (!etag) {
+                    reject(new Error('Part upload succeeded but no ETag returned'))
+                    return
+                  }
+                  resolve(etag)
+                  return
+                }
+
+                reject(new Error(`Part upload failed with status ${xhr.status}`))
+              })
+
+              xhr.addEventListener('error', () => reject(new Error('Network error during upload')))
+              xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+
+              const unsubscribe = () => xhr.abort()
+              controller.signal.addEventListener('abort', unsubscribe, { once: true })
+              xhr.addEventListener('loadend', () => controller.signal.removeEventListener('abort', unsubscribe))
+              xhr.send(chunk)
+            })
+          }
+
+          const worker = async () => {
+            while (nextPartIdx < parts.length) {
+              const i = nextPartIdx++
+              const part = parts[i]
+              const start = i * partSize
+              const end = Math.min(start + partSize, file.size)
+              const chunk = file.slice(start, end)
+              const chunkBytes = end - start
+              const etag = await uploadPart(part, chunk, chunkBytes)
+              completedParts[i] = { partNumber: Number(part?.partNumber || i + 1), etag }
+            }
+          }
+
+          try {
+            await Promise.all(Array.from({ length: maxConcurrent }, () => worker()))
+          } catch (error) {
+            await performRequest(
+              `/api/share/${project.slug}/uploads/s3/abort`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uploadId, key }),
+              },
+              false,
+            ).catch(() => undefined)
+            throw error
+          }
+
+          const completeRes = await performRequest(
+            `/api/share/${project.slug}/uploads/s3/complete`,
+            {
+              method: 'POST',
+              signal: controller.signal,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                uploadId,
+                key,
+                parts: completedParts,
+                fileSize: file.size,
+                fileName: file.name,
+                fileType: file.type || 'application/octet-stream',
+                folderPath,
+                mediaMetadata,
+              }),
+            },
+            true,
+          )
+
+          if (!completeRes.ok) {
+            const payload = await completeRes.json().catch(() => null)
+            throw new Error((payload && typeof payload?.error === 'string') ? payload.error : 'Upload failed')
+          }
+        } else {
+          const formData = new FormData()
+          formData.append('file', file)
+          formData.append('folderPath', folderPath)
+          if (mediaMetadata) {
+            formData.append('mediaMetadata', JSON.stringify(mediaMetadata))
+          }
+
+          const uploadWithProgress = (accessToken: string | null): Promise<{ status: number; responseText: string }> => {
+            return new Promise((resolve, reject) => {
+              if (controller.signal.aborted) {
+                reject(new DOMException('Aborted', 'AbortError'))
+                return
+              }
+
+              const xhr = new XMLHttpRequest()
+              xhr.open('POST', `/api/share/${project.slug}/uploads/files`)
+              if (accessToken) {
+                xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+              }
+
+              xhr.upload.addEventListener('progress', (event) => {
+                if (!event.lengthComputable) return
+                const progress = Math.floor((event.loaded / Math.max(file.size, 1)) * 100)
+                const metrics = calculateUploadMetrics(event.loaded)
+                setUploadTransferItems((prev) => prev.map((item) => (
+                  item.id === transferId
+                    ? {
+                        ...item,
+                        status: 'transferring',
+                        progressPercent: Math.min(99, Math.max(progress, item.progressPercent)),
+                        speedBytesPerSecond: metrics.speedBytesPerSecond,
+                        etaSeconds: metrics.etaSeconds,
+                        errorMessage: null,
+                      }
+                    : item
+                )))
+              })
+
+              xhr.addEventListener('load', () => {
+                resolve({ status: xhr.status, responseText: xhr.responseText || '' })
+              })
+
+              xhr.addEventListener('error', () => reject(new Error('Network error during upload')))
+              xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+
+              const unsubscribe = () => xhr.abort()
+              controller.signal.addEventListener('abort', unsubscribe, { once: true })
+              xhr.addEventListener('loadend', () => controller.signal.removeEventListener('abort', unsubscribe))
+
+              setUploadTransferItems((prev) => prev.map((item) => (
+                item.id === transferId
+                  ? { ...item, status: 'transferring', progressPercent: Math.max(10, item.progressPercent), errorMessage: null }
+                  : item
+              )))
+
+              xhr.send(formData)
+            })
+          }
+
+          let uploadResult = await uploadWithProgress(getAccessToken())
+
+          if (uploadResult.status === 401) {
+            const refreshed = await attemptRefresh()
+            if (refreshed) {
+              uploadResult = await uploadWithProgress(getAccessToken())
+            }
+          }
+
+          if (uploadResult.status < 200 || uploadResult.status >= 300) {
+            let errorMessage = `Unable to upload ${file.name}`
+            try {
+              const payload = JSON.parse(uploadResult.responseText || '{}')
+              if (payload && typeof payload.error === 'string' && payload.error.trim()) {
+                errorMessage = payload.error
+              }
+            } catch {
+              // Keep default message when response is not JSON.
+            }
+            throw new Error(errorMessage)
+          }
+        }
+
+        setUploadTransferItems((prev) => prev.map((item) => (
+          item.id === transferId
+            ? {
+                ...item,
+                status: 'completed',
+                progressPercent: 100,
+                speedBytesPerSecond: null,
+                etaSeconds: null,
+                errorMessage: null,
+              }
+            : item
+        )))
+      } catch (error) {
+        const wasCanceled = error instanceof DOMException && error.name === 'AbortError'
+        setUploadTransferItems((prev) => prev.map((item) => (
+          item.id === transferId
+            ? {
+                ...item,
+                status: wasCanceled ? 'canceled' : 'failed',
+                progressPercent: wasCanceled ? item.progressPercent : 100,
+                speedBytesPerSecond: null,
+                etaSeconds: null,
+                errorMessage: wasCanceled
+                  ? 'Canceled'
+                  : (error instanceof Error ? error.message : 'Upload failed'),
+              }
+            : item
+        )))
+
+        if (!wasCanceled) {
+          firstFailure = error instanceof Error ? error : new Error('Upload failed')
+          break
+        }
+
+        shouldStopProcessing = uploadCancelRequestedRef.current
+      } finally {
+        uploadAbortControllersRef.current.delete(transferId)
+      }
+
+      if (shouldStopProcessing) {
+        break
+      }
+    }
+
+    await fetchDownloadableFiles()
+
+    if (firstFailure) {
+      throw firstFailure
+    }
+  }, [fetchDownloadableFiles, project?.slug])
+
+  const handleDeleteUploadFile = useCallback(async (fileId: string) => {
+    if (!project?.slug) throw new Error('Project share link is unavailable')
+
+    const response = await apiFetch(`/api/share/${project.slug}/uploads?fileId=${encodeURIComponent(fileId)}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(String((payload as any)?.error || 'Unable to delete file'))
+    }
+
+    await fetchDownloadableFiles()
+  }, [fetchDownloadableFiles, project?.slug])
+
+  const handleDeleteUploadFolder = useCallback(async (folderPath: string) => {
+    if (!project?.slug) throw new Error('Project share link is unavailable')
+
+    const response = await apiFetch(`/api/share/${project.slug}/uploads?folderPath=${encodeURIComponent(folderPath)}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(String((payload as any)?.error || 'Unable to delete folder'))
+    }
+
+    await fetchDownloadableFiles()
+  }, [fetchDownloadableFiles, project?.slug])
+
+  const transferItemsCombined = useMemo(() => {
+    return [...transferItems, ...uploadTransferItems]
+  }, [transferItems, uploadTransferItems])
+
+  const transferSummaryCombined = useMemo(() => {
+    return calculateTransferSummary(transferItemsCombined)
+  }, [transferItemsCombined])
+
+  const hasAnyActiveTransfers = useMemo(() => {
+    return transferItemsCombined.some((item) => isTransferActive(item.status))
+  }, [transferItemsCombined])
+
+  const clearCompletedTransfersCombined = useCallback(() => {
+    clearCompletedTransfers()
+    setUploadTransferItems((prev) => prev.filter((item) => isTransferActive(item.status)))
+  }, [clearCompletedTransfers])
+
+  const cancelActiveTransfersCombined = useCallback(() => {
+    uploadCancelRequestedRef.current = true
+    cancelActiveTransfers()
+    setUploadTransferItems((prev) => prev.map((item) => (
+      ['queued', 'preparing', 'transferring'].includes(item.status)
+        ? { ...item, status: 'canceled', errorMessage: 'Canceled' }
+        : item
+    )))
+    uploadAbortControllersRef.current.forEach((controller) => {
+      controller.abort()
+    })
+  }, [cancelActiveTransfers])
+
+  const transferPanelVersionCombined = transferPanelVersion + uploadTransferPanelVersion
 
   const sidebarVideosByName = useMemo(() => {
     return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
@@ -887,6 +1441,27 @@ export default function AdminSharePage() {
       return file.thumbnailUrl || file.previewUrl || file.downloadUrl || null
     }
 
+    if (file.type === 'upload-file' && file.uploadFileId && project?.slug) {
+      try {
+        const response = await apiFetch(`/api/share/${project.slug}/uploads/download-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileId: file.uploadFileId }),
+        })
+        if (!response.ok) return null
+        const data = await response.json().catch(() => ({}))
+        if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
+          return String((data as any).previewUrl)
+        }
+        if (typeof (data as any)?.url === 'string' && (data as any).url) {
+          return String((data as any).url)
+        }
+        return null
+      } catch {
+        return null
+      }
+    }
+
     if (file.type === 'video' && file.videoId) {
       return filePreviewByVideoId.get(file.videoId) || null
     }
@@ -904,7 +1479,7 @@ export default function AdminSharePage() {
     } catch {
       return null
     }
-  }, [filePreviewByVideoId])
+  }, [filePreviewByVideoId, project?.slug])
 
   // Photos-only projects: default to first album once albums load.
   useEffect(() => {
@@ -1034,8 +1609,20 @@ export default function AdminSharePage() {
           <span className="text-foreground font-medium whitespace-nowrap flex-shrink-0 max-w-[25%] truncate" title={project.title}>{project.title}</span>
         )}
 
+        {isUploadsFilesBrowse ? (
+          <>
+            <span className="text-muted-foreground flex-shrink-0">/</span>
+            <span
+              className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[40%] truncate"
+              title={uploadsHeaderPath}
+            >
+              {uploadsHeaderPath}
+            </span>
+          </>
+        ) : null}
+
         {/* Video / Album section */}
-        {(activeVideoName || activeAlbumId) && !(desktopContentTab === 'files' && !requestedFilesFolderName) && (
+        {(activeVideoName || activeAlbumId) && !isUploadsFilesBrowse && !(desktopContentTab === 'files' && !requestedFilesFolderName) && (
           <>
             <span className="text-muted-foreground flex-shrink-0">/</span>
             {mediaOptions.length > 1 ? (
@@ -1171,8 +1758,13 @@ export default function AdminSharePage() {
           downloadableFiles={downloadableFiles}
           onDownloadFile={handleDownloadFile}
           onDownloadFiles={handleDownloadFiles}
-          sharedDownloadProgress={transferSummary}
-          isSharedDownloadActive={hasActiveTransfers}
+          sharedDownloadProgress={transferSummaryCombined}
+          isSharedDownloadActive={hasAnyActiveTransfers}
+          transferItems={transferItemsCombined}
+          transferSummary={transferSummaryCombined}
+          transferPanelVersion={transferPanelVersionCombined}
+          onCancelActiveTransfers={cancelActiveTransfersCombined}
+          onClearCompletedTransfers={clearCompletedTransfersCombined}
           hasApprovableVideos={hasApprovableVideos}
           showDesktopTabBar={false}
           desktopActiveTab={desktopContentTab === 'files' ? 'files' : 'for-review'}
@@ -1213,8 +1805,8 @@ export default function AdminSharePage() {
                   }, 0)
                 }}
                 onDownloadFiles={handleDownloadFiles}
-                sharedDownloadProgress={transferSummary}
-                isSharedDownloadActive={hasActiveTransfers}
+                sharedDownloadProgress={transferSummaryCombined}
+                isSharedDownloadActive={hasAnyActiveTransfers}
                 onCloseFilesView={() => setDesktopContentTab('view')}
                 requestedOpenFolderName={requestedFilesFolderName}
                 requestedOpenFileKey={requestedFilesFileKey}
@@ -1224,6 +1816,13 @@ export default function AdminSharePage() {
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
                 shareSlug={String(project.slug)}
                 shareToken={null}
+                transferItems={transferItemsCombined}
+                canUploadToProjects={true}
+                canDeleteUploads={true}
+                onCreateUploadFolder={handleCreateUploadFolder}
+                onUploadFiles={handleUploadFiles}
+                onDeleteUploadFile={handleDeleteUploadFile}
+                onDeleteUploadFolder={handleDeleteUploadFolder}
               />
             ) : activeAlbumId ? (
               <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} />

@@ -1,4 +1,4 @@
-export type DownloadableFileType = 'video' | 'asset' | 'album-zip' | 'album-photo'
+export type DownloadableFileType = 'video' | 'asset' | 'album-zip' | 'album-photo' | 'upload-file'
 
 export interface DownloadableFile {
   type: DownloadableFileType
@@ -19,6 +19,10 @@ export interface DownloadableFile {
   albumId?: string
   /** Set for type 'album-photo' */
   photoId?: string
+  /** Set for type 'upload-file' */
+  uploadFileId?: string
+  /** Set for type 'upload-file' */
+  uploadFolderPath?: string
   /** Set for type 'album-zip' */
   variant?: 'full' | 'social'
   /** Optional tokenized preview URL (e.g. album photo thumbnail). */
@@ -31,7 +35,7 @@ export interface DownloadableFile {
 
 export interface DownloadableGroup {
   name: string
-  groupType: 'video' | 'album'
+  groupType: 'video' | 'album' | 'uploads'
   /** For video groups: the approved version's original file. Undefined for album groups. */
   mainFile?: DownloadableFile
   /** For video groups: the approved version's assets (shown indented). For album groups: the zip files. */

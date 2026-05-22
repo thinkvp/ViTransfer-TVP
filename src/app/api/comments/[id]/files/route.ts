@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { uploadFile } from '@/lib/storage'
 
 export const runtime = 'nodejs'
@@ -111,17 +112,14 @@ export async function POST(
 
     // Enforce per-project total allocation for client uploads (0 = unlimited)
     if (isClient && (projectSettings.maxClientUploadAllocationMB ?? 0) > 0) {
-      const limitBytes = BigInt(projectSettings.maxClientUploadAllocationMB) * BigInt(1024 * 1024)
-      const used = await prisma.commentFile.aggregate({
-        where: { projectId: comment.projectId },
-        _sum: { fileSize: true },
-      })
-      const usedBytes = (used._sum.fileSize ?? BigInt(0)) as bigint
-      const incomingBytes = BigInt(fileSize)
+      const quota = await checkProjectUploadQuota(
+        comment.projectId,
+        projectSettings.maxClientUploadAllocationMB,
+        BigInt(fileSize),
+      )
 
-      if (usedBytes + incomingBytes > limitBytes) {
-        const remainingBytes = usedBytes >= limitBytes ? BigInt(0) : (limitBytes - usedBytes)
-        const remainingMB = Number(remainingBytes / BigInt(1024 * 1024))
+      if (!quota.allowed) {
+        const remainingMB = Number(quota.remainingBytes / BigInt(1024 * 1024))
         return NextResponse.json(
           { error: `Upload limit exceeded. Remaining allowance: ${remainingMB}MB.` },
           { status: 413 }

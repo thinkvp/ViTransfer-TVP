@@ -262,11 +262,11 @@ export async function generateTimelineSprite(options: TimelineSpriteOptions): Pr
       threadsPerJob: threads,
       activeJobs: dynamic.activeJobs,
     })
-    console.log('[FFMPEG DEBUG] Executing:', 'nice -n 10', ffmpegPath, args.join(' '))
+    console.log('[FFMPEG DEBUG] Executing:', ffmpegPath, args.join(' '))
   }
 
   await new Promise<void>((resolve, reject) => {
-    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args])
+    const ffmpeg = spawn(ffmpegPath, args)
     let stderr = ''
 
     ffmpeg.stderr.on('data', (data) => {
@@ -421,14 +421,11 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   ]
 
   if (DEBUG) {
-    console.log('[FFMPEG DEBUG] Executing command:', 'nice -n 10', ffmpegPath, args.join(' '))
+    console.log('[FFMPEG DEBUG] Executing command:', ffmpegPath, args.join(' '))
   }
 
   return new Promise((resolve, reject) => {
-    // Run FFmpeg with lower CPU priority (nice 10) to prevent system freeze
-    // This allows other processes to remain responsive during video processing
-    // nice values: -20 (highest priority) to 19 (lowest priority), default is 0
-    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
+    const ffmpeg = spawn(ffmpegPath, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let stderr = ''
@@ -625,12 +622,11 @@ export async function generateThumbnail(
   ]
 
   if (DEBUG) {
-    console.log('[FFMPEG DEBUG] Thumbnail command:', 'nice -n 10', ffmpegPath, args.join(' '))
+    console.log('[FFMPEG DEBUG] Thumbnail command:', ffmpegPath, args.join(' '))
   }
 
   return new Promise((resolve, reject) => {
-    // Run with lower CPU priority to keep system responsive
-    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
+    const ffmpeg = spawn(ffmpegPath, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let stderr = ''

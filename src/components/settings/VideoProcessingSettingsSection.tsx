@@ -194,9 +194,9 @@ export function VideoProcessingSettingsSection({
 
             <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
               <div className="space-y-0.5">
-                <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files while commenting</Label>
+                <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files to Projects</Label>
                 <p className="text-xs text-muted-foreground">
-                  Clients can attach files to comments (up to 5 per comment). Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR).
+                  Authenticated clients can upload files to the Share page UPLOADS root and subfolders. Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR).
                 </p>
               </div>
               <Switch
@@ -208,9 +208,9 @@ export function VideoProcessingSettingsSection({
 
             <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">
               <div className="space-y-0.5 flex-1">
-                <Label htmlFor="defaultMaxClientUploadAllocationMB">Default max allowed data allocation for client uploads</Label>
+                <Label htmlFor="defaultMaxClientUploadAllocationMB">Default max allowed data allocation for project uploads</Label>
                 <p className="text-xs text-muted-foreground">
-                  Clients will not be allowed to upload more than this amount for the entire project. Zero = no limit.
+                  Quota applies to total project uploads (comment attachments + UPLOADS files). Zero = no limit.
                 </p>
               </div>
               <div className="flex items-center justify-end gap-2">

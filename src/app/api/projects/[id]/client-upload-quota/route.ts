@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { getProjectUploadUsageBytes, toSafeNumber } from '@/lib/project-upload-quota'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,19 +43,16 @@ export async function GET(
       return authResult.errorResponse!
     }
 
-    const sum = await prisma.commentFile.aggregate({
-      where: { projectId },
-      _sum: { fileSize: true },
-    })
-
-    const usedBytesBigInt = (sum._sum.fileSize ?? BigInt(0)) as bigint
-    const usedBytes = usedBytesBigInt > BigInt(Number.MAX_SAFE_INTEGER)
-      ? Number.MAX_SAFE_INTEGER
-      : Number(usedBytesBigInt)
+    const usage = await getProjectUploadUsageBytes(projectId)
+    const usedBytes = toSafeNumber(usage.totalBytes)
 
     return NextResponse.json({
       usedBytes,
       limitMB: project.maxClientUploadAllocationMB,
+      breakdown: {
+        commentAttachmentsBytes: toSafeNumber(usage.commentBytes),
+        uploadsRootBytes: toSafeNumber(usage.uploadsBytes),
+      },
     })
   } catch (error) {
     console.error('Error fetching client upload quota:', error)

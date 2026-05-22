@@ -315,6 +315,8 @@ model Project {
   emailTracking     EmailTracking[] // Email open tracking pixels
   commentFiles      CommentFile[] // Files uploaded with comments
   files             ProjectFile[] // Internal-only project documents (briefs, references)
+  shareUploadFolders ShareUploadFolder[]
+  shareUploadFiles   ShareUploadFile[]
 
   // Imported communications (uploaded .eml emails)
   emails ProjectEmail[]
@@ -582,6 +584,53 @@ model ProjectFile {
   updatedAt DateTime @updatedAt
 
   @@index([projectId])
+  @@index([projectId, category])
+}
+
+model ShareUploadFolder {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Relative path under the project uploads root (e.g. "Client Notes/R1").
+  // Root itself is represented as empty string.
+  relativePath String
+  folderName   String
+  storagePath  String
+
+  createdById   String?
+  createdByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, relativePath])
+  @@index([projectId, folderName])
+}
+
+model ShareUploadFile {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  folderRelativePath String
+  fileName           String
+  fileSize           BigInt
+  fileType           String
+  storagePath        String
+  category           String?
+  mediaDurationSeconds Float?
+  mediaWidth         Int?
+  mediaHeight        Int?
+  mediaCodec         String?
+
+  uploadedById   String?
+  uploadedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, folderRelativePath])
   @@index([projectId, category])
 }
 

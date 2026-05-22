@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
       videoAgg,
       assetAgg,
       commentFileAgg,
+      shareUploadFileAgg,
       projectFileAgg,
       projectEmailAgg,
       projectEmailAttachmentAgg,
@@ -50,6 +51,7 @@ export async function GET(request: NextRequest) {
       prisma.video.aggregate({ _sum: { originalFileSize: true } }),
       prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
       prisma.commentFile.aggregate({ _sum: { fileSize: true } }),
+      prisma.shareUploadFile.aggregate({ _sum: { fileSize: true } }),
       prisma.projectFile.aggregate({ _sum: { fileSize: true } }),
       prisma.projectEmail.aggregate({ _sum: { rawFileSize: true } }),
       prisma.projectEmailAttachment.aggregate({ _sum: { fileSize: true } }),
@@ -73,6 +75,7 @@ export async function GET(request: NextRequest) {
     const originalVideosBytes = asNumber(videoAgg._sum.originalFileSize)
     const videoAssetsBytes = asNumber(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumber(commentFileAgg._sum.fileSize)
+    const uploadsFilesBytes = asNumber(shareUploadFileAgg._sum.fileSize)
     const communicationsBytes =
       asNumber(projectEmailAgg._sum.rawFileSize) +
       asNumber(projectEmailAttachmentAgg._sum.fileSize)
@@ -133,6 +136,7 @@ export async function GET(request: NextRequest) {
         originalPhotosBytes,
         photoZipBytes,
         communicationsBytes,
+        uploadsFilesBytes,
         projectFilesBytes,
         clientFilesBytes,
         userFilesBytes,

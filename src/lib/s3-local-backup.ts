@@ -43,6 +43,7 @@ export const ALL_BACKUP_CATEGORIES = [
   'videoPreviewsBytes',
   'videoAssetsBytes',
   'commentAttachmentsBytes',
+  'uploadsFilesBytes',
   'originalPhotosBytes',
   'photoZipBytes',
   'communicationsBytes',
@@ -84,6 +85,7 @@ export type BackupProgressFn = (info: {
 // ---------------------------------------------------------------------------
 
 const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
+const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 
 function normalizeKey(raw: string | null | undefined): string | null {
   const trimmed = String(raw || '').trim()
@@ -317,6 +319,24 @@ async function collectKeysForCategory(
         const key = normalizeKey(r.storagePath)
         return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
       })
+    }
+
+    case 'uploadsFilesBytes': {
+      const [files, folders] = await Promise.all([
+        prisma.shareUploadFile.findMany({ select: { storagePath: true } }),
+        prisma.shareUploadFolder.findMany({ select: { storagePath: true } }),
+      ])
+      const fileEntries = files.flatMap((row) => {
+        const key = normalizeKey(row.storagePath)
+        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
+      })
+      const markerEntries = folders.flatMap((row) => {
+        const folderKey = normalizeKey(row.storagePath)
+        if (!folderKey) return []
+        const markerKey = normalizeKey(`${folderKey}/${UPLOAD_FOLDER_MARKER}`)
+        return markerKey ? [{ key: markerKey, localPath: path.join(STORAGE_ROOT, markerKey) }] : []
+      })
+      return [...fileEntries, ...markerEntries]
     }
 
     case 'originalPhotosBytes': {

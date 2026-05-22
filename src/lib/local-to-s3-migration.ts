@@ -9,6 +9,8 @@ import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/f
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 
+const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
+
 const MB = 1024 * 1024
 const MAX_SINGLE_PUT_OBJECT_BYTES = 5 * 1024 * 1024 * 1024
 const DEFAULT_MULTIPART_THRESHOLD_MB = 64
@@ -195,11 +197,15 @@ function getConfig(input: Partial<S3MigrationConfig>): S3MigrationConfig {
 
 async function collectReferencedPaths(): Promise<Set<string>> {
   const keys = new Set<string>()
+  type UploadFilePathRow = { storagePath: string | null }
+  type UploadFolderPathRow = { storagePath: string | null }
 
   const [
     videos,
     videoAssets,
     commentFiles,
+    shareUploadFiles,
+    shareUploadFolders,
     projectFiles,
     albumPhotos,
     albums,
@@ -223,6 +229,8 @@ async function collectReferencedPaths(): Promise<Set<string>> {
     }),
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
+    prisma.$queryRaw<UploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<UploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
     prisma.album.findMany({
@@ -279,6 +287,18 @@ async function collectReferencedPaths(): Promise<Set<string>> {
   for (const row of commentFiles) {
     const key = normalizeKey(row.storagePath)
     if (key) keys.add(key)
+  }
+
+  for (const row of shareUploadFiles) {
+    const key = normalizeKey(row.storagePath || '')
+    if (key) keys.add(key)
+  }
+
+  for (const row of shareUploadFolders) {
+    const folderKey = normalizeKey(row.storagePath || '')
+    if (!folderKey) continue
+    const markerKey = normalizeKey(`${folderKey}/${UPLOAD_FOLDER_MARKER}`)
+    if (markerKey) keys.add(markerKey)
   }
 
   for (const row of projectFiles) {

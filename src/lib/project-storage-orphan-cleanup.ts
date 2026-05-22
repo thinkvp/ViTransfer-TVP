@@ -21,6 +21,10 @@ import {
 } from '@/lib/accounting/file-storage'
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
+
+type ShareUploadFilePathRow = { storagePath: string | null }
+type ShareUploadFolderPathRow = { storagePath: string | null }
 
 export type ProjectStorageOrphanCleanupResult = {
   ok: true
@@ -217,7 +221,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   const exactFilePaths = new Set<string>()
   const protectedDirectoryPrefixes = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums, clientFiles, userFiles, users, settings] = await Promise.all([
+  const [videos, videoAssets, commentFiles, shareUploadFiles, shareUploadFolders, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums, clientFiles, userFiles, users, settings] = await Promise.all([
     prisma.video.findMany({
       select: {
         projectId: true,
@@ -243,6 +247,8 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     }),
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
+    prisma.$queryRaw<ShareUploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
     prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
@@ -322,6 +328,11 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
 
   for (const videoAsset of videoAssets) addResolvedFilePath(exactFilePaths, videoAsset.storagePath)
   for (const commentFile of commentFiles) addResolvedFilePath(exactFilePaths, commentFile.storagePath)
+  for (const shareUploadFile of shareUploadFiles) addResolvedFilePath(exactFilePaths, shareUploadFile.storagePath)
+  for (const shareUploadFolder of shareUploadFolders) {
+    if (!shareUploadFolder.storagePath) continue
+    addResolvedFilePath(exactFilePaths, `${shareUploadFolder.storagePath}/${UPLOAD_FOLDER_MARKER}`)
+  }
   for (const projectFile of projectFiles) addResolvedFilePath(exactFilePaths, projectFile.storagePath)
 
   for (const albumPhoto of albumPhotos) {
@@ -546,7 +557,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   const accountingPaths = new Set<string>()
   const timelineSpritePrefixes = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, projectFiles, albumPhotos, albums, projectEmails, projectEmailAttachments, clientFiles, userFiles, users, settings, accountingAttachments] = await Promise.all([
+  const [videos, videoAssets, commentFiles, shareUploadFiles, shareUploadFolders, projectFiles, albumPhotos, albums, projectEmails, projectEmailAttachments, clientFiles, userFiles, users, settings, accountingAttachments] = await Promise.all([
     prisma.video.findMany({
       select: {
         originalStoragePath: true,
@@ -560,6 +571,8 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     }),
     prisma.videoAsset.findMany({ select: { storagePath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
+    prisma.$queryRaw<ShareUploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
     prisma.album.findMany({
@@ -618,6 +631,11 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   }
   for (const a of videoAssets) addMain(a.storagePath)
   for (const c of commentFiles) addMain(c.storagePath)
+  for (const f of shareUploadFiles) addMain(f.storagePath)
+  for (const folder of shareUploadFolders) {
+    if (!folder.storagePath) continue
+    addMain(`${folder.storagePath}/${UPLOAD_FOLDER_MARKER}`)
+  }
   for (const f of projectFiles) addMain(f.storagePath)
   for (const p of albumPhotos) {
     addMain(p.storagePath)

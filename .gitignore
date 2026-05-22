@@ -60,6 +60,10 @@ SECURITY_BUGS_*.md
 
 # Local storage
 uploads/
+!src/app/api/share/[[]token[]]/uploads/
+!src/app/api/share/[[]token[]]/uploads/**
+!src/app/api/share/uploads/
+!src/app/api/share/uploads/**
 minio-data/
 postgres-data/
 redis-data/

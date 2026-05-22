@@ -9,6 +9,7 @@ export type DownloadableFileKind =
   | 'other'
 
 export function getDownloadableFileKey(file: DownloadableFile): string {
+  if (file.uploadFileId) return file.uploadFileId
   if (file.photoId) return file.photoId
   return file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant || 'full'}` : file.videoId ?? file.fileName)
 }

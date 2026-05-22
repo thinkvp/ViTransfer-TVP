@@ -200,7 +200,7 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
                     progressPercent: 100,
                     speedBytesPerSecond: null,
                     etaSeconds: null,
-                    errorMessage: 'Browser-managed download. Live progress is not available.',
+                    errorMessage: 'Browser-managed download.',
                   }
                 : item
             )

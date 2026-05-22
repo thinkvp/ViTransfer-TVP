@@ -19,6 +19,7 @@ type StorageSummary = {
     videosBytes: number
     videoAssetsBytes: number
     commentAttachmentsBytes: number
+    uploadsFilesBytes?: number
     originalPhotosBytes?: number
     photoZipBytes?: number
     photosBytes: number
@@ -40,6 +41,7 @@ type StorageSummary = {
     videosBytes: number
     videoAssetsBytes: number
     commentAttachmentsBytes: number
+    uploadsFilesBytes?: number
     originalPhotosBytes?: number
     photoZipBytes?: number
     photosBytes: number
@@ -139,6 +141,7 @@ export function ProjectStorageUsage({
           { key: 'videoPreviewsBytes', label: 'Video Previews', bytes: videoPreviewsBytes },
           { key: 'videoAssetsBytes', label: 'Video Assets', bytes: Number(b.videoAssetsBytes || 0) },
           { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
+          { key: 'uploadsFilesBytes', label: 'Uploads', bytes: Number((b as any).uploadsFilesBytes || 0) },
           { key: 'originalPhotosBytes', label: 'Original Photos', bytes: originalPhotosBytes },
           { key: 'photoZipBytes', label: 'Photo ZIP files & previews', bytes: photoZipBytes },
           { key: 'communicationsBytes', label: 'External Communication', bytes: communicationsBytes },
@@ -153,6 +156,7 @@ export function ProjectStorageUsage({
           },
           { key: 'videoAssetsBytes', label: 'Video Assets', bytes: Number(b.videoAssetsBytes || 0) },
           { key: 'commentAttachmentsBytes', label: 'Comment Attachments', bytes: Number(b.commentAttachmentsBytes || 0) },
+          { key: 'uploadsFilesBytes', label: 'Uploads', bytes: Number((b as any).uploadsFilesBytes || 0) },
           {
             key: 'photosBytes',
             label: 'Photos',

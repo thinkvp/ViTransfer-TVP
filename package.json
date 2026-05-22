@@ -10,6 +10,9 @@
     "start:standalone": "node .next/standalone/server.js",
     "check:rbac": "node scripts/check-rbac-gates.mjs",
     "lint": "eslint .",
+    "test:share-uploads:api": "tsx scripts/check-share-uploads-api.ts",
+    "test:share-uploads:ui": "tsx scripts/check-share-uploads-ui.ts",
+    "test:share-uploads": "npm run test:share-uploads:api && npm run test:share-uploads:ui",
     "postinstall": "patch-package && prisma generate && node scripts/ensure-prisma-client.mjs || prisma generate && node scripts/ensure-prisma-client.mjs",
     "worker": "tsx src/worker/index.ts",
     "preview:emails": "tsx scripts/render-email-previews.ts"

@@ -23,6 +23,19 @@ function asNumberBigInt(v: unknown): number {
   return 0
 }
 
+interface ShareUploadFileRow {
+  id: string
+  folderRelativePath: string
+  fileName: string
+  fileSize: bigint
+  fileType: string
+  mediaDurationSeconds: number | null
+}
+
+interface ShareUploadFolderRow {
+  relativePath: string
+}
+
 // GET /api/share/[token]/downloadable-files
 // Returns approved video files + assets and album zip files available for download.
 // Requires authentication; guest sessions are blocked (403).
@@ -65,7 +78,7 @@ export async function GET(
   const now = new Date()
 
   // Fetch data in parallel
-  const [readyVideos, albums, approvableCount] = await Promise.all([
+  const [readyVideos, albums, uploadFolders, uploadFiles, approvableCount] = await Promise.all([
     prisma.video.findMany({
       where: {
         projectId: projectMeta.id,
@@ -107,10 +120,65 @@ export async function GET(
       },
       orderBy: { name: 'asc' },
     }),
+    prisma.$queryRaw<ShareUploadFolderRow[]>`
+      SELECT "relativePath"
+      FROM "ShareUploadFolder"
+      WHERE "projectId" = ${projectMeta.id}
+      ORDER BY "relativePath" ASC
+    `,
+    prisma.$queryRaw<ShareUploadFileRow[]>`
+      SELECT "id", "folderRelativePath", "fileName", "fileSize", "fileType", "mediaDurationSeconds"
+      FROM "ShareUploadFile"
+      WHERE "projectId" = ${projectMeta.id}
+      ORDER BY "folderRelativePath" ASC, "createdAt" ASC
+    `,
     prisma.video.count({
       where: { projectId: projectMeta.id, allowApproval: true },
     }),
   ])
+  const uploadGroupsByPath = new Map<string, DownloadableFile[]>()
+
+  for (const folder of uploadFolders) {
+    const folderPath = String(folder.relativePath || '').trim()
+    if (!uploadGroupsByPath.has(folderPath)) {
+      uploadGroupsByPath.set(folderPath, [])
+    }
+  }
+
+  for (const file of uploadFiles) {
+    const folderPath = String(file.folderRelativePath || '').trim()
+    if (!uploadGroupsByPath.has(folderPath)) {
+      uploadGroupsByPath.set(folderPath, [])
+    }
+
+    uploadGroupsByPath.get(folderPath)!.push({
+      type: 'upload-file',
+      uploadFileId: file.id,
+      uploadFolderPath: folderPath,
+      fileName: file.fileName,
+      fileSizeBytes: Number(file.fileSize),
+      durationSeconds: String(file.fileType || '').toLowerCase().startsWith('video/')
+        ? (typeof file.mediaDurationSeconds === 'number' && Number.isFinite(file.mediaDurationSeconds)
+            ? file.mediaDurationSeconds
+            : undefined)
+        : undefined,
+    })
+  }
+
+  // Keep a synthetic root only when uploads are completely empty.
+  // If real folders/files exist, do not add an extra empty `UPLOADS` entry.
+  if (uploadGroupsByPath.size === 0) {
+    uploadGroupsByPath.set('', [])
+  }
+
+  const uploadGroups: DownloadableGroup[] = [...uploadGroupsByPath.entries()]
+    .map(([folderPath, files]) => ({
+      name: folderPath ? `UPLOADS / ${folderPath}` : 'UPLOADS',
+      groupType: 'uploads' as const,
+      subFiles: files,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
 
   // Build video groups: one per unique video name, containing all versions.
   const videosByName = new Map<string, typeof readyVideos>()
@@ -138,7 +206,7 @@ export async function GET(
 
     const approvedVideo = sortedVersions.find((video) => video.approved === true)
     const assetFiles: DownloadableFile[] = approvedVideo
-      ? approvedVideo.assets.map((asset): DownloadableFile => ({
+      ? approvedVideo.assets.map((asset: any): DownloadableFile => ({
           type: 'asset',
           videoId: approvedVideo.id,
           assetId: asset.id,
@@ -187,7 +255,7 @@ export async function GET(
     }
 
     const photos: DownloadableFile[] = await Promise.all(
-      album.photos.map(async (photo) => {
+      album.photos.map(async (photo: any) => {
         const tokenValue = await generateAlbumPhotoAccessToken({
           photoId: photo.id,
           albumId: album.id,
@@ -229,7 +297,7 @@ export async function GET(
   }
 
   const result: DownloadableFilesResult = {
-    groups: [...videoGroups, ...albumGroups],
+    groups: [...videoGroups, ...albumGroups, ...uploadGroups],
     hasApprovableVideos: approvableCount > 0,
   }
 

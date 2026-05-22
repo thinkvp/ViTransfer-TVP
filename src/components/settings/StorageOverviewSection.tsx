@@ -20,6 +20,7 @@ type StorageOverview = {
     videoPreviewsBytes: number
     videoAssetsBytes: number
     commentAttachmentsBytes: number
+    uploadsFilesBytes: number
     originalPhotosBytes: number
     photoZipBytes: number
     communicationsBytes: number
@@ -55,6 +56,7 @@ const BACKUP_CATEGORY_KEYS = [
   'videoPreviewsBytes',
   'videoAssetsBytes',
   'commentAttachmentsBytes',
+  'uploadsFilesBytes',
   'originalPhotosBytes',
   'photoZipBytes',
   'communicationsBytes',
@@ -249,6 +251,7 @@ export function StorageOverviewSection({
       { key: 'videoPreviewsBytes' as BackupCategory, label: 'Video Previews', bytes: b.videoPreviewsBytes },
       { key: 'videoAssetsBytes' as BackupCategory, label: 'Video Assets', bytes: b.videoAssetsBytes },
       { key: 'commentAttachmentsBytes' as BackupCategory, label: 'Comment Attachments', bytes: b.commentAttachmentsBytes },
+      { key: 'uploadsFilesBytes' as BackupCategory, label: 'Uploads', bytes: b.uploadsFilesBytes },
       { key: 'originalPhotosBytes' as BackupCategory, label: 'Original Photos', bytes: b.originalPhotosBytes },
       { key: 'photoZipBytes' as BackupCategory, label: 'Photo ZIP files & previews', bytes: b.photoZipBytes },
       { key: 'communicationsBytes' as BackupCategory, label: 'External Communication', bytes: b.communicationsBytes },

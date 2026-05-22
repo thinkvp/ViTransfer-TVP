@@ -715,7 +715,8 @@ export function DeveloperToolsSection({
                 <p className="text-xs text-muted-foreground">
                   Checks storage for two classes of issue: <strong>orphan files</strong> — files present on
                   storage that have no matching database record (videos, previews, album photos, comment
-                  uploads, project files, accounting receipts, and more); and <strong>missing files</strong>
+                  uploads, Share page UPLOADS files/folder markers, project files, accounting receipts, and
+                  more); and <strong>missing files</strong>
                   — database records whose file is absent from storage. Run a dry run first to preview
                   findings. The clean-up action removes orphan files only; missing files must be
                   investigated and re-uploaded manually.

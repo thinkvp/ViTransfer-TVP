@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
+import type { TransferItem } from '@/lib/transfer-state'
 import {
   ArrowLeft,
   ChevronLeft,
@@ -19,6 +20,8 @@ import {
   FileVideo,
   Folder,
   MoreHorizontal,
+  Plus,
+  Trash2,
   X,
 } from 'lucide-react'
 
@@ -54,6 +57,13 @@ type ShareFilesBrowserProps = {
   resolveFilePreviewUrl?: (file: DownloadableFile) => Promise<string | null>
   shareSlug?: string
   shareToken?: string | null
+  transferItems?: TransferItem[]
+  canUploadToProjects?: boolean
+  canDeleteUploads?: boolean
+  onCreateUploadFolder?: (parentPath: string, folderName: string) => Promise<void>
+  onUploadFiles?: (folderPath: string, files: File[]) => Promise<void>
+  onDeleteUploadFile?: (fileId: string) => Promise<void>
+  onDeleteUploadFolder?: (folderPath: string) => Promise<void>
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -136,18 +146,30 @@ export function ShareFilesBrowser({
   resolveFilePreviewUrl,
   shareSlug,
   shareToken,
+  transferItems = [],
+  canUploadToProjects = false,
+  canDeleteUploads = false,
+  onCreateUploadFolder,
+  onUploadFiles,
+  onDeleteUploadFile,
+  onDeleteUploadFolder,
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
   const [localDownloadProgress, setLocalDownloadProgress] = useState<DownloadProgressSnapshot | null>(null)
   const [previewUrlByFileKey, setPreviewUrlByFileKey] = useState<Record<string, string | null>>({})
+  const [derivedVideoDurationByFileKey, setDerivedVideoDurationByFileKey] = useState<Record<string, number | null>>({})
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
   const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
   const [albumViewerState, setAlbumViewerState] = useState<{ images: DownloadableFile[]; currentIndex: number; albumId: string | null } | null>(null)
   const [albumPhotoMetaByPhotoId, setAlbumPhotoMetaByPhotoId] = useState<Record<string, { socialDownloadUrl: string; socialReady: boolean }>>({})
   const [albumSocialEnabledByAlbumId, setAlbumSocialEnabledByAlbumId] = useState<Record<string, boolean>>({})
   const [albumMetaLoadedByAlbumId, setAlbumMetaLoadedByAlbumId] = useState<Record<string, boolean>>({})
+  const [isUploadActionBusy, setIsUploadActionBusy] = useState(false)
+  const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
+  const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const sortedGroups = useMemo(() => {
     return [...groups].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
@@ -163,12 +185,38 @@ export function ShareFilesBrowser({
     [sortedGroups]
   )
 
-  const splitRootSections = rootVideoGroups.length > 0 && rootAlbumGroups.length > 0
+  const rootUploadGroups = useMemo(
+    () => sortedGroups.filter((group) => group.groupType === 'uploads'),
+    [sortedGroups]
+  )
+
+  const projectRootGroups = useMemo(
+    () => sortedGroups.filter((group) => group.groupType !== 'uploads'),
+    [sortedGroups]
+  )
+
+  const uploadsRootGroup = useMemo<DownloadableGroup>(() => {
+    return rootUploadGroups.find((group) => group.name === 'UPLOADS') || {
+      name: 'UPLOADS',
+      groupType: 'uploads',
+      subFiles: [],
+    }
+  }, [rootUploadGroups])
+
+  const splitRootSections = [
+    rootVideoGroups.length > 0,
+    rootAlbumGroups.length > 0,
+  ].filter(Boolean).length > 1
+
+  const openUploadsRoot = openFolderName === 'UPLOADS' && rootUploadGroups.length > 0
 
   const openFolder = useMemo(() => {
     if (!openFolderName) return null
+    if (openFolderName === 'UPLOADS' && rootUploadGroups.length > 0) {
+      return uploadsRootGroup
+    }
     return sortedGroups.find((group) => group.name === openFolderName) || null
-  }, [openFolderName, sortedGroups])
+  }, [openFolderName, sortedGroups, rootUploadGroups.length, uploadsRootGroup])
 
   const filesInOpenFolder = useMemo(() => {
     if (!openFolder) return []
@@ -177,14 +225,22 @@ export function ShareFilesBrowser({
 
   useEffect(() => {
     if (!openFolderName) return
+    if (openFolderName === 'UPLOADS' && rootUploadGroups.length > 0) {
+      return
+    }
     if (!sortedGroups.some((group) => group.name === openFolderName)) {
       setOpenFolderName(null)
     }
-  }, [openFolderName, sortedGroups])
+  }, [openFolderName, sortedGroups, rootUploadGroups.length])
 
   useEffect(() => {
     const requested = String(requestedOpenFolderName || '').trim()
     if (!requested) return
+
+    if (requested === 'UPLOADS' && rootUploadGroups.length > 0) {
+      setOpenFolderName('UPLOADS')
+      return
+    }
 
     const matchingGroup = sortedGroups.find((group) => group.name === requested)
     if (matchingGroup) {
@@ -193,7 +249,25 @@ export function ShareFilesBrowser({
     }
 
     setOpenFolderName(null)
-  }, [requestedOpenFolderName, sortedGroups])
+  }, [requestedOpenFolderName, sortedGroups, rootUploadGroups.length])
+
+  const getUploadsFolderPathFromGroup = useCallback((groupName: string): string => {
+    if (groupName === 'UPLOADS') return ''
+    const prefix = 'UPLOADS / '
+    if (groupName.startsWith(prefix)) return groupName.slice(prefix.length).trim()
+    return ''
+  }, [])
+
+  const uploadsTargetFolderPath = useMemo(() => {
+    if (openFolder?.groupType === 'uploads') {
+      return getUploadsFolderPathFromGroup(openFolder.name)
+    }
+    return ''
+  }, [getUploadsFolderPathFromGroup, openFolder])
+
+  const isUploadsContext = useMemo(() => {
+    return openFolder?.groupType === 'uploads'
+  }, [openFolder])
 
   useEffect(() => {
     onOpenFolderNameChange?.(openFolderName)
@@ -302,6 +376,9 @@ export function ShareFilesBrowser({
     })
   }, [filesInOpenFolder, previewUrlByFileKey, resolveFilePreviewUrl])
 
+  // Avoid automatic upload-video metadata probing from preview URLs.
+  // Duration labels rely on persisted metadata captured during upload.
+
   const toggleFile = (fileKey: string, checked: boolean) => {
     setSelectedFileIds((prev) => {
       const next = new Set(prev)
@@ -360,22 +437,28 @@ export function ShareFilesBrowser({
   const selectedTotalSizeBytes = useMemo(() => {
     if (selectedFileIds.size === 0) return 0
 
-    const allFiles = sortedGroups.flatMap((group) => [
-      ...(group.mainFile ? [group.mainFile] : []),
-      ...group.subFiles,
-    ])
+    const scopedFiles = openFolder
+      ? filesInOpenFolder
+      : projectRootGroups.flatMap((group) => [
+          ...(group.mainFile ? [group.mainFile] : []),
+          ...group.subFiles,
+        ])
 
-    return allFiles.reduce((total, file) => {
+    return scopedFiles.reduce((total, file) => {
       const key = getDownloadableFileKey(file)
       if (!selectedFileIds.has(key)) return total
       const rawSize = typeof file.fileSizeBytes === 'string' ? Number(file.fileSizeBytes) : file.fileSizeBytes
       const size = Number.isFinite(rawSize) && (rawSize as number) > 0 ? Number(rawSize) : 0
       return total + size
     }, 0)
-  }, [selectedFileIds, sortedGroups])
+  }, [selectedFileIds, openFolder, filesInOpenFolder, projectRootGroups])
   const visibleFiles = openFolder
     ? filesInOpenFolder
-    : sortedGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+    : projectRootGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+  const selectedUploadFilesInContext = useMemo(() => {
+    if (!isUploadsContext) return [] as DownloadableFile[]
+    return visibleFiles.filter((file) => file.type === 'upload-file' && selectedFileIds.has(getDownloadableFileKey(file)))
+  }, [isUploadsContext, visibleFiles, selectedFileIds])
 
   useEffect(() => {
     const selectableKeys = new Set(
@@ -405,8 +488,10 @@ export function ShareFilesBrowser({
   }
 
   const downloadSelected = async () => {
-    const allFiles = sortedGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
-    const selectedFiles = allFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
+    const scopedFiles = openFolder
+      ? filesInOpenFolder
+      : projectRootGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+    const selectedFiles = scopedFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
       .filter((file) => file.type !== 'video' || file.isApproved !== false)
     if (!selectedFiles.length) return
 
@@ -424,8 +509,116 @@ export function ShareFilesBrowser({
     }
   }
 
-  const isDownloadBusy = isDownloadingSelected || isSharedDownloadActive
-  const activeProgress = isSharedDownloadActive ? sharedDownloadProgress : localDownloadProgress
+  const isDownloadBusy = isDownloadingSelected
+  const activeProgress = localDownloadProgress
+
+  const runCreateUploadFolder = useCallback(async () => {
+    if (!canUploadToProjects || !onCreateUploadFolder || isUploadActionBusy) return
+    const folderName = window.prompt('Folder name')
+    const normalizedName = String(folderName || '').trim()
+    if (!normalizedName) return
+
+    setIsUploadActionBusy(true)
+    try {
+      await onCreateUploadFolder(uploadsTargetFolderPath, normalizedName)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to create folder')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [canUploadToProjects, onCreateUploadFolder, isUploadActionBusy, uploadsTargetFolderPath])
+
+  const openUploadFilePicker = useCallback(() => {
+    if (!canUploadToProjects || !onUploadFiles || isUploadActionBusy) return
+    setPendingUploadFolderPath(uploadsTargetFolderPath)
+    uploadInputRef.current?.click()
+  }, [canUploadToProjects, onUploadFiles, isUploadActionBusy, uploadsTargetFolderPath])
+
+  const deleteSelectedUploadFiles = useCallback(async () => {
+    if (!canDeleteUploads || !onDeleteUploadFile || isUploadActionBusy) return
+    if (selectedUploadFilesInContext.length === 0) return
+
+    const count = selectedUploadFilesInContext.length
+    const shouldDelete = window.confirm(`Delete ${count} selected upload file${count === 1 ? '' : 's'}?`)
+    if (!shouldDelete) return
+
+    setIsUploadActionBusy(true)
+    try {
+      for (const file of selectedUploadFilesInContext) {
+        if (!file.uploadFileId) continue
+        await onDeleteUploadFile(file.uploadFileId)
+      }
+
+      const deletedKeys = new Set(selectedUploadFilesInContext.map((file) => getDownloadableFileKey(file)))
+      setSelectedFileIds((prev) => new Set(Array.from(prev).filter((key) => !deletedKeys.has(key))))
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to delete selected files')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [
+    canDeleteUploads,
+    onDeleteUploadFile,
+    isUploadActionBusy,
+    selectedUploadFilesInContext,
+    setSelectedFileIds,
+  ])
+
+  const submitUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
+    if (!canUploadToProjects || !onUploadFiles || !Array.isArray(files) || files.length === 0) return
+    setIsUploadActionBusy(true)
+    try {
+      await onUploadFiles(folderPath, files)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to upload files')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [canUploadToProjects, onUploadFiles])
+
+  const hasDraggedFiles = useCallback((event: React.DragEvent) => {
+    const types = Array.from(event.dataTransfer?.types || [])
+    return types.includes('Files')
+  }, [])
+
+  const allowUploadDrop = useCallback((event: React.DragEvent) => {
+    if (!hasDraggedFiles(event)) return false
+    if (!canUploadToProjects || !onUploadFiles || isUploadActionBusy) return false
+    event.preventDefault()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy'
+    }
+    return true
+  }, [canUploadToProjects, onUploadFiles, isUploadActionBusy, hasDraggedFiles])
+
+  const deleteUploadFile = useCallback(async (fileId: string) => {
+    if (!canDeleteUploads || !onDeleteUploadFile || !fileId || isUploadActionBusy) return
+    const shouldDelete = window.confirm('Delete this uploaded file?')
+    if (!shouldDelete) return
+    setIsUploadActionBusy(true)
+    try {
+      await onDeleteUploadFile(fileId)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to delete file')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [canDeleteUploads, onDeleteUploadFile, isUploadActionBusy])
+
+  const deleteUploadFolder = useCallback(async (folderPath: string) => {
+    if (!canDeleteUploads || !onDeleteUploadFolder || !folderPath || isUploadActionBusy) return
+    const shouldDelete = window.confirm('Delete this folder and all nested files?')
+    if (!shouldDelete) return
+    setIsUploadActionBusy(true)
+    try {
+      await onDeleteUploadFolder(folderPath)
+      setOpenFolderName(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to delete folder')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [canDeleteUploads, onDeleteUploadFolder, isUploadActionBusy])
 
   const openFolderVideoVersions = openFolder?.groupType === 'video'
     ? filesInOpenFolder.filter((file) => file.type === 'video')
@@ -439,14 +632,31 @@ export function ShareFilesBrowser({
   const openFolderAlbumPhotos = openFolder?.groupType === 'album'
     ? filesInOpenFolder.filter((file) => file.type === 'album-photo')
     : []
+  const openFolderUploadFiles = openFolder?.groupType === 'uploads'
+    ? filesInOpenFolder.filter((file) => file.type === 'upload-file')
+    : []
+  const nestedUploadFoldersInRoot = useMemo(
+    () => openUploadsRoot ? rootUploadGroups.filter((group) => group.name !== 'UPLOADS') : [],
+    [openUploadsRoot, rootUploadGroups]
+  )
+  const pendingUploadTransferByFileId = useMemo(() => {
+    const map = new Map<string, TransferItem>()
+    for (const transfer of transferItems) {
+      if (transfer.direction !== 'upload') continue
+      const pendingId = `pending-${transfer.id}`
+      map.set(pendingId, transfer)
+    }
+    return map
+  }, [transferItems])
   const videoAssetsSelection = getSubsetSelectionState(openFolderVideoAssets)
   const albumPhotosSelection = getSubsetSelectionState(openFolderAlbumPhotos)
+  const uploadFilesSelection = getSubsetSelectionState(openFolderUploadFiles)
 
   // Returns the best available full-resolution URL for a file in the lightbox.
   const getLightboxUrl = (file: DownloadableFile): string | null => {
     if (file.type === 'album-photo') {
       // Prefer social-sized preview (higher res than thumbnail)
-      return file.previewUrl || file.thumbnailUrl || previewUrlByFileKey[getDownloadableFileKey(file)] || null
+      return file.previewUrl || file.downloadUrl || file.thumbnailUrl || null
     }
     const resolved = previewUrlByFileKey[getDownloadableFileKey(file)]
     return (typeof resolved === 'string' && resolved.length > 0) ? resolved : (file.thumbnailUrl || file.previewUrl || null)
@@ -594,14 +804,17 @@ export function ShareFilesBrowser({
     const previewSrc = (typeof resolvedPreview === 'string' && resolvedPreview.length > 0)
       ? resolvedPreview
       : (typeof inlinePreview === 'string' && inlinePreview.length > 0 ? inlinePreview : null)
-    const showImagePreview = typeof previewSrc === 'string' && previewSrc.length > 0
+    const showUploadVideoPreview = file.type === 'upload-file' && fileKind === 'video' && typeof previewSrc === 'string' && previewSrc.length > 0
+    const showImagePreview = !showUploadVideoPreview && typeof previewSrc === 'string' && previewSrc.length > 0
     const hasMultipleVideoVersionsInOpenFolder = openFolderVideoVersions.length > 1
     const showVideoPreview =
       file.type === 'video' &&
       !hasMultipleVideoVersionsInOpenFolder &&
       Boolean(folderPreviewByName?.[openFolder?.name || ''])
     const sizeLabel = formatFileSize(file.fileSizeBytes)
-    const durationLabel = fileKind === 'video' ? formatDuration(file.durationSeconds) : null
+    const durationLabel = fileKind === 'video'
+      ? formatDuration(file.durationSeconds ?? derivedVideoDurationByFileKey[fileKey] ?? undefined)
+      : null
     const fileExtensionLabel = getFileExtensionLabel(file.fileName)
     const canDownloadFile = file.type !== 'video' || file.isApproved !== false
     const canSelectFile = isSelectableDownloadableFile(file)
@@ -620,6 +833,23 @@ export function ShareFilesBrowser({
       hasMultipleVideoVersions &&
       hasApprovedVideoVersionInGroup &&
       file.isApproved !== true
+    const uploadTransfer = file.type === 'upload-file' && file.uploadFileId
+      ? pendingUploadTransferByFileId.get(file.uploadFileId)
+      : null
+    const uploadProgressPercent = uploadTransfer ? Math.max(0, Math.min(100, Math.round(uploadTransfer.progressPercent))) : null
+    const uploadStatusLabel = uploadTransfer
+      ? uploadTransfer.status === 'completed'
+        ? 'Uploaded'
+        : uploadTransfer.status === 'failed'
+          ? 'Upload failed'
+          : uploadTransfer.status === 'canceled'
+            ? 'Upload canceled'
+            : uploadTransfer.status === 'preparing'
+              ? 'Preparing upload'
+              : uploadTransfer.status === 'transferring'
+                ? 'Uploading'
+                : 'Queued for upload'
+      : null
 
     return (
       <div
@@ -656,6 +886,14 @@ export function ShareFilesBrowser({
                   alt={file.fileName}
                   className={cn('w-full h-full', file.type === 'album-photo' ? 'object-cover' : 'object-contain')}
                   loading="lazy"
+                />
+              ) : showUploadVideoPreview ? (
+                <video
+                  src={previewSrc!}
+                  className="w-full h-full object-contain"
+                  preload="none"
+                  muted
+                  playsInline
                 />
               ) : showVideoPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -728,21 +966,38 @@ export function ShareFilesBrowser({
               <p className={cn('font-semibold text-foreground truncate', compact ? 'text-xs' : 'text-sm')} title={displayFileName}>{displayFileName}</p>
             </div>
             {canDownloadFile ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
-                disabled={muteInactiveVideoVersion}
-                onClick={() => void onDownloadFile(file)}
-                onClickCapture={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                onDoubleClick={(event) => event.stopPropagation()}
-                aria-label={`Download ${file.fileName}`}
-                title={`Download ${file.fileName}`}
-              >
-                <Download className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
-              </Button>
+              <div className="flex items-center gap-1">
+                {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+                    disabled={isUploadActionBusy}
+                    onClick={(event) => { event.stopPropagation(); void deleteUploadFile(file.uploadFileId!) }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    aria-label={`Delete ${file.fileName}`}
+                    title={`Delete ${file.fileName}`}
+                  >
+                    <Trash2 className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+                  disabled={muteInactiveVideoVersion}
+                  onClick={(event) => { event.stopPropagation(); void onDownloadFile(file) }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  aria-label={`Download ${file.fileName}`}
+                  title={`Download ${file.fileName}`}
+                >
+                  <Download className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
+                </Button>
+              </div>
             ) : null}
           </div>
           <div className={cn('text-muted-foreground flex items-center justify-between gap-2', compact ? 'text-[11px] mt-1' : 'text-xs mt-1.5')}>
@@ -751,6 +1006,31 @@ export function ShareFilesBrowser({
               <span className="min-w-0 truncate text-right" title={file.fileName}>{file.fileName}</span>
             ) : null}
           </div>
+          {uploadTransfer && uploadProgressPercent !== null ? (
+            <div className={cn('mt-1.5 space-y-1', compact ? 'text-[10px]' : 'text-[11px]')}>
+              <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-primary/40 text-[10px] font-semibold text-primary">
+                    {uploadProgressPercent}
+                  </span>
+                  <span>{uploadStatusLabel}</span>
+                </div>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    uploadTransfer.status === 'failed'
+                      ? 'bg-destructive'
+                      : uploadTransfer.status === 'canceled'
+                        ? 'bg-warning'
+                        : 'bg-primary'
+                  )}
+                  style={{ width: `${uploadProgressPercent}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     )
@@ -758,6 +1038,7 @@ export function ShareFilesBrowser({
 
   const renderRootFolderCard = (group: DownloadableGroup) => {
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+    const uploadFolderPath = group.groupType === 'uploads' ? getUploadsFolderPathFromGroup(group.name) : ''
     const groupVideoFiles = groupFiles.filter((file) => file.type === 'video')
     const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
     const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
@@ -781,6 +1062,19 @@ export function ShareFilesBrowser({
             : 'border border-border hover:border-primary/45'
         )}
         onDoubleClick={() => setOpenFolderName(group.name)}
+        onDragOver={(event) => {
+          if (group.groupType !== 'uploads') return
+          if (!allowUploadDrop(event)) return
+          event.stopPropagation()
+        }}
+        onDrop={(event) => {
+          if (group.groupType !== 'uploads') return
+          if (!allowUploadDrop(event)) return
+          event.stopPropagation()
+          const targetPath = getUploadsFolderPathFromGroup(group.name)
+          const droppedFiles = Array.from(event.dataTransfer?.files || [])
+          void submitUploadFiles(targetPath, droppedFiles)
+        }}
       >
         <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
           <div className="relative pt-2">
@@ -880,7 +1174,27 @@ export function ShareFilesBrowser({
               <Folder className="w-4 h-4 text-primary shrink-0" />
               <span className="text-sm font-semibold text-foreground truncate">{group.name}</span>
             </div>
-            <MoreHorizontal className="w-4 h-4 text-muted-foreground shrink-0" />
+            <div className="flex items-center gap-1">
+              {group.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFolder && uploadFolderPath ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-6 w-6"
+                  disabled={isUploadActionBusy}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void deleteUploadFolder(uploadFolderPath)
+                  }}
+                  title="Delete folder"
+                  aria-label="Delete folder"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              ) : null}
+              <MoreHorizontal className="w-4 h-4 text-muted-foreground shrink-0" />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground mt-1.5">
             {groupFiles.length} Item{groupFiles.length === 1 ? '' : 's'}
@@ -892,6 +1206,17 @@ export function ShareFilesBrowser({
 
   return (
     <div className="border border-border rounded-lg bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files || [])
+          void submitUploadFiles(pendingUploadFolderPath, files)
+          event.currentTarget.value = ''
+        }}
+      />
       <div className="px-4 py-3 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex items-center justify-between gap-2 sm:flex-1">
           <div className="min-w-0">
@@ -932,6 +1257,45 @@ export function ShareFilesBrowser({
           ) : null}
         </div>
         <div className="flex w-full flex-nowrap items-center gap-2 shrink-0 sm:ml-auto sm:w-auto">
+          {isUploadsContext && canUploadToProjects && onUploadFiles ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-[28] min-w-0 sm:flex-none sm:w-auto"
+              onClick={openUploadFilePicker}
+              disabled={isUploadActionBusy}
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>File</span>
+            </Button>
+          ) : null}
+          {isUploadsContext && canUploadToProjects && onCreateUploadFolder ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-[28] min-w-0 sm:flex-none sm:w-auto"
+              onClick={runCreateUploadFolder}
+              disabled={isUploadActionBusy}
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Folder</span>
+            </Button>
+          ) : null}
+          {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="flex-[34] min-w-0 sm:flex-none sm:w-auto"
+              onClick={() => void deleteSelectedUploadFiles()}
+              disabled={isUploadActionBusy || selectedUploadFilesInContext.length === 0}
+            >
+              <Trash2 className="w-4 h-4 mr-1.5" />
+              <span>Delete ({selectedUploadFilesInContext.length})</span>
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -982,7 +1346,23 @@ export function ShareFilesBrowser({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-0">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-0"
+        onDragOverCapture={(event) => {
+          if (!isUploadsContext) return
+          void allowUploadDrop(event)
+        }}
+        onDragOver={(event) => {
+          if (!isUploadsContext) return
+          void allowUploadDrop(event)
+        }}
+        onDrop={(event) => {
+          if (!isUploadsContext) return
+          if (!allowUploadDrop(event)) return
+          const droppedFiles = Array.from(event.dataTransfer?.files || [])
+          void submitUploadFiles(uploadsTargetFolderPath, droppedFiles)
+        }}
+      >
         {!openFolder ? (
           <div className={cn(splitRootSections ? 'space-y-5' : 'space-y-2')}>
             <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white truncate" title={rootFolderLabel || 'PROJECT'}>
@@ -990,23 +1370,27 @@ export function ShareFilesBrowser({
             </h4>
             {splitRootSections ? (
               <>
-                <section className="space-y-2">
-                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                    {rootVideoGroups.map((group) => renderRootFolderCard(group))}
-                  </div>
-                </section>
+                {rootVideoGroups.length > 0 ? (
+                  <section className="space-y-2">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {rootVideoGroups.map((group) => renderRootFolderCard(group))}
+                    </div>
+                  </section>
+                ) : null}
 
-                <section className="space-y-2 border-t border-border/70 pt-4">
-                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                    {rootAlbumGroups.map((group) => renderRootFolderCard(group))}
-                  </div>
-                </section>
+                {rootAlbumGroups.length > 0 ? (
+                  <section className="space-y-2 border-t border-border/70 pt-4">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {rootAlbumGroups.map((group) => renderRootFolderCard(group))}
+                    </div>
+                  </section>
+                ) : null}
               </>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                {sortedGroups.map((group) => renderRootFolderCard(group))}
+                {projectRootGroups.map((group) => renderRootFolderCard(group))}
               </div>
             )}
           </div>
@@ -1053,7 +1437,7 @@ export function ShareFilesBrowser({
                   )}
                 </section>
               </>
-            ) : (
+            ) : openFolder?.groupType === 'album' ? (
               <>
                 <section className="space-y-2">
                   <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
@@ -1089,11 +1473,50 @@ export function ShareFilesBrowser({
                   )}
                 </section>
               </>
+            ) : (
+              <>
+                {openUploadsRoot && nestedUploadFoldersInRoot.length > 0 ? (
+                  <section className="space-y-2">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Folders</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {nestedUploadFoldersInRoot.map((group) => renderRootFolderCard(group))}
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className={cn('space-y-2', openUploadsRoot && nestedUploadFoldersInRoot.length > 0 ? 'border-t border-border/70 pt-4' : '')}>
+                  <div className="px-1 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={uploadFilesSelection.allChecked}
+                      disabled={openFolderUploadFiles.length === 0}
+                      ref={(el) => {
+                        if (el) el.indeterminate = uploadFilesSelection.someChecked
+                      }}
+                      onChange={(event) => toggleSubset(openFolderUploadFiles, event.target.checked)}
+                      className={cn(
+                        'w-4 h-4',
+                        FILES_CHECKBOX_CLASS,
+                        openFolderUploadFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                      )}
+                      aria-label="Select all uploads"
+                    />
+                    <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
+                  </div>
+                  {openFolderUploadFiles.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
+                      {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, true, openFolderUploadFiles))}
+                    </div>
+                  ) : (
+                    <p className="px-1 text-xs text-muted-foreground italic">No uploaded files available.</p>
+                  )}
+                </section>
+              </>
             )}
           </div>
         )}
 
-        {sortedGroups.length === 0 && (
+        {projectRootGroups.length === 0 && !openFolder && (
           <div className={cn('h-full min-h-[180px] flex items-center justify-center text-sm text-muted-foreground')}>
             No files available.
           </div>

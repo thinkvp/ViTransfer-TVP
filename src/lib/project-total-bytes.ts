@@ -140,6 +140,7 @@ export async function computeProjectTotalBytes(
     projectEmailRow,
     commentFileRow,
     projectFileRow,
+    shareUploadFileRow,
     assetRows,
     albumRow,
     albumPhotoRows,
@@ -158,6 +159,10 @@ export async function computeProjectTotalBytes(
       _sum: { fileSize: true },
     }),
     prismaClient.projectFile.aggregate({
+      where: { projectId },
+      _sum: { fileSize: true },
+    }),
+    prismaClient.shareUploadFile.aggregate({
       where: { projectId },
       _sum: { fileSize: true },
     }),
@@ -190,6 +195,7 @@ export async function computeProjectTotalBytes(
     toBigIntSafe((projectEmailRow as any)?._sum?.rawFileSize) +
     toBigIntSafe((commentFileRow as any)?._sum?.fileSize) +
     toBigIntSafe((projectFileRow as any)?._sum?.fileSize) +
+    toBigIntSafe((shareUploadFileRow as any)?._sum?.fileSize) +
     toBigIntSafe((assetRows as any)?._sum?.fileSize) +
     toBigIntSafe((albumRow as any)?._sum?.fullZipFileSize) +
     toBigIntSafe((albumRow as any)?._sum?.socialZipFileSize) +

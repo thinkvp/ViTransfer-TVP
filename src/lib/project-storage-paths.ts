@@ -80,6 +80,81 @@ export function buildProjectFilesStoragePath(projectStoragePath: string, fileNam
   return path.posix.join(projectStoragePath, 'files', `projectfile-${timestamp}-${fileName}`)
 }
 
+export function buildProjectUploadsRoot(projectStoragePath: string): string {
+  return path.posix.join(projectStoragePath, 'uploads')
+}
+
+export function normalizeProjectUploadRelativePath(relativePath: string): string {
+  const trimmed = String(relativePath || '').trim()
+  if (!trimmed) return ''
+
+  const cleaned = trimmed
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+/, '')
+
+  const segments = cleaned
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+
+  const normalizedSegments: string[] = []
+  for (const segment of segments) {
+    if (segment === '.' || segment === '..') continue
+    const safeSegment = sanitizeStorageName(segment)
+    if (!safeSegment || safeSegment === 'Untitled') continue
+    normalizedSegments.push(safeSegment)
+  }
+
+  return normalizedSegments.join('/')
+}
+
+export function buildProjectUploadFolderStoragePath(projectStoragePath: string, folderRelativePath: string): string {
+  const normalizedRelativePath = normalizeProjectUploadRelativePath(folderRelativePath)
+  if (!normalizedRelativePath) return buildProjectUploadsRoot(projectStoragePath)
+  return path.posix.join(buildProjectUploadsRoot(projectStoragePath), normalizedRelativePath)
+}
+
+export function buildProjectUploadFileStoragePath(
+  projectStoragePath: string,
+  folderRelativePath: string,
+  fileName: string,
+): string {
+  const normalizedFolderPath = buildProjectUploadFolderStoragePath(projectStoragePath, folderRelativePath)
+  const safeFileName = sanitizeFilename(fileName)
+  return path.posix.join(normalizedFolderPath, safeFileName)
+}
+
+export function buildProjectUploadVideoThumbnailStoragePath(uploadFileStoragePath: string): string {
+  const normalized = String(uploadFileStoragePath || '').replace(/\\/g, '/')
+  const parsed = path.posix.parse(normalized)
+  const baseName = sanitizeFilename(parsed.base || `${parsed.name || 'video'}.bin`)
+  const thumbnailFileName = `${baseName}.jpg`
+  if (!parsed.dir) {
+    return path.posix.join('.thumbnails', thumbnailFileName)
+  }
+  return path.posix.join(parsed.dir, '.thumbnails', thumbnailFileName)
+}
+
+export function allocateUniqueUploadFileName(fileName: string, existingNames: Iterable<string>): string {
+  const safeFileName = sanitizeFilename(fileName)
+  const parsed = path.posix.parse(safeFileName)
+  const baseName = parsed.name || 'file'
+  const extension = parsed.ext || ''
+
+  const used = new Set(Array.from(existingNames, (value) => String(value || '').trim().toLowerCase()).filter(Boolean))
+  if (!used.has(safeFileName.toLowerCase())) {
+    return safeFileName
+  }
+
+  let suffix = 2
+  while (used.has(`${baseName} (${suffix})${extension}`.toLowerCase())) {
+    suffix += 1
+  }
+
+  return `${baseName} (${suffix})${extension}`
+}
+
 export function buildProjectEmailRawStoragePath(projectStoragePath: string, fileName: string, timestamp: number): string {
   return path.posix.join(projectStoragePath, 'communication', 'raw', `email-${timestamp}-${fileName}`)
 }

@@ -50,10 +50,17 @@ type DownloadProgressSnapshot = {
 }
 
 const SIDEBAR_CHECKBOX_CLASS = 'w-3.5 h-3.5 shrink-0 rounded accent-primary/75 opacity-70 checked:opacity-100 transition-opacity'
+const UPLOADS_GROUP_PREFIX = 'UPLOADS / '
 
 const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
   if (file.type !== 'video') return true
   return file.isApproved === true
+}
+
+const getUploadsRelativePath = (groupName: string): string => {
+  if (groupName === 'UPLOADS') return ''
+  if (groupName.startsWith(UPLOADS_GROUP_PREFIX)) return groupName.slice(UPLOADS_GROUP_PREFIX.length).trim()
+  return groupName
 }
 
 const formatTransferSpeed = (bytesPerSecond: number | null): string => {
@@ -230,6 +237,7 @@ export default function VideoSidebar({
   const [showTransferCloseWarning, setShowTransferCloseWarning] = useState(false)
   const [transferPanelHeight, setTransferPanelHeight] = useState(208)
   const [isDraggingTransferPanel, setIsDraggingTransferPanel] = useState(false)
+  const autoClearUploadsTimeoutRef = useRef<number | null>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const mobileContainerRef = useRef<HTMLDivElement>(null)
@@ -384,9 +392,6 @@ export default function VideoSidebar({
 
     for (let i = 0; i < files.length; i += 1) {
       await onDownloadFile(files[i])
-      if (i < files.length - 1) {
-        await new Promise<void>((r) => setTimeout(r, 350))
-      }
     }
   }, [onDownloadFile, onDownloadFiles])
 
@@ -457,9 +462,12 @@ export default function VideoSidebar({
   const showFiles = downloadableFiles !== undefined && downloadableFiles !== null
   const isMobileFilesMode = desktopActiveTabValue === 'files'
   const hasTransferItems = transferItems.length > 0
+  const hasActiveDownloadTransfers = transferItems.some((transfer) => (
+    transfer.direction === 'download' && ['queued', 'preparing', 'transferring'].includes(transfer.status)
+  ))
   const hasDismissibleTransfers = transferItems.some((transfer) => !['queued', 'preparing', 'transferring'].includes(transfer.status))
-  const effectiveDownloadProgress = isSharedDownloadActive ? sharedDownloadProgress : downloadProgress
-  const showDownloadProgress = (isDownloadingAll || isSharedDownloadActive) && effectiveDownloadProgress !== null
+  const effectiveDownloadProgress = isDownloadingAll ? downloadProgress : sharedDownloadProgress
+  const showDownloadProgress = (isDownloadingAll || hasActiveDownloadTransfers) && effectiveDownloadProgress !== null
   const effectiveProgressPercent = effectiveDownloadProgress?.percent ?? 0
   const effectiveSpeed = effectiveDownloadProgress?.speedBytesPerSecond ?? null
   const effectiveEta = effectiveDownloadProgress?.etaSeconds ?? null
@@ -491,6 +499,40 @@ export default function VideoSidebar({
       setIsTransfersHidden(false)
     }
   }, [hasTransferItems, transferPanelVersion])
+
+  useEffect(() => {
+    if (autoClearUploadsTimeoutRef.current != null) {
+      window.clearTimeout(autoClearUploadsTimeoutRef.current)
+      autoClearUploadsTimeoutRef.current = null
+    }
+
+    if (!onClearCompletedTransfers || transferItems.length === 0) return
+
+    const finishedNonUploadCount = transferItems.filter((item) => {
+      if (item.direction === 'upload') return false
+      return ['completed', 'failed', 'canceled', 'browser'].includes(item.status)
+    }).length
+
+    const completedUploadCount = transferItems.filter((item) => {
+      return item.direction === 'upload'
+        && item.status === 'completed'
+        && Math.round(item.progressPercent) >= 100
+    }).length
+
+    if (completedUploadCount === 0 || finishedNonUploadCount > 0) return
+
+    autoClearUploadsTimeoutRef.current = window.setTimeout(() => {
+      onClearCompletedTransfers()
+      autoClearUploadsTimeoutRef.current = null
+    }, 2000)
+
+    return () => {
+      if (autoClearUploadsTimeoutRef.current != null) {
+        window.clearTimeout(autoClearUploadsTimeoutRef.current)
+        autoClearUploadsTimeoutRef.current = null
+      }
+    }
+  }, [onClearCompletedTransfers, transferItems])
 
   useEffect(() => {
     const saved = localStorage.getItem('share_transfers_height')
@@ -554,7 +596,7 @@ export default function VideoSidebar({
       case 'preparing':
         return 'Preparing'
       case 'transferring':
-        return 'Downloading'
+        return transfer.direction === 'upload' ? 'Uploading' : 'Downloading'
       case 'browser':
         return 'Opened in browser'
       case 'completed':
@@ -613,11 +655,7 @@ export default function VideoSidebar({
               <span>{formatTransferSpeed(transferSummary?.speedBytesPerSecond ?? null)}</span>
               <span>{formatEta(transferSummary?.etaSeconds ?? null)}</span>
             </div>
-          ) : (
-            <div className="text-[11px] text-muted-foreground">
-              Large direct downloads continue in your browser after they are opened.
-            </div>
-          )}
+          ) : null}
 
           {hasDismissibleTransfers && (
             <div className="flex justify-end">
@@ -766,7 +804,7 @@ export default function VideoSidebar({
             <div className="px-3 pb-2 space-y-0.5">
               {downloadFiles.map(file => (
                 <button
-                  key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                  key={getDownloadableFileKey(file)}
                   onClick={() => void onDownloadFile?.(file)}
                   className="w-full text-left text-xs text-muted-foreground hover:text-foreground truncate flex items-center gap-1.5 py-0.5 transition-colors"
                   title={file.fileName}
@@ -872,7 +910,7 @@ export default function VideoSidebar({
             <div className="px-3 pb-2 space-y-0.5">
               {downloadFiles.map(file => (
                 <button
-                  key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                  key={getDownloadableFileKey(file)}
                   onClick={() => void onDownloadFile?.(file)}
                   className="w-full text-left text-xs text-muted-foreground hover:text-foreground truncate flex items-center gap-1.5 py-0.5 transition-colors"
                   title={file.fileName}
@@ -906,7 +944,23 @@ export default function VideoSidebar({
   }
 
   const renderFilesTabSection = (isMobile = false) => {
+    const uploadGroups = (downloadableFiles ?? []).filter((group) => group.groupType === 'uploads')
+    const hasUploads = uploadGroups.length > 0
+    const uploadRootGroup = uploadGroups.find((group) => group.name === 'UPLOADS') ?? null
+    const uploadRootFiles = uploadRootGroup
+      ? [...(uploadRootGroup.mainFile ? [uploadRootGroup.mainFile] : []), ...uploadRootGroup.subFiles]
+      : []
+    const nestedUploadGroups = uploadGroups
+      .filter((group) => group.name !== 'UPLOADS')
+      .sort((a, b) => getUploadsRelativePath(a.name).localeCompare(getUploadsRelativePath(b.name), undefined, { sensitivity: 'base' }))
+    const uploadRootFileKeys = uploadGroups
+      .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+      .map((file) => getDownloadableFileKey(file))
+    const allUploadsSelected = uploadRootFileKeys.length > 0 && uploadRootFileKeys.every((key) => selectedFileIdsValue.has(key))
+    const someUploadsSelected = uploadRootFileKeys.some((key) => selectedFileIdsValue.has(key))
+    const isUploadsRootActive = String(activeFilesFolderName || '').trim().startsWith('UPLOADS')
     const allProjectFileKeys = (downloadableFiles ?? [])
+      .filter((group) => group.groupType !== 'uploads')
       .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
       .filter((file) => isSelectableDownloadableFile(file))
       .map((file) => getDownloadableFileKey(file))
@@ -918,7 +972,7 @@ export default function VideoSidebar({
     return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className={cn('overflow-y-auto overflow-x-hidden flex-1', !isMobile && 'mr-[5px]')}>
-        {!hasVideos && !hasAlbums ? (
+        {!hasVideos && !hasAlbums && !hasUploads ? (
           <p className="px-3 py-4 text-xs text-muted-foreground">No content available for download.</p>
         ) : (
           <div className="py-2">
@@ -1194,6 +1248,175 @@ export default function VideoSidebar({
                 </div>
               )
             })}
+
+            {hasUploads ? (
+              <div>
+                <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isUploadsRootActive && 'rounded-md bg-primary/15')}>
+                  <input
+                    type="checkbox"
+                    checked={allUploadsSelected}
+                    disabled={uploadRootFileKeys.length === 0}
+                    ref={(el) => { if (el) el.indeterminate = someUploadsSelected && !allUploadsSelected }}
+                    onChange={() => {
+                      setSelectedFileIdsValue((prev) => {
+                        const next = new Set(prev)
+                        if (allUploadsSelected) {
+                          uploadRootFileKeys.forEach((key) => next.delete(key))
+                        } else {
+                          uploadRootFileKeys.forEach((key) => next.add(key))
+                        }
+                        return next
+                      })
+                    }}
+                    className={cn(
+                      SIDEBAR_CHECKBOX_CLASS,
+                      uploadRootFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                    )}
+                    aria-label="Select all files in UPLOADS"
+                  />
+                  <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <button
+                    type="button"
+                    className={cn(
+                      'text-xs font-semibold truncate text-left hover:underline',
+                      isUploadsRootActive ? 'text-primary' : 'text-foreground'
+                    )}
+                    onClick={() => {
+                      setDesktopActiveTabValue('files')
+                      window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                        detail: { folderName: 'UPLOADS' },
+                      }))
+                    }}
+                    title="Open UPLOADS in Files"
+                  >
+                    UPLOADS
+                  </button>
+                </div>
+
+                {uploadRootGroup && uploadRootGroup.subFiles.length === 0 && nestedUploadGroups.length === 0 ? (
+                  <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                ) : null}
+
+                {uploadRootFiles.map((file) => {
+                  const fileKey = getDownloadableFileKey(file)
+                  const isChecked = selectedFileIdsValue.has(fileKey)
+                  const FileIcon = getFileIcon(file)
+
+                  return (
+                    <div
+                      key={fileKey}
+                      className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-9"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          setSelectedFileIdsValue((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(fileKey)) next.delete(fileKey)
+                            else next.add(fileKey)
+                            return next
+                          })
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        className={cn(SIDEBAR_CHECKBOX_CLASS, 'cursor-pointer')}
+                      />
+                      <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span className="flex-1 text-xs text-muted-foreground truncate py-0.5" title={file.fileName}>
+                        {file.fileName}
+                      </span>
+                    </div>
+                  )
+                })}
+
+                {nestedUploadGroups.map((group) => {
+                  const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+                  const isActiveFolder = activeFilesFolderName === group.name
+                  const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
+                  const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
+                  const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
+                  const folderLabel = getUploadsRelativePath(group.name)
+                  const openMainFilesFolder = () => {
+                    setDesktopActiveTabValue('files')
+                    window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                      detail: { folderName: group.name },
+                    }))
+                  }
+
+                  return (
+                    <div key={`uploads-${group.name}`}>
+                      <div className={cn('flex items-center gap-2 pl-9 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                        <input
+                          type="checkbox"
+                          checked={allGroupSelected}
+                          disabled={groupFileKeys.length === 0}
+                          ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
+                          onChange={() => {
+                            setSelectedFileIdsValue((prev) => {
+                              const next = new Set(prev)
+                              if (allGroupSelected) {
+                                groupFileKeys.forEach((k) => next.delete(k))
+                              } else {
+                                groupFileKeys.forEach((k) => next.add(k))
+                              }
+                              return next
+                            })
+                          }}
+                          className={cn(
+                            SIDEBAR_CHECKBOX_CLASS,
+                            groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                          )}
+                        />
+                        <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-foreground truncate text-left hover:underline"
+                          onClick={openMainFilesFolder}
+                          title={`Open ${folderLabel} in Files`}
+                        >
+                          {folderLabel}
+                        </button>
+                      </div>
+                      {groupFiles.length === 0 ? (
+                        <p className="pl-14 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                      ) : (
+                        groupFiles.map((file) => {
+                          const fileKey = getDownloadableFileKey(file)
+                          const isChecked = selectedFileIdsValue.has(fileKey)
+                          const FileIcon = getFileIcon(file)
+
+                          return (
+                            <div
+                              key={fileKey}
+                              className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-12"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setSelectedFileIdsValue((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(fileKey)) next.delete(fileKey)
+                                    else next.add(fileKey)
+                                    return next
+                                  })
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                                className={cn(SIDEBAR_CHECKBOX_CLASS, 'cursor-pointer')}
+                              />
+                              <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                              <span className="flex-1 text-xs text-muted-foreground truncate py-0.5" title={file.fileName}>
+                                {file.fileName}
+                              </span>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -1405,7 +1628,7 @@ export default function VideoSidebar({
                               )}
                               {group.subFiles.map((file) => (
                                 <button
-                                  key={file.assetId ?? `${file.albumId}-${file.variant}`}
+                                  key={getDownloadableFileKey(file)}
                                   onClick={() => void onDownloadFile?.(file)}
                                   className={cn(
                                     'w-full text-left py-1 text-xs text-muted-foreground hover:bg-accent truncate block transition-colors',

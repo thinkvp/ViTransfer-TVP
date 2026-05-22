@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildProjectUploadsRoot, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -129,6 +129,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       videoAgg,
       assetAgg,
       commentFileAgg,
+      shareUploadFileAgg,
       projectFileAgg,
       projectEmailAgg,
       projectEmailAttachmentAgg,
@@ -149,6 +150,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       prisma.video.aggregate({ where: { projectId }, _sum: { originalFileSize: true } }),
       prisma.videoAsset.aggregate({ where: { video: { projectId } }, _sum: { fileSize: true } }),
       prisma.commentFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
+      prisma.shareUploadFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
       prisma.projectFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
       prisma.projectEmail.aggregate({ where: { projectId }, _sum: { rawFileSize: true } }),
       prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
@@ -159,6 +161,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const videosBytes = asNumberBigInt(videoAgg._sum.originalFileSize)
     const videoAssetsBytes = asNumberBigInt(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumberBigInt(commentFileAgg._sum.fileSize)
+    const uploadsFilesBytes = asNumberBigInt(shareUploadFileAgg._sum.fileSize)
 
     const projectFilesBytes = asNumberBigInt(projectFileAgg._sum.fileSize)
     const communicationsBytes =
@@ -210,6 +213,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           videosBytes: number
           videoAssetsBytes: number
           commentAttachmentsBytes: number
+          uploadsFilesBytes: number
           originalPhotosBytes: number
           photoZipBytes: number
           photosBytes: number
@@ -223,12 +227,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const commentsRel = `${projectRootRel}/comments`
       const communicationRel = `${projectRootRel}/communication`
       const filesRel = `${projectRootRel}/files`
+      const uploadsRel = buildProjectUploadsRoot(projectRootRel)
 
-      const [projectRootAbs, commentsAbs, communicationAbs, filesAbs] = [
+      const [projectRootAbs, commentsAbs, communicationAbs, filesAbs, uploadsAbs] = [
         projectRootRel,
         commentsRel,
         communicationRel,
         filesRel,
+        uploadsRel,
       ].map((p) => getFilePath(p))
 
       const [
@@ -240,6 +246,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         commentsBytesDisk,
         communicationBytesDisk,
         filesBytesDisk,
+        uploadsBytesDisk,
       ] = await Promise.all([
         prisma.video.findMany({
           where: { projectId },
@@ -273,6 +280,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         computeDirectorySizeBytes(commentsAbs),
         computeDirectorySizeBytes(communicationAbs),
         computeDirectorySizeBytes(filesAbs),
+        computeDirectorySizeBytes(uploadsAbs),
       ])
 
       const [originalVideosBytesDisk, videoPreviewsBytesDisk, videoAssetsBytesDisk, originalPhotosBytesDisk, photoZipBytesDisk] = await Promise.all([
@@ -327,6 +335,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
       videoPreviewsBytes = Math.max(0, videoPreviewsBytesDisk)
       const projectFilesBytesDisk = Math.max(0, filesBytesDisk)
+      const uploadsFilesBytesDisk = Math.max(0, uploadsBytesDisk)
       const communicationsBytesDisk = Math.max(0, communicationBytesDisk)
 
       diskTotalBytes = Math.max(0, rootBytes)
@@ -335,6 +344,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         Math.max(0, originalPhotosBytesDisk) +
         Math.max(0, photoZipBytesDisk) +
         Math.max(0, communicationsBytesDisk) +
+        Math.max(0, uploadsFilesBytesDisk) +
         Math.max(0, projectFilesBytesDisk) +
         Math.max(0, originalVideosBytesDisk) +
         Math.max(0, videoPreviewsBytesDisk) +
@@ -347,6 +357,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         videosBytes: Math.max(0, originalVideosBytesDisk + videoPreviewsBytesDisk),
         videoAssetsBytes: Math.max(0, videoAssetsBytesDisk),
         commentAttachmentsBytes: Math.max(0, commentsBytesDisk),
+        uploadsFilesBytes: Math.max(0, uploadsFilesBytesDisk),
         originalPhotosBytes: Math.max(0, originalPhotosBytesDisk),
         photoZipBytes: Math.max(0, photoZipBytesDisk),
         photosBytes: Math.max(0, originalPhotosBytesDisk + photoZipBytesDisk),
@@ -390,6 +401,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         videosBytes,
         videoAssetsBytes,
         commentAttachmentsBytes,
+        uploadsFilesBytes,
         originalPhotosBytes,
         photoZipBytes,
         photosBytes,
