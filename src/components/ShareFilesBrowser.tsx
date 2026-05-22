@@ -2,11 +2,14 @@
 
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Download,
   File,
   FileArchive,
@@ -19,14 +22,32 @@ import {
   X,
 } from 'lucide-react'
 
+type DownloadProgressSnapshot = {
+  percent: number
+  speedBytesPerSecond: number | null
+  etaSeconds: number | null
+}
+
+const FILES_CHECKBOX_CLASS = 'rounded accent-primary/75 opacity-70 checked:opacity-100 transition-opacity'
+
+const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
+  if (file.type !== 'video') return true
+  return file.isApproved === true
+}
+
 type ShareFilesBrowserProps = {
   groups: DownloadableGroup[]
+  rootFolderLabel?: string
   selectedFileIds: Set<string>
   setSelectedFileIds: React.Dispatch<React.SetStateAction<Set<string>>>
   onDownloadFile: (file: DownloadableFile) => Promise<void>
-  onDownloadFiles?: (files: DownloadableFile[], onProgress?: (pct: number) => void) => Promise<void>
+  onOpenVideoVersion?: (file: DownloadableFile, folderName: string | null) => void
+  onDownloadFiles?: (files: DownloadableFile[], onProgress?: (progress: DownloadProgressSnapshot) => void) => Promise<void>
+  sharedDownloadProgress?: DownloadProgressSnapshot | null
+  isSharedDownloadActive?: boolean
   onCloseFilesView?: () => void
   requestedOpenFolderName?: string | null
+  onOpenFolderNameChange?: (folderName: string | null) => void
   folderPreviewByName?: Record<string, string | null>
   resolveFilePreviewUrl?: (file: DownloadableFile) => Promise<string | null>
 }
@@ -83,22 +104,37 @@ function getFileExtensionLabel(fileName: string): string | null {
   return ext.length > 6 ? ext.slice(0, 6) : ext
 }
 
+function formatSelectedTotalSize(bytes: number): string {
+  const safeBytes = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  const mb = safeBytes / (1024 * 1024)
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(2)} GB`
+  }
+  return `${mb.toFixed(2)} MB`
+}
+
 export function ShareFilesBrowser({
   groups,
+  rootFolderLabel,
   selectedFileIds,
   setSelectedFileIds,
   onDownloadFile,
+  onOpenVideoVersion,
   onDownloadFiles,
+  sharedDownloadProgress,
+  isSharedDownloadActive = false,
   onCloseFilesView,
   requestedOpenFolderName,
+  onOpenFolderNameChange,
   folderPreviewByName,
   resolveFilePreviewUrl,
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
+  const [localDownloadProgress, setLocalDownloadProgress] = useState<DownloadProgressSnapshot | null>(null)
   const [previewUrlByFileKey, setPreviewUrlByFileKey] = useState<Record<string, string | null>>({})
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
+  const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
 
   const sortedGroups = useMemo(() => {
@@ -129,8 +165,26 @@ export function ShareFilesBrowser({
     const matchingGroup = sortedGroups.find((group) => group.name === requested)
     if (matchingGroup) {
       setOpenFolderName(matchingGroup.name)
+      return
     }
+
+    setOpenFolderName(null)
   }, [requestedOpenFolderName, sortedGroups])
+
+  useEffect(() => {
+    onOpenFolderNameChange?.(openFolderName)
+  }, [openFolderName, onOpenFolderNameChange])
+
+  useEffect(() => {
+    const handleOpenRoot = () => {
+      setOpenFolderName(null)
+    }
+
+    window.addEventListener('shareOpenFilesRoot', handleOpenRoot)
+    return () => {
+      window.removeEventListener('shareOpenFilesRoot', handleOpenRoot)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -188,15 +242,23 @@ export function ShareFilesBrowser({
   }, [sortedGroups, resolveFilePreviewUrl, folderPreviewByName])
 
   useEffect(() => {
-    if (!resolveFilePreviewUrl || !filesInOpenFolder.length) return
+    if (!filesInOpenFolder.length) return
 
     filesInOpenFolder.forEach((file) => {
       const fileKey = getDownloadableFileKey(file)
       if (previewUrlByFileKey[fileKey] !== undefined) return
       if (getDownloadableFileKind(file) !== 'image') return
 
+      const embeddedPreview = file.thumbnailUrl || file.previewUrl || null
+      if (embeddedPreview) {
+        setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: embeddedPreview }))
+        return
+      }
+
       const inFlight = previewRequestRef.current.get(fileKey)
       if (inFlight) return
+
+      if (!resolveFilePreviewUrl) return
 
       const request = resolveFilePreviewUrl(file)
         .then((url) => {
@@ -225,7 +287,9 @@ export function ShareFilesBrowser({
   }
 
   const toggleGroup = (group: DownloadableGroup, checked: boolean) => {
-    const fileKeys = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles].map(getDownloadableFileKey)
+    const fileKeys = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+      .filter((file) => isSelectableDownloadableFile(file))
+      .map(getDownloadableFileKey)
     setSelectedFileIds((prev) => {
       const next = new Set(prev)
       if (checked) {
@@ -237,13 +301,75 @@ export function ShareFilesBrowser({
     })
   }
 
+  const toggleSubset = (files: DownloadableFile[], checked: boolean) => {
+    const subsetKeys = files
+      .filter((file) => isSelectableDownloadableFile(file))
+      .map(getDownloadableFileKey)
+    if (!subsetKeys.length) return
+
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        subsetKeys.forEach((key) => next.add(key))
+      } else {
+        subsetKeys.forEach((key) => next.delete(key))
+      }
+      return next
+    })
+  }
+
+  const getSubsetSelectionState = (files: DownloadableFile[]) => {
+    const total = files.length
+    const selected = files.reduce((count, file) => {
+      const key = getDownloadableFileKey(file)
+      return selectedFileIds.has(key) ? count + 1 : count
+    }, 0)
+
+    return {
+      allChecked: total > 0 && selected === total,
+      someChecked: selected > 0 && selected < total,
+    }
+  }
+
   const selectedCount = selectedFileIds.size
+  const selectedTotalSizeBytes = useMemo(() => {
+    if (selectedFileIds.size === 0) return 0
+
+    const allFiles = sortedGroups.flatMap((group) => [
+      ...(group.mainFile ? [group.mainFile] : []),
+      ...group.subFiles,
+    ])
+
+    return allFiles.reduce((total, file) => {
+      const key = getDownloadableFileKey(file)
+      if (!selectedFileIds.has(key)) return total
+      const rawSize = typeof file.fileSizeBytes === 'string' ? Number(file.fileSizeBytes) : file.fileSizeBytes
+      const size = Number.isFinite(rawSize) && (rawSize as number) > 0 ? Number(rawSize) : 0
+      return total + size
+    }, 0)
+  }, [selectedFileIds, sortedGroups])
   const visibleFiles = openFolder
     ? filesInOpenFolder
     : sortedGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
 
+  useEffect(() => {
+    const selectableKeys = new Set(
+      visibleFiles
+        .filter((file) => isSelectableDownloadableFile(file))
+        .map((file) => getDownloadableFileKey(file))
+    )
+
+    setSelectedFileIds((prev) => {
+      if (prev.size === 0) return prev
+      const next = new Set(Array.from(prev).filter((key) => selectableKeys.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [setSelectedFileIds, visibleFiles])
+
   const selectAllVisible = () => {
-    const visibleKeys = visibleFiles.map(getDownloadableFileKey)
+    const visibleKeys = visibleFiles
+      .filter((file) => isSelectableDownloadableFile(file))
+      .map(getDownloadableFileKey)
     if (!visibleKeys.length) return
 
     setSelectedFileIds((prev) => {
@@ -256,20 +382,232 @@ export function ShareFilesBrowser({
   const downloadSelected = async () => {
     const allFiles = sortedGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
     const selectedFiles = allFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
+      .filter((file) => file.type !== 'video' || file.isApproved !== false)
     if (!selectedFiles.length) return
 
     setIsDownloadingSelected(true)
-    setDownloadProgress(null)
+    setLocalDownloadProgress(null)
     try {
       if (onDownloadFiles) {
-        await onDownloadFiles(selectedFiles, (pct) => setDownloadProgress(pct))
+        await onDownloadFiles(selectedFiles, (progress) => setLocalDownloadProgress(progress))
       } else {
         await Promise.all(selectedFiles.map((file) => onDownloadFile(file).catch(() => undefined)))
       }
     } finally {
       setIsDownloadingSelected(false)
-      setDownloadProgress(null)
+      setLocalDownloadProgress(null)
     }
+  }
+
+  const isDownloadBusy = isDownloadingSelected || isSharedDownloadActive
+  const activeProgress = isSharedDownloadActive ? sharedDownloadProgress : localDownloadProgress
+
+  const openFolderVideoVersions = openFolder?.groupType === 'video'
+    ? filesInOpenFolder.filter((file) => file.type === 'video')
+    : []
+  const openFolderVideoAssets = openFolder?.groupType === 'video'
+    ? filesInOpenFolder.filter((file) => file.type === 'asset')
+    : []
+  const openFolderAlbumZips = openFolder?.groupType === 'album'
+    ? filesInOpenFolder.filter((file) => file.type === 'album-zip')
+    : []
+  const openFolderAlbumPhotos = openFolder?.groupType === 'album'
+    ? filesInOpenFolder.filter((file) => file.type === 'album-photo')
+    : []
+  const videoAssetsSelection = getSubsetSelectionState(openFolderVideoAssets)
+  const albumPhotosSelection = getSubsetSelectionState(openFolderAlbumPhotos)
+
+  // Returns the best available full-resolution URL for a file in the lightbox.
+  const getLightboxUrl = (file: DownloadableFile): string | null => {
+    if (file.type === 'album-photo') {
+      // Prefer social-sized preview (higher res than thumbnail)
+      return file.previewUrl || file.thumbnailUrl || previewUrlByFileKey[getDownloadableFileKey(file)] || null
+    }
+    const resolved = previewUrlByFileKey[getDownloadableFileKey(file)]
+    return (typeof resolved === 'string' && resolved.length > 0) ? resolved : (file.thumbnailUrl || file.previewUrl || null)
+  }
+
+  const openImageLightbox = (file: DownloadableFile, imageList: DownloadableFile[]) => {
+    if (getDownloadableFileKind(file) !== 'image') return
+    const imageOnly = imageList.filter((f) => getDownloadableFileKind(f) === 'image')
+    const index = imageOnly.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+    setLightboxState({ images: imageOnly, currentIndex: Math.max(0, index) })
+  }
+
+  const lightboxNavigate = (delta: number) => {
+    setLightboxState((prev) => {
+      if (!prev) return prev
+      const next = (prev.currentIndex + delta + prev.images.length) % prev.images.length
+      return { ...prev, currentIndex: next }
+    })
+  }
+
+  useEffect(() => {
+    if (!lightboxState) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') lightboxNavigate(-1)
+      else if (event.key === 'ArrowRight') lightboxNavigate(1)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightboxState !== null])
+
+  const renderOpenFolderFileCard = (file: DownloadableFile, compact = false, imageList: DownloadableFile[] = []) => {
+    const fileKey = getDownloadableFileKey(file)
+    const FileTypeIcon = getFileTypeIcon(file)
+    const fileKind = getDownloadableFileKind(file)
+    const isImageFile = fileKind === 'image'
+    const isSelected = selectedFileIds.has(fileKey)
+    const resolvedPreview = previewUrlByFileKey[fileKey]
+    const inlinePreview = file.thumbnailUrl || file.previewUrl || null
+    const previewSrc = (typeof resolvedPreview === 'string' && resolvedPreview.length > 0)
+      ? resolvedPreview
+      : (typeof inlinePreview === 'string' && inlinePreview.length > 0 ? inlinePreview : null)
+    const showImagePreview = typeof previewSrc === 'string' && previewSrc.length > 0
+    const showVideoPreview = file.type === 'video' && Boolean(folderPreviewByName?.[openFolder?.name || ''])
+    const sizeLabel = formatFileSize(file.fileSizeBytes)
+    const durationLabel = fileKind === 'video' ? formatDuration(file.durationSeconds) : null
+    const fileExtensionLabel = getFileExtensionLabel(file.fileName)
+    const canDownloadFile = file.type !== 'video' || file.isApproved !== false
+    const canSelectFile = isSelectableDownloadableFile(file)
+    const displayFileName = file.type === 'video'
+      ? `${openFolder?.name || file.fileName} - ${file.versionLabel || 'Version'}`
+      : file.fileName
+    const latestVideoVersionKey = openFolderVideoVersions.length > 0
+      ? getDownloadableFileKey(openFolderVideoVersions[0])
+      : null
+    const showForReviewBadge = file.type === 'video' && file.isApproved === false && latestVideoVersionKey === fileKey
+
+    return (
+      <div
+        key={fileKey}
+        className={cn(
+          'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
+          isImageFile && 'cursor-zoom-in',
+          isSelected
+            ? 'border-2 border-primary/85 hover:border-primary'
+            : 'border border-border hover:border-primary/45'
+        )}
+        onClick={() => {
+          openImageLightbox(file, imageList)
+        }}
+        onDoubleClick={() => {
+          if (file.type === 'video' && file.videoId && onOpenVideoVersion) {
+            onOpenVideoVersion(file, openFolder?.name || null)
+            return
+          }
+          if (!canDownloadFile) return
+          void onDownloadFile(file)
+        }}
+      >
+        <div className={cn('relative bg-gradient-to-b from-muted/70 to-muted/35', compact ? 'p-2 pb-1.5' : 'p-2.5 pb-2')}>
+          <div className={cn('relative rounded-lg border border-border/80 bg-card shadow-inner shadow-black/10', compact ? 'p-1' : 'p-1.5')}>
+            <div className={cn('relative rounded-md overflow-hidden bg-black/85', compact ? 'aspect-[4/3]' : 'aspect-[16/10]')}>
+              {showImagePreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewSrc!}
+                  alt={file.fileName}
+                  className={cn('w-full h-full', file.type === 'album-photo' ? 'object-cover' : 'object-contain')}
+                  loading="lazy"
+                />
+              ) : showVideoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={folderPreviewByName?.[openFolder?.name || ''] || ''}
+                  alt={file.fileName}
+                  className="w-full h-full object-contain"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <FileTypeIcon className="w-10 h-10" />
+                  {fileExtensionLabel ? (
+                    <span className="text-[11px] font-semibold tracking-wide text-foreground/80">{fileExtensionLabel}</span>
+                  ) : null}
+                </div>
+              )}
+
+              {durationLabel ? (
+                <div className="absolute bottom-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums">
+                  {durationLabel}
+                </div>
+              ) : null}
+
+              {file.type === 'video' && file.versionLabel ? (
+                <div className="absolute top-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[11px] leading-none text-white font-medium">
+                  {file.versionLabel}
+                </div>
+              ) : null}
+
+              {file.type === 'video' && file.isApproved === true ? (
+                <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
+                  APPROVED
+                </div>
+              ) : null}
+
+              {showForReviewBadge ? (
+                <div className="absolute bottom-2 left-2 rounded bg-amber-500/95 px-1.5 py-0.5 text-[11px] leading-none text-black font-semibold tracking-wide">
+                  FOR REVIEW
+                </div>
+              ) : null}
+            </div>
+
+            <div className="absolute top-2 left-2">
+              <input
+                type="checkbox"
+                checked={isSelected}
+                disabled={!canSelectFile}
+                onChange={(event) => {
+                  if (!canSelectFile) return
+                  toggleFile(fileKey, event.target.checked)
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                className={cn(
+                  'w-4 h-4',
+                  FILES_CHECKBOX_CLASS,
+                  canSelectFile ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                )}
+                aria-label={`Select ${file.fileName}`}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className={cn(compact ? 'px-2 py-2' : 'px-3 py-2.5')}>
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileTypeIcon className={cn('text-muted-foreground shrink-0', compact ? 'w-3.5 h-3.5' : 'w-4 h-4')} />
+              <p className={cn('font-semibold text-foreground truncate', compact ? 'text-xs' : 'text-sm')} title={displayFileName}>{displayFileName}</p>
+            </div>
+            {canDownloadFile ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+                onClick={() => void onDownloadFile(file)}
+                onClickCapture={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                aria-label={`Download ${file.fileName}`}
+                title={`Download ${file.fileName}`}
+              >
+                <Download className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
+              </Button>
+            ) : null}
+          </div>
+          <div className={cn('text-muted-foreground flex items-center justify-between gap-2', compact ? 'text-[11px] mt-1' : 'text-xs mt-1.5')}>
+            <span className="shrink-0">{sizeLabel || 'Size unavailable'}</span>
+            {file.type === 'video' ? (
+              <span className="min-w-0 truncate text-right" title={file.fileName}>{file.fileName}</span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -283,11 +621,20 @@ export function ShareFilesBrowser({
                   <ArrowLeft className="w-4 h-4" />
                   <span className="hidden sm:inline">Back</span>
                 </Button>
-                <span className="text-sm text-muted-foreground">/</span>
-                <span className="text-sm font-semibold text-foreground truncate">{openFolder.name}</span>
+                {selectedCount > 0 ? (
+                  <span className="text-xs sm:text-sm text-muted-foreground truncate">
+                    {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
+                  </span>
+                ) : null}
               </div>
             ) : (
-              <h3 className="text-sm font-semibold text-foreground">Files</h3>
+              selectedCount > 0 ? (
+                <span className="text-xs sm:text-sm text-muted-foreground truncate">
+                  {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
+                </span>
+              ) : (
+                <span className="sr-only">Root folder</span>
+              )
             )}
           </div>
           {onCloseFilesView ? (
@@ -330,12 +677,12 @@ export function ShareFilesBrowser({
             size="sm"
             className="flex-[45] min-w-0 sm:flex-none sm:w-auto"
             onClick={downloadSelected}
-            disabled={selectedCount === 0 || isDownloadingSelected}
+            disabled={selectedCount === 0 || isDownloadBusy}
           >
             <Download className="w-4 h-4" />
-            {isDownloadingSelected
-              ? downloadProgress !== null
-                ? `Zipping… ${Math.round(downloadProgress)}%`
+            {isDownloadBusy
+              ? activeProgress
+                ? `Downloading… ${Math.round(activeProgress.percent)}%`
                 : 'Preparing…'
               : `Download (${selectedCount})`}
           </Button>
@@ -355,11 +702,19 @@ export function ShareFilesBrowser({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-0">
         {!openFolder ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-            {sortedGroups.map((group) => {
+          <div className="space-y-2">
+            <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white truncate" title={rootFolderLabel || 'PROJECT'}>
+              {rootFolderLabel || 'PROJECT'}
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+              {sortedGroups.map((group) => {
               const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+              const groupVideoFiles = groupFiles.filter((file) => file.type === 'video')
+              const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
+              const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
+              const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo
               const groupFileKeys = groupFiles.map(getDownloadableFileKey)
               const allChecked = groupFileKeys.length > 0 && groupFileKeys.every((key) => selectedFileIds.has(key))
               const someChecked = groupFileKeys.some((key) => selectedFileIds.has(key))
@@ -369,23 +724,29 @@ export function ShareFilesBrowser({
               const sidePreviewTop = folderPreviewTiles[1] || null
               const sidePreviewBottom = folderPreviewTiles[2] || null
 
-              return (
-                <div
-                  key={group.name}
-                  className="rounded-xl border border-border/80 bg-card hover:border-primary/40 transition-colors overflow-hidden shadow-sm"
-                  onDoubleClick={() => setOpenFolderName(group.name)}
-                >
-                  <div className="relative p-3 pb-2 bg-gradient-to-b from-muted/65 to-muted/30">
-                    <div className="absolute left-4 top-1 h-2.5 w-20 rounded-t-md border border-b-0 border-border/70 bg-muted" />
-                    <div className="relative rounded-lg border border-border/70 bg-card/70 p-1.5 shadow-inner">
-                      <div className="grid grid-cols-3 grid-rows-2 gap-1.5 aspect-[4/3] rounded-md overflow-hidden bg-black/5">
+                return (
+                  <div
+                    key={group.name}
+                    className={cn(
+                      'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
+                      someChecked
+                        ? 'border-2 border-primary/85 hover:border-primary'
+                        : 'border border-border hover:border-primary/45'
+                    )}
+                    onDoubleClick={() => setOpenFolderName(group.name)}
+                  >
+                  <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
+                    <div className="relative pt-2">
+                      <div className="absolute left-3 top-0 h-2.5 w-16 rounded-t-md border border-b-0 border-primary/55 bg-primary/30" />
+                      <div className="relative rounded-lg rounded-tl-sm border border-primary/50 bg-primary/20 p-1.5 shadow-inner shadow-black/10">
+                      <div className="grid grid-cols-3 grid-rows-2 gap-1.5 aspect-[16/10] rounded-md overflow-hidden bg-primary/20">
                         {leadPreview ? (
                           <>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={leadPreview}
                               alt={group.name}
-                              className="col-span-2 row-span-2 h-full w-full object-cover"
+                              className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
                               loading="lazy"
                             />
 
@@ -395,11 +756,11 @@ export function ShareFilesBrowser({
                                 src={sidePreviewTop}
                                 alt=""
                                 aria-hidden="true"
-                                className="h-full w-full object-cover"
+                                className="h-full w-full object-contain bg-black"
                                 loading="lazy"
                               />
                             ) : (
-                              <div className="h-full w-full bg-muted/35" aria-hidden="true" />
+                              <div className="h-full w-full bg-primary/35" aria-hidden="true" />
                             )}
 
                             {sidePreviewBottom ? (
@@ -408,11 +769,11 @@ export function ShareFilesBrowser({
                                 src={sidePreviewBottom}
                                 alt=""
                                 aria-hidden="true"
-                                className="h-full w-full object-cover"
+                                className="h-full w-full object-contain bg-black"
                                 loading="lazy"
                               />
                             ) : (
-                              <div className="h-full w-full bg-muted/20" aria-hidden="true" />
+                              <div className="h-full w-full bg-primary/30" aria-hidden="true" />
                             )}
                           </>
                         ) : folderPreview ? (
@@ -421,19 +782,32 @@ export function ShareFilesBrowser({
                             <img
                               src={folderPreview}
                               alt={group.name}
-                              className="col-span-2 row-span-2 h-full w-full object-cover"
+                              className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
                               loading="lazy"
                             />
-                            <div className="h-full w-full bg-muted/35" aria-hidden="true" />
-                            <div className="h-full w-full bg-muted/20" aria-hidden="true" />
+                            <div className="h-full w-full bg-primary/35" aria-hidden="true" />
+                            <div className="h-full w-full bg-primary/30" aria-hidden="true" />
                           </>
                         ) : (
-                          <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-muted-foreground">
-                            <Folder className="w-10 h-10" />
+                          <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
+                            <Folder className="w-9 h-9" />
                           </div>
                         )}
                       </div>
                     </div>
+                    </div>
+
+                    {showVideoFolderApprovedBadge ? (
+                      <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
+                        APPROVED
+                      </div>
+                    ) : null}
+
+                    {showVideoFolderForReviewBadge ? (
+                      <div className="absolute bottom-2 left-2 rounded bg-amber-500/95 px-1.5 py-0.5 text-[11px] leading-none text-black font-semibold tracking-wide">
+                        FOR REVIEW
+                      </div>
+                    ) : null}
 
                     <div className="absolute top-2 left-2">
                       <input
@@ -443,7 +817,7 @@ export function ShareFilesBrowser({
                           if (el) el.indeterminate = someChecked && !allChecked
                         }}
                         onChange={(event) => toggleGroup(group, event.target.checked)}
-                        className="w-4 h-4 rounded accent-primary"
+                        className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, groupFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
                         aria-label={`Select files in ${group.name}`}
                       />
                     </div>
@@ -452,7 +826,7 @@ export function ShareFilesBrowser({
                   <button
                     type="button"
                     onClick={() => setOpenFolderName(group.name)}
-                    className="w-full text-left px-3 py-3"
+                    className="w-full text-left px-3 py-2.5"
                   >
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <div className="flex items-center gap-2 min-w-0">
@@ -465,100 +839,84 @@ export function ShareFilesBrowser({
                       {groupFiles.length} Item{groupFiles.length === 1 ? '' : 's'}
                     </p>
                   </button>
-                </div>
-              )
-            })}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-            {filesInOpenFolder.map((file) => {
-              const fileKey = getDownloadableFileKey(file)
-              const FileTypeIcon = getFileTypeIcon(file)
-              const fileKind = getDownloadableFileKind(file)
-              const isSelected = selectedFileIds.has(fileKey)
-              const resolvedPreview = previewUrlByFileKey[fileKey]
-              const showImagePreview = typeof resolvedPreview === 'string' && resolvedPreview.length > 0
-              const showVideoPreview = file.type === 'video' && Boolean(folderPreviewByName?.[openFolder.name])
-              const sizeLabel = formatFileSize(file.fileSizeBytes)
-              const durationLabel = fileKind === 'video' ? formatDuration(file.durationSeconds) : null
-              const fileExtensionLabel = getFileExtensionLabel(file.fileName)
-
-              return (
-                <div
-                  key={fileKey}
-                  className="rounded-xl border border-border/80 bg-card hover:border-primary/40 transition-colors overflow-hidden shadow-sm"
-                  onDoubleClick={() => void onDownloadFile(file)}
-                >
-                  <div className="relative p-3 pb-2 bg-gradient-to-b from-muted/65 to-muted/30">
-                    <div className="absolute left-4 top-1 h-2.5 w-20 rounded-t-md border border-b-0 border-border/70 bg-muted" />
-                    <div className="relative rounded-lg border border-border/70 bg-card/70 p-1.5 shadow-inner">
-                      <div className="relative aspect-[4/3] rounded-md overflow-hidden bg-black/5">
-                        {showImagePreview ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={resolvedPreview!} alt={file.fileName} className="w-full h-full object-cover" loading="lazy" />
-                        ) : showVideoPreview ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={folderPreviewByName?.[openFolder.name] || ''}
-                            alt={file.fileName}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                            <FileTypeIcon className="w-10 h-10" />
-                            {fileExtensionLabel ? (
-                              <span className="text-[11px] font-semibold tracking-wide text-foreground/80">{fileExtensionLabel}</span>
-                            ) : null}
-                          </div>
-                        )}
-
-                        {durationLabel ? (
-                          <div className="absolute bottom-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums">
-                            {durationLabel}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="absolute top-2 left-2">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(event) => toggleFile(fileKey, event.target.checked)}
-                          onDoubleClick={(event) => event.stopPropagation()}
-                          className="w-4 h-4 rounded accent-primary"
-                          aria-label={`Select ${file.fileName}`}
-                        />
-                      </div>
+          <div className="space-y-5">
+            {openFolder?.groupType === 'video' ? (
+              <>
+                <section className="space-y-2">
+                  <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white">VIDEO VERSIONS</h4>
+                  {openFolderVideoVersions.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {openFolderVideoVersions.map((file) => renderOpenFolderFileCard(file, false, openFolderVideoVersions))}
                     </div>
-                  </div>
+                  ) : (
+                    <p className="px-1 text-xs text-muted-foreground italic">No video versions available.</p>
+                  )}
+                </section>
 
-                  <div className="px-3 py-3">
-                    <div className="flex items-center justify-between gap-2 min-w-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileTypeIcon className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <p className="text-sm font-semibold text-foreground truncate" title={file.fileName}>{file.fileName}</p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7 shrink-0"
-                        onClick={() => void onDownloadFile(file)}
-                        onDoubleClick={(event) => event.stopPropagation()}
-                        aria-label={`Download ${file.fileName}`}
-                        title={`Download ${file.fileName}`}
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                      </Button>
+                {openFolderVideoAssets.length > 0 ? (
+                  <section className="space-y-2 border-t border-border/70 pt-4">
+                    <div className="px-1 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={videoAssetsSelection.allChecked}
+                        ref={(el) => {
+                          if (el) el.indeterminate = videoAssetsSelection.someChecked
+                        }}
+                        onChange={(event) => toggleSubset(openFolderVideoAssets, event.target.checked)}
+                          className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, 'cursor-pointer')}
+                        aria-label="Select all video assets"
+                      />
+                      <h4 className="text-base sm:text-lg font-bold uppercase tracking-wider text-white">VIDEO ASSETS</h4>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1.5">
-                      {sizeLabel || 'Size unavailable'}
-                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
+                      {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, true, openFolderVideoAssets))}
+                    </div>
+                  </section>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <section className="space-y-2">
+                  <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white">ALBUM ZIPS</h4>
+                  {openFolderAlbumZips.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {openFolderAlbumZips.map((file) => renderOpenFolderFileCard(file))}
+                    </div>
+                  ) : (
+                    <p className="px-1 text-xs text-muted-foreground italic">No album ZIPs available.</p>
+                  )}
+                </section>
+
+                <section className="space-y-2 border-t border-border/70 pt-4">
+                  <div className="px-1 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={albumPhotosSelection.allChecked}
+                      ref={(el) => {
+                        if (el) el.indeterminate = albumPhotosSelection.someChecked
+                      }}
+                      onChange={(event) => toggleSubset(openFolderAlbumPhotos, event.target.checked)}
+                      className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, 'cursor-pointer')}
+                      aria-label="Select all photos"
+                    />
+                    <h4 className="text-base sm:text-lg font-bold uppercase tracking-wider text-white">PHOTOS</h4>
                   </div>
-                </div>
-              )
-            })}
+                  {openFolderAlbumPhotos.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
+                      {openFolderAlbumPhotos.map((file) => renderOpenFolderFileCard(file, true, openFolderAlbumPhotos))}
+                    </div>
+                  ) : (
+                    <p className="px-1 text-xs text-muted-foreground italic">No photos available.</p>
+                  )}
+                </section>
+              </>
+            )}
           </div>
         )}
 
@@ -568,6 +926,51 @@ export function ShareFilesBrowser({
           </div>
         )}
       </div>
+
+      {(() => {
+        const lightboxFile = lightboxState ? lightboxState.images[lightboxState.currentIndex] : null
+        const lightboxSrc = lightboxFile ? getLightboxUrl(lightboxFile) : null
+        const hasMultiple = lightboxState && lightboxState.images.length > 1
+        return (
+          <Dialog open={Boolean(lightboxState)} onOpenChange={(open) => { if (!open) setLightboxState(null) }}>
+            <DialogContent className="max-w-[92vw] sm:max-w-5xl p-0 overflow-hidden bg-black border-border">
+              {lightboxFile && lightboxSrc ? (
+                <div className="relative w-full h-[70vh] bg-black">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={lightboxSrc}
+                    alt={lightboxFile.fileName}
+                    className="w-full h-full object-contain"
+                  />
+                  {hasMultiple ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => lightboxNavigate(-1)}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
+                        aria-label="Previous image"
+                      >
+                        <ChevronLeft className="w-6 h-6" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => lightboxNavigate(1)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
+                        aria-label="Next image"
+                      >
+                        <ChevronRight className="w-6 h-6" />
+                      </button>
+                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] text-white tabular-nums">
+                        {lightboxState!.currentIndex + 1} / {lightboxState!.images.length}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </DialogContent>
+          </Dialog>
+        )
+      })()}
     </div>
   )
 }

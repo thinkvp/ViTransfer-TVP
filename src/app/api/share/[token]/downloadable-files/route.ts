@@ -3,10 +3,25 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { getAlbumZipFileName } from '@/lib/album-photo-zip'
+import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import type { DownloadableFile, DownloadableGroup, DownloadableFilesResult } from '@/lib/downloadable-files'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+function asNumberBigInt(v: unknown): number {
+  if (typeof v === 'bigint') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
 
 // GET /api/share/[token]/downloadable-files
 // Returns approved video files + assets and album zip files available for download.
@@ -50,11 +65,10 @@ export async function GET(
   const now = new Date()
 
   // Fetch data in parallel
-  const [approvedVideos, albums, approvableCount] = await Promise.all([
+  const [readyVideos, albums, approvableCount] = await Promise.all([
     prisma.video.findMany({
       where: {
         projectId: projectMeta.id,
-        approved: true,
         status: 'READY',
       },
       include: {
@@ -67,7 +81,7 @@ export async function GET(
           },
         },
       },
-      orderBy: { version: 'desc' },
+      orderBy: [{ name: 'asc' }, { version: 'desc' }],
     }),
     prisma.album.findMany({
       where: { projectId: projectMeta.id, status: 'READY' },
@@ -77,6 +91,19 @@ export async function GET(
         fullZipFileSize: true,
         socialZipFileSize: true,
         socialCopiesEnabled: true,
+        photos: {
+          where: { status: 'READY' },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            fileName: true,
+            fileSize: true,
+            socialStatus: true,
+            socialStoragePath: true,
+            thumbnailStatus: true,
+            thumbnailStoragePath: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     }),
@@ -85,31 +112,46 @@ export async function GET(
     }),
   ])
 
-  // Build video groups: one per unique video name, taking the highest version (orderBy: version desc)
-  const videoNamesSeen = new Set<string>()
+  // Build video groups: one per unique video name, containing all versions.
+  const videosByName = new Map<string, typeof readyVideos>()
+
+  for (const video of readyVideos) {
+    if (!videosByName.has(video.name)) {
+      videosByName.set(video.name, [])
+    }
+    videosByName.get(video.name)!.push(video)
+  }
+
   const videoGroups: DownloadableGroup[] = []
 
-  for (const video of approvedVideos) {
-    if (videoNamesSeen.has(video.name)) continue
-    videoNamesSeen.add(video.name)
+  for (const [videoName, videos] of videosByName.entries()) {
+    const sortedVersions = [...videos].sort((a, b) => b.version - a.version)
+    const versionFiles: DownloadableFile[] = sortedVersions.map((video) => ({
+      type: 'video',
+      videoId: video.id,
+      fileName: video.originalFileName,
+      fileSizeBytes: Number(video.originalFileSize),
+      durationSeconds: Number(video.duration),
+      versionLabel: (video as any).versionLabel ? String((video as any).versionLabel) : undefined,
+      isApproved: video.approved === true,
+    }))
+
+    const approvedVideo = sortedVersions.find((video) => video.approved === true)
+    const assetFiles: DownloadableFile[] = approvedVideo
+      ? approvedVideo.assets.map((asset): DownloadableFile => ({
+          type: 'asset',
+          videoId: approvedVideo.id,
+          assetId: asset.id,
+          fileName: asset.fileName,
+          fileSizeBytes: Number(asset.fileSize),
+        }))
+      : []
 
     videoGroups.push({
-      name: video.name,
+      name: videoName,
       groupType: 'video',
-      mainFile: {
-        type: 'video',
-        videoId: video.id,
-        fileName: video.originalFileName,
-        fileSizeBytes: Number(video.originalFileSize),
-        durationSeconds: Number(video.duration),
-      },
-      subFiles: video.assets.map((asset): DownloadableFile => ({
-        type: 'asset',
-        videoId: video.id,
-        assetId: asset.id,
-        fileName: asset.fileName,
-        fileSizeBytes: Number(asset.fileSize),
-      })),
+      mainFile: versionFiles[0],
+      subFiles: [...versionFiles.slice(1), ...assetFiles],
     })
   }
 
@@ -118,6 +160,8 @@ export async function GET(
 
   // Build album groups: only include albums with at least one ready zip
   const albumGroups: DownloadableGroup[] = []
+  const albumsNeedingThumbnailBackfill = new Set<string>()
+  const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `share:${Date.now()}`)
 
   for (const album of albums) {
     const zips: DownloadableFile[] = []
@@ -142,13 +186,46 @@ export async function GET(
       })
     }
 
-    if (zips.length > 0) {
+    const photos: DownloadableFile[] = await Promise.all(
+      album.photos.map(async (photo) => {
+        const tokenValue = await generateAlbumPhotoAccessToken({
+          photoId: photo.id,
+          albumId: album.id,
+          projectId: projectMeta.id,
+          request,
+          sessionId,
+        })
+
+        if (photo.thumbnailStatus !== 'READY' || !photo.thumbnailStoragePath) {
+          albumsNeedingThumbnailBackfill.add(album.id)
+        }
+
+        return {
+          type: 'album-photo',
+          albumId: album.id,
+          photoId: photo.id,
+          fileName: photo.fileName,
+          fileSizeBytes: asNumberBigInt(photo.fileSize),
+          thumbnailUrl: `/api/content/photo/${tokenValue}?variant=thumbnail`,
+          previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
+          downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
+        } as DownloadableFile
+      })
+    )
+
+    if (zips.length > 0 || photos.length > 0) {
       albumGroups.push({
         name: album.name,
         groupType: 'album',
-        subFiles: zips,
+        subFiles: [...zips, ...photos],
       })
     }
+  }
+
+  if (albumsNeedingThumbnailBackfill.size > 0) {
+    await Promise.allSettled(
+      [...albumsNeedingThumbnailBackfill].map((albumId) => enqueueAlbumThumbnailJob({ albumId, delayMs: 500 }))
+    )
   }
 
   const result: DownloadableFilesResult = {

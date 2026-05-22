@@ -1372,7 +1372,7 @@ export function CommentSectionView({
               <p className="text-muted-foreground">
                 {commentsDisabled
                   ? 'This video has been approved. Comments are now closed.'
-                  : 'No messages yet. Start the conversation!'}
+                  : 'Have some feedback? Leave it here.'}
               </p>
             </div>
           ) : (

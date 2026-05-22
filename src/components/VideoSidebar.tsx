@@ -11,6 +11,7 @@ import {
   Images,
   Check,
   Download,
+  Upload,
   Folder,
   File,
   FileArchive,
@@ -18,16 +19,75 @@ import {
   FileImage,
   FileText,
   FileVideo,
+  X,
 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
+import type { TransferItem, TransferSummary } from '@/lib/transfer-state'
 
 interface VideoGroup {
   name: string
   videos: any[]
   versionCount: number
+}
+
+type DownloadProgressSnapshot = {
+  percent: number
+  speedBytesPerSecond: number | null
+  etaSeconds: number | null
+}
+
+const SIDEBAR_CHECKBOX_CLASS = 'w-3.5 h-3.5 shrink-0 rounded accent-primary/75 opacity-70 checked:opacity-100 transition-opacity'
+
+const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
+  if (file.type !== 'video') return true
+  return file.isApproved === true
+}
+
+const formatTransferSpeed = (bytesPerSecond: number | null): string => {
+  if (!bytesPerSecond || !Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+    return 'Speed: --'
+  }
+
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  let value = bytesPerSecond
+  let index = 0
+
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+
+  const precision = value >= 100 ? 0 : value >= 10 ? 1 : 2
+  return `Speed: ${value.toFixed(precision)} ${units[index]}`
+}
+
+const formatEta = (etaSeconds: number | null): string => {
+  if (!etaSeconds || !Number.isFinite(etaSeconds) || etaSeconds <= 0) {
+    return 'Time left: --'
+  }
+
+  const totalSeconds = Math.floor(etaSeconds)
+  const seconds = totalSeconds % 60
+  const minutes = Math.floor(totalSeconds / 60) % 60
+  const hours = Math.floor(totalSeconds / 3600)
+
+  if (hours > 0) {
+    return `Time left: ${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+  return `Time left: ${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
 // Keep thumbnails aspect-correct inside a 16:9 container.
@@ -85,7 +145,21 @@ interface VideoSidebarProps {
   /** Called when the user clicks a file to download. Should fetch a token and trigger the download. */
   onDownloadFile?: (file: DownloadableFile) => Promise<void>
   /** Called when the user triggers a multi-file download. */
-  onDownloadFiles?: (files: DownloadableFile[], onProgress?: (percent: number) => void) => Promise<void>
+  onDownloadFiles?: (files: DownloadableFile[], onProgress?: (progress: DownloadProgressSnapshot) => void) => Promise<void>
+  /** Shared progress state from the page-level download flow. */
+  sharedDownloadProgress?: DownloadProgressSnapshot | null
+  /** Indicates a download initiated elsewhere in the share page is active. */
+  isSharedDownloadActive?: boolean
+  /** Transfer items shown in the sidebar Transfers panel. */
+  transferItems?: TransferItem[]
+  /** Aggregate transfer state shown in the sidebar Transfers panel. */
+  transferSummary?: TransferSummary | null
+  /** Increments whenever a new transfer batch starts so the panel can reopen. */
+  transferPanelVersion?: number
+  /** Cancels the current app-managed transfers. */
+  onCancelActiveTransfers?: () => void
+  /** Clears completed transfer rows from the Transfers panel. */
+  onClearCompletedTransfers?: () => void
   /** Whether the project has any videos with allowApproval=true, used for empty state messages. */
   hasApprovableVideos?: boolean
   /** Whether the desktop tab bar should be rendered inside the sidebar. */
@@ -98,6 +172,8 @@ interface VideoSidebarProps {
   selectedFileIds?: Set<string>
   /** Controlled selected file IDs setter. */
   onSelectedFileIdsChange?: React.Dispatch<React.SetStateAction<Set<string>>>
+  /** Currently open folder in the main files display for row highlighting. */
+  activeFilesFolderName?: string | null
 }
 
 
@@ -122,12 +198,20 @@ export default function VideoSidebar({
   downloadableFiles,
   onDownloadFile,
   onDownloadFiles,
+  sharedDownloadProgress,
+  isSharedDownloadActive = false,
+  transferItems = [],
+  transferSummary,
+  transferPanelVersion = 0,
+  onCancelActiveTransfers,
+  onClearCompletedTransfers,
   hasApprovableVideos = false,
   showDesktopTabBar = true,
   desktopActiveTab,
   onDesktopActiveTabChange,
   selectedFileIds,
   onSelectedFileIdsChange,
+  activeFilesFolderName,
 }: VideoSidebarProps) {
   const logoSrc = '/api/branding/logo'
   const [isCollapsed, setIsCollapsed] = useState(initialCollapsed)
@@ -138,10 +222,14 @@ export default function VideoSidebar({
   const [hasManualRatio, setHasManualRatio] = useState(false)
   const [isDraggingDivider, setIsDraggingDivider] = useState(false)
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgressSnapshot | null>(null)
   const [showLocalModeWarning, setShowLocalModeWarning] = useState(false)
   const [localDesktopActiveTab, setLocalDesktopActiveTab] = useState<'for-review' | 'files'>('for-review')
   const [localSelectedFileIds, setLocalSelectedFileIds] = useState<Set<string>>(new Set())
+  const [isTransfersHidden, setIsTransfersHidden] = useState(true)
+  const [showTransferCloseWarning, setShowTransferCloseWarning] = useState(false)
+  const [transferPanelHeight, setTransferPanelHeight] = useState(208)
+  const [isDraggingTransferPanel, setIsDraggingTransferPanel] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const mobileContainerRef = useRef<HTMLDivElement>(null)
@@ -280,23 +368,10 @@ export default function VideoSidebar({
   const queueSidebarDownloads = useCallback(async (files: DownloadableFile[], withProgress?: boolean) => {
     if (!files.length) return
 
-    // Estimate total size for local mode warning
-    const totalBytes = files.reduce((sum, f) => {
-      const rawSize = f.fileSizeBytes
-      const parsedSize = typeof rawSize === 'string' ? Number(rawSize) : rawSize
-      return sum + (Number.isFinite(parsedSize) ? Number(parsedSize) : 0)
-    }, 0)
-    // Detect if browser is using Blob fallback (no FSAPI)
-    const isLocalMode = typeof window !== 'undefined' && !('showSaveFilePicker' in window)
-    if (isLocalMode && totalBytes > 1_000_000_000) { // 1GB threshold
-      setShowLocalModeWarning(true)
-    } else {
-      setShowLocalModeWarning(false)
-    }
-
     if (onDownloadFiles) {
+      setShowLocalModeWarning(false)
       if (withProgress) {
-        await onDownloadFiles(files, (pct) => setDownloadProgress(pct))
+        await onDownloadFiles(files, (progress) => setDownloadProgress(progress))
       } else {
         await onDownloadFiles(files)
       }
@@ -304,6 +379,8 @@ export default function VideoSidebar({
     }
 
     if (!onDownloadFile) return
+
+    setShowLocalModeWarning(false)
 
     for (let i = 0; i < files.length; i += 1) {
       await onDownloadFile(files[i])
@@ -338,7 +415,7 @@ export default function VideoSidebar({
       ])
       const toDownload = allFiles.filter((file) => {
         const key = getDownloadableFileKey(file)
-        return selectedFileIdsValue.has(key)
+        return selectedFileIdsValue.has(key) && isSelectableDownloadableFile(file)
       })
       await queueSidebarDownloads(toDownload, true)
     } finally {
@@ -351,8 +428,26 @@ export default function VideoSidebar({
     if (!downloadableFiles) return
     const allKeys = downloadableFiles
       .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
+      .filter((file) => isSelectableDownloadableFile(file))
       .map((file) => getDownloadableFileKey(file))
     setSelectedFileIdsValue(new Set(allKeys))
+  }, [downloadableFiles, setSelectedFileIdsValue])
+
+  useEffect(() => {
+    if (!downloadableFiles) return
+
+    const selectableKeys = new Set(
+      downloadableFiles
+        .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
+        .filter((file) => isSelectableDownloadableFile(file))
+        .map((file) => getDownloadableFileKey(file))
+    )
+
+    setSelectedFileIdsValue((prev) => {
+      if (prev.size === 0) return prev
+      const next = new Set(Array.from(prev).filter((key) => selectableKeys.has(key)))
+      return next.size === prev.size ? prev : next
+    })
   }, [downloadableFiles, setSelectedFileIdsValue])
 
   const handleClearSelected = useCallback(() => {
@@ -361,6 +456,14 @@ export default function VideoSidebar({
 
   const showFiles = downloadableFiles !== undefined && downloadableFiles !== null
   const isMobileFilesMode = desktopActiveTabValue === 'files'
+  const hasTransferItems = transferItems.length > 0
+  const hasDismissibleTransfers = transferItems.some((transfer) => !['queued', 'preparing', 'transferring'].includes(transfer.status))
+  const effectiveDownloadProgress = isSharedDownloadActive ? sharedDownloadProgress : downloadProgress
+  const showDownloadProgress = (isDownloadingAll || isSharedDownloadActive) && effectiveDownloadProgress !== null
+  const effectiveProgressPercent = effectiveDownloadProgress?.percent ?? 0
+  const effectiveSpeed = effectiveDownloadProgress?.speedBytesPerSecond ?? null
+  const effectiveEta = effectiveDownloadProgress?.etaSeconds ?? null
+  const hasActiveTransferMetrics = Boolean(transferSummary?.activeCount)
 
   const canOpenProjectSwitcher = showProjectSwitcher && typeof onProjectSwitcherOpen === 'function'
 
@@ -382,6 +485,204 @@ export default function VideoSidebar({
     const newRatio = bottomWeight / (topCount + bottomWeight)
     setFilesRatio(Math.max(0.2, Math.min(0.8, newRatio)))
   }, [forReviewGroups.length, approvedGroups.length, albumsList.length, hideApprovalGrouping, hasManualRatio])
+
+  useEffect(() => {
+    if (transferPanelVersion > 0 && hasTransferItems) {
+      setIsTransfersHidden(false)
+    }
+  }, [hasTransferItems, transferPanelVersion])
+
+  useEffect(() => {
+    const saved = localStorage.getItem('share_transfers_height')
+    if (!saved) return
+    const height = parseInt(saved, 10)
+    if (height >= 140 && height <= 420) {
+      setTransferPanelHeight(height)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingTransferPanel || !sidebarRef.current) return
+      const rect = sidebarRef.current.getBoundingClientRect()
+      const nextHeight = rect.bottom - e.clientY
+      const minHeight = 140
+      const maxHeight = Math.max(180, Math.min(420, Math.round(rect.height * 0.6)))
+      setTransferPanelHeight(Math.max(minHeight, Math.min(maxHeight, nextHeight)))
+    }
+
+    const handleMouseUp = () => {
+      if (!isDraggingTransferPanel) return
+      setIsDraggingTransferPanel(false)
+      localStorage.setItem('share_transfers_height', transferPanelHeight.toString())
+    }
+
+    if (isDraggingTransferPanel) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDraggingTransferPanel, transferPanelHeight])
+
+  const handleCloseTransfers = useCallback(() => {
+    if (isSharedDownloadActive) {
+      setShowTransferCloseWarning(true)
+      return
+    }
+
+    setIsTransfersHidden(true)
+  }, [isSharedDownloadActive])
+
+  const handleConfirmCloseTransfers = useCallback(() => {
+    setShowTransferCloseWarning(false)
+    onCancelActiveTransfers?.()
+    setIsTransfersHidden(true)
+  }, [onCancelActiveTransfers])
+
+  const getTransferStatusLabel = (transfer: TransferItem) => {
+    switch (transfer.status) {
+      case 'queued':
+        return 'Queued'
+      case 'preparing':
+        return 'Preparing'
+      case 'transferring':
+        return 'Downloading'
+      case 'browser':
+        return 'Opened in browser'
+      case 'completed':
+        return 'Complete'
+      case 'failed':
+        return 'Failed'
+      case 'canceled':
+        return 'Canceled'
+      default:
+        return transfer.status
+    }
+  }
+
+  const renderTransfersSection = (isMobile = false) => {
+    if (!hasTransferItems || isTransfersHidden) return null
+
+    return (
+      <div className={cn('border-t border-border bg-card/95 backdrop-blur-sm', isMobile ? 'mt-2' : 'flex-shrink-0')}>
+        {!isMobile && (
+          <div
+            className="flex h-[5px] cursor-row-resize items-center justify-center bg-border transition-colors hover:bg-primary/20"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              setIsDraggingTransferPanel(true)
+            }}
+          >
+            <div className="h-0.5 w-8 rounded-full bg-muted-foreground/30" />
+          </div>
+        )}
+        <div
+          className="flex flex-col px-3 py-2 gap-2"
+          style={!isMobile ? { height: `${transferPanelHeight}px` } : undefined}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Transfers</div>
+              <div className="text-[11px] text-muted-foreground">
+                {transferSummary?.activeCount
+                  ? `${transferSummary.activeCount} active of ${transferSummary.totalCount}`
+                  : `${transferItems.length} item${transferItems.length === 1 ? '' : 's'}`}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleCloseTransfers}
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Close transfers"
+              title="Close transfers"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {hasActiveTransferMetrics ? (
+            <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+              <span>{formatTransferSpeed(transferSummary?.speedBytesPerSecond ?? null)}</span>
+              <span>{formatEta(transferSummary?.etaSeconds ?? null)}</span>
+            </div>
+          ) : (
+            <div className="text-[11px] text-muted-foreground">
+              Large direct downloads continue in your browser after they are opened.
+            </div>
+          )}
+
+          {hasDismissibleTransfers && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onClearCompletedTransfers}
+                className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Clear Finished
+              </button>
+            </div>
+          )}
+
+          <div className={cn('space-y-1.5 overflow-y-auto', isMobile ? 'max-h-40' : 'flex-1 min-h-0')}>
+            {transferItems.map((transfer) => {
+              const DirectionIcon = transfer.direction === 'upload' ? Upload : Download
+              const statusLabel = getTransferStatusLabel(transfer)
+
+              return (
+                <div key={transfer.id} className="rounded-md border border-border/70 bg-background/70 px-2 py-2">
+                  <div className="flex items-start gap-2">
+                    <DirectionIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-xs font-medium text-foreground" title={transfer.fileName}>
+                          {transfer.fileName}
+                        </p>
+                        <span className="shrink-0 text-[11px] font-semibold text-muted-foreground">
+                          {Math.round(transfer.progressPercent)}%
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">{statusLabel}</div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn(
+                            'h-full transition-all',
+                            transfer.status === 'failed'
+                              ? 'bg-destructive'
+                              : transfer.status === 'canceled'
+                                ? 'bg-warning'
+                                : 'bg-primary'
+                          )}
+                          style={{ width: `${Math.max(0, Math.min(100, transfer.progressPercent))}%` }}
+                        />
+                      </div>
+                      {transfer.errorMessage && (
+                        <div
+                          className={cn(
+                            'mt-1 text-[11px]',
+                            transfer.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'
+                          )}
+                        >
+                          {transfer.errorMessage}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const renderVideoButton = (group: VideoGroup, showDownloadFiles = false) => {
     const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
@@ -604,29 +905,88 @@ export default function VideoSidebar({
     )
   }
 
-  const renderFilesTabSection = (isMobile = false) => (
+  const renderFilesTabSection = (isMobile = false) => {
+    const allProjectFileKeys = (downloadableFiles ?? [])
+      .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+      .filter((file) => isSelectableDownloadableFile(file))
+      .map((file) => getDownloadableFileKey(file))
+    const allProjectSelected = allProjectFileKeys.length > 0 && allProjectFileKeys.every((key) => selectedFileIdsValue.has(key))
+    const someProjectSelected = allProjectFileKeys.some((key) => selectedFileIdsValue.has(key))
+    const projectLabel = String(heading || 'Project').trim() || 'Project'
+
+    return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className={cn('overflow-y-auto overflow-x-hidden flex-1', !isMobile && 'mr-[5px]')}>
         {!hasVideos && !hasAlbums ? (
           <p className="px-3 py-4 text-xs text-muted-foreground">No content available for download.</p>
         ) : (
           <div className="py-2">
+            <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+              <input
+                type="checkbox"
+                checked={allProjectSelected}
+                disabled={allProjectFileKeys.length === 0}
+                ref={(el) => { if (el) el.indeterminate = someProjectSelected && !allProjectSelected }}
+                onChange={() => {
+                  if (allProjectSelected) {
+                    setSelectedFileIdsValue(new Set())
+                  } else {
+                    setSelectedFileIdsValue(new Set(allProjectFileKeys))
+                  }
+                }}
+                className={cn(
+                  SIDEBAR_CHECKBOX_CLASS,
+                  allProjectFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                )}
+                aria-label={`Select all files in ${projectLabel}`}
+              />
+              <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
+              <button
+                type="button"
+                className="text-[11px] font-bold tracking-widest text-foreground truncate text-left hover:underline"
+                title={`Open ${projectLabel} root folder`}
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('shareOpenFilesRoot'))
+                }}
+              >
+                {projectLabel.toUpperCase()}
+              </button>
+            </div>
+
             {sortedVideoGroups(videoGroups).map((vg) => {
               const dlGroup = downloadableFiles?.find((g) => g.name === vg.name && g.groupType === 'video') ?? null
-              const groupFiles: DownloadableFile[] = dlGroup
+              const groupFilesRaw: DownloadableFile[] = dlGroup
                 ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                 : []
-              const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
+              const orderedGroupFiles: DownloadableFile[] = [
+                ...groupFilesRaw.filter((f) => f.type === 'video'),
+                ...groupFilesRaw.filter((f) => f.type === 'asset'),
+              ]
+              const isActiveFolder = activeFilesFolderName === vg.name
+              const groupFileKeys = orderedGroupFiles
+                .filter((f) => isSelectableDownloadableFile(f))
+                .map((f) => getDownloadableFileKey(f))
               const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
               const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
               const openMainFilesFolder = () => {
+                onVideoSelect(vg.name)
                 window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
                   detail: { folderName: vg.name },
                 }))
               }
+              const openVideoVersionInView = (videoFile: DownloadableFile) => {
+                if (videoFile.type !== 'video' || !videoFile.videoId) return
+                onVideoSelect(vg.name)
+                setDesktopActiveTabValue('for-review')
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: videoFile.videoId } }))
+                  window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: videoFile.videoId } }))
+                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: videoFile.videoId, videoVersion: null } }))
+                }, 0)
+              }
               return (
                 <div key={vg.name}>
-                  <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+                  <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
                     <input
                       type="checkbox"
                       checked={allGroupSelected}
@@ -644,7 +1004,7 @@ export default function VideoSidebar({
                         })
                       }}
                       className={cn(
-                        'w-3.5 h-3.5 shrink-0 rounded accent-primary',
+                        SIDEBAR_CHECKBOX_CLASS,
                         groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                       )}
                     />
@@ -658,26 +1018,36 @@ export default function VideoSidebar({
                       {vg.name}
                     </button>
                   </div>
-                  {groupFiles.length === 0 ? (
-                    <p className="pl-8 pr-3 pb-2 text-xs text-muted-foreground/70 italic">Video is not approved.</p>
+                  {orderedGroupFiles.length === 0 ? (
+                    <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">Video is not approved.</p>
                   ) : (
-                    groupFiles.map((file) => {
+                    orderedGroupFiles.map((file) => {
                       const fileKey = getDownloadableFileKey(file)
                       const isChecked = selectedFileIdsValue.has(fileKey)
                       const FileIcon = getFileIcon(file)
-                      const isSubFile = file !== dlGroup?.mainFile
+                      const isSubFile = file.type !== 'video'
+                      const canCheckFile = isSelectableDownloadableFile(file)
+                      const fileDisplayName = file.type === 'video'
+                        ? `${vg.name} - ${file.versionLabel || file.fileName}`
+                        : file.fileName
                       return (
                         <div
                           key={fileKey}
                           className={cn(
                             'flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors',
-                            isSubFile && dlGroup?.groupType === 'video' ? 'pl-8' : 'pl-6'
+                            isSubFile && dlGroup?.groupType === 'video' ? 'pl-11' : 'pl-9'
                           )}
+                          onClick={() => {
+                            if (file.type !== 'video') return
+                            openVideoVersionInView(file)
+                          }}
                         >
                           <input
                             type="checkbox"
                             checked={isChecked}
+                            disabled={!canCheckFile}
                             onChange={() => {
+                              if (!canCheckFile) return
                               setSelectedFileIdsValue((prev) => {
                                 const next = new Set(prev)
                                 if (next.has(fileKey)) next.delete(fileKey)
@@ -685,14 +1055,21 @@ export default function VideoSidebar({
                                 return next
                               })
                             }}
-                            className="w-3.5 h-3.5 shrink-0 rounded accent-primary cursor-pointer"
+                            onClick={(event) => event.stopPropagation()}
+                            className={cn(
+                              SIDEBAR_CHECKBOX_CLASS,
+                              canCheckFile ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                            )}
                           />
                           <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <span
-                            className="flex-1 text-xs text-muted-foreground truncate py-0.5 cursor-default"
-                            title={file.fileName}
+                            className={cn(
+                              'flex-1 text-xs text-muted-foreground truncate py-0.5',
+                              file.type === 'video' ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
+                            )}
+                            title={fileDisplayName}
                           >
-                            {file.fileName}
+                            {fileDisplayName}
                           </span>
                         </div>
                       )
@@ -707,17 +1084,19 @@ export default function VideoSidebar({
               const groupFiles: DownloadableFile[] = dlGroup
                 ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                 : []
+              const isActiveFolder = activeFilesFolderName === a.name
               const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
               const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
               const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
               const openMainFilesFolder = () => {
+                onAlbumSelect?.(a.id)
                 window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
                   detail: { folderName: a.name },
                 }))
               }
               return (
                 <div key={a.id}>
-                  <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+                  <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
                     <input
                       type="checkbox"
                       checked={allGroupSelected}
@@ -735,7 +1114,7 @@ export default function VideoSidebar({
                         })
                       }}
                       className={cn(
-                        'w-3.5 h-3.5 shrink-0 rounded accent-primary',
+                        SIDEBAR_CHECKBOX_CLASS,
                         groupFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                       )}
                     />
@@ -750,16 +1129,20 @@ export default function VideoSidebar({
                     </button>
                   </div>
                   {groupFiles.length === 0 ? (
-                    <p className="pl-8 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                    <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                   ) : (
                     groupFiles.map((file) => {
                       const fileKey = getDownloadableFileKey(file)
                       const isChecked = selectedFileIdsValue.has(fileKey)
                       const FileIcon = getFileIcon(file)
+                      const isAlbumPhoto = file.type === 'album-photo'
                       return (
                         <div
                           key={fileKey}
-                          className="flex items-center gap-2 py-0.5 pl-6 pr-3 hover:bg-accent transition-colors"
+                          className={cn(
+                            'flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors',
+                            isAlbumPhoto ? 'pl-11' : 'pl-9'
+                          )}
                         >
                           <input
                             type="checkbox"
@@ -772,7 +1155,7 @@ export default function VideoSidebar({
                                 return next
                               })
                             }}
-                            className="w-3.5 h-3.5 shrink-0 rounded accent-primary cursor-pointer"
+                            className={cn(SIDEBAR_CHECKBOX_CLASS, 'cursor-pointer')}
                           />
                           <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <span
@@ -795,19 +1178,23 @@ export default function VideoSidebar({
       {downloadableFiles && downloadableFiles.length > 0 && (onDownloadFile || onDownloadFiles) && (
         <div className={cn('flex-shrink-0 border-t border-border bg-card p-2 space-y-1.5', isMobile && 'sticky bottom-0')}>
           {/* Progress bar above buttons */}
-          {isDownloadingAll && downloadProgress !== null && (
+          {showDownloadProgress && (
             <div className="w-full mb-2">
               <div className="h-2 bg-muted rounded overflow-hidden">
                 <div
                   className="bg-primary transition-all h-2"
-                  style={{ width: `${downloadProgress}%` }}
+                  style={{ width: `${effectiveProgressPercent}%` }}
                   role="progressbar"
-                  aria-valuenow={Math.round(downloadProgress)}
+                  aria-valuenow={Math.round(effectiveProgressPercent)}
                   aria-valuemin={0}
                   aria-valuemax={100}
                 />
               </div>
-              <div className="text-xs text-muted-foreground mt-1 text-center">Zipping… {Math.round(downloadProgress)}%</div>
+              <div className="text-xs text-muted-foreground mt-1 text-center">Downloading… {Math.round(effectiveProgressPercent)}%</div>
+              <div className="text-xs text-muted-foreground mt-1 flex items-center justify-between">
+                <span>{formatTransferSpeed(effectiveSpeed)}</span>
+                <span>{formatEta(effectiveEta)}</span>
+              </div>
             </div>
           )}
           {/* Local mode warning for large ZIPs */}
@@ -844,8 +1231,8 @@ export default function VideoSidebar({
             )}
           >
             {isDownloadingAll
-              ? downloadProgress !== null
-                ? `Zipping… ${Math.round(downloadProgress)}%`
+              ? effectiveDownloadProgress !== null
+                ? `Downloading… ${Math.round(effectiveProgressPercent)}%`
                 : 'Preparing…'
               : selectedFileIdsValue.size > 0
               ? `Download (${selectedFileIdsValue.size})`
@@ -854,7 +1241,8 @@ export default function VideoSidebar({
         </div>
       )}
     </div>
-  )
+    )
+  }
 
   return (
     <>
@@ -1097,6 +1485,8 @@ export default function VideoSidebar({
             </>
           )}
         </div>
+
+        {renderTransfersSection(false)}
 
         {/* Resize Handle */}
         <div
@@ -1361,7 +1751,29 @@ export default function VideoSidebar({
               </div>
             )}
           </div>
+
+          {renderTransfersSection(true)}
       </div>
+
+      <AlertDialog open={showTransferCloseWarning} onOpenChange={setShowTransferCloseWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close transfers?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Closing the Transfers panel will cancel any active transfers still managed in the app. Downloads already handed off to your browser will continue there.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Transfers Open</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmCloseTransfers}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Cancel Active Transfers
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </>
   )

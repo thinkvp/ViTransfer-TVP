@@ -15,7 +15,11 @@ export async function POST(
   try {
     const { id: videoId } = await params
 
-    const limited = await rateLimit(request, { maxRequests: 30, windowMs: 60_000 }, 'video-download-token')
+    const limited = await rateLimit(
+      request,
+      { maxRequests: 180, windowMs: 60_000 },
+      `video-download-token:${videoId}`
+    )
     if (limited) return limited
 
     // Get video with project info

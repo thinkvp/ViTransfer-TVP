@@ -9,6 +9,7 @@ export type DownloadableFileKind =
   | 'other'
 
 export function getDownloadableFileKey(file: DownloadableFile): string {
+  if (file.photoId) return file.photoId
   return file.assetId ?? (file.albumId ? `${file.albumId}-${file.variant || 'full'}` : file.videoId ?? file.fileName)
 }
 
@@ -26,6 +27,7 @@ export function isImageFileName(fileName: string): boolean {
 
 export function getDownloadableFileKind(file: DownloadableFile): DownloadableFileKind {
   if (file.type === 'video') return 'video'
+  if (file.type === 'album-photo') return 'image'
   if (file.type === 'album-zip') return 'archive'
 
   const ext = getFileExtension(file.fileName)

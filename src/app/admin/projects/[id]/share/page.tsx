@@ -21,8 +21,8 @@ import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
-import { queueDownloads, type DownloadQueueItem } from '@/lib/download-queue'
-import { downloadFilesAsZip } from '@/lib/download-zip-stream'
+import type { DownloadQueueItem } from '@/lib/download-queue'
+import { useDownloadTransfers } from '@/hooks/useDownloadTransfers'
 
 type DraftNavigationGuard = {
   confirmDiscardDraft: () => boolean
@@ -785,34 +785,45 @@ export default function AdminSharePage() {
     setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
+    if (desktopContentTab === 'files') {
+      setRequestedFilesFolderName(videoName)
+    }
   }
 
   const handleAlbumSelect = (albumId: string) => {
     if (activeAlbumId === albumId) return
     if (!confirmShareDraftNavigation()) return
+    const album = albums.find((a: any) => String(a.id) === String(albumId))
     setActiveAlbumId(albumId)
+    if (desktopContentTab === 'files') {
+      setRequestedFilesFolderName(String(album?.name || ''))
+    }
   }
 
-  const resolveDownloadTarget = useCallback(async (file: DownloadableFile): Promise<DownloadQueueItem | null> => {
+  const resolveDownloadTarget = useCallback(async (file: DownloadableFile, signal?: AbortSignal): Promise<DownloadQueueItem | null> => {
     const sessionId = sessionIdRef.current
     try {
       let url: string
       if (file.type === 'video') {
-        const r = await apiFetch(`/api/admin/video-token?videoId=${file.videoId}&projectId=${id}&quality=original&sessionId=${sessionId}`)
+        const r = await apiFetch(`/api/admin/video-token?videoId=${file.videoId}&projectId=${id}&quality=original&sessionId=${sessionId}`, { signal })
         const data = await r.json()
         url = `/api/content/${data.token}?download=true`
       } else if (file.type === 'asset') {
-        const r = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, { method: 'POST' })
+        const r = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, { method: 'POST', signal })
         const data = await r.json()
         url = data.url
-      } else {
+      } else if (file.type === 'album-zip') {
         const r = await apiFetch(`/api/share/${project?.slug}/albums/${file.albumId}/download-zip-token`, {
           method: 'POST',
+          signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ variant: file.variant }),
         })
         const data = await r.json()
         url = data.url
+      } else {
+        if (!file.downloadUrl) return null
+        url = file.downloadUrl
       }
       return { url, fileName: file.fileName }
     } catch {
@@ -820,40 +831,19 @@ export default function AdminSharePage() {
     }
   }, [id, project?.slug])
 
-  const handleDownloadFile = useCallback(async (file: DownloadableFile) => {
-    const target = await resolveDownloadTarget(file)
-    if (!target) return
-    await queueDownloads([target])
-  }, [resolveDownloadTarget])
-
-  const handleDownloadFiles = useCallback(async (files: DownloadableFile[], onProgress?: (pct: number) => void) => {
-    if (!files.length) return
-
-    const targets = await Promise.all(files.map((file) => resolveDownloadTarget(file)))
-    const validTargets = targets.filter((item): item is DownloadQueueItem => Boolean(item))
-    if (!validTargets.length) return
-
-    if (validTargets.length === 1) {
-      await queueDownloads(validTargets)
-      return
-    }
-
-    const zipName = `${project?.title || 'Download'} Files.zip`
-    const entries = validTargets.map((t, i) => ({
-      url: t.url,
-      fileName: t.fileName || 'file',
-      fileSizeBytes: (() => {
-        const raw = files[i]?.fileSizeBytes
-        return raw != null ? Number(raw) : undefined
-      })(),
-    }))
-
-    await downloadFilesAsZip(
-      entries,
-      zipName,
-      onProgress ? (loaded, total) => onProgress(total > 0 ? Math.round((loaded / total) * 100) : 0) : undefined
-    )
-  }, [resolveDownloadTarget, project?.title])
+  const {
+    transferItems,
+    transferSummary,
+    hasActiveTransfers,
+    transferPanelVersion,
+    downloadFile: handleDownloadFile,
+    downloadFiles: handleDownloadFiles,
+    cancelActiveTransfers,
+    clearCompletedTransfers,
+  } = useDownloadTransfers({
+    projectTitle: project?.title,
+    resolveDownloadTarget,
+  })
 
   const sidebarVideosByName = useMemo(() => {
     return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
@@ -890,6 +880,10 @@ export default function AdminSharePage() {
   }, [albums, sidebarVideosByName])
 
   const resolveDownloadablePreviewUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    if (file.type === 'album-photo') {
+      return file.thumbnailUrl || file.previewUrl || file.downloadUrl || null
+    }
+
     if (file.type === 'video' && file.videoId) {
       return filePreviewByVideoId.get(file.videoId) || null
     }
@@ -1038,7 +1032,7 @@ export default function AdminSharePage() {
         )}
 
         {/* Video / Album section */}
-        {(activeVideoName || activeAlbumId) && (
+        {(activeVideoName || activeAlbumId) && !(desktopContentTab === 'files' && !requestedFilesFolderName) && (
           <>
             <span className="text-muted-foreground flex-shrink-0">/</span>
             {mediaOptions.length > 1 ? (
@@ -1071,8 +1065,8 @@ export default function AdminSharePage() {
           </>
         )}
 
-        {/* Version section */}
-        {!activeAlbumId && readyVideos.length > 0 && (
+        {/* Version section — hidden in files mode */}
+        {!activeAlbumId && readyVideos.length > 0 && desktopContentTab !== 'files' && (
           <>
             <span className="text-muted-foreground flex-shrink-0">/</span>
             {readyVideos.length > 1 ? (
@@ -1219,7 +1213,7 @@ export default function AdminSharePage() {
       )}
 
       {/* Content */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row lg:gap-1 overflow-y-auto lg:overflow-hidden">
         {/* Video Sidebar */}
         <VideoSidebar
           videosByName={sidebarVideosByName}
@@ -1239,27 +1233,58 @@ export default function AdminSharePage() {
           downloadableFiles={downloadableFiles}
           onDownloadFile={handleDownloadFile}
           onDownloadFiles={handleDownloadFiles}
+          sharedDownloadProgress={transferSummary}
+          isSharedDownloadActive={hasActiveTransfers}
+          transferItems={transferItems}
+          transferSummary={transferSummary}
+          transferPanelVersion={transferPanelVersion}
+          onCancelActiveTransfers={cancelActiveTransfers}
+          onClearCompletedTransfers={clearCompletedTransfers}
           hasApprovableVideos={hasApprovableVideos}
           showDesktopTabBar={false}
           desktopActiveTab={desktopContentTab === 'files' ? 'files' : 'for-review'}
           onDesktopActiveTabChange={(tab) => setDesktopContentTab(tab === 'files' ? 'files' : 'view')}
           selectedFileIds={selectedFileIds}
           onSelectedFileIdsChange={setSelectedFileIds}
+          activeFilesFolderName={requestedFilesFolderName}
         />
 
         {/* Main Content Area */}
         <div className={cn('flex-1 flex flex-col min-w-0 overflow-x-hidden', activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto')}>
-          <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1 min-h-0 flex flex-col">
+          <div
+            className={cn(
+              'w-full flex-1 min-h-0 flex flex-col',
+              desktopContentTab === 'files'
+                ? 'h-full'
+                : 'px-4 sm:px-6 lg:px-8 py-4 sm:py-8'
+            )}
+          >
             {/* Main Content */}
             {desktopContentTab === 'files' ? (
               <ShareFilesBrowser
                 groups={downloadableFiles || []}
+                rootFolderLabel={String(project.title || 'PROJECT')}
                 selectedFileIds={selectedFileIds}
                 setSelectedFileIds={setSelectedFileIds}
                 onDownloadFile={handleDownloadFile}
+                onOpenVideoVersion={(file, folderName) => {
+                  if (file.type !== 'video' || !file.videoId) return
+                  if (folderName) {
+                    handleVideoSelect(folderName)
+                  }
+                  setDesktopContentTab('view')
+                  setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
+                    window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
+                    window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
+                  }, 0)
+                }}
                 onDownloadFiles={handleDownloadFiles}
+                sharedDownloadProgress={transferSummary}
+                isSharedDownloadActive={hasActiveTransfers}
                 onCloseFilesView={() => setDesktopContentTab('view')}
                 requestedOpenFolderName={requestedFilesFolderName}
+                onOpenFolderNameChange={setRequestedFilesFolderName}
                 folderPreviewByName={folderPreviewByName}
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
               />

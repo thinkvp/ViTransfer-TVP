@@ -152,8 +152,13 @@ export async function generateVideoAccessToken(
 ): Promise<string> {
   const redis = getRedis()
 
+  const shouldBypassCache = ttlOverrideSeconds != null
+    || quality === 'original'
+    || quality === 'download'
+    || quality === 'asset-download'
+
   const cacheKey = `video_token_cache:${sessionId}:${videoId}:${quality}`
-  const cachedToken = await redis.get(cacheKey)
+  const cachedToken = shouldBypassCache ? null : await redis.get(cacheKey)
 
   if (cachedToken) {
     const tokenData = await redis.get(`video_access:${cachedToken}`)
@@ -182,7 +187,9 @@ export async function generateVideoAccessToken(
     JSON.stringify(tokenData)
   )
 
-  await redis.setex(cacheKey, ttlSeconds, token)
+  if (!shouldBypassCache) {
+    await redis.setex(cacheKey, ttlSeconds, token)
+  }
 
   return token
 }
