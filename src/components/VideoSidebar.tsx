@@ -913,6 +913,7 @@ export default function VideoSidebar({
     const allProjectSelected = allProjectFileKeys.length > 0 && allProjectFileKeys.every((key) => selectedFileIdsValue.has(key))
     const someProjectSelected = allProjectFileKeys.some((key) => selectedFileIdsValue.has(key))
     const projectLabel = String(heading || 'Project').trim() || 'Project'
+    const isRootFilesFolderActive = String(activeFilesFolderName || '').trim().length === 0
 
     return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -921,7 +922,7 @@ export default function VideoSidebar({
           <p className="px-3 py-4 text-xs text-muted-foreground">No content available for download.</p>
         ) : (
           <div className="py-2">
-            <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+            <div className={cn('flex items-center gap-2 px-3 pt-2 pb-1', isRootFilesFolderActive && 'rounded-md bg-primary/15')}>
               <input
                 type="checkbox"
                 checked={allProjectSelected}
@@ -943,7 +944,10 @@ export default function VideoSidebar({
               <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
               <button
                 type="button"
-                className="text-[11px] font-bold tracking-widest text-foreground truncate text-left hover:underline"
+                className={cn(
+                  'text-[11px] font-bold tracking-widest truncate text-left hover:underline',
+                  isRootFilesFolderActive ? 'text-primary' : 'text-foreground'
+                )}
                 title={`Open ${projectLabel} root folder`}
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('shareOpenFilesRoot'))

@@ -153,6 +153,18 @@ export function ShareFilesBrowser({
     return [...groups].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   }, [groups])
 
+  const rootVideoGroups = useMemo(
+    () => sortedGroups.filter((group) => group.groupType === 'video'),
+    [sortedGroups]
+  )
+
+  const rootAlbumGroups = useMemo(
+    () => sortedGroups.filter((group) => group.groupType === 'album'),
+    [sortedGroups]
+  )
+
+  const splitRootSections = rootVideoGroups.length > 0 && rootAlbumGroups.length > 0
+
   const openFolder = useMemo(() => {
     if (!openFolderName) return null
     return sortedGroups.find((group) => group.name === openFolderName) || null
@@ -744,6 +756,140 @@ export function ShareFilesBrowser({
     )
   }
 
+  const renderRootFolderCard = (group: DownloadableGroup) => {
+    const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+    const groupVideoFiles = groupFiles.filter((file) => file.type === 'video')
+    const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
+    const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
+    const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo
+    const groupFileKeys = groupFiles.map(getDownloadableFileKey)
+    const allChecked = groupFileKeys.length > 0 && groupFileKeys.every((key) => selectedFileIds.has(key))
+    const someChecked = groupFileKeys.some((key) => selectedFileIds.has(key))
+    const folderPreview = folderPreviewByName?.[group.name] || null
+    const folderPreviewTiles = folderPreviewTilesByName[group.name] || []
+    const leadPreview = folderPreviewTiles[0] || null
+    const sidePreviewTop = folderPreviewTiles[1] || null
+    const sidePreviewBottom = folderPreviewTiles[2] || null
+
+    return (
+      <div
+        key={group.name}
+        className={cn(
+          'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
+          someChecked
+            ? 'border-2 border-primary/85 hover:border-primary'
+            : 'border border-border hover:border-primary/45'
+        )}
+        onDoubleClick={() => setOpenFolderName(group.name)}
+      >
+        <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
+          <div className="relative pt-2">
+            <div className="absolute left-3 top-0 h-2.5 w-16 rounded-t-md border border-b-0 border-primary/55 bg-primary/30" />
+            <div className="relative rounded-lg rounded-tl-sm border border-primary/50 bg-primary/20 p-1.5 shadow-inner shadow-black/10">
+              <div className="grid grid-cols-3 grid-rows-2 gap-1.5 aspect-[16/10] rounded-md overflow-hidden bg-primary/20">
+                {leadPreview ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={leadPreview}
+                      alt={group.name}
+                      className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
+                      loading="lazy"
+                    />
+
+                    {sidePreviewTop ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={sidePreviewTop}
+                        alt=""
+                        aria-hidden="true"
+                        className="h-full w-full object-contain bg-black"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-primary/35" aria-hidden="true" />
+                    )}
+
+                    {sidePreviewBottom ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={sidePreviewBottom}
+                        alt=""
+                        aria-hidden="true"
+                        className="h-full w-full object-contain bg-black"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-primary/30" aria-hidden="true" />
+                    )}
+                  </>
+                ) : folderPreview ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={folderPreview}
+                      alt={group.name}
+                      className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
+                      loading="lazy"
+                    />
+                    <div className="h-full w-full bg-primary/35" aria-hidden="true" />
+                    <div className="h-full w-full bg-primary/30" aria-hidden="true" />
+                  </>
+                ) : (
+                  <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
+                    <Folder className="w-9 h-9" />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {showVideoFolderApprovedBadge ? (
+            <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
+              APPROVED
+            </div>
+          ) : null}
+
+          {showVideoFolderForReviewBadge ? (
+            <div className="absolute bottom-2 left-2 rounded bg-amber-500/95 px-1.5 py-0.5 text-[11px] leading-none text-black font-semibold tracking-wide">
+              FOR REVIEW
+            </div>
+          ) : null}
+
+          <div className="absolute top-2 left-2">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              ref={(el) => {
+                if (el) el.indeterminate = someChecked && !allChecked
+              }}
+              onChange={(event) => toggleGroup(group, event.target.checked)}
+              className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, groupFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
+              aria-label={`Select files in ${group.name}`}
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setOpenFolderName(group.name)}
+          className="w-full text-left px-3 py-2.5"
+        >
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <Folder className="w-4 h-4 text-primary shrink-0" />
+              <span className="text-sm font-semibold text-foreground truncate">{group.name}</span>
+            </div>
+            <MoreHorizontal className="w-4 h-4 text-muted-foreground shrink-0" />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            {groupFiles.length} Item{groupFiles.length === 1 ? '' : 's'}
+          </p>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="border border-border rounded-lg bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
       <div className="px-4 py-3 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -838,152 +984,38 @@ export function ShareFilesBrowser({
 
       <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-0">
         {!openFolder ? (
-          <div className="space-y-2">
+          <div className={cn(splitRootSections ? 'space-y-5' : 'space-y-2')}>
             <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white truncate" title={rootFolderLabel || 'PROJECT'}>
               {rootFolderLabel || 'PROJECT'}
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-              {sortedGroups.map((group) => {
-              const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-              const groupVideoFiles = groupFiles.filter((file) => file.type === 'video')
-              const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
-              const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
-              const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo
-              const groupFileKeys = groupFiles.map(getDownloadableFileKey)
-              const allChecked = groupFileKeys.length > 0 && groupFileKeys.every((key) => selectedFileIds.has(key))
-              const someChecked = groupFileKeys.some((key) => selectedFileIds.has(key))
-              const folderPreview = folderPreviewByName?.[group.name] || null
-              const folderPreviewTiles = folderPreviewTilesByName[group.name] || []
-              const leadPreview = folderPreviewTiles[0] || null
-              const sidePreviewTop = folderPreviewTiles[1] || null
-              const sidePreviewBottom = folderPreviewTiles[2] || null
-
-                return (
-                  <div
-                    key={group.name}
-                    className={cn(
-                      'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
-                      someChecked
-                        ? 'border-2 border-primary/85 hover:border-primary'
-                        : 'border border-border hover:border-primary/45'
-                    )}
-                    onDoubleClick={() => setOpenFolderName(group.name)}
-                  >
-                  <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
-                    <div className="relative pt-2">
-                      <div className="absolute left-3 top-0 h-2.5 w-16 rounded-t-md border border-b-0 border-primary/55 bg-primary/30" />
-                      <div className="relative rounded-lg rounded-tl-sm border border-primary/50 bg-primary/20 p-1.5 shadow-inner shadow-black/10">
-                      <div className="grid grid-cols-3 grid-rows-2 gap-1.5 aspect-[16/10] rounded-md overflow-hidden bg-primary/20">
-                        {leadPreview ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={leadPreview}
-                              alt={group.name}
-                              className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
-                              loading="lazy"
-                            />
-
-                            {sidePreviewTop ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={sidePreviewTop}
-                                alt=""
-                                aria-hidden="true"
-                                className="h-full w-full object-contain bg-black"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className="h-full w-full bg-primary/35" aria-hidden="true" />
-                            )}
-
-                            {sidePreviewBottom ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={sidePreviewBottom}
-                                alt=""
-                                aria-hidden="true"
-                                className="h-full w-full object-contain bg-black"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className="h-full w-full bg-primary/30" aria-hidden="true" />
-                            )}
-                          </>
-                        ) : folderPreview ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={folderPreview}
-                              alt={group.name}
-                              className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
-                              loading="lazy"
-                            />
-                            <div className="h-full w-full bg-primary/35" aria-hidden="true" />
-                            <div className="h-full w-full bg-primary/30" aria-hidden="true" />
-                          </>
-                        ) : (
-                          <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
-                            <Folder className="w-9 h-9" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    </div>
-
-                    {showVideoFolderApprovedBadge ? (
-                      <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
-                        APPROVED
-                      </div>
-                    ) : null}
-
-                    {showVideoFolderForReviewBadge ? (
-                      <div className="absolute bottom-2 left-2 rounded bg-amber-500/95 px-1.5 py-0.5 text-[11px] leading-none text-black font-semibold tracking-wide">
-                        FOR REVIEW
-                      </div>
-                    ) : null}
-
-                    <div className="absolute top-2 left-2">
-                      <input
-                        type="checkbox"
-                        checked={allChecked}
-                        ref={(el) => {
-                          if (el) el.indeterminate = someChecked && !allChecked
-                        }}
-                        onChange={(event) => toggleGroup(group, event.target.checked)}
-                        className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, groupFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
-                        aria-label={`Select files in ${group.name}`}
-                      />
-                    </div>
+            {splitRootSections ? (
+              <>
+                <section className="space-y-2">
+                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                    {rootVideoGroups.map((group) => renderRootFolderCard(group))}
                   </div>
+                </section>
 
-                  <button
-                    type="button"
-                    onClick={() => setOpenFolderName(group.name)}
-                    className="w-full text-left px-3 py-2.5"
-                  >
-                    <div className="flex items-center justify-between gap-2 min-w-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Folder className="w-4 h-4 text-primary shrink-0" />
-                        <span className="text-sm font-semibold text-foreground truncate">{group.name}</span>
-                      </div>
-                      <MoreHorizontal className="w-4 h-4 text-muted-foreground shrink-0" />
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1.5">
-                      {groupFiles.length} Item{groupFiles.length === 1 ? '' : 's'}
-                    </p>
-                  </button>
+                <section className="space-y-2 border-t border-border/70 pt-4">
+                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                    {rootAlbumGroups.map((group) => renderRootFolderCard(group))}
                   </div>
-                )
-              })}
-            </div>
+                </section>
+              </>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                {sortedGroups.map((group) => renderRootFolderCard(group))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-5">
             {openFolder?.groupType === 'video' ? (
               <>
                 <section className="space-y-2">
-                  <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white">VIDEO VERSIONS</h4>
+                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos</h4>
                   {openFolderVideoVersions.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
                       {openFolderVideoVersions.map((file) => renderOpenFolderFileCard(file, false, openFolderVideoVersions))}
@@ -993,31 +1025,38 @@ export function ShareFilesBrowser({
                   )}
                 </section>
 
-                {openFolderVideoAssets.length > 0 ? (
-                  <section className="space-y-2 border-t border-border/70 pt-4">
-                    <div className="px-1 flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={videoAssetsSelection.allChecked}
-                        ref={(el) => {
-                          if (el) el.indeterminate = videoAssetsSelection.someChecked
-                        }}
-                        onChange={(event) => toggleSubset(openFolderVideoAssets, event.target.checked)}
-                          className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, 'cursor-pointer')}
-                        aria-label="Select all video assets"
-                      />
-                      <h4 className="text-base sm:text-lg font-bold uppercase tracking-wider text-white">VIDEO ASSETS</h4>
-                    </div>
+                <section className="space-y-2 border-t border-border/70 pt-4">
+                  <div className="px-1 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={videoAssetsSelection.allChecked}
+                      disabled={openFolderVideoAssets.length === 0}
+                      ref={(el) => {
+                        if (el) el.indeterminate = videoAssetsSelection.someChecked
+                      }}
+                      onChange={(event) => toggleSubset(openFolderVideoAssets, event.target.checked)}
+                      className={cn(
+                        'w-4 h-4',
+                        FILES_CHECKBOX_CLASS,
+                        openFolderVideoAssets.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                      )}
+                      aria-label="Select all video assets"
+                    />
+                    <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Video Assets</h4>
+                  </div>
+                  {openFolderVideoAssets.length > 0 ? (
                     <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
                       {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, true, openFolderVideoAssets))}
                     </div>
-                  </section>
-                ) : null}
+                  ) : (
+                    <p className="px-1 text-xs text-muted-foreground italic">There are currently no Video Assets for this video.</p>
+                  )}
+                </section>
               </>
             ) : (
               <>
                 <section className="space-y-2">
-                  <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white">ALBUM ZIPS</h4>
+                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
                   {openFolderAlbumZips.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
                       {openFolderAlbumZips.map((file) => renderOpenFolderFileCard(file))}
@@ -1039,7 +1078,7 @@ export function ShareFilesBrowser({
                       className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, 'cursor-pointer')}
                       aria-label="Select all photos"
                     />
-                    <h4 className="text-base sm:text-lg font-bold uppercase tracking-wider text-white">PHOTOS</h4>
+                    <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Photos</h4>
                   </div>
                   {openFolderAlbumPhotos.length > 0 ? (
                     <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">

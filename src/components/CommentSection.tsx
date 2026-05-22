@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { CheckCircle2, Info, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
-import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
@@ -250,8 +249,6 @@ export function CommentSectionView({
   const approvingRef = useRef(false)
   
   const [exportingSrt, setExportingSrt] = useState(false)
-  const [showDownloadOptions, setShowDownloadOptions] = useState(false)
-  const [openDownloadAfterApprove, setOpenDownloadAfterApprove] = useState(false)
   // Optimistic local flag: remember which video was just approved until server data propagates.
   const [localApprovedVideoId, setLocalApprovedVideoId] = useState<string | null>(null)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
@@ -840,22 +837,6 @@ export function CommentSectionView({
       selectedVideoId !== latestSelectableVideo.id
   )
 
-  useEffect(() => {
-    if (!openDownloadAfterApprove) return
-
-    // Only auto-open in the client/share view.
-    if (isAdminView) {
-      setOpenDownloadAfterApprove(false)
-      return
-    }
-
-    if (!headerVideo) return
-    if (!(headerVideo as any).approved && !isApproved) return
-
-    setShowDownloadOptions(true)
-    setOpenDownloadAfterApprove(false)
-  }, [openDownloadAfterApprove, headerVideo, isAdminView, isApproved])
-
   const handleSelectVideoVersion = (videoId: string) => {
     // Update comments immediately
     window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
@@ -872,15 +853,10 @@ export function CommentSectionView({
     if (!video) return
     if (!(video as any).approved && !isApproved && !isHeaderVideoLocallyApproved) return
 
-    if (!isAdminView) {
-      const folderName = String((video as any)?.name || headerVideoName || '').trim()
-      window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
-        detail: { folderName },
-      }))
-      return
-    }
-
-    setShowDownloadOptions(true)
+    const folderName = String((video as any)?.name || headerVideoName || '').trim()
+    window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+      detail: { folderName },
+    }))
   }
 
   const handleApproveSelected = async () => {
@@ -1252,18 +1228,6 @@ export function CommentSectionView({
           </DialogContent>
         </Dialog>
 
-        {headerVideo && ((headerVideo as any)?.approved || isApproved || isHeaderVideoLocallyApproved) ? (
-          <VideoAssetDownloadModal
-            videoId={headerVideo.id}
-            videoName={headerVideoName}
-            versionLabel={(headerVideo as any)?.versionLabel || '—'}
-            isOpen={showDownloadOptions}
-            onClose={() => setShowDownloadOptions(false)}
-            shareToken={shareToken}
-            isAdmin={isAdminView}
-          />
-        ) : null}
-
         {/* Approval Status Banner */}
         {commentsDisabled && (
           <div className="bg-success-visible border-b-2 border-success-visible p-4 flex-shrink-0">
@@ -1272,12 +1236,10 @@ export function CommentSectionView({
                 <CheckCircle2 className="w-8 h-8 text-success flex-shrink-0" />
                 <div className="min-w-0">
                   <h3 className="text-foreground font-medium">
-                    {isApproved ? 'Project Approved' : 'Video Approved'}
+                    Video Approved
                   </h3>
                   <p className="text-sm text-muted-foreground">
-                    {isApproved
-                      ? 'The final version is ready for download.'
-                      : approvedVideo
+                    {approvedVideo
                       ? `${approvedVideo.versionLabel} is ready for download from the Files section.`
                       : 'A version is ready for download from the Files section.'}
                   </p>
