@@ -19,6 +19,7 @@ export interface TransferItem {
   direction: TransferDirection
   kind: TransferKind
   fileName: string
+  uploadFolderPath?: string
   progressPercent: number
   status: TransferStatus
   fileSizeBytes?: number | null

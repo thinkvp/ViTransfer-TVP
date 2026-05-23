@@ -30,6 +30,7 @@ interface ShareUploadFileRow {
   fileSize: bigint
   fileType: string
   mediaDurationSeconds: number | null
+  previewStatus: string | null
 }
 
 interface ShareUploadFolderRow {
@@ -127,7 +128,7 @@ export async function GET(
       ORDER BY "relativePath" ASC
     `,
     prisma.$queryRaw<ShareUploadFileRow[]>`
-      SELECT "id", "folderRelativePath", "fileName", "fileSize", "fileType", "mediaDurationSeconds"
+      SELECT "id", "folderRelativePath", "fileName", "fileSize", "fileType", "mediaDurationSeconds", "previewStatus"
       FROM "ShareUploadFile"
       WHERE "projectId" = ${projectMeta.id}
       ORDER BY "folderRelativePath" ASC, "createdAt" ASC
@@ -162,6 +163,7 @@ export async function GET(
             ? file.mediaDurationSeconds
             : undefined)
         : undefined,
+      previewStatus: file.previewStatus ?? undefined,
     })
   }
 

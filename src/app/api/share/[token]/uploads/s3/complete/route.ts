@@ -5,13 +5,14 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import {
-  buildProjectUploadFolderStoragePath,
   buildProjectUploadsRoot,
   normalizeProjectUploadRelativePath,
 } from '@/lib/project-storage-paths'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
+import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
-import { ensureShareUploadPreview, isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
+import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
+import { enqueueShareUploadPreview } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -116,7 +117,11 @@ export async function POST(
   })
 
   if (folderPath) {
-    const folderStoragePath = buildProjectUploadFolderStoragePath(projectStoragePath, folderPath)
+    const folderStoragePath = await resolveUploadFolderStoragePath({
+      projectId: access.project.id,
+      projectStoragePath,
+      folderRelativePath: folderPath,
+    })
     await prisma.shareUploadFolder.upsert({
       where: {
         projectId_relativePath: {
@@ -124,9 +129,7 @@ export async function POST(
           relativePath: folderPath,
         },
       },
-      update: {
-        storagePath: folderStoragePath,
-      },
+      update: {},
       create: {
         projectId: access.project.id,
         relativePath: folderPath,
@@ -139,14 +142,15 @@ export async function POST(
 
   await recalculateAndStoreProjectTotalBytes(access.project.id)
 
-  if (isShareUploadVideoFileType(fileType) || isShareUploadImageFileType(fileType)) {
-    // Best effort pre-generation so the first gallery view is usually already warm.
-    void ensureShareUploadPreview({
+  if (isShareUploadImageFileType(fileType) || isShareUploadVideoFileType(fileType)) {
+    void enqueueShareUploadPreview({
+      type: 'shareUploadFile',
+      recordId: createdFile.id,
       storagePath: key,
-      fileName: storedFileName || fileName,
       fileType,
+      fileName: storedFileName || fileName,
       durationSeconds: mediaMetadata?.durationSeconds ?? null,
-    })
+    }).catch((e) => console.warn('[PREVIEW] Failed to enqueue preview after S3 complete:', e))
   }
 
   return NextResponse.json({

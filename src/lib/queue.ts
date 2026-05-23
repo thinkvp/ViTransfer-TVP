@@ -1,5 +1,6 @@
 import { Queue, Worker, Job } from 'bullmq'
 import { getRedisForQueue } from './redis'
+import { prisma } from './db'
 
 // Lazy initialization to prevent connections during build time
 let videoQueueInstance: Queue<VideoProcessingJob> | null = null
@@ -12,6 +13,7 @@ let albumPhotoSocialQueueInstance: Queue<AlbumPhotoSocialJob> | null = null
 let albumPhotoThumbnailQueueInstance: Queue<AlbumPhotoThumbnailJob> | null = null
 let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
 let folderRenameQueueInstance: Queue<FolderRenameJobPayload> | null = null
+let shareUploadPreviewQueueInstance: Queue<ShareUploadPreviewJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -76,6 +78,17 @@ export interface AlbumPhotoZipJob {
 export interface FolderRenameJobPayload {
   /** The FolderRenameJob DB record id. All state lives in DB, not BullMQ. */
   folderRenameJobId: string
+}
+
+/** Payload for a share-files preview generation job (image resize or video frame extract). */
+export interface ShareUploadPreviewJob {
+  /** 'shareUploadFile' for UPLOADS root files, 'videoAsset' for PROJECT root video assets */
+  type: 'shareUploadFile' | 'videoAsset'
+  recordId: string
+  storagePath: string
+  fileType: string
+  fileName: string
+  durationSeconds?: number | null
 }
 
 export function getVideoQueue(): Queue<VideoProcessingJob> {
@@ -342,6 +355,74 @@ export function getFolderRenameQueue(): Queue<FolderRenameJobPayload> {
   }
 
   return folderRenameQueueInstance
+}
+
+export function getShareUploadPreviewQueue(): Queue<ShareUploadPreviewJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!shareUploadPreviewQueueInstance) {
+    shareUploadPreviewQueueInstance = new Queue<ShareUploadPreviewJob>('share-upload-preview', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return shareUploadPreviewQueueInstance
+}
+
+/**
+ * Enqueue a preview generation job for a ShareUploadFile or VideoAsset.
+ * Uses a deterministic jobId so duplicate enqueues are deduplicated by BullMQ
+ * (a second call for the same record is a no-op if the job is already waiting/active).
+ * Also stamps previewStatus=PENDING + previewQueuedAt on the DB record.
+ */
+export async function enqueueShareUploadPreview(payload: ShareUploadPreviewJob): Promise<void> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return
+
+  const jobId = `share-preview:${payload.type}:${payload.recordId}`
+
+  // Stamp DB record before enqueuing so the UI can immediately show PENDING state.
+  if (payload.type === 'shareUploadFile') {
+    await prisma.shareUploadFile.update({
+      where: { id: payload.recordId },
+      data: {
+        previewStatus: 'PENDING',
+        previewQueuedAt: new Date(),
+        previewAttempts: { increment: 1 },
+      },
+    }).catch(() => {
+      // Record may have been deleted between upload and enqueue — safe to ignore
+    })
+  } else {
+    await prisma.videoAsset.update({
+      where: { id: payload.recordId },
+      data: {
+        previewStatus: 'PENDING',
+        previewQueuedAt: new Date(),
+        previewAttempts: { increment: 1 },
+      },
+    }).catch(() => {})
+  }
+
+  await getShareUploadPreviewQueue().add('generate-preview', payload, {
+    jobId,
+    // BullMQ ignores this add() if a job with the same jobId already exists in
+    // waiting/active/delayed state, giving us safe idempotent enqueue.
+  })
 }
 
 // Export for backward compatibility, but use getter in new code

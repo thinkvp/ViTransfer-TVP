@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -16,6 +16,7 @@ import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoThumbnail } from './album-photo-thumbnail-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processFolderRename } from './folder-rename-processor'
+import { processShareUploadPreview, reconcileShareUploadPreviews } from './share-upload-preview-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processInternalCommentNotifications } from './internal-comment-notifications'
@@ -377,6 +378,22 @@ async function main() {
 
   console.log('[WORKER] Folder rename worker started')
 
+  // Create share-upload preview worker
+  const shareUploadPreviewWorker = new Worker<ShareUploadPreviewJob>('share-upload-preview', processShareUploadPreview, {
+    connection: getRedisForQueue(),
+    concurrency: Math.max(1, concurrency),
+  })
+
+  shareUploadPreviewWorker.on('completed', (job) => {
+    console.log(`[WORKER] Share upload preview job ${job.id} completed successfully`)
+  })
+
+  shareUploadPreviewWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Share upload preview job ${job?.id} failed:`, err instanceof Error ? err.message : err)
+  })
+
+  console.log('[WORKER] Share upload preview worker started')
+
   // Create notification processing queue with repeatable job
   console.log('Setting up notification processing...')
   const notificationQueue = new Queue('notification-processing', {
@@ -405,6 +422,7 @@ async function main() {
       if (job.name === 'accounting-reminders') return true
       if (job.name === 'quickbooks-refresh-token') return true
       if (job.name === 's3-multipart-cleanup') return true
+      if (job.name === 'share-upload-preview-reconcile') return true
       return false
     })
 
@@ -603,6 +621,20 @@ async function main() {
         pattern: '30 2 * * *',
       },
       jobId: 'notification-log-cleanup',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
+  // Share upload preview reconcile — hourly scan for files missing previews
+  await notificationQueue.add(
+    'share-upload-preview-reconcile',
+    {},
+    {
+      repeat: {
+        pattern: '0 * * * *',
+      },
+      jobId: 'share-upload-preview-reconcile',
       removeOnComplete: true,
       removeOnFail: true,
     }
@@ -853,6 +885,18 @@ async function main() {
         return
       }
 
+      if (job.name === 'share-upload-preview-reconcile') {
+        try {
+          const result = await reconcileShareUploadPreviews()
+          if (result.queued > 0) {
+            console.log(`[PREVIEW-RECONCILE] Queued ${result.queued} preview job(s)`)
+          }
+        } catch (e) {
+          console.error('[PREVIEW-RECONCILE] Reconciliation failed:', e instanceof Error ? e.message : e)
+        }
+        return
+      }
+
       if (job.name === 'project-key-date-reminders') {
         await processProjectKeyDateReminders()
         return
@@ -1029,6 +1073,7 @@ async function main() {
       assetWorker.close(),
       albumPhotoSocialWorker.close(),
       albumPhotoZipWorker.close(),
+      shareUploadPreviewWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
     ])
@@ -1048,6 +1093,7 @@ async function main() {
       assetWorker.close(),
       albumPhotoSocialWorker.close(),
       albumPhotoZipWorker.close(),
+      shareUploadPreviewWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
     ])

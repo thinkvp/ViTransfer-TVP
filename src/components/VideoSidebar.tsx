@@ -257,6 +257,30 @@ export default function VideoSidebar({
     return File
   }
 
+  const compareFileNameAsc = (a: DownloadableFile, b: DownloadableFile) => {
+    return String(a.fileName || '').localeCompare(String(b.fileName || ''), undefined, { sensitivity: 'base' })
+  }
+
+  const getVideoVersionNumber = (file: DownloadableFile): number | null => {
+    const label = String(file.versionLabel || '').trim()
+    if (!label) return null
+    const match = label.match(/\d+/)
+    if (!match) return null
+    const value = Number(match[0])
+    return Number.isFinite(value) ? value : null
+  }
+
+  const compareVideoVersionDesc = (a: DownloadableFile, b: DownloadableFile) => {
+    const av = getVideoVersionNumber(a)
+    const bv = getVideoVersionNumber(b)
+    if (av != null && bv != null && av !== bv) {
+      return bv - av
+    }
+    if (av != null && bv == null) return -1
+    if (av == null && bv != null) return 1
+    return compareFileNameAsc(a, b)
+  }
+
   const safeVideosByName = videosByName || {}
   const videoGroups: VideoGroup[] = Object.entries(safeVideosByName).map(([name, videos]) => ({
     name,
@@ -598,7 +622,7 @@ export default function VideoSidebar({
       case 'transferring':
         return transfer.direction === 'upload' ? 'Uploading' : 'Downloading'
       case 'browser':
-        return 'Opened in browser'
+        return 'Opened in browser downloads'
       case 'completed':
         return 'Complete'
       case 'failed':
@@ -683,9 +707,11 @@ export default function VideoSidebar({
                         <p className="truncate text-xs font-medium text-foreground" title={transfer.fileName}>
                           {transfer.fileName}
                         </p>
-                        <span className="shrink-0 text-[11px] font-semibold text-muted-foreground">
-                          {Math.round(transfer.progressPercent)}%
-                        </span>
+                        {transfer.status !== 'browser' ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-muted-foreground">
+                            {Math.round(transfer.progressPercent)}%
+                          </span>
+                        ) : null}
                       </div>
                       <div className="mt-0.5 text-[11px] text-muted-foreground">{statusLabel}</div>
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -950,6 +976,7 @@ export default function VideoSidebar({
     const uploadRootFiles = uploadRootGroup
       ? [...(uploadRootGroup.mainFile ? [uploadRootGroup.mainFile] : []), ...uploadRootGroup.subFiles]
       : []
+    const sortedUploadRootFiles = [...uploadRootFiles].sort(compareFileNameAsc)
     const nestedUploadGroups = uploadGroups
       .filter((group) => group.name !== 'UPLOADS')
       .sort((a, b) => getUploadsRelativePath(a.name).localeCompare(getUploadsRelativePath(b.name), undefined, { sensitivity: 'base' }))
@@ -1016,9 +1043,11 @@ export default function VideoSidebar({
               const groupFilesRaw: DownloadableFile[] = dlGroup
                 ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                 : []
+              const sortedVideoFiles = [...groupFilesRaw.filter((f) => f.type === 'video')].sort(compareVideoVersionDesc)
+              const sortedNonVideoFiles = [...groupFilesRaw.filter((f) => f.type !== 'video')].sort(compareFileNameAsc)
               const orderedGroupFiles: DownloadableFile[] = [
-                ...groupFilesRaw.filter((f) => f.type === 'video'),
-                ...groupFilesRaw.filter((f) => f.type === 'asset'),
+                ...sortedVideoFiles,
+                ...sortedNonVideoFiles,
               ]
               const isActiveFolder = activeFilesFolderName === vg.name
               const groupFileKeys = orderedGroupFiles
@@ -1152,8 +1181,9 @@ export default function VideoSidebar({
               const groupFiles: DownloadableFile[] = dlGroup
                 ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                 : []
+              const sortedGroupFiles = [...groupFiles].sort(compareFileNameAsc)
               const isActiveFolder = activeFilesFolderName === a.name
-              const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
+              const groupFileKeys = sortedGroupFiles.map((f) => getDownloadableFileKey(f))
               const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
               const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
               const openMainFilesFolder = () => {
@@ -1196,10 +1226,10 @@ export default function VideoSidebar({
                       {a.name}
                     </button>
                   </div>
-                  {groupFiles.length === 0 ? (
+                  {sortedGroupFiles.length === 0 ? (
                     <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                   ) : (
-                    groupFiles.map((file) => {
+                    sortedGroupFiles.map((file) => {
                       const fileKey = getDownloadableFileKey(file)
                       const isChecked = selectedFileIdsValue.has(fileKey)
                       const FileIcon = getFileIcon(file)
@@ -1297,7 +1327,7 @@ export default function VideoSidebar({
                   <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                 ) : null}
 
-                {uploadRootFiles.map((file) => {
+                {sortedUploadRootFiles.map((file) => {
                   const fileKey = getDownloadableFileKey(file)
                   const isChecked = selectedFileIdsValue.has(fileKey)
                   const FileIcon = getFileIcon(file)
@@ -1331,8 +1361,9 @@ export default function VideoSidebar({
 
                 {nestedUploadGroups.map((group) => {
                   const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+                  const sortedGroupFiles = [...groupFiles].sort(compareFileNameAsc)
                   const isActiveFolder = activeFilesFolderName === group.name
-                  const groupFileKeys = groupFiles.map((f) => getDownloadableFileKey(f))
+                  const groupFileKeys = sortedGroupFiles.map((f) => getDownloadableFileKey(f))
                   const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
                   const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
                   const folderLabel = getUploadsRelativePath(group.name)
@@ -1377,10 +1408,10 @@ export default function VideoSidebar({
                           {folderLabel}
                         </button>
                       </div>
-                      {groupFiles.length === 0 ? (
+                      {sortedGroupFiles.length === 0 ? (
                         <p className="pl-14 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                       ) : (
-                        groupFiles.map((file) => {
+                        sortedGroupFiles.map((file) => {
                           const fileKey = getDownloadableFileKey(file)
                           const isChecked = selectedFileIdsValue.has(fileKey)
                           const FileIcon = getFileIcon(file)

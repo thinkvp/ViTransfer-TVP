@@ -3,6 +3,12 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
@@ -19,6 +25,7 @@ import {
   FileText,
   FileVideo,
   Folder,
+  Pencil,
   MoreHorizontal,
   Plus,
   Trash2,
@@ -64,6 +71,7 @@ type ShareFilesBrowserProps = {
   onUploadFiles?: (folderPath: string, files: File[]) => Promise<void>
   onDeleteUploadFile?: (fileId: string) => Promise<void>
   onDeleteUploadFolder?: (folderPath: string) => Promise<void>
+  onRenameUploadFolder?: (folderPath: string, folderName: string) => Promise<void>
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -153,6 +161,7 @@ export function ShareFilesBrowser({
   onUploadFiles,
   onDeleteUploadFile,
   onDeleteUploadFolder,
+  onRenameUploadFolder,
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
@@ -160,6 +169,7 @@ export function ShareFilesBrowser({
   const [previewUrlByFileKey, setPreviewUrlByFileKey] = useState<Record<string, string | null>>({})
   const [derivedVideoDurationByFileKey, setDerivedVideoDurationByFileKey] = useState<Record<string, number | null>>({})
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
+  const [folderPreviewPosterByName, setFolderPreviewPosterByName] = useState<Record<string, string | null>>({})
   const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
   const [albumViewerState, setAlbumViewerState] = useState<{ images: DownloadableFile[]; currentIndex: number; albumId: string | null } | null>(null)
   const [albumPhotoMetaByPhotoId, setAlbumPhotoMetaByPhotoId] = useState<Record<string, { socialDownloadUrl: string; socialReady: boolean }>>({})
@@ -168,8 +178,164 @@ export function ShareFilesBrowser({
   const [isUploadActionBusy, setIsUploadActionBusy] = useState(false)
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
+  const previewRetryTimerRef = useRef<Map<string, number>>(new Map())
   const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    const availableFileKeys = new Set<string>()
+    const availableGroupNames = new Set<string>()
+
+    for (const group of groups) {
+      availableGroupNames.add(group.name)
+      if (group.mainFile) {
+        availableFileKeys.add(getDownloadableFileKey(group.mainFile))
+      }
+      for (const file of group.subFiles) {
+        availableFileKeys.add(getDownloadableFileKey(file))
+      }
+    }
+
+    setPreviewUrlByFileKey((prev) => {
+      let changed = false
+      const next: Record<string, string | null> = {}
+
+      for (const [fileKey, previewUrl] of Object.entries(prev)) {
+        if (availableFileKeys.has(fileKey)) {
+          next[fileKey] = previewUrl
+        } else {
+          changed = true
+          previewRequestRef.current.delete(fileKey)
+          const retryTimer = previewRetryTimerRef.current.get(fileKey)
+          if (retryTimer != null) {
+            window.clearTimeout(retryTimer)
+            previewRetryTimerRef.current.delete(fileKey)
+          }
+        }
+      }
+
+      return changed ? next : prev
+    })
+
+    setFolderPreviewTilesByName((prev) => {
+      let changed = false
+      const next: Record<string, string[]> = {}
+      for (const [groupName, tiles] of Object.entries(prev)) {
+        if (availableGroupNames.has(groupName)) {
+          next[groupName] = tiles
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+
+    setFolderPreviewPosterByName((prev) => {
+      let changed = false
+      const next: Record<string, string | null> = {}
+      for (const [groupName, posterUrl] of Object.entries(prev)) {
+        if (availableGroupNames.has(groupName)) {
+          next[groupName] = posterUrl
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [groups])
+
+  useEffect(() => {
+    return () => {
+      previewRetryTimerRef.current.forEach((timerId) => window.clearTimeout(timerId))
+      previewRetryTimerRef.current.clear()
+    }
+  }, [])
+
+  const schedulePreviewRetry = useCallback((fileKey: string) => {
+    if (previewRetryTimerRef.current.has(fileKey)) return
+
+    const timerId = window.setTimeout(() => {
+      previewRetryTimerRef.current.delete(fileKey)
+      setPreviewUrlByFileKey((prev) => {
+        if (prev[fileKey] !== null) return prev
+        const next = { ...prev }
+        delete next[fileKey]
+        return next
+      })
+    }, 8000)
+
+    previewRetryTimerRef.current.set(fileKey, timerId)
+  }, [])
+
+  const captureVideoPoster = useCallback(async (videoUrl: string): Promise<string | null> => {
+    if (!videoUrl) return null
+
+    return await new Promise((resolve) => {
+      const video = document.createElement('video')
+      video.crossOrigin = 'anonymous'
+      video.preload = 'metadata'
+      video.muted = true
+      video.playsInline = true
+
+      let settled = false
+      const cleanup = () => {
+        video.pause()
+        video.removeAttribute('src')
+        video.load()
+      }
+
+      const finish = (value: string | null) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(value)
+      }
+
+      const capture = () => {
+        try {
+          if (!video.videoWidth || !video.videoHeight) {
+            finish(null)
+            return
+          }
+
+          const canvas = document.createElement('canvas')
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          const context = canvas.getContext('2d')
+          if (!context) {
+            finish(null)
+            return
+          }
+
+          context.drawImage(video, 0, 0, canvas.width, canvas.height)
+          const poster = canvas.toDataURL('image/jpeg', 0.8)
+          finish(poster && poster !== 'data:,' ? poster : null)
+        } catch {
+          finish(null)
+        }
+      }
+
+      video.addEventListener('loadedmetadata', () => {
+        try {
+          const targetTime = Math.min(0.75, Math.max(0.1, (video.duration || 0) * 0.1))
+          if (Number.isFinite(targetTime) && targetTime > 0 && video.duration > targetTime) {
+            video.currentTime = targetTime
+            return
+          }
+        } catch {
+          // ignore and capture the first available frame
+        }
+
+        capture()
+      }, { once: true })
+      video.addEventListener('loadeddata', capture, { once: true })
+      video.addEventListener('seeked', capture, { once: true })
+      video.addEventListener('error', () => finish(null), { once: true })
+      video.src = videoUrl
+
+      window.setTimeout(() => finish(null), 10000)
+    })
+  }, [])
 
   const sortedGroups = useMemo(() => {
     return [...groups].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
@@ -188,6 +354,11 @@ export function ShareFilesBrowser({
   const rootUploadGroups = useMemo(
     () => sortedGroups.filter((group) => group.groupType === 'uploads'),
     [sortedGroups]
+  )
+
+  const rootUploadsSectionGroups = useMemo(
+    () => rootUploadGroups.filter((group) => group.name === 'UPLOADS'),
+    [rootUploadGroups]
   )
 
   const projectRootGroups = useMemo(
@@ -252,11 +423,74 @@ export function ShareFilesBrowser({
   }, [requestedOpenFolderName, sortedGroups, rootUploadGroups.length])
 
   const getUploadsFolderPathFromGroup = useCallback((groupName: string): string => {
-    if (groupName === 'UPLOADS') return ''
-    const prefix = 'UPLOADS / '
-    if (groupName.startsWith(prefix)) return groupName.slice(prefix.length).trim()
-    return ''
+    const normalized = String(groupName || '').trim()
+    if (!normalized || normalized === 'UPLOADS') return ''
+
+    // Accept both "UPLOADS / foo" and "UPLOADS/foo" forms from server payloads.
+    const withoutPrefix = normalized.replace(/^UPLOADS\s*\/\s*/i, '')
+    if (!withoutPrefix || withoutPrefix === normalized) return ''
+
+    return withoutPrefix
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .join('/')
   }, [])
+
+  const getUploadsFolderLabelFromGroup = useCallback((groupName: string): string => {
+    const relativePath = getUploadsFolderPathFromGroup(groupName)
+    if (!relativePath) return 'UPLOADS'
+    return relativePath
+  }, [getUploadsFolderPathFromGroup])
+
+  const getFolderHierarchySegments = useCallback((folderName: string): string[] => {
+    const normalized = String(folderName || '').trim()
+    if (!normalized) return []
+
+    if (/^UPLOADS\s*\//i.test(normalized)) {
+      const relativePath = normalized.replace(/^UPLOADS\s*\/\s*/i, '')
+      const pathSegments = relativePath
+        .split('/')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+      return ['UPLOADS', ...pathSegments]
+    }
+
+    if (normalized.includes(' / ')) {
+      return normalized
+        .split(' / ')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+    }
+
+    return [normalized]
+  }, [])
+
+  const buildFolderNameFromSegments = useCallback((segments: string[]): string | null => {
+    if (!segments.length) return null
+    if (segments[0] === 'UPLOADS') {
+      if (segments.length === 1) return 'UPLOADS'
+      return `UPLOADS / ${segments.slice(1).join('/')}`
+    }
+    if (segments.length === 1) return segments[0]
+    return segments.join(' / ')
+  }, [])
+
+  const folderNameByHierarchyKey = useMemo(() => {
+    const map = new Map<string, string>()
+    sortedGroups.forEach((group) => {
+      const key = getFolderHierarchySegments(group.name).join('\u001f')
+      if (key) map.set(key, group.name)
+    })
+    return map
+  }, [sortedGroups, getFolderHierarchySegments])
+
+  const resolveFolderNameFromSegments = useCallback((segments: string[]): string | null => {
+    const key = segments.join('\u001f')
+    const existing = folderNameByHierarchyKey.get(key)
+    if (existing) return existing
+    return buildFolderNameFromSegments(segments)
+  }, [folderNameByHierarchyKey, buildFolderNameFromSegments])
 
   const uploadsTargetFolderPath = useMemo(() => {
     if (openFolder?.groupType === 'uploads') {
@@ -268,6 +502,30 @@ export function ShareFilesBrowser({
   const isUploadsContext = useMemo(() => {
     return openFolder?.groupType === 'uploads'
   }, [openFolder])
+
+  const navigateBackFolder = useCallback(() => {
+    if (!openFolderName) return
+
+    const segments = getFolderHierarchySegments(openFolderName)
+    if (segments.length <= 1) {
+      setOpenFolderName(null)
+      return
+    }
+
+    const parentSegments = segments.slice(0, -1)
+    const resolvedParentName = resolveFolderNameFromSegments(parentSegments)
+    if (!resolvedParentName) {
+      setOpenFolderName(null)
+      return
+    }
+
+    if (resolvedParentName === 'UPLOADS' && rootUploadGroups.length === 0) {
+      setOpenFolderName(null)
+      return
+    }
+
+    setOpenFolderName(resolvedParentName)
+  }, [openFolderName, getFolderHierarchySegments, resolveFolderNameFromSegments, rootUploadGroups.length])
 
   useEffect(() => {
     onOpenFolderNameChange?.(openFolderName)
@@ -289,6 +547,7 @@ export function ShareFilesBrowser({
 
     async function resolveFolderPreviewTiles() {
       const next: Record<string, string[]> = {}
+      const nextPoster: Record<string, string | null> = {}
 
       for (const group of sortedGroups) {
         const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
@@ -325,10 +584,33 @@ export function ShareFilesBrowser({
         }
 
         next[group.name] = uniqueUrls
+
+        if (uniqueUrls.length === 0 && resolveFilePreviewUrl) {
+          const videoCandidate = groupFiles.find((file) => getDownloadableFileKind(file) === 'video')
+          if (videoCandidate) {
+            try {
+              const videoUrl = await resolveFilePreviewUrl(videoCandidate)
+              if (typeof videoUrl === 'string' && videoUrl.length > 0) {
+                nextPoster[group.name] = videoCandidate.type === 'upload-file'
+                  ? videoUrl
+                  : await captureVideoPoster(videoUrl)
+              } else {
+                nextPoster[group.name] = null
+              }
+            } catch {
+              nextPoster[group.name] = null
+            }
+          } else {
+            nextPoster[group.name] = null
+          }
+        } else {
+          nextPoster[group.name] = null
+        }
       }
 
       if (!cancelled) {
         setFolderPreviewTilesByName(next)
+        setFolderPreviewPosterByName(nextPoster)
       }
     }
 
@@ -348,8 +630,17 @@ export function ShareFilesBrowser({
       const fileKind = getDownloadableFileKind(file)
       if (fileKind !== 'image' && fileKind !== 'video') return
 
+      if (file.type === 'upload-file' && String(file.uploadFileId || '').startsWith('pending-')) {
+        return
+      }
+
       const embeddedPreview = file.thumbnailUrl || file.previewUrl || null
       if (embeddedPreview) {
+        const retryTimer = previewRetryTimerRef.current.get(fileKey)
+        if (retryTimer != null) {
+          window.clearTimeout(retryTimer)
+          previewRetryTimerRef.current.delete(fileKey)
+        }
         setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: embeddedPreview }))
         return
       }
@@ -360,12 +651,29 @@ export function ShareFilesBrowser({
       if (!resolveFilePreviewUrl) return
 
       const request = resolveFilePreviewUrl(file)
-        .then((url) => {
-          setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: url || null }))
-          return url || null
+        .then(async (url) => {
+          if (!url) {
+            setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+            if (file.type === 'upload-file' && file.previewStatus !== 'FAILED') {
+              schedulePreviewRetry(fileKey)
+            }
+            return null
+          }
+
+          const retryTimer = previewRetryTimerRef.current.get(fileKey)
+          if (retryTimer != null) {
+            window.clearTimeout(retryTimer)
+            previewRetryTimerRef.current.delete(fileKey)
+          }
+
+          setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: url }))
+          return url
         })
         .catch(() => {
           setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+          if (file.type === 'upload-file' && file.previewStatus !== 'FAILED') {
+            schedulePreviewRetry(fileKey)
+          }
           return null
         })
         .finally(() => {
@@ -374,7 +682,7 @@ export function ShareFilesBrowser({
 
       previewRequestRef.current.set(fileKey, request)
     })
-  }, [filesInOpenFolder, previewUrlByFileKey, resolveFilePreviewUrl])
+  }, [filesInOpenFolder, previewUrlByFileKey, resolveFilePreviewUrl, captureVideoPoster, schedulePreviewRetry])
 
   // Avoid automatic upload-video metadata probing from preview URLs.
   // Duration labels rely on persisted metadata captured during upload.
@@ -437,32 +745,37 @@ export function ShareFilesBrowser({
   const selectedTotalSizeBytes = useMemo(() => {
     if (selectedFileIds.size === 0) return 0
 
-    const scopedFiles = openFolder
-      ? filesInOpenFolder
-      : projectRootGroups.flatMap((group) => [
-          ...(group.mainFile ? [group.mainFile] : []),
-          ...group.subFiles,
-        ])
+    const fileByKey = new Map<string, DownloadableFile>()
+    groups.forEach((group) => {
+      ;[...(group.mainFile ? [group.mainFile] : []), ...group.subFiles].forEach((file) => {
+        fileByKey.set(getDownloadableFileKey(file), file)
+      })
+    })
 
-    return scopedFiles.reduce((total, file) => {
-      const key = getDownloadableFileKey(file)
-      if (!selectedFileIds.has(key)) return total
+    return Array.from(selectedFileIds).reduce((total, key) => {
+      const file = fileByKey.get(key)
+      if (!file) return total
       const rawSize = typeof file.fileSizeBytes === 'string' ? Number(file.fileSizeBytes) : file.fileSizeBytes
       const size = Number.isFinite(rawSize) && (rawSize as number) > 0 ? Number(rawSize) : 0
       return total + size
     }, 0)
-  }, [selectedFileIds, openFolder, filesInOpenFolder, projectRootGroups])
+  }, [groups, selectedFileIds])
   const visibleFiles = openFolder
     ? filesInOpenFolder
-    : projectRootGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+    : [...projectRootGroups, ...rootUploadsSectionGroups].flatMap((group) => [
+        ...(group.mainFile ? [group.mainFile] : []),
+        ...group.subFiles,
+      ])
   const selectedUploadFilesInContext = useMemo(() => {
     if (!isUploadsContext) return [] as DownloadableFile[]
     return visibleFiles.filter((file) => file.type === 'upload-file' && selectedFileIds.has(getDownloadableFileKey(file)))
   }, [isUploadsContext, visibleFiles, selectedFileIds])
 
   useEffect(() => {
+    // Keep selection valid across folder changes without dropping items selected from other sections.
     const selectableKeys = new Set(
-      visibleFiles
+      groups
+        .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
         .filter((file) => isSelectableDownloadableFile(file))
         .map((file) => getDownloadableFileKey(file))
     )
@@ -472,7 +785,7 @@ export function ShareFilesBrowser({
       const next = new Set(Array.from(prev).filter((key) => selectableKeys.has(key)))
       return next.size === prev.size ? prev : next
     })
-  }, [setSelectedFileIds, visibleFiles])
+  }, [groups, setSelectedFileIds])
 
   const selectAllVisible = () => {
     const visibleKeys = visibleFiles
@@ -490,7 +803,7 @@ export function ShareFilesBrowser({
   const downloadSelected = async () => {
     const scopedFiles = openFolder
       ? filesInOpenFolder
-      : projectRootGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+      : groups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
     const selectedFiles = scopedFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
       .filter((file) => file.type !== 'video' || file.isApproved !== false)
     if (!selectedFiles.length) return
@@ -569,8 +882,8 @@ export function ShareFilesBrowser({
     setIsUploadActionBusy(true)
     try {
       await onUploadFiles(folderPath, files)
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to upload files')
+    } catch {
+      // Upload errors are shown in the transfer UI; avoid duplicate modal alerts.
     } finally {
       setIsUploadActionBusy(false)
     }
@@ -620,21 +933,71 @@ export function ShareFilesBrowser({
     }
   }, [canDeleteUploads, onDeleteUploadFolder, isUploadActionBusy])
 
-  const openFolderVideoVersions = openFolder?.groupType === 'video'
-    ? filesInOpenFolder.filter((file) => file.type === 'video')
-    : []
-  const openFolderVideoAssets = openFolder?.groupType === 'video'
-    ? filesInOpenFolder.filter((file) => file.type === 'asset')
-    : []
-  const openFolderAlbumZips = openFolder?.groupType === 'album'
-    ? filesInOpenFolder.filter((file) => file.type === 'album-zip')
-    : []
-  const openFolderAlbumPhotos = openFolder?.groupType === 'album'
-    ? filesInOpenFolder.filter((file) => file.type === 'album-photo')
-    : []
-  const openFolderUploadFiles = openFolder?.groupType === 'uploads'
-    ? filesInOpenFolder.filter((file) => file.type === 'upload-file')
-    : []
+  const renameUploadFolder = useCallback(async (folderPath: string, currentFolderName: string) => {
+    if (!canDeleteUploads || !onRenameUploadFolder || !folderPath || isUploadActionBusy) return
+
+    const nextName = window.prompt('New folder name', currentFolderName)
+    const normalizedName = String(nextName || '').trim()
+    if (!normalizedName || normalizedName === currentFolderName) return
+
+    setIsUploadActionBusy(true)
+    try {
+      await onRenameUploadFolder(folderPath, normalizedName)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to rename folder')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [canDeleteUploads, onRenameUploadFolder, isUploadActionBusy])
+
+  const compareFileNameAsc = useCallback((a: DownloadableFile, b: DownloadableFile) => {
+    return String(a.fileName || '').localeCompare(String(b.fileName || ''), undefined, { sensitivity: 'base' })
+  }, [])
+
+  const getVideoVersionNumber = useCallback((file: DownloadableFile): number | null => {
+    const label = String(file.versionLabel || '').trim()
+    if (!label) return null
+    const match = label.match(/\d+/)
+    if (!match) return null
+    const value = Number(match[0])
+    return Number.isFinite(value) ? value : null
+  }, [])
+
+  const compareVideoVersionDesc = useCallback((a: DownloadableFile, b: DownloadableFile) => {
+    const av = getVideoVersionNumber(a)
+    const bv = getVideoVersionNumber(b)
+    if (av != null && bv != null && av !== bv) {
+      return bv - av
+    }
+    if (av != null && bv == null) return -1
+    if (av == null && bv != null) return 1
+    return compareFileNameAsc(a, b)
+  }, [compareFileNameAsc, getVideoVersionNumber])
+
+  const openFolderVideoVersions = useMemo(() => {
+    if (openFolder?.groupType !== 'video') return [] as DownloadableFile[]
+    return [...filesInOpenFolder.filter((file) => file.type === 'video')].sort(compareVideoVersionDesc)
+  }, [openFolder?.groupType, filesInOpenFolder, compareVideoVersionDesc])
+
+  const openFolderVideoAssets = useMemo(() => {
+    if (openFolder?.groupType !== 'video') return [] as DownloadableFile[]
+    return [...filesInOpenFolder.filter((file) => file.type === 'asset')].sort(compareFileNameAsc)
+  }, [openFolder?.groupType, filesInOpenFolder, compareFileNameAsc])
+
+  const openFolderAlbumZips = useMemo(() => {
+    if (openFolder?.groupType !== 'album') return [] as DownloadableFile[]
+    return [...filesInOpenFolder.filter((file) => file.type === 'album-zip')].sort(compareFileNameAsc)
+  }, [openFolder?.groupType, filesInOpenFolder, compareFileNameAsc])
+
+  const openFolderAlbumPhotos = useMemo(() => {
+    if (openFolder?.groupType !== 'album') return [] as DownloadableFile[]
+    return [...filesInOpenFolder.filter((file) => file.type === 'album-photo')].sort(compareFileNameAsc)
+  }, [openFolder?.groupType, filesInOpenFolder, compareFileNameAsc])
+
+  const openFolderUploadFiles = useMemo(() => {
+    if (openFolder?.groupType !== 'uploads') return [] as DownloadableFile[]
+    return [...filesInOpenFolder.filter((file) => file.type === 'upload-file')].sort(compareFileNameAsc)
+  }, [openFolder?.groupType, filesInOpenFolder, compareFileNameAsc])
   const nestedUploadFoldersInRoot = useMemo(
     () => openUploadsRoot ? rootUploadGroups.filter((group) => group.name !== 'UPLOADS') : [],
     [openUploadsRoot, rootUploadGroups]
@@ -677,6 +1040,15 @@ export function ShareFilesBrowser({
       return
     }
     setLightboxState({ images: imageOnly, currentIndex: Math.max(0, index) })
+  }
+
+  const openVideoLightbox = (file: DownloadableFile, fileList: DownloadableFile[]) => {
+    if (getDownloadableFileKind(file) !== 'video' || file.type === 'video') return
+
+    const videoOnly = fileList.filter((f) => getDownloadableFileKind(f) === 'video' && f.type !== 'video')
+    const source = videoOnly.length > 0 ? videoOnly : [file]
+    const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+    setLightboxState({ images: source, currentIndex: Math.max(0, index) })
   }
 
   const lightboxNavigate = (delta: number) => {
@@ -804,8 +1176,7 @@ export function ShareFilesBrowser({
     const previewSrc = (typeof resolvedPreview === 'string' && resolvedPreview.length > 0)
       ? resolvedPreview
       : (typeof inlinePreview === 'string' && inlinePreview.length > 0 ? inlinePreview : null)
-    const showUploadVideoPreview = file.type === 'upload-file' && fileKind === 'video' && typeof previewSrc === 'string' && previewSrc.length > 0
-    const showImagePreview = !showUploadVideoPreview && typeof previewSrc === 'string' && previewSrc.length > 0
+    const showImagePreview = typeof previewSrc === 'string' && previewSrc.length > 0
     const hasMultipleVideoVersionsInOpenFolder = openFolderVideoVersions.length > 1
     const showVideoPreview =
       file.type === 'video' &&
@@ -850,6 +1221,41 @@ export function ShareFilesBrowser({
                 ? 'Uploading'
                 : 'Queued for upload'
       : null
+    const keepActionsOnTitleRow = file.type === 'video'
+    const actionButtons = canDownloadFile ? (
+      <div className="flex items-center gap-1">
+        {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+            disabled={isUploadActionBusy}
+            onClick={(event) => { event.stopPropagation(); void deleteUploadFile(file.uploadFileId!) }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            aria-label={`Delete ${file.fileName}`}
+            title={`Delete ${file.fileName}`}
+          >
+            <Trash2 className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+          disabled={muteInactiveVideoVersion}
+          onClick={(event) => { event.stopPropagation(); void onDownloadFile(file) }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          aria-label={`Download ${file.fileName}`}
+          title={`Download ${file.fileName}`}
+        >
+          <Download className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
+        </Button>
+      </div>
+    ) : null
 
     return (
       <div
@@ -872,6 +1278,10 @@ export function ShareFilesBrowser({
             onOpenVideoVersion(file, openFolder?.name || null)
             return
           }
+          if (fileKind === 'video' && file.type !== 'video') {
+            openVideoLightbox(file, imageList)
+            return
+          }
           if (!canDownloadFile) return
           void onDownloadFile(file)
         }}
@@ -887,14 +1297,6 @@ export function ShareFilesBrowser({
                   className={cn('w-full h-full', file.type === 'album-photo' ? 'object-cover' : 'object-contain')}
                   loading="lazy"
                 />
-              ) : showUploadVideoPreview ? (
-                <video
-                  src={previewSrc!}
-                  className="w-full h-full object-contain"
-                  preload="none"
-                  muted
-                  playsInline
-                />
               ) : showVideoPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -908,6 +1310,13 @@ export function ShareFilesBrowser({
                   <FileTypeIcon className="w-10 h-10" />
                   {fileExtensionLabel ? (
                     <span className="text-[11px] font-semibold tracking-wide text-foreground/80">{fileExtensionLabel}</span>
+                  ) : null}
+                  {(file.previewStatus === 'PENDING' || file.previewStatus === 'PROCESSING') ? (
+                    <span className="absolute bottom-2 left-0 right-0 flex justify-center">
+                      <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] leading-tight text-white/80">
+                        Generating preview…
+                      </span>
+                    </span>
                   ) : null}
                 </div>
               )}
@@ -965,46 +1374,16 @@ export function ShareFilesBrowser({
               <FileTypeIcon className={cn('text-muted-foreground shrink-0', compact ? 'w-3.5 h-3.5' : 'w-4 h-4')} />
               <p className={cn('font-semibold text-foreground truncate', compact ? 'text-xs' : 'text-sm')} title={displayFileName}>{displayFileName}</p>
             </div>
-            {canDownloadFile ? (
-              <div className="flex items-center gap-1">
-                {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
-                    disabled={isUploadActionBusy}
-                    onClick={(event) => { event.stopPropagation(); void deleteUploadFile(file.uploadFileId!) }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    aria-label={`Delete ${file.fileName}`}
-                    title={`Delete ${file.fileName}`}
-                  >
-                    <Trash2 className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
-                  </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
-                  disabled={muteInactiveVideoVersion}
-                  onClick={(event) => { event.stopPropagation(); void onDownloadFile(file) }}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  aria-label={`Download ${file.fileName}`}
-                  title={`Download ${file.fileName}`}
-                >
-                  <Download className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
-                </Button>
-              </div>
-            ) : null}
+            {keepActionsOnTitleRow ? actionButtons : null}
           </div>
           <div className={cn('text-muted-foreground flex items-center justify-between gap-2', compact ? 'text-[11px] mt-1' : 'text-xs mt-1.5')}>
-            <span className="shrink-0">{sizeLabel || 'Size unavailable'}</span>
-            {file.type === 'video' ? (
-              <span className="min-w-0 truncate text-right" title={file.fileName}>{file.fileName}</span>
-            ) : null}
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0">{sizeLabel || 'Size unavailable'}</span>
+              {file.type === 'video' ? (
+                <span className="min-w-0 truncate" title={file.fileName}>{file.fileName}</span>
+              ) : null}
+            </div>
+            {!keepActionsOnTitleRow ? actionButtons : null}
           </div>
           {uploadTransfer && uploadProgressPercent !== null ? (
             <div className={cn('mt-1.5 space-y-1', compact ? 'text-[10px]' : 'text-[11px]')}>
@@ -1039,6 +1418,9 @@ export function ShareFilesBrowser({
   const renderRootFolderCard = (group: DownloadableGroup) => {
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
     const uploadFolderPath = group.groupType === 'uploads' ? getUploadsFolderPathFromGroup(group.name) : ''
+    const displayGroupName = group.groupType === 'uploads'
+      ? getUploadsFolderLabelFromGroup(group.name)
+      : group.name
     const groupVideoFiles = groupFiles.filter((file) => file.type === 'video')
     const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
     const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
@@ -1048,9 +1430,11 @@ export function ShareFilesBrowser({
     const someChecked = groupFileKeys.some((key) => selectedFileIds.has(key))
     const folderPreview = folderPreviewByName?.[group.name] || null
     const folderPreviewTiles = folderPreviewTilesByName[group.name] || []
+    const folderVideoPreviewUrl = folderPreviewPosterByName[group.name] || null
     const leadPreview = folderPreviewTiles[0] || null
     const sidePreviewTop = folderPreviewTiles[1] || null
     const sidePreviewBottom = folderPreviewTiles[2] || null
+    const showVideoFolderPreview = !leadPreview && Boolean(folderVideoPreviewUrl) && group.groupType === 'uploads'
 
     return (
       <div
@@ -1129,6 +1513,14 @@ export function ShareFilesBrowser({
                     <div className="h-full w-full bg-primary/35" aria-hidden="true" />
                     <div className="h-full w-full bg-primary/30" aria-hidden="true" />
                   </>
+                ) : showVideoFolderPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={folderVideoPreviewUrl || undefined}
+                    alt={group.name}
+                    className="col-span-3 row-span-2 h-full w-full object-contain bg-black"
+                    loading="lazy"
+                  />
                 ) : (
                   <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
                     <Folder className="w-9 h-9" />
@@ -1159,7 +1551,7 @@ export function ShareFilesBrowser({
               }}
               onChange={(event) => toggleGroup(group, event.target.checked)}
               className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, groupFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
-              aria-label={`Select files in ${group.name}`}
+              aria-label={`Select files in ${displayGroupName}`}
             />
           </div>
         </div>
@@ -1172,28 +1564,57 @@ export function ShareFilesBrowser({
           <div className="flex items-center justify-between gap-2 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <Folder className="w-4 h-4 text-primary shrink-0" />
-              <span className="text-sm font-semibold text-foreground truncate">{group.name}</span>
+              <span className="text-sm font-semibold text-foreground truncate">{displayGroupName}</span>
             </div>
             <div className="flex items-center gap-1">
-              {group.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFolder && uploadFolderPath ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-6 w-6"
-                  disabled={isUploadActionBusy}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    void deleteUploadFolder(uploadFolderPath)
-                  }}
-                  title="Delete folder"
-                  aria-label="Delete folder"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              ) : null}
-              <MoreHorizontal className="w-4 h-4 text-muted-foreground shrink-0" />
+              {group.groupType === 'uploads' && canDeleteUploads && uploadFolderPath ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-6 w-6"
+                      disabled={isUploadActionBusy}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                      }}
+                      title="Folder actions"
+                      aria-label="Folder actions"
+                    >
+                      <MoreHorizontal className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+                    {onRenameUploadFolder ? (
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          void renameUploadFolder(uploadFolderPath, displayGroupName.split('/').pop()?.trim() || displayGroupName)
+                        }}
+                      >
+                        <Pencil className="mr-2 h-3.5 w-3.5" />
+                        Rename folder
+                      </DropdownMenuItem>
+                    ) : null}
+                    {onDeleteUploadFolder ? (
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          void deleteUploadFolder(uploadFolderPath)
+                        }}
+                      >
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />
+                        Delete folder
+                      </DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <MoreHorizontal className="w-4 h-4 text-muted-foreground shrink-0" />
+              )}
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-1.5">
@@ -1222,7 +1643,7 @@ export function ShareFilesBrowser({
           <div className="min-w-0">
             {openFolder ? (
               <div className="flex items-center gap-2 min-w-0">
-                <Button type="button" variant="outline" size="sm" className="px-2 sm:px-3" onClick={() => setOpenFolderName(null)}>
+                <Button type="button" variant="outline" size="sm" className="px-2 sm:px-3" onClick={navigateBackFolder}>
                   <ArrowLeft className="w-4 h-4" />
                   <span className="hidden sm:inline">Back</span>
                 </Button>
@@ -1262,12 +1683,15 @@ export function ShareFilesBrowser({
               type="button"
               variant="outline"
               size="sm"
-              className="flex-[28] min-w-0 sm:flex-none sm:w-auto"
+              className="flex-[28] min-w-0 justify-center gap-1.5 sm:flex-none sm:w-auto"
               onClick={openUploadFilePicker}
               disabled={isUploadActionBusy}
+              aria-label="Add upload file"
+              title="Add upload file"
             >
-              <Plus className="w-4 h-4 mr-1.5" />
-              <span>File</span>
+              <Plus className="w-4 h-4" />
+              <File className="w-4 h-4" />
+              <span className="sr-only">File</span>
             </Button>
           ) : null}
           {isUploadsContext && canUploadToProjects && onCreateUploadFolder ? (
@@ -1275,12 +1699,15 @@ export function ShareFilesBrowser({
               type="button"
               variant="outline"
               size="sm"
-              className="flex-[28] min-w-0 sm:flex-none sm:w-auto"
+              className="flex-[28] min-w-0 justify-center gap-1.5 sm:flex-none sm:w-auto"
               onClick={runCreateUploadFolder}
               disabled={isUploadActionBusy}
+              aria-label="Add upload folder"
+              title="Add upload folder"
             >
-              <Plus className="w-4 h-4 mr-1.5" />
-              <span>Folder</span>
+              <Plus className="w-4 h-4" />
+              <Folder className="w-4 h-4" />
+              <span className="sr-only">Folder</span>
             </Button>
           ) : null}
           {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
@@ -1387,11 +1814,30 @@ export function ShareFilesBrowser({
                     </div>
                   </section>
                 ) : null}
+
+                {rootUploadsSectionGroups.length > 0 ? (
+                  <section className="space-y-2 border-t border-border/70 pt-4">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">UPLOADS</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
+                    </div>
+                  </section>
+                ) : null}
               </>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                {projectRootGroups.map((group) => renderRootFolderCard(group))}
-              </div>
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                  {projectRootGroups.map((group) => renderRootFolderCard(group))}
+                </div>
+                {rootUploadsSectionGroups.length > 0 ? (
+                  <section className={cn('space-y-2', projectRootGroups.length > 0 ? 'border-t border-border/70 pt-4' : '')}>
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">UPLOADS</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
+                    </div>
+                  </section>
+                ) : null}
+              </>
             )}
           </div>
         ) : (
@@ -1516,7 +1962,7 @@ export function ShareFilesBrowser({
           </div>
         )}
 
-        {projectRootGroups.length === 0 && !openFolder && (
+        {projectRootGroups.length === 0 && rootUploadsSectionGroups.length === 0 && !openFolder && (
           <div className={cn('h-full min-h-[180px] flex items-center justify-center text-sm text-muted-foreground')}>
             No files available.
           </div>
@@ -1526,18 +1972,29 @@ export function ShareFilesBrowser({
       {(() => {
         const lightboxFile = lightboxState ? lightboxState.images[lightboxState.currentIndex] : null
         const lightboxSrc = lightboxFile ? getLightboxUrl(lightboxFile) : null
+        const isVideoLightbox = lightboxFile ? getDownloadableFileKind(lightboxFile) === 'video' : false
         const hasMultiple = lightboxState && lightboxState.images.length > 1
         return (
           <Dialog open={Boolean(lightboxState)} onOpenChange={(open) => { if (!open) setLightboxState(null) }}>
             <DialogContent className="max-w-[92vw] sm:max-w-5xl p-0 overflow-hidden bg-black border-border">
               {lightboxFile && lightboxSrc ? (
                 <div className="relative w-full h-[70vh] bg-black">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={lightboxSrc}
-                    alt={lightboxFile.fileName}
-                    className="w-full h-full object-contain"
-                  />
+                  {isVideoLightbox ? (
+                    <video
+                      src={lightboxSrc}
+                      className="w-full h-full object-contain"
+                      controls
+                      autoPlay
+                      playsInline
+                    />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={lightboxSrc}
+                      alt={lightboxFile.fileName}
+                      className="w-full h-full object-contain"
+                    />
+                  )}
                   {hasMultiple ? (
                     <>
                       <button

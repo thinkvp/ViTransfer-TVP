@@ -627,11 +627,21 @@ model ShareUploadFile {
   uploadedById   String?
   uploadedByName String?
 
+  // Preview lifecycle
+  previewStatus      String?   // PENDING | PROCESSING | READY | FAILED
+  previewPath        String?   // storage path of generated preview image
+  previewError       String?   // last error message on failure
+  previewGeneratedAt DateTime?
+  previewFileSize    BigInt?
+  previewAttempts    Int       @default(0)
+  previewQueuedAt    DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([projectId, folderRelativePath])
   @@index([projectId, category])
+  @@index([previewStatus])
 }
 
 model ProjectUser {
@@ -777,11 +787,21 @@ model VideoAsset {
   expiresAt      DateTime?
   uploadedByName String? // Display name of uploader
 
+  // Preview lifecycle
+  previewStatus      String?   // PENDING | PROCESSING | READY | FAILED
+  previewPath        String?   // storage path of generated preview image
+  previewError       String?   // last error message on failure
+  previewGeneratedAt DateTime?
+  previewFileSize    BigInt?
+  previewAttempts    Int       @default(0)
+  previewQueuedAt    DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([videoId])
   @@index([videoId, category])
+  @@index([previewStatus])
 }
 
 enum VideoStatus {

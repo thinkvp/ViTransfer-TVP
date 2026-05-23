@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import path from 'path'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile } from '@/lib/fileUpload'
 import { uploadFile } from '@/lib/storage'
 import {
   allocateUniqueUploadFileName,
-  buildProjectUploadFolderStoragePath,
-  buildProjectUploadFileStoragePath,
   normalizeProjectUploadRelativePath,
 } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
-import { ensureShareUploadPreview, isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
+import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
+import { enqueueShareUploadPreview } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -104,11 +105,12 @@ export async function POST(
   })
   const existingNames = existingFilesInFolder.map((entry) => entry.storagePath.split('/').pop() || '')
   const storageFileName = allocateUniqueUploadFileName(fileName, existingNames)
-  const storagePath = buildProjectUploadFileStoragePath(
+  const folderStoragePath = await resolveUploadFolderStoragePath({
+    projectId: access.project.id,
     projectStoragePath,
-    normalizedFolderPath,
-    storageFileName,
-  )
+    folderRelativePath: normalizedFolderPath,
+  })
+  const storagePath = path.posix.join(folderStoragePath, storageFileName)
 
   const buffer = Buffer.from(await file.arrayBuffer())
   await uploadFile(storagePath, buffer, fileSize, mimeType)
@@ -138,7 +140,6 @@ export async function POST(
   })
 
   if (normalizedFolderPath) {
-    const folderStoragePath = buildProjectUploadFolderStoragePath(projectStoragePath, normalizedFolderPath)
     await prisma.shareUploadFolder.upsert({
       where: {
         projectId_relativePath: {
@@ -146,9 +147,7 @@ export async function POST(
           relativePath: normalizedFolderPath,
         },
       },
-      update: {
-        storagePath: folderStoragePath,
-      },
+      update: {},
       create: {
         projectId: access.project.id,
         relativePath: normalizedFolderPath,
@@ -161,14 +160,15 @@ export async function POST(
 
   await recalculateAndStoreProjectTotalBytes(access.project.id)
 
-  if (isShareUploadVideoFileType(mimeType) || isShareUploadImageFileType(mimeType)) {
-    // Best effort pre-generation so the first gallery view is usually already warm.
-    void ensureShareUploadPreview({
+  if (isShareUploadImageFileType(mimeType) || isShareUploadVideoFileType(mimeType)) {
+    void enqueueShareUploadPreview({
+      type: 'shareUploadFile',
+      recordId: createdFile.id,
       storagePath,
-      fileName: storageFileName,
       fileType: mimeType,
+      fileName: storageFileName,
       durationSeconds: mediaMetadata?.durationSeconds ?? null,
-    })
+    }).catch((e) => console.warn('[PREVIEW] Failed to enqueue preview after upload:', e))
   }
 
   return NextResponse.json({

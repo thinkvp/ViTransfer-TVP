@@ -108,6 +108,8 @@ export default function SharePage() {
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
   const uploadAbortControllersRef = useRef<Map<string, AbortController>>(new Map())
   const uploadCancelRequestedRef = useRef(false)
+  const lastFilesRefreshAtRef = useRef(0)
+  const filesRefreshInFlightRef = useRef(false)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
@@ -516,6 +518,49 @@ export default function SharePage() {
       // ignore
     }
   }, [token, shareToken, isAdminSession, isGuest])
+
+  const requestFilesRefresh = useCallback((force = false) => {
+    if (desktopContentTab !== 'files') return
+    if (filesRefreshInFlightRef.current) return
+
+    const now = Date.now()
+    if (!force && now - lastFilesRefreshAtRef.current < 45_000) return
+
+    filesRefreshInFlightRef.current = true
+    lastFilesRefreshAtRef.current = now
+
+    const authToken = !isAdminSession ? (loadShareToken(storageKey) || shareToken) : null
+    void fetchDownloadableFiles(authToken || shareToken)
+      .finally(() => {
+        filesRefreshInFlightRef.current = false
+      })
+  }, [desktopContentTab, fetchDownloadableFiles, isAdminSession, shareToken, storageKey])
+
+  useEffect(() => {
+    if (desktopContentTab !== 'files') return
+
+    const onFocus = () => requestFilesRefresh(true)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        requestFilesRefresh(true)
+      }
+    }
+
+    const intervalId = window.setInterval(() => {
+      requestFilesRefresh(false)
+    }, 2 * 60 * 1000)
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    requestFilesRefresh(true)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [desktopContentTab, requestFilesRefresh])
 
   useEffect(() => {
     const allKeys = new Set(
@@ -994,6 +1039,7 @@ export default function SharePage() {
       direction: 'upload',
       kind: 'file',
       fileName: file.name,
+      uploadFolderPath: folderPath,
       progressPercent: 0,
       status: 'queued',
       fileSizeBytes: file.size,
@@ -1003,8 +1049,6 @@ export default function SharePage() {
     }))
 
     setDownloadableFiles((prev) => {
-      if (!Array.isArray(prev)) return prev
-
       const targetGroupName = folderPath ? `UPLOADS / ${folderPath}` : 'UPLOADS'
       const optimisticFiles: DownloadableFile[] = files.map((file, index) => ({
         type: 'upload-file',
@@ -1013,6 +1057,16 @@ export default function SharePage() {
         fileName: file.name,
         fileSizeBytes: file.size,
       }))
+
+      if (!Array.isArray(prev)) {
+        return [
+          {
+            name: targetGroupName,
+            groupType: 'uploads',
+            subFiles: optimisticFiles,
+          },
+        ]
+      }
 
       const existingGroupIndex = prev.findIndex((group) => group.groupType === 'uploads' && group.name === targetGroupName)
       if (existingGroupIndex === -1) {
@@ -1028,12 +1082,9 @@ export default function SharePage() {
 
       return prev.map((group, index) => {
         if (index !== existingGroupIndex) return group
-        const existingKeys = new Set(group.subFiles.map((file) => `${file.fileName}:${String(file.fileSizeBytes || '')}`))
-        const nextOptimistic = optimisticFiles.filter((file) => !existingKeys.has(`${file.fileName}:${String(file.fileSizeBytes || '')}`))
-        if (nextOptimistic.length === 0) return group
         return {
           ...group,
-          subFiles: [...group.subFiles, ...nextOptimistic],
+          subFiles: [...group.subFiles, ...optimisticFiles],
         }
       })
     })
@@ -1385,8 +1436,10 @@ export default function SharePage() {
         )))
 
         if (!wasCanceled) {
-          firstFailure = error instanceof Error ? error : new Error('Upload failed')
-          break
+          if (!firstFailure) {
+            firstFailure = error instanceof Error ? error : new Error('Upload failed')
+          }
+          continue
         }
 
         shouldStopProcessing = uploadCancelRequestedRef.current
@@ -1446,9 +1499,99 @@ export default function SharePage() {
     await fetchDownloadableFiles()
   }, [isAdminSession, token, fetchDownloadableFiles])
 
+  const handleRenameUploadFolder = useCallback(async (folderPath: string, folderName: string) => {
+    if (!isAdminSession) throw new Error('Only admins can rename upload folders')
+    if (!folderPath) return
+
+    const response = await apiFetch(`/api/share/${token}/uploads`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderPath, folderName }),
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null)
+      throw new Error((payload && typeof payload?.error === 'string') ? payload.error : 'Unable to rename folder')
+    }
+
+    await fetchDownloadableFiles()
+  }, [isAdminSession, token, fetchDownloadableFiles])
+
   const transferItemsCombined = useMemo(() => {
     return [...transferItems, ...uploadTransferItems]
   }, [transferItems, uploadTransferItems])
+
+  const optimisticUploadRowsSignature = useMemo(() => {
+    return uploadTransferItems
+      .filter((item) => item.status !== 'failed' && item.status !== 'canceled')
+      .map((item) => [
+        item.id,
+        item.status,
+        item.fileName,
+        String(item.uploadFolderPath || ''),
+        String(item.fileSizeBytes ?? ''),
+      ].join(':'))
+      .join('|')
+  }, [uploadTransferItems])
+
+  const optimisticUploadRows = useMemo(() => {
+    return uploadTransferItems.filter((item) => item.status !== 'failed' && item.status !== 'canceled')
+    // Recompute only when row identity/status changes, not on frequent progress ticks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optimisticUploadRowsSignature])
+
+  const downloadableFilesWithOptimisticUploads = useMemo<DownloadableGroup[]>(() => {
+    const baseGroups = Array.isArray(downloadableFiles) ? downloadableFiles : []
+    if (optimisticUploadRows.length === 0) return baseGroups
+
+    const nextGroups = baseGroups.map((group) => ({ ...group, subFiles: [...group.subFiles] }))
+    const groupIndexByName = new Map(nextGroups.map((group, index) => [group.name, index]))
+
+    for (const item of optimisticUploadRows) {
+      const folderPath = String(item.uploadFolderPath || '').trim()
+      const groupName = folderPath ? `UPLOADS / ${folderPath}` : 'UPLOADS'
+      const optimisticFile: DownloadableFile = {
+        type: 'upload-file',
+        uploadFileId: `pending-${item.id}`,
+        uploadFolderPath: folderPath,
+        fileName: item.fileName,
+        fileSizeBytes: typeof item.fileSizeBytes === 'number' ? item.fileSizeBytes : undefined,
+      }
+
+      let groupIndex = groupIndexByName.get(groupName)
+      if (groupIndex == null) {
+        groupIndex = nextGroups.length
+        nextGroups.push({
+          name: groupName,
+          groupType: 'uploads',
+          subFiles: [],
+        })
+        groupIndexByName.set(groupName, groupIndex)
+      }
+
+      const group = nextGroups[groupIndex]
+      const hasMatchingPersistedUpload = group.subFiles.some((file) => {
+        if (file.type !== 'upload-file') return false
+        if (String(file.uploadFileId || '').startsWith('pending-')) return false
+        if (file.fileName !== item.fileName) return false
+
+        const serverSize = typeof file.fileSizeBytes === 'string' ? Number(file.fileSizeBytes) : file.fileSizeBytes
+        const optimisticSize = typeof item.fileSizeBytes === 'number' ? item.fileSizeBytes : null
+        if (optimisticSize == null) return true
+        return Number.isFinite(serverSize as number) && Number(serverSize) === optimisticSize
+      })
+
+      if (item.status === 'completed' && hasMatchingPersistedUpload) {
+        continue
+      }
+
+      if (!group.subFiles.some((file) => file.uploadFileId === optimisticFile.uploadFileId)) {
+        group.subFiles.push(optimisticFile)
+      }
+    }
+
+    return nextGroups
+  }, [downloadableFiles, optimisticUploadRows])
 
   const transferSummaryCombined = useMemo(() => {
     return calculateTransferSummary(transferItemsCombined)
@@ -1535,6 +1678,10 @@ export default function SharePage() {
     }
 
     if (file.type === 'upload-file' && file.uploadFileId) {
+      if (file.uploadFileId.startsWith('pending-')) {
+        return null
+      }
+
       try {
         const url = `/api/share/${token}/uploads/download-token`
         const response = isAdminSession
@@ -1557,14 +1704,17 @@ export default function SharePage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fileId: file.uploadFileId }),
               })
-        if (!response.ok) return null
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            requestFilesRefresh(true)
+          }
+          return null
+        }
         const data = await response.json().catch(() => ({}))
         if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
           return String((data as any).previewUrl)
         }
-        if (typeof (data as any)?.url === 'string' && (data as any).url) {
-          return String((data as any).url)
-        }
+        // Do not fall back to downloadUrl — videos without a ready preview should show the icon fallback
         return null
       } catch {
         return null
@@ -1592,7 +1742,7 @@ export default function SharePage() {
     } catch {
       return null
     }
-  }, [filePreviewByVideoId, isAdminSession, shareToken])
+  }, [filePreviewByVideoId, isAdminSession, shareToken, requestFilesRefresh, token])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (project?.enableVideos === false) return videos
@@ -2560,7 +2710,7 @@ export default function SharePage() {
         className="w-64 flex-shrink-0"
         hasLogo={hasLogo}
         mainCompanyDomain={mainCompanyDomain}
-        downloadableFiles={isGuest ? null : downloadableFiles}
+        downloadableFiles={isGuest ? null : downloadableFilesWithOptimisticUploads}
         onDownloadFile={handleDownloadFile}
         onDownloadFiles={handleDownloadFiles}
         sharedDownloadProgress={downloadTransferSummary}
@@ -2593,7 +2743,7 @@ export default function SharePage() {
           {/* Content Area */}
           {desktopContentTab === 'files' ? (
             <ShareFilesBrowser
-              groups={downloadableFiles || []}
+              groups={downloadableFilesWithOptimisticUploads}
               rootFolderLabel={String(project.title || 'PROJECT')}
               selectedFileIds={selectedFileIds}
               setSelectedFileIds={setSelectedFileIds}
@@ -2624,11 +2774,12 @@ export default function SharePage() {
               shareToken={shareToken}
               transferItems={transferItemsCombined}
               canUploadToProjects={Boolean(isAdminSession || (isAuthenticated && !isGuest && project?.allowClientUploadFiles))}
-              canDeleteUploads={Boolean(isAdminSession)}
+              canDeleteUploads={false}
               onCreateUploadFolder={handleCreateUploadFolder}
               onUploadFiles={handleUploadFiles}
-              onDeleteUploadFile={handleDeleteUploadFile}
-              onDeleteUploadFolder={handleDeleteUploadFolder}
+              onDeleteUploadFile={undefined}
+              onDeleteUploadFolder={undefined}
+              onRenameUploadFolder={undefined}
             />
           ) : activeAlbumId ? (
             <ShareAlbumViewer

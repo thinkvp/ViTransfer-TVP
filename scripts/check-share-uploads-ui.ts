@@ -11,9 +11,12 @@ async function read(relPath: string): Promise<string> {
 async function main() {
   const browser = await read('src/components/ShareFilesBrowser.tsx')
   assert(browser.includes("group.groupType === 'uploads'"), 'ShareFilesBrowser should render uploads groups')
-  assert(browser.includes('<span>File</span>'), 'ShareFilesBrowser should expose File action')
-  assert(browser.includes('<span>Folder</span>'), 'ShareFilesBrowser should expose Folder action')
+  assert(browser.includes('aria-label="Add upload file"'), 'ShareFilesBrowser should expose upload file action')
+  assert(browser.includes('aria-label="Add upload folder"'), 'ShareFilesBrowser should expose upload folder action')
+  assert(browser.includes('<File className="w-4 h-4" />'), 'ShareFilesBrowser should show file icon action')
+  assert(browser.includes('<Folder className="w-4 h-4" />'), 'ShareFilesBrowser should show folder icon action')
   assert(browser.includes('deleteSelectedUploadFiles'), 'ShareFilesBrowser should expose bulk upload delete action')
+  assert(browser.includes('onRenameUploadFolder'), 'ShareFilesBrowser should expose upload folder rename action')
   assert(browser.includes("onDragOver={(event) => {"), 'ShareFilesBrowser should support drag-over upload targeting')
   assert(browser.includes("onDrop={(event) => {"), 'ShareFilesBrowser should support drop upload targeting')
   assert(browser.includes('uploadProgressPercent'), 'ShareFilesBrowser should show inline upload progress')
@@ -26,6 +29,7 @@ async function main() {
   assert(page.includes('handleUploadFiles'), 'share page should wire file upload')
   assert(page.includes('handleDeleteUploadFile'), 'share page should wire file delete')
   assert(page.includes('handleDeleteUploadFolder'), 'share page should wire folder delete')
+  assert(page.includes('handleRenameUploadFolder'), 'share page should wire folder rename')
   assert(page.includes('canUploadToProjects') && page.includes('project?.allowClientUploadFiles') && page.includes('isAdminSession'), 'share page should gate uploads by role')
 
   const sidebar = await read('src/components/VideoSidebar.tsx')

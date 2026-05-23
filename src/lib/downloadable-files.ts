@@ -29,6 +29,8 @@ export interface DownloadableFile {
   thumbnailUrl?: string
   /** Optional tokenized preview URL (e.g. album photo social-size preview). */
   previewUrl?: string
+  /** Preview generation lifecycle status for upload files. */
+  previewStatus?: string
   /** Optional tokenized direct download URL. */
   downloadUrl?: string
 }

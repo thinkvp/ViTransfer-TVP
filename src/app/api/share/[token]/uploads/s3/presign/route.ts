@@ -10,11 +10,12 @@ import { validateCommentFile } from '@/lib/fileUpload'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import {
   allocateUniqueUploadFileName,
-  buildProjectUploadFileStoragePath,
   normalizeProjectUploadRelativePath,
 } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { prisma } from '@/lib/db'
+import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
+import path from 'path'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -108,7 +109,12 @@ export async function POST(
   })
   const existingNames = existingFilesInFolder.map((entry) => entry.storagePath.split('/').pop() || '')
   const storageFileName = allocateUniqueUploadFileName(fileName, existingNames)
-  const key = buildProjectUploadFileStoragePath(projectStoragePath, normalizedFolderPath, storageFileName)
+  const folderStoragePath = await resolveUploadFolderStoragePath({
+    projectId: access.project.id,
+    projectStoragePath,
+    folderRelativePath: normalizedFolderPath,
+  })
+  const key = path.posix.join(folderStoragePath, storageFileName)
 
   const partSize = calculatePartSize(fileSize)
   const partCount = Math.ceil(fileSize / partSize)

@@ -164,6 +164,24 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
 
     if (projectId) await recalculateAndStoreProjectTotalBytes(projectId)
 
+    // Enqueue preview generation for image and video assets
+    if (fileType.mime.startsWith('image/') || fileType.mime.startsWith('video/')) {
+      const { enqueueShareUploadPreview } = await import('@/lib/queue')
+      const asset = await prisma.videoAsset.findUnique({
+        where: { id: assetId },
+        select: { id: true, storagePath: true, fileName: true },
+      })
+      if (asset) {
+        enqueueShareUploadPreview({
+          type: 'videoAsset',
+          recordId: asset.id,
+          storagePath: asset.storagePath,
+          fileType: fileType.mime,
+          fileName: asset.fileName,
+        }).catch((e) => console.warn(`[PREVIEW] Failed to enqueue preview for asset ${assetId}:`, e))
+      }
+    }
+
     // Clean up temp file if materialized from Dropbox
     if (resolved.isTemporary) {
       fs.promises.unlink(filePath).catch(() => {})

@@ -3,7 +3,8 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { resolveShareUploadAccess } from '@/lib/share-uploads'
 import { generateShareUploadAccessToken } from '@/lib/share-upload-access'
-import { ensureShareUploadPreview, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
+import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
+import { enqueueShareUploadPreview } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -53,6 +54,9 @@ export async function POST(
       fileType: true,
       fileSize: true,
       mediaDurationSeconds: true,
+      previewStatus: true,
+      previewPath: true,
+      previewFileSize: true,
     },
   })
 
@@ -72,30 +76,41 @@ export async function POST(
   })
 
   const baseUrl = `/api/share/uploads/content/${downloadToken}`
-  const isImageUpload = String(file.fileType || '').toLowerCase().startsWith('image/')
-  const isVideoUpload = isShareUploadVideoFileType(file.fileType)
-  let previewUrl = isImageUpload ? `${baseUrl}?variant=thumbnail` : baseUrl
+  const isPreviewable = isShareUploadImageFileType(file.fileType) || isShareUploadVideoFileType(file.fileType)
+  const isVideoFile = isShareUploadVideoFileType(file.fileType)
+  // null means "no preview available" — UI shows icon fallback
+  let previewUrl: string | null = null
 
-  if (isImageUpload || isVideoUpload) {
-    const thumbnail = await ensureShareUploadPreview({
-      storagePath: file.storagePath,
-      fileName: file.fileName,
-      fileType: file.fileType,
-      durationSeconds: file.mediaDurationSeconds,
-    })
-
-    if (thumbnail) {
+  if (isPreviewable) {
+    if (file.previewStatus === 'READY' && file.previewPath) {
+      // Preview is ready — serve thumbnail directly
       const thumbnailToken = await generateShareUploadAccessToken({
         projectId: file.projectId,
         fileId: file.id,
-        storagePath: thumbnail.storagePath,
-        fileName: thumbnail.fileName,
-        fileType: thumbnail.fileType,
-        fileSize: thumbnail.fileSize,
+        storagePath: file.previewPath,
+        fileName: `${file.fileName}.jpg`,
+        fileType: 'image/jpeg',
+        fileSize: Math.max(0, Number(file.previewFileSize || 0)),
         request,
         sessionId: access.shareTokenSessionId || null,
       })
       previewUrl = `/api/share/uploads/content/${thumbnailToken}`
+    } else if (!isVideoFile) {
+      // For non-video (image) files with no ready preview: serve original as fallback preview
+      previewUrl = baseUrl
+    }
+    // For videos with PENDING/PROCESSING/FAILED/null: previewUrl stays null → icon + badge in UI
+
+    if (!file.previewStatus || file.previewStatus === 'FAILED') {
+      // Missing or failed — trigger backfill enqueue (non-blocking best effort)
+      void enqueueShareUploadPreview({
+        type: 'shareUploadFile',
+        recordId: file.id,
+        storagePath: file.storagePath,
+        fileType: file.fileType,
+        fileName: file.fileName,
+        durationSeconds: file.mediaDurationSeconds,
+      }).catch(() => {})
     }
   }
 
@@ -105,6 +120,7 @@ export async function POST(
     // Keep `url` for backward compatibility with existing callers expecting direct download URL.
     url: downloadUrl,
     downloadUrl,
-    previewUrl,
+    ...(previewUrl !== null ? { previewUrl } : {}),
+    previewStatus: file.previewStatus ?? null,
   })
 }
