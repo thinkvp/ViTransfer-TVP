@@ -43,7 +43,15 @@ type DraftNavigationGuard = {
   confirmDiscardDraft: () => boolean
 }
 
+type UploadAccessUrlCacheEntry = {
+  downloadUrl: string | null
+  previewUrl: string | null
+  previewStatus: string | null
+  expiresAt: number
+}
+
 const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
+const UPLOAD_ACCESS_URL_CACHE_TTL_MS = 45 * 1000
 
 export default function SharePage() {
   const params = useParams()
@@ -115,6 +123,8 @@ export default function SharePage() {
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
   const sidebarThumbnailRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
+  const uploadAccessUrlCacheRef = useRef<Map<string, UploadAccessUrlCacheEntry>>(new Map())
+  const uploadAccessUrlRequestCacheRef = useRef<Map<string, Promise<UploadAccessUrlCacheEntry | null>>>(new Map())
   const logoSrc = '/api/branding/logo'
 
   const availableFileCount = useMemo(() => {
@@ -915,6 +925,91 @@ export default function SharePage() {
     return data.token || ''
   }, [token, shareToken, storageKey])
 
+  const getUploadAccessUrl = useCallback(async (fileId: string): Promise<UploadAccessUrlCacheEntry | null> => {
+    const normalizedFileId = String(fileId || '').trim()
+    if (!normalizedFileId || normalizedFileId.startsWith('pending-')) return null
+
+    const scopeKey = `${isAdminSession ? 'admin' : 'share'}:${shareToken || 'anon'}`
+    const cacheKey = `${token}:${scopeKey}:${normalizedFileId}`
+    const now = Date.now()
+
+    const cached = uploadAccessUrlCacheRef.current.get(cacheKey)
+    if (cached && cached.expiresAt > now) {
+      return cached
+    }
+
+    const inFlight = uploadAccessUrlRequestCacheRef.current.get(cacheKey)
+    if (inFlight) {
+      return inFlight
+    }
+
+    const request = (async () => {
+      try {
+        const url = `/api/share/${token}/uploads/download-token`
+        const response = isAdminSession
+          ? await apiFetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileId: normalizedFileId }),
+            })
+          : shareToken
+            ? await fetch(url, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${shareToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ fileId: normalizedFileId }),
+              })
+            : await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileId: normalizedFileId }),
+              })
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            requestFilesRefresh(true)
+          }
+          return null
+        }
+
+        const data = await response.json().catch(() => ({}))
+        const downloadUrl = typeof (data as any)?.downloadUrl === 'string'
+          ? String((data as any).downloadUrl)
+          : (typeof (data as any)?.url === 'string' ? String((data as any).url) : null)
+        const previewUrl = typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl
+          ? String((data as any).previewUrl)
+          : null
+        const previewStatus = typeof (data as any)?.previewStatus === 'string'
+          ? String((data as any).previewStatus)
+          : null
+
+        const entry: UploadAccessUrlCacheEntry = {
+          downloadUrl,
+          previewUrl,
+          previewStatus,
+          expiresAt: now + UPLOAD_ACCESS_URL_CACHE_TTL_MS,
+        }
+
+        uploadAccessUrlCacheRef.current.set(cacheKey, entry)
+        return entry
+      } catch {
+        return null
+      } finally {
+        uploadAccessUrlRequestCacheRef.current.delete(cacheKey)
+      }
+    })()
+
+    uploadAccessUrlRequestCacheRef.current.set(cacheKey, request)
+    return request
+  }, [isAdminSession, requestFilesRefresh, shareToken, token])
+
+  useEffect(() => {
+    uploadAccessUrlCacheRef.current.clear()
+    uploadAccessUrlRequestCacheRef.current.clear()
+  }, [shareToken, isAdminSession, token])
+
   const resolveDownloadTarget = useCallback(async (file: DownloadableFile, signal?: AbortSignal): Promise<DownloadQueueItem | null> => {
     if (isGuest) return null
     const authHeader: Record<string, string> = !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}
@@ -945,14 +1040,9 @@ export default function SharePage() {
         const data = await r.json()
         url = data.url
       } else if (file.type === 'upload-file') {
-        const r = await apiFetch(`/api/share/${token}/uploads/download-token`, {
-          method: 'POST',
-          signal,
-          headers: { ...authHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileId: file.uploadFileId }),
-        })
-        const data = await r.json()
-        url = data.downloadUrl || data.url
+        const tokenizedUrls = await getUploadAccessUrl(String(file.uploadFileId || ''))
+        if (!tokenizedUrls?.downloadUrl) return null
+        url = tokenizedUrls.downloadUrl
       } else {
         if (!file.downloadUrl) return null
         url = file.downloadUrl
@@ -962,7 +1052,7 @@ export default function SharePage() {
     } catch {
       return null
     }
-  }, [token, shareToken, isAdminSession, isGuest])
+  }, [token, shareToken, isAdminSession, isGuest, getUploadAccessUrl])
 
   const {
     transferItems,
@@ -1678,47 +1768,12 @@ export default function SharePage() {
     }
 
     if (file.type === 'upload-file' && file.uploadFileId) {
-      if (file.uploadFileId.startsWith('pending-')) {
-        return null
+      const tokenizedUrls = await getUploadAccessUrl(file.uploadFileId)
+      if (tokenizedUrls?.previewUrl) {
+        return tokenizedUrls.previewUrl
       }
-
-      try {
-        const url = `/api/share/${token}/uploads/download-token`
-        const response = isAdminSession
-          ? await apiFetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fileId: file.uploadFileId }),
-            })
-          : shareToken
-            ? await fetch(url, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${shareToken}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ fileId: file.uploadFileId }),
-              })
-            : await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileId: file.uploadFileId }),
-              })
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403 || response.status === 404) {
-            requestFilesRefresh(true)
-          }
-          return null
-        }
-        const data = await response.json().catch(() => ({}))
-        if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
-          return String((data as any).previewUrl)
-        }
-        // Do not fall back to downloadUrl — videos without a ready preview should show the icon fallback
-        return null
-      } catch {
-        return null
-      }
+      // Do not fall back to downloadUrl — videos without a ready preview should show the icon fallback
+      return null
     }
 
     if (file.type === 'video' && file.videoId) {
@@ -1742,7 +1797,7 @@ export default function SharePage() {
     } catch {
       return null
     }
-  }, [filePreviewByVideoId, isAdminSession, shareToken, requestFilesRefresh, token])
+  }, [filePreviewByVideoId, getUploadAccessUrl, isAdminSession, shareToken])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (project?.enableVideos === false) return videos

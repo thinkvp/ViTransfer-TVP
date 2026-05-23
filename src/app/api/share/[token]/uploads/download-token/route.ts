@@ -15,19 +15,20 @@ export async function POST(
 ) {
   const { token } = await params
 
-  const rateLimitResult = await rateLimit(
-    request,
-    { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many requests. Please slow down.' },
-    `share-uploads-download-token:${token}`,
-  )
-  if (rateLimitResult) return rateLimitResult
-
   const access = await resolveShareUploadAccess(request, token)
   if (access instanceof Response) return access
 
   if (!access.canRead) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const rateLimitResult = await rateLimit(
+    request,
+    { windowMs: 60 * 1000, maxRequests: 600, message: 'Too many requests. Please slow down.' },
+    `share-uploads-download-token:${token}`,
+    access.shareTokenSessionId || undefined,
+  )
+  if (rateLimitResult) return rateLimitResult
 
   let body: any
   try {

@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
 import { getRedis } from '@/lib/redis'
-import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 
@@ -316,6 +316,7 @@ export async function GET(request: NextRequest) {
 
 async function buildAlbumThumbnailJobs() {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+  const now = Date.now()
 
   const [activeJobs, completedJobs, failedJobs] = await Promise.all([
     prisma.albumThumbnailJob.findMany({
@@ -332,18 +333,74 @@ async function buildAlbumThumbnailJobs() {
     }),
   ])
 
-  const active = activeJobs.map((job) => ({
-    id: job.id,
-    albumId: job.albumId,
-    albumName: job.albumName,
-    projectId: job.projectId,
-    projectName: job.projectName,
-    status: job.status,
-    totalPhotos: job.totalPhotos,
-    processedPhotos: job.processedPhotos,
-    totalBytes: job.totalBytes.toString(),
-    processedBytes: job.processedBytes.toString(),
-  }))
+  const queueStatusByAlbumId = new Map<string, 'PENDING' | 'IN_PROGRESS'>()
+  const queueDbJobIds = new Set<string>()
+  let queueStateLoaded = false
+
+  try {
+    const thumbnailQueue = getAlbumPhotoThumbnailQueue()
+    const [activeQueueJobs, waitingQueueJobs] = await Promise.all([
+      thumbnailQueue.getJobs(['active']),
+      thumbnailQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+    ])
+
+    const queueIdPrefix = 'album-photo-thumbnail-'
+
+    for (const qj of activeQueueJobs) {
+      const queuedDbJobId = qj.data?.albumThumbnailJobId
+      if (queuedDbJobId) queueDbJobIds.add(String(queuedDbJobId))
+
+      const qid = String(qj.id ?? '')
+      if (qid.startsWith(queueIdPrefix)) {
+        queueStatusByAlbumId.set(qid.slice(queueIdPrefix.length), 'IN_PROGRESS')
+      }
+    }
+
+    for (const qj of waitingQueueJobs) {
+      const queuedDbJobId = qj.data?.albumThumbnailJobId
+      if (queuedDbJobId) queueDbJobIds.add(String(queuedDbJobId))
+
+      const qid = String(qj.id ?? '')
+      if (qid.startsWith(queueIdPrefix)) {
+        const albumId = qid.slice(queueIdPrefix.length)
+        if (!queueStatusByAlbumId.has(albumId)) {
+          queueStatusByAlbumId.set(albumId, 'PENDING')
+        }
+      }
+    }
+
+    queueStateLoaded = true
+  } catch {
+    // Queue may be unavailable — fall back to DB statuses only.
+  }
+
+  const active = activeJobs
+    .filter((job) => {
+      if (!queueStateLoaded) return true
+
+      // Keep jobs explicitly represented in the queue (album-level id or db job id).
+      if (queueStatusByAlbumId.has(job.albumId) || queueDbJobIds.has(job.id)) {
+        return true
+      }
+
+      // If a worker just transitioned state, allow a short grace window.
+      return now - job.updatedAt.getTime() < 90_000
+    })
+    .map((job) => {
+      const queueStatus = queueStatusByAlbumId.get(job.albumId)
+      return {
+        id: job.id,
+        albumId: job.albumId,
+        albumName: job.albumName,
+        projectId: job.projectId,
+        projectName: job.projectName,
+        status: queueStatus ?? job.status,
+        totalPhotos: job.totalPhotos,
+        processedPhotos: job.processedPhotos,
+        totalBytes: job.totalBytes.toString(),
+        processedBytes: job.processedBytes.toString(),
+      }
+    })
 
   const latestCompletedByAlbum = new Map<string, {
     id: string

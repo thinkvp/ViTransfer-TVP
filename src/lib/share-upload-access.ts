@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { type NextRequest } from 'next/server'
 import { getRedis } from '@/lib/redis'
+import { getClientSessionTimeoutSeconds } from '@/lib/settings'
 import { getClientIpAddress } from '@/lib/utils'
 
 interface ShareUploadAccessTokenData {
@@ -30,7 +31,8 @@ export async function generateShareUploadAccessToken(params: {
 }): Promise<string> {
   const redis = getRedis()
   const token = crypto.randomBytes(16).toString('base64url')
-  const ttlSeconds = Math.max(60, params.ttlSeconds ?? 5 * 60)
+  const sessionTtlSeconds = await getClientSessionTimeoutSeconds()
+  const ttlSeconds = Math.max(60, params.ttlSeconds ?? sessionTtlSeconds)
 
   const payload: ShareUploadAccessTokenData = {
     projectId: params.projectId,

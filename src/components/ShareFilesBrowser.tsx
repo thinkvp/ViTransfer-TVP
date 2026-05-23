@@ -177,10 +177,17 @@ export function ShareFilesBrowser({
   const [albumMetaLoadedByAlbumId, setAlbumMetaLoadedByAlbumId] = useState<Record<string, boolean>>({})
   const [isUploadActionBusy, setIsUploadActionBusy] = useState(false)
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
+  const [visibleFolderNames, setVisibleFolderNames] = useState<Set<string>>(new Set())
+  const [visibleFileKeys, setVisibleFileKeys] = useState<Set<string>>(new Set())
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
   const previewRetryTimerRef = useRef<Map<string, number>>(new Map())
+  const previewRetryAttemptRef = useRef<Map<string, number>>(new Map())
   const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const folderCardObserverRef = useRef<IntersectionObserver | null>(null)
+  const fileCardObserverRef = useRef<IntersectionObserver | null>(null)
+  const folderCardNodesRef = useRef<Map<string, Element>>(new Map())
+  const fileCardNodesRef = useRef<Map<string, Element>>(new Map())
 
   useEffect(() => {
     const availableFileKeys = new Set<string>()
@@ -211,6 +218,7 @@ export function ShareFilesBrowser({
             window.clearTimeout(retryTimer)
             previewRetryTimerRef.current.delete(fileKey)
           }
+          previewRetryAttemptRef.current.delete(fileKey)
         }
       }
 
@@ -245,14 +253,157 @@ export function ShareFilesBrowser({
   }, [groups])
 
   useEffect(() => {
+    const previewRetryTimers = new Map(previewRetryTimerRef.current)
+    const previewRetryAttempts = previewRetryAttemptRef.current
+
     return () => {
-      previewRetryTimerRef.current.forEach((timerId) => window.clearTimeout(timerId))
-      previewRetryTimerRef.current.clear()
+      previewRetryTimers.forEach((timerId) => window.clearTimeout(timerId))
+      previewRetryTimers.clear()
+      previewRetryAttempts.clear()
     }
   }, [])
 
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setVisibleFolderNames((prev) => {
+          const next = new Set(prev)
+          let changed = false
+          for (const entry of entries) {
+            const folderName = entry.target.getAttribute('data-folder-preview-key')
+            if (!folderName) continue
+            if (entry.isIntersecting) {
+              if (!next.has(folderName)) {
+                next.add(folderName)
+                changed = true
+              }
+              continue
+            }
+
+            if (next.delete(folderName)) {
+              changed = true
+            }
+          }
+          return changed ? next : prev
+        })
+      },
+      { root: null, rootMargin: '240px 0px', threshold: 0.01 }
+    )
+
+    folderCardObserverRef.current = observer
+    return () => {
+      observer.disconnect()
+      folderCardObserverRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setVisibleFileKeys((prev) => {
+          const next = new Set(prev)
+          let changed = false
+          for (const entry of entries) {
+            const fileKey = entry.target.getAttribute('data-file-preview-key')
+            if (!fileKey) continue
+            if (entry.isIntersecting) {
+              if (!next.has(fileKey)) {
+                next.add(fileKey)
+                changed = true
+              }
+              continue
+            }
+
+            if (next.delete(fileKey)) {
+              changed = true
+            }
+          }
+          return changed ? next : prev
+        })
+      },
+      { root: null, rootMargin: '200px 0px', threshold: 0.01 }
+    )
+
+    fileCardObserverRef.current = observer
+    return () => {
+      observer.disconnect()
+      fileCardObserverRef.current = null
+    }
+  }, [])
+
+  const registerFolderPreviewCardRef = useCallback((folderName: string, node: HTMLDivElement | null) => {
+    const prevNode = folderCardNodesRef.current.get(folderName)
+    if (prevNode && prevNode !== node) {
+      folderCardObserverRef.current?.unobserve(prevNode)
+      folderCardNodesRef.current.delete(folderName)
+    }
+
+    if (!node) return
+
+    folderCardNodesRef.current.set(folderName, node)
+    folderCardObserverRef.current?.observe(node)
+  }, [])
+
+  const registerFilePreviewCardRef = useCallback((fileKey: string, node: HTMLDivElement | null) => {
+    const prevNode = fileCardNodesRef.current.get(fileKey)
+    if (prevNode && prevNode !== node) {
+      fileCardObserverRef.current?.unobserve(prevNode)
+      fileCardNodesRef.current.delete(fileKey)
+    }
+
+    if (!node) return
+
+    fileCardNodesRef.current.set(fileKey, node)
+    fileCardObserverRef.current?.observe(node)
+  }, [])
+
+  useEffect(() => {
+    const activeFolderNames = new Set(groups.map((group) => group.name))
+    setVisibleFolderNames((prev) => {
+      let changed = false
+      const next = new Set<string>()
+      for (const folderName of prev) {
+        if (!activeFolderNames.has(folderName)) {
+          changed = true
+          continue
+        }
+        next.add(folderName)
+      }
+      return changed ? next : prev
+    })
+  }, [groups])
+
+  useEffect(() => {
+    const activeFileKeys = new Set<string>()
+    for (const group of groups) {
+      if (group.mainFile) {
+        activeFileKeys.add(getDownloadableFileKey(group.mainFile))
+      }
+      for (const file of group.subFiles) {
+        activeFileKeys.add(getDownloadableFileKey(file))
+      }
+    }
+
+    setVisibleFileKeys((prev) => {
+      let changed = false
+      const next = new Set<string>()
+      for (const fileKey of prev) {
+        if (!activeFileKeys.has(fileKey)) {
+          changed = true
+          continue
+        }
+        next.add(fileKey)
+      }
+      return changed ? next : prev
+    })
+  }, [groups])
+
   const schedulePreviewRetry = useCallback((fileKey: string) => {
     if (previewRetryTimerRef.current.has(fileKey)) return
+
+    const attempt = (previewRetryAttemptRef.current.get(fileKey) || 0) + 1
+    previewRetryAttemptRef.current.set(fileKey, attempt)
+    const delayMs = Math.min(2 * 60 * 1000, 8000 * (2 ** (attempt - 1)))
 
     const timerId = window.setTimeout(() => {
       previewRetryTimerRef.current.delete(fileKey)
@@ -262,9 +413,27 @@ export function ShareFilesBrowser({
         delete next[fileKey]
         return next
       })
-    }, 8000)
+    }, delayMs)
 
     previewRetryTimerRef.current.set(fileKey, timerId)
+  }, [])
+
+  const invalidatePreviewForFileKey = useCallback((fileKey: string) => {
+    previewRequestRef.current.delete(fileKey)
+
+    const retryTimer = previewRetryTimerRef.current.get(fileKey)
+    if (retryTimer != null) {
+      window.clearTimeout(retryTimer)
+      previewRetryTimerRef.current.delete(fileKey)
+    }
+    previewRetryAttemptRef.current.delete(fileKey)
+
+    setPreviewUrlByFileKey((prev) => {
+      if (prev[fileKey] === undefined) return prev
+      const next = { ...prev }
+      delete next[fileKey]
+      return next
+    })
   }, [])
 
   const captureVideoPoster = useCallback(async (videoUrl: string): Promise<string | null> => {
@@ -546,27 +715,36 @@ export function ShareFilesBrowser({
     let cancelled = false
 
     async function resolveFolderPreviewTiles() {
-      const next: Record<string, string[]> = {}
+      if (!resolveFilePreviewUrl || visibleFolderNames.size === 0) return
+
+      const visibleGroups = sortedGroups.filter((group) => visibleFolderNames.has(group.name))
+      const groupsToResolve = visibleGroups.filter((group) => {
+        const existingTiles = folderPreviewTilesByName[group.name]
+        const existingPoster = folderPreviewPosterByName[group.name]
+        return existingTiles === undefined || existingPoster === undefined
+      })
+
+      if (groupsToResolve.length === 0) return
+
+      const nextTiles: Record<string, string[]> = {}
       const nextPoster: Record<string, string | null> = {}
 
-      for (const group of sortedGroups) {
+      for (const group of groupsToResolve) {
         const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
         const imageCandidates = groupFiles
           .filter((file) => getDownloadableFileKind(file) === 'image')
-          .slice(0, 12)
+          .slice(0, 3)
 
-        const resolvedUrls = resolveFilePreviewUrl
-          ? await Promise.all(
-              imageCandidates.map(async (file) => {
-                try {
-                  const url = await resolveFilePreviewUrl(file)
-                  return typeof url === 'string' && url.length > 0 ? url : null
-                } catch {
-                  return null
-                }
-              })
-            )
-          : []
+        const resolvedUrls = await Promise.all(
+          imageCandidates.map(async (file) => {
+            try {
+              const url = await resolveFilePreviewUrl(file)
+              return typeof url === 'string' && url.length > 0 ? url : null
+            } catch {
+              return null
+            }
+          })
+        )
 
         const uniqueUrls: string[] = []
         for (const url of resolvedUrls) {
@@ -583,9 +761,9 @@ export function ShareFilesBrowser({
           }
         }
 
-        next[group.name] = uniqueUrls
+        nextTiles[group.name] = uniqueUrls
 
-        if (uniqueUrls.length === 0 && resolveFilePreviewUrl) {
+        if (uniqueUrls.length === 0) {
           const videoCandidate = groupFiles.find((file) => getDownloadableFileKind(file) === 'video')
           if (videoCandidate) {
             try {
@@ -609,8 +787,8 @@ export function ShareFilesBrowser({
       }
 
       if (!cancelled) {
-        setFolderPreviewTilesByName(next)
-        setFolderPreviewPosterByName(nextPoster)
+        setFolderPreviewTilesByName((prev) => ({ ...prev, ...nextTiles }))
+        setFolderPreviewPosterByName((prev) => ({ ...prev, ...nextPoster }))
       }
     }
 
@@ -619,13 +797,22 @@ export function ShareFilesBrowser({
     return () => {
       cancelled = true
     }
-  }, [sortedGroups, resolveFilePreviewUrl, folderPreviewByName])
+  }, [
+    sortedGroups,
+    resolveFilePreviewUrl,
+    folderPreviewByName,
+    captureVideoPoster,
+    visibleFolderNames,
+    folderPreviewTilesByName,
+    folderPreviewPosterByName,
+  ])
 
   useEffect(() => {
     if (!filesInOpenFolder.length) return
 
     filesInOpenFolder.forEach((file) => {
       const fileKey = getDownloadableFileKey(file)
+      if (!visibleFileKeys.has(fileKey)) return
       if (previewUrlByFileKey[fileKey] !== undefined) return
       const fileKind = getDownloadableFileKind(file)
       if (fileKind !== 'image' && fileKind !== 'video') return
@@ -641,6 +828,7 @@ export function ShareFilesBrowser({
           window.clearTimeout(retryTimer)
           previewRetryTimerRef.current.delete(fileKey)
         }
+        previewRetryAttemptRef.current.delete(fileKey)
         setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: embeddedPreview }))
         return
       }
@@ -665,6 +853,7 @@ export function ShareFilesBrowser({
             window.clearTimeout(retryTimer)
             previewRetryTimerRef.current.delete(fileKey)
           }
+          previewRetryAttemptRef.current.delete(fileKey)
 
           setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: url }))
           return url
@@ -682,7 +871,14 @@ export function ShareFilesBrowser({
 
       previewRequestRef.current.set(fileKey, request)
     })
-  }, [filesInOpenFolder, previewUrlByFileKey, resolveFilePreviewUrl, captureVideoPoster, schedulePreviewRetry])
+  }, [
+    filesInOpenFolder,
+    previewUrlByFileKey,
+    resolveFilePreviewUrl,
+    captureVideoPoster,
+    schedulePreviewRetry,
+    visibleFileKeys,
+  ])
 
   // Avoid automatic upload-video metadata probing from preview URLs.
   // Duration labels rely on persisted metadata captured during upload.
@@ -1078,7 +1274,7 @@ export function ShareFilesBrowser({
     link.remove()
   }
 
-  const loadAlbumPhotoMeta = async (albumId: string | null) => {
+  const loadAlbumPhotoMeta = useCallback(async (albumId: string | null) => {
     if (!albumId || !shareSlug) return
     if (albumMetaLoadedByAlbumId[albumId]) return
 
@@ -1115,7 +1311,7 @@ export function ShareFilesBrowser({
     } finally {
       setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
     }
-  }
+  }, [albumMetaLoadedByAlbumId, shareSlug, shareToken])
 
   useEffect(() => {
     if (!lightboxState) return
@@ -1131,7 +1327,7 @@ export function ShareFilesBrowser({
   useEffect(() => {
     if (!albumViewerState) return
     void loadAlbumPhotoMeta(albumViewerState.albumId)
-  }, [albumViewerState, shareSlug, shareToken])
+  }, [albumViewerState, loadAlbumPhotoMeta])
 
   useEffect(() => {
     if (!albumViewerState) return
@@ -1260,6 +1456,8 @@ export function ShareFilesBrowser({
     return (
       <div
         key={fileKey}
+        ref={(node) => registerFilePreviewCardRef(fileKey, node)}
+        data-file-preview-key={fileKey}
         className={cn(
           'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
           isImageFile && 'cursor-zoom-in',
@@ -1296,6 +1494,14 @@ export function ShareFilesBrowser({
                   alt={file.fileName}
                   className={cn('w-full h-full', file.type === 'album-photo' ? 'object-cover' : 'object-contain')}
                   loading="lazy"
+                  onError={() => {
+                    // Upload previews are short-lived token URLs; if a token expires while idle,
+                    // clear the cached URL so the effect path requests a fresh token.
+                    invalidatePreviewForFileKey(fileKey)
+                    if (file.type === 'upload-file' && file.previewStatus !== 'FAILED') {
+                      schedulePreviewRetry(fileKey)
+                    }
+                  }}
                 />
               ) : showVideoPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -1439,6 +1645,8 @@ export function ShareFilesBrowser({
     return (
       <div
         key={group.name}
+        ref={(node) => registerFolderPreviewCardRef(group.name, node)}
+        data-folder-preview-key={group.name}
         className={cn(
           'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
           someChecked

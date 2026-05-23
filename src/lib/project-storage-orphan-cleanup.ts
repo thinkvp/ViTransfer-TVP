@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
-import { getAlbumZipStoragePath, getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
+import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import {
   getFilePath,
@@ -259,6 +259,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         projectId: true,
         name: true,
         storageFolderName: true,
+        socialCopiesEnabled: true,
         project: {
           select: {
             storagePath: true,
@@ -358,10 +359,12 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
       exactFilePaths,
       getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'full' })
     )
-    addResolvedFilePath(
-      exactFilePaths,
-      getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'social' })
-    )
+    if (album.socialCopiesEnabled) {
+      addResolvedFilePath(
+        exactFilePaths,
+        getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'social' })
+      )
+    }
   }
 
   return { exactFilePaths, protectedDirectoryPrefixes }
@@ -579,6 +582,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
       select: {
         name: true,
         storageFolderName: true,
+        socialCopiesEnabled: true,
         project: {
           select: {
             storagePath: true,
@@ -646,17 +650,22 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     const projectStoragePath = album.project.storagePath
       || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
     const albumFolderName = album.storageFolderName || album.name
-    const zipPaths = getAlbumZipStoragePaths({
+    addMain(getAlbumZipStoragePath({
       projectStoragePath,
       albumFolderName,
       albumName: album.name,
-    })
+      variant: 'full',
+    }))
 
-    // Always include derived ZIP paths in missing-file checks. Cached ZIP sizes
-    // can be stale (e.g. 0 while an archive should exist), so gating on size
-    // can hide real DB->storage mismatches.
-    addMain(zipPaths.full)
-    addMain(zipPaths.social)
+    // Social ZIPs are optional. Only require them when social downloads are enabled.
+    if (album.socialCopiesEnabled) {
+      addMain(getAlbumZipStoragePath({
+        projectStoragePath,
+        albumFolderName,
+        albumName: album.name,
+        variant: 'social',
+      }))
+    }
   }
   for (const e of projectEmails) addMain(e.rawStoragePath)
   for (const a of projectEmailAttachments) addMain(a.storagePath)

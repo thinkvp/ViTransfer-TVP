@@ -57,12 +57,25 @@ export async function enqueueAlbumThumbnailJob(params: {
 
   const queue = getAlbumPhotoThumbnailQueue()
   const queueJobId = getAlbumThumbnailQueueJobId(albumId)
-  await queue.remove(queueJobId).catch(() => {})
-  await queue.add(
-    'process-album-photo-thumbnail',
-    { albumThumbnailJobId: albumThumbnailJob.id },
-    { jobId: queueJobId, delay: delayMs },
-  )
+  try {
+    await queue.remove(queueJobId).catch(() => {})
+    await queue.add(
+      'process-album-photo-thumbnail',
+      { albumThumbnailJobId: albumThumbnailJob.id },
+      { jobId: queueJobId, delay: delayMs },
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await prisma.albumThumbnailJob.update({
+      where: { id: albumThumbnailJob.id },
+      data: {
+        status: 'FAILED',
+        error: `Failed to enqueue thumbnail job: ${message}`.substring(0, 2000),
+        completedAt: new Date(),
+      },
+    }).catch(() => {})
+    throw error
+  }
 
   return albumThumbnailJob.id
 }
