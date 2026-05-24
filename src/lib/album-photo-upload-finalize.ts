@@ -2,22 +2,24 @@ import { prisma } from '@/lib/db'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
-import { buildAlbumPhotoThumbnailStoragePath } from '@/lib/project-storage-paths'
+import { buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumPhotoSocialQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 
 export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: true } | { ok: false; reason: 'not-found' }> {
   const photo = await prisma.albumPhoto.findUnique({
     where: { id: photoId },
-    include: { album: true },
+    include: { album: { include: { project: { select: { storagePath: true, title: true, companyName: true, client: { select: { name: true } } } } } } },
   })
 
   if (!photo) {
     return { ok: false, reason: 'not-found' }
   }
 
+  const projectStoragePath = photo.album.project.storagePath
+    || buildProjectStorageRoot(photo.album.project.client?.name || photo.album.project.companyName || 'Client', photo.album.project.title)
   const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
-  const thumbnailStoragePath = photo.thumbnailStoragePath || buildAlbumPhotoThumbnailStoragePath(photo.storagePath)
+  const thumbnailStoragePath = photo.thumbnailStoragePath || buildAlbumPhotoThumbnailStoragePath(projectStoragePath, photo.storagePath)
 
   await prisma.albumPhoto.update({
     where: { id: photo.id },

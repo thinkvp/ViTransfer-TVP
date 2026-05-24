@@ -11,6 +11,7 @@ import {
   stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
 import {
+  allocateUniqueStorageName,
   buildVideoAssetStoragePath,
   buildProjectStorageRoot,
 } from '@/lib/project-storage-paths'
@@ -143,46 +144,57 @@ export async function POST(
       buildProjectStorageRoot(clientName, project.title)
     const targetVideoFolderName = targetVideo.storageFolderName || targetVideo.name
     const targetVersionLabel = targetVideo.versionLabel || `v${targetVideo.version}`
+    const targetExistingAssets = await prisma.videoAsset.findMany({
+      where: { videoId: targetVideoId },
+      select: { storagePath: true },
+    })
+    const reservedStorageNames = new Set(
+      targetExistingAssets
+        .map((asset) => path.posix.basename(String(asset.storagePath || '')))
+        .filter(Boolean)
+    )
 
     // Physically copy each asset file to the target version's assets folder
-    const copiedAssets = await Promise.all(
-      assets.map(async (asset) => {
-        // Resolve source local path (strip dropbox: prefix if present)
-        const sourceLocalRelPath = isDropboxStoragePath(asset.storagePath)
-          ? stripDropboxStoragePrefix(asset.storagePath)
-          : asset.storagePath
-        const sourceAbsPath = getFilePath(sourceLocalRelPath)
+    const copiedAssets = [] as Array<unknown>
+    for (const asset of assets) {
+      // Resolve source local path (strip dropbox: prefix if present)
+      const sourceLocalRelPath = isDropboxStoragePath(asset.storagePath)
+        ? stripDropboxStoragePrefix(asset.storagePath)
+        : asset.storagePath
+      const sourceAbsPath = getFilePath(sourceLocalRelPath)
 
-        // Build target paths
-        const targetLocalRelPath = buildVideoAssetStoragePath(
-          projectStoragePath,
-          targetVideoFolderName,
-          targetVersionLabel,
-          asset.fileName,
-        )
-        const targetAbsPath = getFilePath(targetLocalRelPath)
+      const uniqueStorageFileName = allocateUniqueStorageName(asset.fileName, reservedStorageNames)
+      reservedStorageNames.add(uniqueStorageFileName)
 
-        // Ensure target directory exists and copy the file
-        await fs.promises.mkdir(path.dirname(targetAbsPath), { recursive: true })
-        await fs.promises.copyFile(sourceAbsPath, targetAbsPath)
+      // Build target paths
+      const targetLocalRelPath = buildVideoAssetStoragePath(
+        projectStoragePath,
+        targetVideoFolderName,
+        targetVersionLabel,
+        uniqueStorageFileName,
+      )
+      const targetAbsPath = getFilePath(targetLocalRelPath)
 
-        // Determine the storage path for the new DB record
-        const newStoragePath = targetLocalRelPath
+      // Ensure target directory exists and copy the file
+      await fs.promises.mkdir(path.dirname(targetAbsPath), { recursive: true })
+      await fs.promises.copyFile(sourceAbsPath, targetAbsPath)
 
-        // Create the new asset DB record pointing to the copied file
-        return prisma.videoAsset.create({
-          data: {
-            videoId: targetVideoId,
-            fileName: asset.fileName,
-            fileSize: asset.fileSize,
-            fileType: asset.fileType,
-            storagePath: newStoragePath,
-            category: asset.category,
-            uploadedByName: asset.uploadedByName,
-          },
-        })
-      })
-    )
+      // Determine the storage path for the new DB record
+      const newStoragePath = targetLocalRelPath
+
+      // Create the new asset DB record pointing to the copied file
+      copiedAssets.push(await prisma.videoAsset.create({
+        data: {
+          videoId: targetVideoId,
+          fileName: asset.fileName,
+          fileSize: asset.fileSize,
+          fileType: asset.fileType,
+          storagePath: newStoragePath,
+          category: asset.category,
+          uploadedByName: asset.uploadedByName,
+        },
+      }))
+    }
 
     await recalculateAndStoreProjectTotalBytes(sourceVideo.projectId)
 

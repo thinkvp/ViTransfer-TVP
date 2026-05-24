@@ -25,6 +25,8 @@ const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 
 type ShareUploadFilePathRow = { storagePath: string | null }
 type ShareUploadFolderPathRow = { storagePath: string | null }
+type ShareUploadPreviewPathRow = { storagePath: string | null; previewPath: string | null }
+type VideoAssetPreviewPathRow = { storagePath: string | null; previewPath: string | null }
 
 export type ProjectStorageOrphanCleanupResult = {
   ok: true
@@ -245,9 +247,9 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         },
       },
     }),
-    prisma.videoAsset.findMany({ select: { storagePath: true } }),
+    prisma.videoAsset.findMany({ select: { storagePath: true, previewPath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<ShareUploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
@@ -319,7 +321,12 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         const originalRelPath = normalizeRelativeStoragePath(toStorageRelative(getFilePath(rawOriginalPath)))
         const versionRoot = path.posix.dirname(originalRelPath)
         if (versionRoot && versionRoot !== '.') {
-          exactFilePaths.add(path.posix.join(versionRoot, 'thumbnail.jpg'))
+          exactFilePaths.add(path.posix.join(
+            canonicalProjectStoragePath,
+            '.previews',
+            path.posix.relative(canonicalProjectStoragePath, versionRoot),
+            'thumbnail.jpg',
+          ))
         }
       } catch {
         // Ignore; the canonical check above will still cover this video's thumbnail
@@ -327,9 +334,15 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     }
   }
 
-  for (const videoAsset of videoAssets) addResolvedFilePath(exactFilePaths, videoAsset.storagePath)
+  for (const videoAsset of videoAssets) {
+    addResolvedFilePath(exactFilePaths, videoAsset.storagePath)
+    addResolvedFilePath(exactFilePaths, videoAsset.previewPath)
+  }
   for (const commentFile of commentFiles) addResolvedFilePath(exactFilePaths, commentFile.storagePath)
-  for (const shareUploadFile of shareUploadFiles) addResolvedFilePath(exactFilePaths, shareUploadFile.storagePath)
+  for (const shareUploadFile of shareUploadFiles) {
+    addResolvedFilePath(exactFilePaths, shareUploadFile.storagePath)
+    addResolvedFilePath(exactFilePaths, shareUploadFile.previewPath)
+  }
   for (const shareUploadFolder of shareUploadFolders) {
     if (!shareUploadFolder.storagePath) continue
     addResolvedFilePath(exactFilePaths, `${shareUploadFolder.storagePath}/${UPLOAD_FOLDER_MARKER}`)
@@ -572,9 +585,9 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
         timelinePreviewSpritesPath: true,
       },
     }),
-    prisma.videoAsset.findMany({ select: { storagePath: true } }),
+    prisma.videoAsset.findMany({ select: { storagePath: true, previewPath: true } }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<ShareUploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
@@ -633,9 +646,15 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
     addMain(v.timelinePreviewVttPath)
     addTimelineSpritePrefix(v.timelinePreviewSpritesPath)
   }
-  for (const a of videoAssets) addMain(a.storagePath)
+  for (const a of videoAssets) {
+    addMain(a.storagePath)
+    addMain(a.previewPath)
+  }
   for (const c of commentFiles) addMain(c.storagePath)
-  for (const f of shareUploadFiles) addMain(f.storagePath)
+  for (const f of shareUploadFiles) {
+    addMain(f.storagePath)
+    addMain(f.previewPath)
+  }
   for (const folder of shareUploadFolders) {
     if (!folder.storagePath) continue
     addMain(`${folder.storagePath}/${UPLOAD_FOLDER_MARKER}`)

@@ -5,6 +5,25 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.4] - 2026-05-24
+
+### Added
+- **Share-page uploads now have a full API and storage pipeline** — added tokenized share-upload routes for list/create/download/content and S3 multipart presign/complete/abort flows, backed by new schema migrations for share uploads, media metadata, and preview fields.
+- **Preview generation for share uploads is now first-class** — added folder-aware share-upload preview storage helpers and a dedicated `share-upload-preview` worker/queue path to generate and track preview artifacts.
+- **Preview maintenance tools were added for operators** — Admin Developer Tools now include a preview-path migration action backed by `POST /api/settings/migrate-preview-paths` (dry run by default) with scanned counts, update totals, samples, and error reporting.
+- **Project-level preview rebuild controls were added** — `POST`/`GET /api/projects/[id]/reprocess-previews` and related project actions now support cancelling in-flight preview jobs, deleting stale preview derivatives, and re-enqueueing video/share-upload/video-asset/album preview work.
+
+### Changed
+- **Share review/file-browse UX was refined after 1.8.3** — admin/client share pages, sidebar selection, and files-browser state handling were tightened for approval/download flows, including better handling of upload folders and transfer state.
+- **Comment and file delivery routes were hardened** — comment file routes, share content delivery, and video-asset/share-upload download-token paths were updated together with S3 multipart handlers to keep upload/download behavior consistent.
+- **Storage accounting now includes broader preview coverage** — project totals, orphan scans, local-to-S3 migration, and S3 local backup logic were extended to account for preview-derived files and updated preview path conventions.
+- **Release validation assets were expanded** — added share uploads API/UI check scripts and planning/remediation docs for share uploads and previews.
+
+### Fixed
+- **Preview-path drift can now be repaired safely** — migration logic now reconciles stored preview paths for videos, timelines, album thumbnails, share uploads, and video assets against canonical project storage roots, with best-effort file moves.
+- **Preview rebuilds now better preserve intended assets** — reprocess logic avoids clobbering custom video thumbnails and improves cleanup/requeue sequencing so regenerated previews align with current storage conventions.
+- **Share/comment file handling edge cases were reduced** — recent updates to content-token and comment/share file flows address inconsistent playback/download outcomes seen in mixed preview and attachment scenarios.
+
 ## [1.8.3] - 2026-05-21
 
 ### Added

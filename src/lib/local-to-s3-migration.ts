@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { getFilePath } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
@@ -227,7 +227,28 @@ async function collectReferencedPaths(): Promise<Set<string>> {
         timelinePreviewSpritesPath: true,
       },
     }),
-    prisma.videoAsset.findMany({ select: { storagePath: true } }),
+    prisma.videoAsset.findMany({
+      select: {
+        storagePath: true,
+        fileType: true,
+        previewPath: true,
+        video: {
+          select: {
+            storageFolderName: true,
+            name: true,
+            versionLabel: true,
+            project: {
+              select: {
+                storagePath: true,
+                title: true,
+                companyName: true,
+                client: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
     prisma.$queryRaw<UploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<UploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
@@ -282,6 +303,22 @@ async function collectReferencedPaths(): Promise<Set<string>> {
   for (const row of videoAssets) {
     const key = normalizeKey(row.storagePath)
     if (key) keys.add(key)
+    const previewKey = normalizeKey(row.previewPath || '')
+    if (previewKey) keys.add(previewKey)
+
+    if (String(row.fileType || '').toLowerCase().startsWith('video/')) {
+      const projectStoragePath = row.video.project.storagePath
+        || buildProjectStorageRoot(row.video.project.client?.name || row.video.project.companyName || 'Client', row.video.project.title)
+      const jpgPreviewPath = buildVideoAssetPreviewStoragePath(
+        projectStoragePath,
+        row.video.storageFolderName || row.video.name,
+        row.video.versionLabel,
+        row.storagePath,
+        '.jpg',
+      )
+      const jpgPreviewKey = normalizeKey(jpgPreviewPath)
+      if (jpgPreviewKey) keys.add(jpgPreviewKey)
+    }
   }
 
   for (const row of commentFiles) {

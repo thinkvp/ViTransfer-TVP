@@ -1795,6 +1795,9 @@ export default function SharePage() {
       if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
         return String((data as any).previewUrl)
       }
+      if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
+        return String((data as any).playbackUrl)
+      }
       return null
     } catch {
       return null
@@ -1826,6 +1829,9 @@ export default function SharePage() {
 
       if (!response.ok) return null
       const data = await response.json().catch(() => ({}))
+      if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
+        return String((data as any).playbackUrl)
+      }
       if (typeof (data as any)?.url === 'string' && (data as any).url) {
         return String((data as any).url)
       }
@@ -1936,72 +1942,6 @@ export default function SharePage() {
     )
   }, [shareToken, project, fetchVideoToken])
 
-  const fetchSidebarVideos = useCallback(async (videos: any[]) => {
-    if (project?.enableVideos === false) return videos
-    if (!shareToken) return videos
-
-    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
-
-    return Promise.all(
-      videos.map(async (video: any) => {
-        const fullCached = tokenCacheRef.current.get(video.id)
-        if (fullCached) {
-          return fullCached
-        }
-
-        const sidebarCached = sidebarVideoCacheRef.current.get(video.id)
-        if (sidebarCached) {
-          return sidebarCached
-        }
-
-        const inFlight = sidebarThumbnailRequestCacheRef.current.get(video.id)
-        if (inFlight) {
-          return inFlight
-        }
-
-        const request = (async () => {
-          try {
-            let thumbnailUrl = null
-            if (video.hasThumbnail) {
-              const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
-              if (thumbToken) {
-                thumbnailUrl = `/api/content/${thumbToken}`
-              }
-            }
-
-            let timelineVttUrl = null
-            let timelineSpriteUrl = null
-            if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
-              const [vttToken, spriteToken] = await Promise.all([
-                fetchVideoToken(video.id, 'timeline-vtt'),
-                fetchVideoToken(video.id, 'timeline-sprite'),
-              ])
-              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
-              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
-            }
-
-            const sidebarVideo = {
-              ...video,
-              thumbnailUrl,
-              timelineVttUrl,
-              timelineSpriteUrl,
-            }
-
-            sidebarVideoCacheRef.current.set(video.id, sidebarVideo)
-            return sidebarVideo
-          } catch {
-            return video
-          } finally {
-            sidebarThumbnailRequestCacheRef.current.delete(video.id)
-          }
-        })()
-
-        sidebarThumbnailRequestCacheRef.current.set(video.id, request)
-        return request
-      })
-    )
-  }, [shareToken, project, fetchVideoToken])
-
   useEffect(() => {
     let isMounted = true
 
@@ -2041,7 +1981,7 @@ export default function SharePage() {
 
     // Preload in background without blocking UI
     const preloadThumbnails = async () => {
-      const tokenized = await fetchSidebarVideos(allVideos)
+      const tokenized = await fetchTokensForVideos(allVideos)
       
       // Update allVideosByName with tokenized videos
       setAllVideosByName((prev) => {
@@ -2070,7 +2010,7 @@ export default function SharePage() {
     preloadThumbnails().catch(() => {
       // Silently fail - this is just a performance optimization
     })
-  }, [project?.videosByName, shareToken, fetchSidebarVideos])
+  }, [project?.videosByName, shareToken, fetchTokensForVideos])
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {

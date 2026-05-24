@@ -1,4 +1,4 @@
-import { getVideoQueue, getAlbumPhotoSocialQueue, getAlbumPhotoThumbnailQueue, getAlbumPhotoZipQueue } from './queue'
+import { getVideoQueue, getAlbumPhotoSocialQueue, getAlbumPhotoThumbnailQueue, getAlbumPhotoZipQueue, getShareUploadPreviewQueue } from './queue'
 import { getAlbumZipJobId, AlbumZipVariant } from './album-photo-zip'
 import { getAlbumThumbnailQueueJobId } from './album-photo-thumbnail'
 import { prisma } from './db'
@@ -17,9 +17,10 @@ function sanitizeRequestedPreviewResolutions(value: unknown): PreviewResolution[
 }
 
 /**
- * Cancel all pending/waiting BullMQ jobs for a project.
- * Removes waiting, delayed, and prioritized jobs from the video-processing,
- * album-photo-social, album-photo-thumbnail, and album-photo-zip queues.
+ * Cancel all cancellable BullMQ jobs for a project.
+ * Removes waiting, delayed, prioritized, and best-effort active jobs from the
+ * video-processing, share-upload-preview, album-photo-social,
+ * album-photo-thumbnail, and album-photo-zip queues.
  */
 export async function cancelProjectJobs(projectId: string): Promise<{ cancelled: number }> {
   let cancelled = 0
@@ -38,7 +39,40 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
     console.error(`[JOB-CANCEL] Error cancelling video jobs for project ${projectId}:`, err)
   }
 
-  // 2. Cancel album-photo-zip jobs for this project's albums
+  // 2. Cancel share-upload preview jobs for this project's uploads and video assets
+  try {
+    const [uploadFiles, videoAssets] = await Promise.all([
+      prisma.shareUploadFile.findMany({
+        where: { projectId },
+        select: { id: true },
+      }),
+      prisma.videoAsset.findMany({
+        where: { video: { projectId } },
+        select: { id: true },
+      }),
+    ])
+
+    const recordIds = new Set<string>([
+      ...uploadFiles.map((file) => file.id),
+      ...videoAssets.map((asset) => asset.id),
+    ])
+
+    if (recordIds.size > 0) {
+      const previewQueue = getShareUploadPreviewQueue()
+      const previewJobs = await previewQueue.getJobs(['active', 'waiting', 'delayed', 'prioritized'])
+      for (const job of previewJobs) {
+        const recordId = job?.data?.recordId
+        if (recordId && recordIds.has(recordId)) {
+          await job.remove().catch(() => {})
+          cancelled++
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[JOB-CANCEL] Error cancelling share upload preview jobs for project ${projectId}:`, err)
+  }
+
+  // 3. Cancel album-photo-zip jobs for this project's albums
   try {
     const albums = await prisma.album.findMany({
       where: { projectId },
@@ -62,7 +96,7 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
     console.error(`[JOB-CANCEL] Error cancelling album ZIP jobs for project ${projectId}:`, err)
   }
 
-  // 3. Cancel album-photo-social jobs for this project's album photos
+  // 4. Cancel album-photo-social jobs for this project's album photos
   try {
     const photos = await prisma.albumPhoto.findMany({
       where: { album: { projectId } },
@@ -71,7 +105,7 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
     if (photos.length > 0) {
       const socialQueue = getAlbumPhotoSocialQueue()
       const photoIds = new Set(photos.map(p => p.id))
-      const socialJobs = await socialQueue.getJobs(['waiting', 'delayed', 'prioritized'])
+      const socialJobs = await socialQueue.getJobs(['active', 'waiting', 'delayed', 'prioritized'])
       for (const job of socialJobs) {
         if (job?.data?.photoId && photoIds.has(job.data.photoId)) {
           await job.remove().catch(() => {})
@@ -83,7 +117,7 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
     console.error(`[JOB-CANCEL] Error cancelling album photo social jobs for project ${projectId}:`, err)
   }
 
-  // 4. Cancel album-photo-thumbnail jobs for this project's albums
+  // 5. Cancel album-photo-thumbnail jobs for this project's albums
   try {
     const albums = await prisma.album.findMany({
       where: { projectId },

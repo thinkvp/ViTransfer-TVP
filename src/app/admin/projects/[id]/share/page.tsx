@@ -1671,6 +1671,9 @@ export default function AdminSharePage() {
       })
       if (!response.ok) return null
       const data = await response.json().catch(() => ({}))
+      if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
+        return String((data as any).playbackUrl)
+      }
       if (typeof (data as any)?.url === 'string' && (data as any).url) {
         return String((data as any).url)
       }

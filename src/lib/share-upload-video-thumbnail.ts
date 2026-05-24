@@ -6,8 +6,10 @@ import { generateThumbnail } from '@/lib/ffmpeg'
 import sharp from 'sharp'
 import {
   buildProjectUploadVideoThumbnailStoragePath,
+  buildProjectStorageRoot,
   stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
+import { prisma } from '@/lib/db'
 import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
 import { getFilePath, uploadFile } from '@/lib/storage'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
@@ -30,21 +32,23 @@ export function isShareUploadVideoFileType(fileType: string | null | undefined):
 }
 
 export function getShareUploadVideoThumbnailStoragePath(
+  projectStoragePath: string,
   storagePath: string,
   fileType: string | null | undefined,
 ): string | null {
   if (!isShareUploadVideoFileType(fileType)) return null
-  return buildProjectUploadVideoThumbnailStoragePath(storagePath)
+  return buildProjectUploadVideoThumbnailStoragePath(projectStoragePath, storagePath)
 }
 
 export function getShareUploadPreviewStoragePath(
+  projectStoragePath: string,
   storagePath: string,
   fileType: string | null | undefined,
 ): string | null {
   if (!isShareUploadVideoFileType(fileType) && !isShareUploadImageFileType(fileType)) {
     return null
   }
-  return buildProjectUploadVideoThumbnailStoragePath(storagePath)
+  return buildProjectUploadVideoThumbnailStoragePath(projectStoragePath, storagePath)
 }
 
 async function getStoredFileSize(storagePath: string): Promise<number | null> {
@@ -85,12 +89,13 @@ function getThumbnailCaptureTimestamp(durationSeconds?: number | null): number {
 }
 
 export async function ensureShareUploadVideoThumbnail(params: {
+  projectStoragePath: string
   storagePath: string
   fileName: string
   fileType: string
   durationSeconds?: number | null
 }): Promise<ShareUploadVideoThumbnailResult | null> {
-  const thumbnailStoragePath = getShareUploadVideoThumbnailStoragePath(params.storagePath, params.fileType)
+  const thumbnailStoragePath = getShareUploadVideoThumbnailStoragePath(params.projectStoragePath, params.storagePath, params.fileType)
   if (!thumbnailStoragePath) return null
 
   const existingSize = await getStoredFileSize(thumbnailStoragePath)
@@ -173,13 +178,14 @@ export async function ensureShareUploadVideoThumbnail(params: {
 }
 
 export async function ensureShareUploadImagePreview(params: {
+  projectStoragePath: string
   storagePath: string
   fileName: string
   fileType: string
 }): Promise<ShareUploadVideoThumbnailResult | null> {
   if (!isShareUploadImageFileType(params.fileType)) return null
 
-  const previewStoragePath = getShareUploadPreviewStoragePath(params.storagePath, params.fileType)
+  const previewStoragePath = getShareUploadPreviewStoragePath(params.projectStoragePath, params.storagePath, params.fileType)
   if (!previewStoragePath) return null
 
   const existingSize = await getStoredFileSize(previewStoragePath)
@@ -249,16 +255,41 @@ export async function ensureShareUploadImagePreview(params: {
 }
 
 export async function ensureShareUploadPreview(params: {
+  projectStoragePath?: string | null
   storagePath: string
   fileName: string
   fileType: string
   durationSeconds?: number | null
 }): Promise<ShareUploadVideoThumbnailResult | null> {
+  const projectStoragePath = params.projectStoragePath ?? await resolveShareUploadProjectStoragePath(params.storagePath)
+
   if (isShareUploadVideoFileType(params.fileType)) {
-    return ensureShareUploadVideoThumbnail(params)
+    if (!projectStoragePath) return null
+    return ensureShareUploadVideoThumbnail({ ...params, projectStoragePath })
   }
   if (isShareUploadImageFileType(params.fileType)) {
-    return ensureShareUploadImagePreview(params)
+    if (!projectStoragePath) return null
+    return ensureShareUploadImagePreview({ ...params, projectStoragePath })
   }
   return null
+}
+
+async function resolveShareUploadProjectStoragePath(storagePath: string): Promise<string | null> {
+  const record = await prisma.shareUploadFile.findFirst({
+    where: { storagePath },
+    select: {
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
+  }).catch(() => null)
+
+  const project = record?.project
+  if (!project) return null
+  return project.storagePath || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title)
 }

@@ -142,7 +142,7 @@ export default function VoiceNotePlayer({ src, className }: VoiceNotePlayerProps
     const audio = audioRef.current
     if (!audio) return 0
     return getDurationFromAudio(audio)
-  }, [duration, currentTime])
+  }, [duration])
 
   const progressPercent = useMemo(() => {
     if (!effectiveDuration || effectiveDuration <= 0) return 0

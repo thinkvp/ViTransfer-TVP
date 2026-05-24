@@ -42,6 +42,12 @@ export async function POST(
     const normalizedFileType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
     const isPreviewableImage = normalizedFileType.startsWith('image/')
     const isPreviewableVideo = normalizedFileType.startsWith('video/')
+    const isAudioAsset = normalizedFileType.startsWith('audio/')
+    const hasReadyGeneratedPlaybackPreview =
+      asset.previewStatus === 'READY'
+      && typeof asset.previewPath === 'string'
+      && asset.previewPath.length > 0
+      && asset.previewPath.toLowerCase().endsWith('.mp4')
     const hasReadyGeneratedPreview =
       asset.previewStatus === 'READY'
       && typeof asset.previewPath === 'string'
@@ -83,16 +89,22 @@ export async function POST(
       DOWNLOAD_TOKEN_TTL
     )
 
-    const previewUrl = isPreviewableImage
-      ? `/api/content/${token}?assetId=${assetId}`
-      : (isPreviewableVideo && hasReadyGeneratedPreview)
-        ? `/api/content/${token}?assetId=${assetId}&assetPreview=1`
-        : null
+    const directAssetUrl = `/api/content/${token}?download=true&assetId=${assetId}`
+    const previewUrl = (isPreviewableImage || isPreviewableVideo) && hasReadyGeneratedPreview
+      ? `/api/content/${token}?assetId=${assetId}&assetPreview=1`
+      : null
+
+    const playbackUrl = isPreviewableVideo
+      ? (hasReadyGeneratedPlaybackPreview
+          ? `/api/content/${token}?assetId=${assetId}&assetPlayback=1`
+          : directAssetUrl)
+      : (isAudioAsset ? directAssetUrl : null)
 
     // Return download URL with asset ID parameter
     const response = NextResponse.json({
-      url: `/api/content/${token}?download=true&assetId=${assetId}`,
+      url: directAssetUrl,
       ...(previewUrl ? { previewUrl } : {}),
+      ...(playbackUrl ? { playbackUrl } : {}),
     })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')

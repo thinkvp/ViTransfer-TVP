@@ -251,7 +251,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
-    const thumbnailStoragePath = getShareUploadPreviewStoragePath(file.storagePath, file.fileType)
+    const projectStoragePath = resolveProjectStoragePath(access.project)
+    const thumbnailStoragePath = getShareUploadPreviewStoragePath(projectStoragePath, file.storagePath, file.fileType)
 
     await deleteFile(file.storagePath).catch(() => undefined)
     if (thumbnailStoragePath) {
@@ -289,9 +290,10 @@ export async function DELETE(
   })
 
   const fileDeleteTasks: Promise<unknown>[] = []
+  const projectStoragePath = resolveProjectStoragePath(access.project)
   for (const file of filesToDelete) {
     fileDeleteTasks.push(deleteFile(file.storagePath))
-    const thumbnailStoragePath = getShareUploadPreviewStoragePath(file.storagePath, file.fileType)
+    const thumbnailStoragePath = getShareUploadPreviewStoragePath(projectStoragePath, file.storagePath, file.fileType)
     if (thumbnailStoragePath) {
       fileDeleteTasks.push(deleteFile(thumbnailStoragePath))
     }

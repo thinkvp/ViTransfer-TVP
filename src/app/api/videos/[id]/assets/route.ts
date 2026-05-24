@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import path from 'path'
 import { prisma } from '@/lib/db'
 import { getCurrentUserFromRequest, requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -6,7 +7,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
+import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -215,7 +216,13 @@ export async function POST(
       || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
     const videoFolderName = video.storageFolderName || video.name
     const versionLabel = video.versionLabel || `v${video.version}`
-    const localPath = buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, sanitizedFileName)
+    const existingAssetNames = await prisma.videoAsset.findMany({
+      where: { videoId },
+      select: { storagePath: true },
+    })
+    const reservedStorageNames = existingAssetNames.map((asset) => path.posix.basename(String(asset.storagePath || '')))
+    const uniqueStorageFileName = allocateUniqueStorageName(sanitizedFileName, reservedStorageNames)
+    const localPath = buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, uniqueStorageFileName)
 
     const storagePath = localPath
 

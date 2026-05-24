@@ -3,12 +3,15 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { prisma } from '@/lib/db'
-import { generateThumbnail } from '@/lib/ffmpeg'
-import { buildProjectUploadVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
+import { generateThumbnail, getVideoMetadata, transcodeVideo } from '@/lib/ffmpeg'
+import { buildProjectStorageRoot, buildProjectUploadVideoThumbnailStoragePath, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
+import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getFilePath, uploadFile } from '@/lib/storage'
 import { stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
+import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
+import { calculateOutputDimensions, parseResolutions } from './video-processor-helpers'
 
 let sharp: typeof import('sharp') | null = null
 async function getSharp() {
@@ -21,9 +24,36 @@ async function getSharp() {
 const PREVIEW_LONG_EDGE_PX = 1280
 const PREVIEW_JPEG_QUALITY = 85
 const MAX_PREVIEW_ATTEMPTS = 5
+const RESOLUTION_PRIORITY: Record<string, number> = {
+  '480p': 480,
+  '720p': 720,
+  '1080p': 1080,
+}
 
-function getPreviewStoragePath(storagePath: string): string {
-  return buildProjectUploadVideoThumbnailStoragePath(storagePath)
+function getHighestSelectedResolution(rawResolutions: string): '480p' | '720p' | '1080p' {
+  const selected = parseResolutions(rawResolutions)
+  if (!selected.length) return '720p'
+
+  let best = selected[0]
+  for (const candidate of selected) {
+    if ((RESOLUTION_PRIORITY[candidate] || 0) > (RESOLUTION_PRIORITY[best] || 0)) {
+      best = candidate
+    }
+  }
+
+  return best
+}
+
+function getPreviewStoragePath(projectStoragePath: string, storagePath: string): string {
+  return buildProjectUploadVideoThumbnailStoragePath(projectStoragePath, storagePath)
+}
+
+function getVideoAssetPreviewStoragePath(projectStoragePath: string, storagePath: string, videoFolderName: string, versionLabel: string): string {
+  return buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, versionLabel, storagePath)
+}
+
+function getVideoAssetPlaybackPreviewStoragePath(projectStoragePath: string, storagePath: string, videoFolderName: string, versionLabel: string): string {
+  return buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, versionLabel, storagePath, '.mp4')
 }
 
 function getThumbnailCaptureTimestamp(durationSeconds?: number | null): number {
@@ -95,6 +125,47 @@ async function generateVideoPreview(
   await generateThumbnail(inputArg, tempOutputPath, timestamp)
 }
 
+async function generatePlayableVideoPreview(
+  sourcePath: string,
+  tempOutputPath: string,
+  project: {
+    previewResolutions: string
+    watermarkEnabled: boolean
+    watermarkText: string | null
+    title: string
+  },
+): Promise<void> {
+  // In S3 mode sourcePath is a raw object key — FFmpeg can't reach it directly.
+  // Materialize to a local temp file first, then clean up afterwards.
+  const tempDir = path.join(os.tmpdir(), 'vitransfer-asset-preview-src')
+  const materialized = await materializeStoragePathToLocalFile({
+    rawPath: sourcePath,
+    tempDir,
+    suggestedName: path.basename(sourcePath),
+  })
+  const localInputPath = materialized.localPath
+  try {
+    const metadata = await getVideoMetadata(localInputPath)
+    const resolution = getHighestSelectedResolution(project.previewResolutions)
+    const dimensions = calculateOutputDimensions(metadata, resolution)
+    const watermarkText = project.watermarkEnabled
+      ? (project.watermarkText || `PREVIEW-${project.title || 'PROJECT'}`)
+      : undefined
+
+    await transcodeVideo({
+      inputPath: localInputPath,
+      outputPath: tempOutputPath,
+      width: dimensions.width,
+      height: dimensions.height,
+      watermarkText,
+    })
+  } finally {
+    if (materialized.isTemporary) {
+      await fs.promises.rm(materialized.localPath, { force: true }).catch(() => undefined)
+    }
+  }
+}
+
 async function updateRecordSuccess(
   type: 'shareUploadFile' | 'videoAsset',
   recordId: string,
@@ -160,57 +231,227 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     return
   }
 
-  const previewStoragePath = getPreviewStoragePath(storagePath)
+  const record = type === 'shareUploadFile'
+    ? await prisma.shareUploadFile.findUnique({
+        where: { id: recordId },
+        select: {
+          storagePath: true,
+          fileType: true,
+          fileName: true,
+          project: {
+            select: {
+              storagePath: true,
+              title: true,
+              companyName: true,
+              previewResolutions: true,
+              watermarkEnabled: true,
+              watermarkText: true,
+              client: { select: { name: true } },
+            },
+          },
+        },
+      })
+    : await prisma.videoAsset.findUnique({
+        where: { id: recordId },
+        select: {
+          storagePath: true,
+          fileType: true,
+          fileName: true,
+          video: {
+            select: {
+              projectId: true,
+              storageFolderName: true,
+              name: true,
+              versionLabel: true,
+              project: {
+                select: {
+                  storagePath: true,
+                  title: true,
+                  companyName: true,
+                  previewResolutions: true,
+                  watermarkEnabled: true,
+                  watermarkText: true,
+                  client: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+      })
 
-  // Idempotency: if preview already exists and is stored, mark READY and exit
-  if (await previewExists(previewStoragePath)) {
+  if (!record) {
+    await updateRecordFailed(type, recordId, 'Preview source record not found')
+    return
+  }
+
+  let projectStoragePath: string
+  if ('project' in record) {
+    projectStoragePath = record.project.storagePath || buildProjectStorageRoot(
+      record.project.client?.name || record.project.companyName || 'Client',
+      record.project.title,
+    )
+  } else {
+    projectStoragePath = record.video.project.storagePath || buildProjectStorageRoot(
+      record.video.project.client?.name || record.video.project.companyName || 'Client',
+      record.video.project.title,
+    )
+  }
+
+  const resolvedStoragePath = record.storagePath
+  const resolvedFileType = record.fileType || fileType
+  const resolvedFileName = record.fileName || fileName
+
+  let previewStoragePath: string
+  let playbackPreviewStoragePath: string | null = null
+  let projectIdForPreviewBytes: string | null = null
+  let videoAssetPreviewProject: {
+    previewResolutions: string
+    watermarkEnabled: boolean
+    watermarkText: string | null
+    title: string
+  } | null = null
+  if ('project' in record) {
+    previewStoragePath = getPreviewStoragePath(projectStoragePath, resolvedStoragePath)
+  } else {
+    const videoRecord = record.video
+    projectIdForPreviewBytes = videoRecord.projectId
+    videoAssetPreviewProject = {
+      previewResolutions: videoRecord.project.previewResolutions,
+      watermarkEnabled: videoRecord.project.watermarkEnabled,
+      watermarkText: videoRecord.project.watermarkText,
+      title: videoRecord.project.title,
+    }
+    previewStoragePath = getVideoAssetPreviewStoragePath(
+      projectStoragePath,
+      resolvedStoragePath,
+      videoRecord.storageFolderName || videoRecord.name,
+      videoRecord.versionLabel,
+    )
+    playbackPreviewStoragePath = getVideoAssetPlaybackPreviewStoragePath(
+      projectStoragePath,
+      resolvedStoragePath,
+      videoRecord.storageFolderName || videoRecord.name,
+      videoRecord.versionLabel,
+    )
+  }
+
+  const isImage = String(resolvedFileType || '').toLowerCase().startsWith('image/')
+  const isVideo = String(resolvedFileType || '').toLowerCase().startsWith('video/')
+  const shouldGenerateVideoAssetPlaybackPreview = type === 'videoAsset' && isVideo
+
+  if (!isImage && !isVideo) {
+    // Non-previewable type somehow queued — mark failed and exit
+    await updateRecordFailed(type, recordId, `Non-previewable file type: ${resolvedFileType}`)
+    return
+  }
+
+  // Idempotency:
+  // - video assets with video input must have both playback mp4 and thumbnail jpg
+  // - all other previewable files require a single preview output
+  if (shouldGenerateVideoAssetPlaybackPreview) {
+    const playbackExists = Boolean(playbackPreviewStoragePath) && await previewExists(playbackPreviewStoragePath!)
+    const thumbnailExists = await previewExists(previewStoragePath)
+    if (playbackExists && thumbnailExists) {
+      const size = await getPreviewFileSize(playbackPreviewStoragePath!)
+      await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, size)
+      if (projectIdForPreviewBytes) {
+        await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
+      }
+      console.log(`[PREVIEW] Already exists for ${type}:${recordId}, marked READY`)
+      return
+    }
+  } else if (await previewExists(previewStoragePath)) {
     const size = await getPreviewFileSize(previewStoragePath)
     await updateRecordSuccess(type, recordId, previewStoragePath, size)
+    if (projectIdForPreviewBytes) {
+      await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
+    }
     console.log(`[PREVIEW] Already exists for ${type}:${recordId}, marked READY`)
     return
   }
 
   await updateRecordProcessing(type, recordId)
 
-  const isImage = String(fileType || '').toLowerCase().startsWith('image/')
-  const isVideo = String(fileType || '').toLowerCase().startsWith('video/')
-
-  if (!isImage && !isVideo) {
-    // Non-previewable type somehow queued — mark failed and exit
-    await updateRecordFailed(type, recordId, `Non-previewable file type: ${fileType}`)
-    return
-  }
-
   const tempDir = path.join(os.tmpdir(), 'vitransfer-preview')
   await fs.promises.mkdir(tempDir, { recursive: true })
-  const safeName = path.basename(fileName || storagePath).replace(/[^\w.-]/g, '_')
-  const tempOutputPath = path.join(tempDir, `${recordId}-${Date.now()}-${safeName}.jpg`)
+  const safeName = path.basename(resolvedFileName || resolvedStoragePath).replace(/[^\w.-]/g, '_')
+  const tempBaseName = `${recordId}-${Date.now()}-${safeName}`
+  const tempThumbnailPath = path.join(tempDir, `${tempBaseName}.jpg`)
+  const tempPlaybackPath = path.join(tempDir, `${tempBaseName}.mp4`)
+  const tempFilesToCleanup = [tempThumbnailPath, tempPlaybackPath]
 
   try {
     if (isImage) {
-      await generateImagePreview(storagePath, tempOutputPath)
+      await generateImagePreview(resolvedStoragePath, tempThumbnailPath)
+      const stat = fs.statSync(tempThumbnailPath)
+      if (!stat.isFile() || stat.size === 0) {
+        throw new Error('Preview output file is empty')
+      }
+
+      await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, stat.size, 'image/jpeg')
+      const previewFileSize = BigInt(stat.size)
+      await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
     } else {
-      await generateVideoPreview(storagePath, tempOutputPath, durationSeconds)
+      if (videoAssetPreviewProject) {
+        await generatePlayableVideoPreview(resolvedStoragePath, tempPlaybackPath, {
+          previewResolutions: videoAssetPreviewProject.previewResolutions,
+          watermarkEnabled: videoAssetPreviewProject.watermarkEnabled,
+          watermarkText: videoAssetPreviewProject.watermarkText,
+          title: videoAssetPreviewProject.title,
+        })
+
+        // Persist a dedicated image thumbnail for grid cards while keeping the mp4 playback preview.
+        await generateVideoPreview(resolvedStoragePath, tempThumbnailPath, durationSeconds)
+
+        const playbackStat = fs.statSync(tempPlaybackPath)
+        if (!playbackStat.isFile() || playbackStat.size === 0) {
+          throw new Error('Playback preview output file is empty')
+        }
+        const thumbnailStat = fs.statSync(tempThumbnailPath)
+        if (!thumbnailStat.isFile() || thumbnailStat.size === 0) {
+          throw new Error('Thumbnail preview output file is empty')
+        }
+
+        await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, thumbnailStat.size, 'image/jpeg')
+        await uploadFile(playbackPreviewStoragePath!, fs.createReadStream(tempPlaybackPath) as any, playbackStat.size, 'video/mp4')
+
+        const previewFileSize = BigInt(playbackStat.size)
+        await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, previewFileSize)
+      } else {
+        await generateVideoPreview(resolvedStoragePath, tempThumbnailPath, durationSeconds)
+
+        const stat = fs.statSync(tempThumbnailPath)
+        if (!stat.isFile() || stat.size === 0) {
+          throw new Error('Preview output file is empty')
+        }
+
+        await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, stat.size, 'image/jpeg')
+        const previewFileSize = BigInt(stat.size)
+        await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
+      }
     }
 
-    const stat = fs.statSync(tempOutputPath)
-    if (!stat.isFile() || stat.size === 0) {
-      throw new Error('Preview output file is empty')
+    if (projectIdForPreviewBytes) {
+      await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
     }
 
-    await uploadFile(previewStoragePath, fs.createReadStream(tempOutputPath) as any, stat.size, 'image/jpeg')
-
-    const previewFileSize = BigInt(stat.size)
-    await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
-
-    console.log(`[PREVIEW] Generated preview for ${type}:${recordId} → ${previewStoragePath} (${stat.size} bytes)`)
+    if (shouldGenerateVideoAssetPlaybackPreview) {
+      const playbackStat = fs.statSync(tempPlaybackPath)
+      const thumbnailStat = fs.statSync(tempThumbnailPath)
+      console.log(`[PREVIEW] Generated preview for ${type}:${recordId} → ${playbackPreviewStoragePath} (${playbackStat.size} bytes), thumbnail → ${previewStoragePath} (${thumbnailStat.size} bytes)`)
+    } else {
+      const stat = fs.statSync(tempThumbnailPath)
+      console.log(`[PREVIEW] Generated preview for ${type}:${recordId} → ${previewStoragePath} (${stat.size} bytes)`)
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[PREVIEW] Failed for ${type}:${recordId}:`, msg)
     await updateRecordFailed(type, recordId, msg)
     throw err // Re-throw so BullMQ registers the failure and applies retry/backoff
   } finally {
-    try { fs.unlinkSync(tempOutputPath) } catch { /* ignore */ }
+    for (const tempPath of tempFilesToCleanup) {
+      try { fs.unlinkSync(tempPath) } catch { /* ignore */ }
+    }
   }
 }
 
@@ -293,22 +534,33 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
 
   const videoAssetsVideo = await prisma.videoAsset.findMany({
     where: {
-      OR: [
-        { previewStatus: null },
-        {
-          previewStatus: 'PENDING',
-          previewQueuedAt: { lt: thirtyMinutesAgo },
-        },
-        {
-          previewStatus: 'FAILED',
-          previewAttempts: { lt: MAX_PREVIEW_ATTEMPTS },
-          previewGeneratedAt: { lt: twoHoursAgo },
-        },
-      ],
       fileType: { startsWith: 'video/' },
     },
-    select: { id: true, storagePath: true, fileType: true, fileName: true },
+    select: {
+      id: true,
+      storagePath: true,
+      fileType: true,
+      fileName: true,
+      previewStatus: true,
+      previewPath: true,
+      previewAttempts: true,
+      previewGeneratedAt: true,
+    },
     take: Math.floor(BATCH_CAP / 4),
+  })
+
+  const videoAssetsVideoToQueue = videoAssetsVideo.filter((asset) => {
+    const previewPath = String(asset.previewPath || '').toLowerCase()
+    const isStaleReadyPreview = asset.previewStatus === 'READY' && previewPath.length > 0 && !previewPath.endsWith('.mp4')
+    const needsRetry =
+      asset.previewStatus === null ||
+      asset.previewStatus === 'PENDING' ||
+      (
+        asset.previewStatus === 'FAILED' &&
+        (asset.previewAttempts ?? 0) < MAX_PREVIEW_ATTEMPTS &&
+        (!asset.previewGeneratedAt || asset.previewGeneratedAt < twoHoursAgo)
+      )
+    return isStaleReadyPreview || needsRetry
   })
 
   let queued = 0
@@ -348,7 +600,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     queued++
   }
 
-  for (const a of videoAssetsVideo) {
+  for (const a of videoAssetsVideoToQueue) {
     await enqueueShareUploadPreview({
       type: 'videoAsset',
       recordId: a.id,

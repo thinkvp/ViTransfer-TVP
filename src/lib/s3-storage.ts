@@ -201,6 +201,51 @@ export async function s3DeleteFile(key: string): Promise<void> {
 }
 
 /**
+ * Move a single S3 object to a new key.
+ * Returns silently if the source object does not exist.
+ */
+export async function s3MoveFile(sourceKey: string, destinationKey: string): Promise<void> {
+  if (sourceKey === destinationKey) return
+
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const sourceHead = await client.send(
+    new HeadObjectCommand({
+      Bucket: bucket,
+      Key: sourceKey,
+    })
+  ).catch((err: any) => {
+    if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) return null
+    throw err
+  })
+
+  if (!sourceHead) return
+
+  const destinationExists = await client.send(
+    new HeadObjectCommand({
+      Bucket: bucket,
+      Key: destinationKey,
+    })
+  ).then(() => true).catch((err: any) => {
+    if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) return false
+    throw err
+  })
+
+  if (destinationExists) {
+    throw new Error(`Destination already exists: ${destinationKey}`)
+  }
+
+  await s3CopyObjectWithFallback(client, bucket, sourceKey, destinationKey, sourceHead.ContentLength ?? undefined)
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: sourceKey,
+    })
+  )
+}
+
+/**
  * Delete all objects whose key starts with the given prefix (simulates directory delete).
  * Processes in batches of 1000 (S3 DeleteObjects limit).
  */

@@ -175,6 +175,7 @@ export function ShareFilesBrowser({
   const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
   const [audioLightboxState, setAudioLightboxState] = useState<{ files: DownloadableFile[]; currentIndex: number } | null>(null)
   const [audioPlaybackUrlByFileKey, setAudioPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
+  const [videoPlaybackUrlByFileKey, setVideoPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
   const [albumViewerState, setAlbumViewerState] = useState<{ images: DownloadableFile[]; currentIndex: number; albumId: string | null } | null>(null)
   const [albumPhotoMetaByPhotoId, setAlbumPhotoMetaByPhotoId] = useState<Record<string, { socialDownloadUrl: string; socialReady: boolean }>>({})
   const [albumSocialEnabledByAlbumId, setAlbumSocialEnabledByAlbumId] = useState<Record<string, boolean>>({})
@@ -185,6 +186,7 @@ export function ShareFilesBrowser({
   const [visibleFileKeys, setVisibleFileKeys] = useState<Set<string>>(new Set())
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
   const audioPlaybackRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
+  const videoPlaybackRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
   const previewRetryTimerRef = useRef<Map<string, number>>(new Map())
   const previewRetryAttemptRef = useRef<Map<string, number>>(new Map())
   const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
@@ -266,6 +268,22 @@ export function ShareFilesBrowser({
         } else {
           changed = true
           audioPlaybackRequestRef.current.delete(fileKey)
+        }
+      }
+
+      return changed ? next : prev
+    })
+
+    setVideoPlaybackUrlByFileKey((prev) => {
+      let changed = false
+      const next: Record<string, string | null> = {}
+
+      for (const [fileKey, playbackUrl] of Object.entries(prev)) {
+        if (availableFileKeys.has(fileKey)) {
+          next[fileKey] = playbackUrl
+        } else {
+          changed = true
+          videoPlaybackRequestRef.current.delete(fileKey)
         }
       }
 
@@ -525,6 +543,15 @@ export function ShareFilesBrowser({
 
       window.setTimeout(() => finish(null), 10000)
     })
+  }, [])
+
+  const looksLikeVideoUrl = useCallback((value: string): boolean => {
+    const lower = value.toLowerCase()
+    if (lower.startsWith('blob:')) return true
+    if (/\.(mp4|mov|m4v|webm|mkv)(\?|$)/.test(lower)) return true
+    if (lower.includes('assetplayback=1')) return true
+    if (lower.includes('download=true') && lower.includes('assetid=')) return true
+    return false
   }, [])
 
   const sortedGroups = useMemo(() => {
@@ -869,6 +896,14 @@ export function ShareFilesBrowser({
             return null
           }
 
+          let displayUrl = url
+          if (fileKind === 'video' && looksLikeVideoUrl(url)) {
+            const poster = await captureVideoPoster(url)
+            if (poster) {
+              displayUrl = poster
+            }
+          }
+
           const retryTimer = previewRetryTimerRef.current.get(fileKey)
           if (retryTimer != null) {
             window.clearTimeout(retryTimer)
@@ -876,8 +911,8 @@ export function ShareFilesBrowser({
           }
           previewRetryAttemptRef.current.delete(fileKey)
 
-          setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: url }))
-          return url
+          setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: displayUrl }))
+          return displayUrl
         })
         .catch(() => {
           setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
@@ -897,6 +932,7 @@ export function ShareFilesBrowser({
     previewUrlByFileKey,
     resolveFilePreviewUrl,
     captureVideoPoster,
+    looksLikeVideoUrl,
     schedulePreviewRetry,
     visibleFileKeys,
   ])
@@ -1238,6 +1274,9 @@ export function ShareFilesBrowser({
       // Prefer social-sized preview (higher res than thumbnail)
       return file.previewUrl || file.downloadUrl || file.thumbnailUrl || null
     }
+    if (file.type === 'asset' && getDownloadableFileKind(file) === 'video') {
+      return videoPlaybackUrlByFileKey[getDownloadableFileKey(file)] || null
+    }
     const resolved = previewUrlByFileKey[getDownloadableFileKey(file)]
     return (typeof resolved === 'string' && resolved.length > 0) ? resolved : (file.thumbnailUrl || file.previewUrl || null)
   }
@@ -1278,6 +1317,37 @@ export function ShareFilesBrowser({
     return request
   }, [audioPlaybackUrlByFileKey, resolveFilePlaybackUrl])
 
+  const getVideoPlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    const fileKey = getDownloadableFileKey(file)
+    const cached = videoPlaybackUrlByFileKey[fileKey]
+    if (cached !== undefined) return cached
+
+    const inFlight = videoPlaybackRequestRef.current.get(fileKey)
+    if (inFlight) return inFlight
+
+    if (!resolveFilePlaybackUrl) {
+      setVideoPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+      return null
+    }
+
+    const request = resolveFilePlaybackUrl(file)
+      .then((url) => {
+        const resolved = typeof url === 'string' && url.length > 0 ? url : null
+        setVideoPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: resolved }))
+        return resolved
+      })
+      .catch(() => {
+        setVideoPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+        return null
+      })
+      .finally(() => {
+        videoPlaybackRequestRef.current.delete(fileKey)
+      })
+
+    videoPlaybackRequestRef.current.set(fileKey, request)
+    return request
+  }, [resolveFilePlaybackUrl, videoPlaybackUrlByFileKey])
+
   const openImageLightbox = (file: DownloadableFile, imageList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'image') return
     const imageOnly = imageList.filter((f) => getDownloadableFileKind(f) === 'image')
@@ -1295,14 +1365,14 @@ export function ShareFilesBrowser({
     setLightboxState({ images: imageOnly, currentIndex: Math.max(0, index) })
   }
 
-  const openVideoLightbox = (file: DownloadableFile, fileList: DownloadableFile[]) => {
+  const openVideoLightbox = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'video' || file.type === 'video') return
 
     const videoOnly = fileList.filter((f) => getDownloadableFileKind(f) === 'video' && f.type !== 'video')
     const source = videoOnly.length > 0 ? videoOnly : [file]
     const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
     setLightboxState({ images: source, currentIndex: Math.max(0, index) })
-  }
+  }, [])
 
   const openAudioLightbox = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'audio') return
@@ -1422,6 +1492,15 @@ export function ShareFilesBrowser({
   }, [audioLightboxState, getAudioPlaybackUrl])
 
   useEffect(() => {
+    if (!lightboxState) return
+    const currentFile = lightboxState.images[lightboxState.currentIndex]
+    if (!currentFile) return
+    if (currentFile.type === 'asset' && getDownloadableFileKind(currentFile) === 'video') {
+      void getVideoPlaybackUrl(currentFile)
+    }
+  }, [getVideoPlaybackUrl, lightboxState])
+
+  useEffect(() => {
     if (!audioLightboxState) return
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'ArrowLeft') audioLightboxNavigate(-1)
@@ -1440,6 +1519,8 @@ export function ShareFilesBrowser({
     if (requestedFile && getDownloadableFileKind(requestedFile) === 'image') {
       const imageList = requestedFile.type === 'album-photo' ? openFolderAlbumPhotos : openFolderVideoAssets
       openImageLightbox(requestedFile, imageList)
+    } else if (requestedFile && getDownloadableFileKind(requestedFile) === 'video' && requestedFile.type === 'asset') {
+      openVideoLightbox(requestedFile, openFolderVideoAssets)
     } else if (requestedFile && getDownloadableFileKind(requestedFile) === 'audio') {
       const audioList = openFolder?.groupType === 'uploads'
         ? openFolderUploadFiles
@@ -1457,6 +1538,7 @@ export function ShareFilesBrowser({
     openFolderAlbumPhotos,
     openFolderUploadFiles,
     openFolderVideoAssets,
+    openVideoLightbox,
     openAudioLightbox,
     onOpenFileKeyHandled,
   ])
@@ -2290,26 +2372,41 @@ export function ShareFilesBrowser({
 
       {(() => {
         const lightboxFile = lightboxState ? lightboxState.images[lightboxState.currentIndex] : null
+        const lightboxFileKey = lightboxFile ? getDownloadableFileKey(lightboxFile) : null
+        const lightboxPlaybackState = lightboxFile && lightboxFile.type === 'asset' && getDownloadableFileKind(lightboxFile) === 'video'
+          ? videoPlaybackUrlByFileKey[lightboxFileKey!]
+          : undefined
         const lightboxSrc = lightboxFile ? getLightboxUrl(lightboxFile) : null
         const isVideoLightbox = lightboxFile ? getDownloadableFileKind(lightboxFile) === 'video' : false
         const hasMultiple = lightboxState && lightboxState.images.length > 1
         return (
           <Dialog open={Boolean(lightboxState)} onOpenChange={(open) => { if (!open) setLightboxState(null) }}>
             <DialogContent className="max-w-[92vw] sm:max-w-5xl p-0 overflow-hidden bg-black border-border">
-              {lightboxFile && lightboxSrc ? (
+              {lightboxFile ? (
                 <div className="relative w-full h-[70vh] bg-black">
-                  {isVideoLightbox ? (
+                  {isVideoLightbox && lightboxSrc ? (
                     <video
                       src={lightboxSrc}
                       className="w-full h-full object-contain"
                       controls
                       autoPlay
                       playsInline
+                      controlsList="nodownload noplaybackrate noremoteplayback"
+                      disablePictureInPicture
+                      onContextMenu={(event) => event.preventDefault()}
                     />
+                  ) : isVideoLightbox && lightboxPlaybackState === undefined ? (
+                    <div className="flex h-full w-full items-center justify-center text-sm text-white/75">
+                      Loading video preview...
+                    </div>
+                  ) : isVideoLightbox ? (
+                    <div className="flex h-full w-full items-center justify-center text-sm text-white/75">
+                      Video preview is not available yet.
+                    </div>
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={lightboxSrc}
+                      src={lightboxSrc || undefined}
                       alt={lightboxFile.fileName}
                       className="w-full h-full object-contain"
                     />

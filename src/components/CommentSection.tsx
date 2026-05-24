@@ -486,13 +486,14 @@ export function CommentSectionView({
   }
 
   useEffect(() => {
+    const playbackUrlCache = commentPlaybackUrlCacheRef.current
     return () => {
-      for (const url of commentPlaybackUrlCacheRef.current.values()) {
+      for (const url of playbackUrlCache.values()) {
         if (url.startsWith('blob:')) {
           URL.revokeObjectURL(url)
         }
       }
-      commentPlaybackUrlCacheRef.current.clear()
+      playbackUrlCache.clear()
     }
   }, [])
 

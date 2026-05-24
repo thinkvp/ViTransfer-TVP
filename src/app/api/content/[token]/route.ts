@@ -7,6 +7,8 @@ import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import {
+  buildProjectStorageRoot,
+  buildVideoAssetPreviewStoragePath,
   buildVideoAssetStoragePath,
   buildVideoOriginalStoragePath,
   buildVideoPreviewStoragePath,
@@ -91,9 +93,11 @@ export async function GET(
     const isProbe = searchParams.get('probe') === 'true'
     const assetId = searchParams.get('assetId')
     const wantsAssetGeneratedPreview = searchParams.get('assetPreview') === '1'
+    const wantsAssetPlaybackPreview = searchParams.get('assetPlayback') === '1'
     const rawDownloadId = searchParams.get('downloadId')
     const downloadId = rawDownloadId && rawDownloadId.trim().length > 0 ? rawDownloadId.trim() : null
-    const isAssetPreview = Boolean(assetId && !isDownload)
+    const isAssetPreview = Boolean(assetId && !isDownload && wantsAssetGeneratedPreview)
+    const isAssetPlaybackPreview = Boolean(assetId && !isDownload && wantsAssetPlaybackPreview)
 
     const securitySettings = await getSecuritySettings()
 
@@ -266,7 +270,22 @@ export async function GET(
       filename = asset.fileName
       selectedAsset = { fileName: asset.fileName }
 
-      if (wantsAssetGeneratedPreview) {
+      if (wantsAssetPlaybackPreview) {
+        const hasReadyGeneratedPreview =
+          asset.previewStatus === 'READY'
+          && typeof asset.previewPath === 'string'
+          && asset.previewPath.length > 0
+          && asset.previewPath.toLowerCase().endsWith('.mp4')
+
+        if (!hasReadyGeneratedPreview) {
+          return NextResponse.json({ error: 'Preview not ready' }, { status: 404 })
+        }
+
+        filePath = asset.previewPath
+        filename = `${asset.fileName}.mp4`
+        contentType = 'video/mp4'
+        selectedAsset = null
+      } else if (wantsAssetGeneratedPreview) {
         const hasReadyGeneratedPreview =
           asset.previewStatus === 'READY'
           && typeof asset.previewPath === 'string'
@@ -276,7 +295,23 @@ export async function GET(
           return NextResponse.json({ error: 'Preview not ready' }, { status: 404 })
         }
 
-        filePath = asset.previewPath
+        const normalizedAssetType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
+        if (normalizedAssetType.startsWith('video/')) {
+          const projectStoragePath = video.project.storagePath || buildProjectStorageRoot(
+            (video.project as any).companyName || 'Client',
+            video.project.title,
+          )
+          filePath = buildVideoAssetPreviewStoragePath(
+            projectStoragePath,
+            video.storageFolderName || video.name,
+            video.versionLabel,
+            asset.storagePath,
+            '.jpg',
+          )
+        } else {
+          filePath = asset.previewPath
+        }
+
         filename = `${asset.fileName}.jpg`
         contentType = 'image/jpeg'
         selectedAsset = { fileName: filename }
@@ -587,6 +622,53 @@ export async function GET(
           'X-Content-Type-Options': 'nosniff',
           'X-Frame-Options': 'SAMEORIGIN',
           'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+      })
+    }
+
+    if (isAssetPlaybackPreview) {
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-')
+        const start = parseInt(parts[0], 10)
+        const requestedEnd = parts[1] ? parseInt(parts[1], 10) : start + downloadChunkSizeBytes - 1
+        const cappedEnd = isProbe
+          ? requestedEnd
+          : Math.min(requestedEnd, start + downloadChunkSizeBytes - 1)
+        const end = Math.min(cappedEnd, stat.size - 1)
+        const chunksize = (end - start) + 1
+
+        const fileStream = createReadStream(fullPath, { start, end, highWaterMark: downloadChunkSizeBytes })
+        const readableStream = createWebReadableStream(fileStream)
+
+        return new NextResponse(readableStream, {
+          status: 206,
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunksize.toString(),
+            'Content-Type': contentType,
+            'Cache-Control': 'private, no-cache',
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'SAMEORIGIN',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+            'CF-Cache-Status': 'DYNAMIC',
+          },
+        })
+      }
+
+      const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
+      const readableStream = createWebReadableStream(fileStream)
+
+      return new NextResponse(readableStream, {
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': stat.size.toString(),
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'private, no-cache',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'SAMEORIGIN',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'CF-Cache-Status': 'DYNAMIC',
         },
       })
     }

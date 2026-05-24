@@ -84,6 +84,10 @@ export function buildProjectUploadsRoot(projectStoragePath: string): string {
   return path.posix.join(projectStoragePath, 'uploads')
 }
 
+export function buildProjectPreviewsRoot(projectStoragePath: string): string {
+  return path.posix.join(projectStoragePath, '.previews')
+}
+
 export function normalizeProjectUploadRelativePath(relativePath: string): string {
   const trimmed = String(relativePath || '').trim()
   if (!trimmed) return ''
@@ -125,15 +129,29 @@ export function buildProjectUploadFileStoragePath(
   return path.posix.join(normalizedFolderPath, safeFileName)
 }
 
-export function buildProjectUploadVideoThumbnailStoragePath(uploadFileStoragePath: string): string {
+export function buildProjectUploadVideoThumbnailStoragePath(projectStoragePath: string, uploadFileStoragePath: string): string {
   const normalized = String(uploadFileStoragePath || '').replace(/\\/g, '/')
-  const parsed = path.posix.parse(normalized)
+  const relativePath = path.posix.relative(projectStoragePath, normalized).replace(/\\/g, '/')
+  const parsed = path.posix.parse(relativePath)
   const baseName = sanitizeFilename(parsed.base || `${parsed.name || 'video'}.bin`)
   const thumbnailFileName = `${baseName}.jpg`
-  if (!parsed.dir) {
-    return path.posix.join('.thumbnails', thumbnailFileName)
-  }
-  return path.posix.join(parsed.dir, '.thumbnails', thumbnailFileName)
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, thumbnailFileName)
+}
+
+export function buildVideoAssetPreviewStoragePath(
+  projectStoragePath: string,
+  videoFolderName: string,
+  versionLabel: string,
+  assetStoragePath: string,
+  previewExtension = '.jpg',
+): string {
+  const normalized = String(assetStoragePath || '').replace(/\\/g, '/')
+  const assetsRoot = buildVideoAssetsStorageRoot(projectStoragePath, videoFolderName, versionLabel)
+  const relativePath = path.posix.relative(assetsRoot, normalized).replace(/\\/g, '/')
+  const parsed = path.posix.parse(relativePath)
+  const safeExtension = previewExtension.startsWith('.') ? previewExtension : `.${previewExtension}`
+  const fileName = `${sanitizeFilename(parsed.name || 'asset')}${safeExtension}`
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'assets', parsed.dir, fileName)
 }
 
 export function allocateUniqueUploadFileName(fileName: string, existingNames: Iterable<string>): string {
@@ -211,15 +229,15 @@ export function buildVideoAssetStoragePath(
 }
 
 export function buildVideoPreviewStoragePath(projectStoragePath: string, videoFolderName: string, versionLabel: string, resolution: string): string {
-  return path.posix.join(buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel), `preview-${resolution}.mp4`)
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), `preview-${resolution}.mp4`)
 }
 
 export function buildVideoThumbnailStoragePath(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
-  return path.posix.join(buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel), 'thumbnail.jpg')
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'thumbnail.jpg')
 }
 
 export function buildVideoTimelineStorageRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
-  return path.posix.join(buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel), 'timeline-previews')
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'timeline-previews')
 }
 
 export function buildAlbumStorageRoot(projectStoragePath: string, albumFolderName: string): string {
@@ -235,10 +253,10 @@ export function buildAlbumPhotoStoragePath(projectStoragePath: string, albumFold
  * Previews live in a `previews/` subfolder in the same album directory as the original.
  * e.g.  albums/AlbumName/photo.jpg  →  albums/AlbumName/previews/photo.jpg
  */
-export function buildAlbumPhotoPreviewStoragePath(photoStoragePath: string): string {
-  const lastSlash = photoStoragePath.lastIndexOf('/')
-  if (lastSlash === -1) return `previews/${photoStoragePath}`
-  return `${photoStoragePath.substring(0, lastSlash)}/previews/${photoStoragePath.substring(lastSlash + 1)}`
+export function buildAlbumPhotoPreviewStoragePath(projectStoragePath: string, photoStoragePath: string): string {
+  const relativePath = path.posix.relative(projectStoragePath, photoStoragePath).replace(/\\/g, '/')
+  const parsed = path.posix.parse(relativePath)
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, 'previews', `${parsed.name || 'photo'}.jpg`)
 }
 
 /**
@@ -246,11 +264,11 @@ export function buildAlbumPhotoPreviewStoragePath(photoStoragePath: string): str
  * Thumbnails live in a `thumbnails/` subfolder in the same album directory as the original.
  * e.g. albums/AlbumName/photo.jpg -> albums/AlbumName/thumbnails/photo.jpg
  */
-export function buildAlbumPhotoThumbnailStoragePath(photoStoragePath: string): string {
-  const parsed = path.posix.parse(photoStoragePath)
+export function buildAlbumPhotoThumbnailStoragePath(projectStoragePath: string, photoStoragePath: string): string {
+  const relativePath = path.posix.relative(projectStoragePath, photoStoragePath).replace(/\\/g, '/')
+  const parsed = path.posix.parse(relativePath)
   const fileName = `${parsed.name || 'thumbnail'}.jpg`
-  if (!parsed.dir) return `thumbnails/${fileName}`
-  return `${parsed.dir}/thumbnails/${fileName}`
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, 'thumbnails', fileName)
 }
 
 export function buildAlbumZipStoragePath(

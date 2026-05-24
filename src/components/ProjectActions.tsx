@@ -52,6 +52,8 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const { user } = useAuth()
   const [isDeleting, setIsDeleting] = useState(false)
   const [isTogglingApproval, setIsTogglingApproval] = useState(false)
+  const [isReprocessingPreviews, setIsReprocessingPreviews] = useState(false)
+  const [isMonitoringReprocessPreviews, setIsMonitoringReprocessPreviews] = useState(false)
 
   // Unapprove modal state
   const [showUnapproveModal, setShowUnapproveModal] = useState(false)
@@ -121,6 +123,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const canDeleteProjects = canDoAction(permissions, 'deleteProjects')
   const canChangeStatuses = canDoAction(permissions, 'changeProjectStatuses')
   const canViewSharePage = canDoAction(permissions, 'accessSharePage')
+  const canReprocessPreviews = canDoAction(permissions, 'changeProjectSettings')
 
   // Group videos by name
   const videosByName = readyVideos.reduce((acc, video) => {
@@ -249,6 +252,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   const notificationModalOpenRef = useRef(false)
   const notificationTypeRef = useRef(notificationType)
+  const reprocessStatusPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!showNotificationModal) {
@@ -277,6 +281,53 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     if (!sendPasswordSeparately) return
     setSendPasswordSeparately(false)
   }, [notificationType, sendPasswordSeparately])
+
+  useEffect(() => {
+    if (!isReprocessingPreviews || !isMonitoringReprocessPreviews) {
+      if (reprocessStatusPollTimeoutRef.current) {
+        clearTimeout(reprocessStatusPollTimeoutRef.current)
+        reprocessStatusPollTimeoutRef.current = null
+      }
+      return
+    }
+
+    let cancelled = false
+
+    const pollStatus = async () => {
+      try {
+        const res = await apiFetch(`/api/projects/${project.id}/reprocess-previews`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Failed to check reprocess status')
+        const data = await res.json().catch(() => null)
+        const inProgress = Boolean((data as any)?.inProgress)
+
+        if (!inProgress) {
+          if (!cancelled) {
+            setIsMonitoringReprocessPreviews(false)
+            setIsReprocessingPreviews(false)
+            onRefresh?.()
+            router.refresh()
+          }
+          return
+        }
+      } catch {
+        // Keep the action latched and retry on transient polling failures.
+      }
+
+      if (!cancelled) {
+        reprocessStatusPollTimeoutRef.current = setTimeout(pollStatus, 2500)
+      }
+    }
+
+    void pollStatus()
+
+    return () => {
+      cancelled = true
+      if (reprocessStatusPollTimeoutRef.current) {
+        clearTimeout(reprocessStatusPollTimeoutRef.current)
+        reprocessStatusPollTimeoutRef.current = null
+      }
+    }
+  }, [isMonitoringReprocessPreviews, isReprocessingPreviews, onRefresh, project.id, router])
 
 
 
@@ -385,6 +436,39 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const handleViewAnalytics = () => {
     if (!canViewAnalytics) return
     router.push(`/admin/projects/${project.id}/analytics`)
+  }
+
+  const handleReprocessPreviews = async () => {
+    if (!canReprocessPreviews || isReprocessingPreviews) return
+
+    const confirmed = confirm(
+      'Reprocess all project previews? This will delete stored preview files, clear preview references in the database, and queue regeneration for videos, video assets, uploads, album thumbnails, and album photo preview derivatives.'
+    )
+    if (!confirmed) return
+
+    setIsReprocessingPreviews(true)
+    setIsMonitoringReprocessPreviews(false)
+
+    apiPost(`/api/projects/${project.id}/reprocess-previews`, {})
+      .then((data: any) => {
+        alert(
+          `Preview reprocessing started. Cleared jobs: ${Number(data?.cancelledJobs || 0)}. ` +
+          `Videos: ${Number(data?.queuedVideoJobs || 0)}, ` +
+          `Uploads: ${Number(data?.queuedUploadPreviewJobs || 0)}, ` +
+          `Video assets: ${Number(data?.queuedVideoAssetPreviewJobs || 0)}, ` +
+          `Album photo previews: ${Number(data?.queuedAlbumPhotoSocialJobs || 0)}, ` +
+          `Album thumbnails: ${Number(data?.queuedAlbumThumbnailJobs || 0)}. ` +
+          `This button will remain busy until all preview work is complete.`
+        )
+        setIsMonitoringReprocessPreviews(true)
+        onRefresh?.()
+        router.refresh()
+      })
+      .catch((error) => {
+        alert(error instanceof Error ? error.message : 'Failed to reprocess previews')
+        setIsMonitoringReprocessPreviews(false)
+        setIsReprocessingPreviews(false)
+      })
   }
 
   const handleToggleApproval = async () => {
@@ -503,6 +587,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           canSendNotifications ||
           canViewSharePage ||
           canViewAnalytics ||
+          canReprocessPreviews ||
           canChangeStatuses ||
           canDeleteProjects
 
@@ -535,6 +620,28 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               )}
 
             </div>
+          )}
+
+          {canReprocessPreviews && (
+            <Button
+              variant="outline"
+              size="default"
+              className="w-full"
+              onClick={handleReprocessPreviews}
+              disabled={isReprocessingPreviews}
+            >
+              {isReprocessingPreviews ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Reprocessing Previews...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reprocess Previews
+                </>
+              )}
+            </Button>
           )}
 
           {canViewAnalytics && (

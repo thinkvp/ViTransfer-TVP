@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import { reconcileAllAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { getFilePath } from '@/lib/storage'
 import { isS3Mode, s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
+import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -342,6 +343,30 @@ export async function computeProjectPreviewBytes(
     },
   })
 
+  const videoAssets = await prismaClient.videoAsset.findMany({
+    where: { video: { projectId } },
+    select: {
+      storagePath: true,
+      fileType: true,
+      previewPath: true,
+      video: {
+        select: {
+          storageFolderName: true,
+          name: true,
+          versionLabel: true,
+          project: {
+            select: {
+              storagePath: true,
+              title: true,
+              companyName: true,
+              client: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+  })
+
   if (videos.length === 0) return ZERO
 
   const previewFilePaths = new Set<string>()
@@ -356,6 +381,25 @@ export async function computeProjectPreviewBytes(
     }
     if (video.timelinePreviewVttPath) previewFilePaths.add(video.timelinePreviewVttPath)
     if (video.timelinePreviewSpritesPath) spritePrefixes.add(video.timelinePreviewSpritesPath)
+  }
+
+  for (const asset of videoAssets) {
+    if (asset.previewPath && asset.previewPath.toLowerCase().endsWith('.mp4')) {
+      previewFilePaths.add(asset.previewPath)
+
+      // Video assets store playback preview path in DB as .mp4.
+      // Include the companion JPEG thumbnail at the canonical preview location.
+      const projectStoragePath = asset.video.project.storagePath
+        || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
+      const assetPreviewJpgPath = buildVideoAssetPreviewStoragePath(
+        projectStoragePath,
+        asset.video.storageFolderName || asset.video.name,
+        asset.video.versionLabel,
+        asset.storagePath,
+        '.jpg',
+      )
+      previewFilePaths.add(assetPreviewJpgPath)
+    }
   }
 
   const [fileSizes, prefixSizes] = await Promise.all([

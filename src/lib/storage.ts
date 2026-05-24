@@ -4,7 +4,7 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
-import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory } from '@/lib/s3-storage'
+import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -684,6 +684,42 @@ export async function deleteDirectory(dirPath: string): Promise<void> {
   const legacyInfo = isLegacyProjectPath(base.posixNormalized)
   if (legacyInfo && redirected && base.fullPath !== fullPath && fs.existsSync(base.fullPath)) {
     await fs.promises.rm(base.fullPath, { recursive: true, force: true })
+  }
+}
+
+export async function moveFile(sourcePath: string, destinationPath: string): Promise<void> {
+  if (isS3Mode()) {
+    await s3MoveFile(sourcePath, destinationPath)
+    return
+  }
+
+  const sourceFullPath = getRawStoragePath(sourcePath)
+  const destinationFullPath = getRawStoragePath(destinationPath)
+
+  if (sourceFullPath === destinationFullPath) {
+    return
+  }
+
+  if (!fs.existsSync(sourceFullPath)) {
+    return
+  }
+
+  await fs.promises.mkdir(path.dirname(destinationFullPath), { recursive: true })
+
+  try {
+    await fs.promises.rename(sourceFullPath, destinationFullPath)
+  } catch (error: any) {
+    if (error?.code === 'EXDEV') {
+      await fs.promises.copyFile(sourceFullPath, destinationFullPath)
+      await fs.promises.unlink(sourceFullPath)
+      return
+    }
+
+    if (error?.code === 'EEXIST') {
+      return
+    }
+
+    throw error
   }
 }
 

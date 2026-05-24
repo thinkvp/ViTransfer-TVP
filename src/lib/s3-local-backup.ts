@@ -32,7 +32,7 @@ import {
 } from '@aws-sdk/client-s3'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
-import { buildAlbumZipStoragePath, buildAlbumPhotoPreviewStoragePath } from '@/lib/project-storage-paths'
+import { buildAlbumZipStoragePath, buildAlbumPhotoPreviewStoragePath, buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -221,12 +221,32 @@ async function collectTimelineSpriteKeys(client: ReturnType<typeof getS3Client>,
 
 /** Collect album preview photo paths (derived from storagePath — low-res previews used in album viewer). */
 async function collectAlbumPhotoPreviewKeys(): Promise<FileEntry[]> {
-  const photos = await prisma.albumPhoto.findMany({ select: { storagePath: true } })
+  const photos = await prisma.albumPhoto.findMany({
+    select: {
+      storagePath: true,
+      album: {
+        select: {
+          name: true,
+          storageFolderName: true,
+          project: {
+            select: {
+              storagePath: true,
+              title: true,
+              companyName: true,
+              client: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+  })
   const entries: FileEntry[] = []
   for (const photo of photos) {
     const base = normalizeKey(photo.storagePath)
     if (!base) continue
-    const previewKey = normalizeKey(buildAlbumPhotoPreviewStoragePath(base))
+    const projectPath = photo.album.project.storagePath
+      || buildProjectStorageRoot(photo.album.project.client?.name || photo.album.project.companyName || 'Client', photo.album.project.title)
+    const previewKey = normalizeKey(buildAlbumPhotoPreviewStoragePath(projectPath, base))
     if (!previewKey) continue
     entries.push({ key: previewKey, localPath: path.join(STORAGE_ROOT, previewKey) })
   }
@@ -293,11 +313,51 @@ async function collectKeysForCategory(
           timelinePreviewSpritesPath: true,
         },
       })
+      const assetRows = await prisma.videoAsset.findMany({
+        select: {
+          storagePath: true,
+          fileType: true,
+          previewPath: true,
+          video: {
+            select: {
+              storageFolderName: true,
+              name: true,
+              versionLabel: true,
+              project: {
+                select: {
+                  storagePath: true,
+                  title: true,
+                  companyName: true,
+                  client: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+      })
       const entries: FileEntry[] = []
       for (const r of rows) {
         for (const raw of [r.preview480Path, r.preview720Path, r.preview1080Path, r.thumbnailPath, r.timelinePreviewVttPath]) {
           const key = normalizeKey(raw)
           if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
+        }
+      }
+      for (const asset of assetRows) {
+        const key = normalizeKey(asset.previewPath)
+        if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
+
+        if (String(asset.fileType || '').toLowerCase().startsWith('video/')) {
+          const projectStoragePath = asset.video.project.storagePath
+            || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
+          const jpgPath = buildVideoAssetPreviewStoragePath(
+            projectStoragePath,
+            asset.video.storageFolderName || asset.video.name,
+            asset.video.versionLabel,
+            asset.storagePath,
+            '.jpg',
+          )
+          const jpgKey = normalizeKey(jpgPath)
+          if (jpgKey) entries.push({ key: jpgKey, localPath: path.join(STORAGE_ROOT, jpgKey) })
         }
       }
       // Sprite sheets are stored as a directory prefix

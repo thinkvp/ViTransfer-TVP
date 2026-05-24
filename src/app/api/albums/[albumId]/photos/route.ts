@@ -190,7 +190,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const projectStoragePath = album.project.storagePath
     || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
   const storagePath = buildAlbumPhotoStoragePath(projectStoragePath, album.storageFolderName || album.name, uniqueName)
-  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(storagePath)
+  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(projectStoragePath, storagePath)
 
   const photo = await prisma.albumPhoto.create({
     data: {
