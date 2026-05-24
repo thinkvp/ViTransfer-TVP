@@ -5,6 +5,11 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.5] - 2026-05-24
+
+### Fixed
+- **Docker startup migration failure (Prisma P3009) caused by duplicate migration timestamp ordering** — the share-upload media metadata migration folder was retimestamped from `20260522000000_add_share_upload_media_metadata` to `20260522000001_add_share_upload_media_metadata` so it consistently runs after `20260522000000_add_share_uploads` (which creates `ShareUploadFile`), preventing production boot loops where `prisma migrate deploy` failed on app startup.
+
 ## [1.8.4] - 2026-05-24
 
 ### Added
