@@ -45,6 +45,7 @@ type DraftNavigationGuard = {
 
 type UploadAccessUrlCacheEntry = {
   downloadUrl: string | null
+  playbackUrl: string | null
   previewUrl: string | null
   previewStatus: string | null
   expiresAt: number
@@ -978,6 +979,9 @@ export default function SharePage() {
         const downloadUrl = typeof (data as any)?.downloadUrl === 'string'
           ? String((data as any).downloadUrl)
           : (typeof (data as any)?.url === 'string' ? String((data as any).url) : null)
+        const playbackUrl = typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl
+          ? String((data as any).playbackUrl)
+          : null
         const previewUrl = typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl
           ? String((data as any).previewUrl)
           : null
@@ -987,6 +991,7 @@ export default function SharePage() {
 
         const entry: UploadAccessUrlCacheEntry = {
           downloadUrl,
+          playbackUrl,
           previewUrl,
           previewStatus,
           expiresAt: now + UPLOAD_ACCESS_URL_CACHE_TTL_MS,
@@ -1805,12 +1810,11 @@ export default function SharePage() {
   }, [filePreviewByVideoId, getUploadAccessUrl, isAdminSession, shareToken])
 
   const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
-    if (typeof file.downloadUrl === 'string' && file.downloadUrl) {
-      return file.downloadUrl
-    }
-
     if (file.type === 'upload-file' && file.uploadFileId) {
       const tokenizedUrls = await getUploadAccessUrl(file.uploadFileId)
+      if (typeof tokenizedUrls?.playbackUrl === 'string' && tokenizedUrls.playbackUrl) {
+        return tokenizedUrls.playbackUrl
+      }
       if (typeof tokenizedUrls?.downloadUrl === 'string' && tokenizedUrls.downloadUrl) {
         return tokenizedUrls.downloadUrl
       }
@@ -1831,9 +1835,6 @@ export default function SharePage() {
       const data = await response.json().catch(() => ({}))
       if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
         return String((data as any).playbackUrl)
-      }
-      if (typeof (data as any)?.url === 'string' && (data as any).url) {
-        return String((data as any).url)
       }
       return null
     } catch {

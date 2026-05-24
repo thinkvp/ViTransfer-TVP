@@ -89,7 +89,8 @@ export async function POST(
       DOWNLOAD_TOKEN_TTL
     )
 
-    const directAssetUrl = `/api/content/${token}?download=true&assetId=${assetId}`
+    const inlineAssetUrl = `/api/content/${token}?assetId=${assetId}`
+    const directAssetUrl = `${inlineAssetUrl}&download=true`
     const previewUrl = (isPreviewableImage || isPreviewableVideo) && hasReadyGeneratedPreview
       ? `/api/content/${token}?assetId=${assetId}&assetPreview=1`
       : null
@@ -97,8 +98,8 @@ export async function POST(
     const playbackUrl = isPreviewableVideo
       ? (hasReadyGeneratedPlaybackPreview
           ? `/api/content/${token}?assetId=${assetId}&assetPlayback=1`
-          : directAssetUrl)
-      : (isAudioAsset ? directAssetUrl : null)
+          : inlineAssetUrl)
+      : (isAudioAsset ? inlineAssetUrl : null)
 
     // Return download URL with asset ID parameter
     const response = NextResponse.json({

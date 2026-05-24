@@ -27,6 +27,7 @@ import {
   Folder,
   Pencil,
   MoreHorizontal,
+  Play,
   Plus,
   Trash2,
   X,
@@ -134,6 +135,13 @@ function formatSelectedTotalSize(bytes: number): string {
     return `${(mb / 1024).toFixed(2)} GB`
   }
   return `${mb.toFixed(2)} MB`
+}
+
+function isLightboxMediaFile(file: DownloadableFile): boolean {
+  const kind = getDownloadableFileKind(file)
+  if (kind === 'image' || kind === 'audio') return true
+  if (kind === 'video' && file.type !== 'video') return true
+  return false
 }
 
 export function ShareFilesBrowser({
@@ -1350,9 +1358,8 @@ export function ShareFilesBrowser({
 
   const openImageLightbox = (file: DownloadableFile, imageList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'image') return
-    const imageOnly = imageList.filter((f) => getDownloadableFileKind(f) === 'image')
-    const index = imageOnly.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
     if (file.type === 'album-photo') {
+      const imageOnly = imageList.filter((f) => getDownloadableFileKind(f) === 'image')
       const albumPhotoList = imageOnly.filter((f) => f.type === 'album-photo')
       const albumIndex = albumPhotoList.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
       setAlbumViewerState({
@@ -1362,34 +1369,61 @@ export function ShareFilesBrowser({
       })
       return
     }
-    setLightboxState({ images: imageOnly, currentIndex: Math.max(0, index) })
+
+    const mediaItems = imageList.filter(isLightboxMediaFile)
+    const source = mediaItems.length > 0 ? mediaItems : [file]
+    const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+    setLightboxState({ images: source, currentIndex: Math.max(0, index) })
   }
 
   const openVideoLightbox = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'video' || file.type === 'video') return
 
-    const videoOnly = fileList.filter((f) => getDownloadableFileKind(f) === 'video' && f.type !== 'video')
-    const source = videoOnly.length > 0 ? videoOnly : [file]
+    const mediaItems = fileList.filter(isLightboxMediaFile)
+    const source = mediaItems.length > 0 ? mediaItems : [file]
     const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
-    setLightboxState({ images: source, currentIndex: Math.max(0, index) })
+    const safeIndex = Math.max(0, index)
+    const target = source[safeIndex]
+    if (target && getDownloadableFileKind(target) === 'audio') {
+      setAudioLightboxState({ files: source, currentIndex: safeIndex })
+      return
+    }
+    setLightboxState({ images: source, currentIndex: safeIndex })
   }, [])
 
   const openAudioLightbox = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'audio') return
 
-    const audioOnly = fileList.filter((f) => getDownloadableFileKind(f) === 'audio')
-    const source = audioOnly.length > 0 ? audioOnly : [file]
+    const mediaItems = fileList.filter(isLightboxMediaFile)
+    const source = mediaItems.length > 0 ? mediaItems : [file]
     const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
     setAudioLightboxState({ files: source, currentIndex: Math.max(0, index) })
   }, [])
 
-  const lightboxNavigate = (delta: number) => {
-    setLightboxState((prev) => {
+  const navigateMixedLightbox = useCallback((delta: number) => {
+    if (lightboxState) {
+      const next = (lightboxState.currentIndex + delta + lightboxState.images.length) % lightboxState.images.length
+      const nextFile = lightboxState.images[next]
+      if (nextFile && getDownloadableFileKind(nextFile) === 'audio') {
+        setLightboxState(null)
+        setAudioLightboxState({ files: lightboxState.images, currentIndex: next })
+        return
+      }
+      setLightboxState({ ...lightboxState, currentIndex: next })
+      return
+    }
+
+    setAudioLightboxState((prev) => {
       if (!prev) return prev
-      const next = (prev.currentIndex + delta + prev.images.length) % prev.images.length
+      const next = (prev.currentIndex + delta + prev.files.length) % prev.files.length
+      const nextFile = prev.files[next]
+      if (nextFile && getDownloadableFileKind(nextFile) !== 'audio') {
+        setLightboxState({ images: prev.files, currentIndex: next })
+        return null
+      }
       return { ...prev, currentIndex: next }
     })
-  }
+  }, [lightboxState])
 
   const albumViewerNavigate = (delta: number) => {
     setAlbumViewerState((prev) => {
@@ -1398,14 +1432,6 @@ export function ShareFilesBrowser({
       return { ...prev, currentIndex: next }
     })
   }
-
-  const audioLightboxNavigate = useCallback((delta: number) => {
-    setAudioLightboxState((prev) => {
-      if (!prev) return prev
-      const next = (prev.currentIndex + delta + prev.files.length) % prev.files.length
-      return { ...prev, currentIndex: next }
-    })
-  }, [])
 
   const triggerDirectDownload = (url: string) => {
     const link = document.createElement('a')
@@ -1460,13 +1486,12 @@ export function ShareFilesBrowser({
   useEffect(() => {
     if (!lightboxState) return
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowLeft') lightboxNavigate(-1)
-      else if (event.key === 'ArrowRight') lightboxNavigate(1)
+      if (event.key === 'ArrowLeft') navigateMixedLightbox(-1)
+      else if (event.key === 'ArrowRight') navigateMixedLightbox(1)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightboxState !== null])
+  }, [lightboxState, navigateMixedLightbox])
 
   useEffect(() => {
     if (!albumViewerState) return
@@ -1503,12 +1528,12 @@ export function ShareFilesBrowser({
   useEffect(() => {
     if (!audioLightboxState) return
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowLeft') audioLightboxNavigate(-1)
-      else if (event.key === 'ArrowRight') audioLightboxNavigate(1)
+      if (event.key === 'ArrowLeft') navigateMixedLightbox(-1)
+      else if (event.key === 'ArrowRight') navigateMixedLightbox(1)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [audioLightboxState, audioLightboxNavigate])
+  }, [audioLightboxState, navigateMixedLightbox])
 
   useEffect(() => {
     const requestedKey = String(requestedOpenFileKey || '').trim()
@@ -1549,6 +1574,7 @@ export function ShareFilesBrowser({
     const fileKind = getDownloadableFileKind(file)
     const isImageFile = fileKind === 'image'
     const isAudioFile = fileKind === 'audio'
+    const isVideoAssetFile = fileKind === 'video' && file.type === 'asset'
     const isSelected = selectedFileIds.has(fileKey)
     const resolvedPreview = previewUrlByFileKey[fileKey]
     const inlinePreview = file.thumbnailUrl || file.previewUrl || null
@@ -1719,6 +1745,14 @@ export function ShareFilesBrowser({
                   ) : null}
                 </div>
               )}
+
+              {isVideoAssetFile && (showImagePreview || showVideoPreview) ? (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/65 text-white shadow-lg">
+                    <Play className="h-5 w-5 fill-current" />
+                  </span>
+                </div>
+              ) : null}
 
               {durationLabel ? (
                 <div className="absolute bottom-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums">
@@ -2415,17 +2449,17 @@ export function ShareFilesBrowser({
                     <>
                       <button
                         type="button"
-                        onClick={() => lightboxNavigate(-1)}
+                        onClick={() => navigateMixedLightbox(-1)}
                         className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
-                        aria-label="Previous image"
+                        aria-label="Previous item"
                       >
                         <ChevronLeft className="w-6 h-6" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => lightboxNavigate(1)}
+                        onClick={() => navigateMixedLightbox(1)}
                         className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
-                        aria-label="Next image"
+                        aria-label="Next item"
                       >
                         <ChevronRight className="w-6 h-6" />
                       </button>
@@ -2477,17 +2511,17 @@ export function ShareFilesBrowser({
                     <>
                       <button
                         type="button"
-                        onClick={() => audioLightboxNavigate(-1)}
+                        onClick={() => navigateMixedLightbox(-1)}
                         className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
-                        aria-label="Previous audio"
+                        aria-label="Previous item"
                       >
                         <ChevronLeft className="w-6 h-6" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => audioLightboxNavigate(1)}
+                        onClick={() => navigateMixedLightbox(1)}
                         className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
-                        aria-label="Next audio"
+                        aria-label="Next item"
                       >
                         <ChevronRight className="w-6 h-6" />
                       </button>

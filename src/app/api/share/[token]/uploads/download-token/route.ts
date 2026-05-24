@@ -116,11 +116,13 @@ export async function POST(
   }
 
   const downloadUrl = `${baseUrl}?download=true`
+  const playbackUrl = baseUrl
 
   return NextResponse.json({
     // Keep `url` for backward compatibility with existing callers expecting direct download URL.
     url: downloadUrl,
     downloadUrl,
+    playbackUrl,
     ...(previewUrl !== null ? { previewUrl } : {}),
     previewStatus: file.previewStatus ?? null,
   })

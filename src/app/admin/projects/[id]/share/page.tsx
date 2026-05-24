@@ -1631,10 +1631,6 @@ export default function AdminSharePage() {
   }, [filePreviewByVideoId, project?.slug, requestFilesRefresh])
 
   const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
-    if (typeof file.downloadUrl === 'string' && file.downloadUrl) {
-      return file.downloadUrl
-    }
-
     if (file.type === 'upload-file' && file.uploadFileId && project?.slug) {
       try {
         const response = await apiFetch(`/api/share/${project.slug}/uploads/download-token`, {
@@ -1651,11 +1647,11 @@ export default function AdminSharePage() {
         }
 
         const data = await response.json().catch(() => ({}))
+        if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
+          return String((data as any).playbackUrl)
+        }
         if (typeof (data as any)?.downloadUrl === 'string' && (data as any).downloadUrl) {
           return String((data as any).downloadUrl)
-        }
-        if (typeof (data as any)?.url === 'string' && (data as any).url) {
-          return String((data as any).url)
         }
         return null
       } catch {
@@ -1673,9 +1669,6 @@ export default function AdminSharePage() {
       const data = await response.json().catch(() => ({}))
       if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
         return String((data as any).playbackUrl)
-      }
-      if (typeof (data as any)?.url === 'string' && (data as any).url) {
-        return String((data as any).url)
       }
       return null
     } catch {

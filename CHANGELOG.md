@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.8.4] - 2026-05-24
 
 ### Added
+- **Voice Note comments are now supported** — users can now add audio voice-note comments in the review flow, making feedback faster when typing is less convenient.
 - **Share-page uploads now have a full API and storage pipeline** — added tokenized share-upload routes for list/create/download/content and S3 multipart presign/complete/abort flows, backed by new schema migrations for share uploads, media metadata, and preview fields.
 - **Preview generation for share uploads is now first-class** — added folder-aware share-upload preview storage helpers and a dedicated `share-upload-preview` worker/queue path to generate and track preview artifacts.
 - **Preview maintenance tools were added for operators** — Admin Developer Tools now include a preview-path migration action backed by `POST /api/settings/migrate-preview-paths` (dry run by default) with scanned counts, update totals, samples, and error reporting.
