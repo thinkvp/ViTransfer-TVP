@@ -237,6 +237,7 @@ export default function VideoSidebar({
   const [showTransferCloseWarning, setShowTransferCloseWarning] = useState(false)
   const [transferPanelHeight, setTransferPanelHeight] = useState(208)
   const [isDraggingTransferPanel, setIsDraggingTransferPanel] = useState(false)
+  const [collapsedFoldersByKey, setCollapsedFoldersByKey] = useState<Record<string, boolean>>({})
   const autoClearUploadsTimeoutRef = useRef<number | null>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -259,6 +260,19 @@ export default function VideoSidebar({
 
   const compareFileNameAsc = (a: DownloadableFile, b: DownloadableFile) => {
     return String(a.fileName || '').localeCompare(String(b.fileName || ''), undefined, { sensitivity: 'base' })
+  }
+
+  const compareAlbumFilesForSidebar = (a: DownloadableFile, b: DownloadableFile) => {
+    const getAlbumRank = (file: DownloadableFile): number => {
+      if (file.type === 'album-zip') return 0
+      if (file.type === 'album-photo') return 1
+      return 2
+    }
+
+    const rankDiff = getAlbumRank(a) - getAlbumRank(b)
+    if (rankDiff !== 0) return rankDiff
+
+    return compareFileNameAsc(a, b)
   }
 
   const getVideoVersionNumber = (file: DownloadableFile): number | null => {
@@ -306,6 +320,17 @@ export default function VideoSidebar({
   const sortedVideoGroups = (groups: VideoGroup[]) => {
     return [...groups].sort((a, b) => a.name.localeCompare(b.name))
   }
+
+  const isFolderCollapsed = useCallback((folderKey: string) => {
+    return collapsedFoldersByKey[folderKey] === true
+  }, [collapsedFoldersByKey])
+
+  const toggleFolderCollapsed = useCallback((folderKey: string) => {
+    setCollapsedFoldersByKey((prev) => ({
+      ...prev,
+      [folderKey]: !prev[folderKey],
+    }))
+  }, [])
 
   // Load saved width from localStorage
   useEffect(() => {
@@ -995,6 +1020,10 @@ export default function VideoSidebar({
     const someProjectSelected = allProjectFileKeys.some((key) => selectedFileIdsValue.has(key))
     const projectLabel = String(heading || 'Project').trim() || 'Project'
     const isRootFilesFolderActive = String(activeFilesFolderName || '').trim().length === 0
+    const projectRootFolderKey = 'files:project-root'
+    const isProjectRootCollapsed = isFolderCollapsed(projectRootFolderKey)
+    const uploadsRootFolderKey = 'files:uploads-root'
+    const isUploadsRootCollapsed = isFolderCollapsed(uploadsRootFolderKey)
 
     return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -1004,6 +1033,14 @@ export default function VideoSidebar({
         ) : (
           <div className="py-2">
             <div className={cn('flex items-center gap-2 px-3 pt-2 pb-1', isRootFilesFolderActive && 'rounded-md bg-primary/15')}>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={isProjectRootCollapsed ? `Expand ${projectLabel}` : `Collapse ${projectLabel}`}
+                onClick={() => toggleFolderCollapsed(projectRootFolderKey)}
+              >
+                {isProjectRootCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
               <input
                 type="checkbox"
                 checked={allProjectSelected}
@@ -1038,7 +1075,7 @@ export default function VideoSidebar({
               </button>
             </div>
 
-            {sortedVideoGroups(videoGroups).map((vg) => {
+            {!isProjectRootCollapsed && sortedVideoGroups(videoGroups).map((vg) => {
               const dlGroup = downloadableFiles?.find((g) => g.name === vg.name && g.groupType === 'video') ?? null
               const groupFilesRaw: DownloadableFile[] = dlGroup
                 ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
@@ -1055,6 +1092,8 @@ export default function VideoSidebar({
                 .map((f) => getDownloadableFileKey(f))
               const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
               const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
+              const videoFolderKey = `files:video:${vg.name}`
+              const isVideoFolderCollapsed = isFolderCollapsed(videoFolderKey)
               const openMainFilesFolder = () => {
                 onVideoSelect(vg.name)
                 window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
@@ -1074,6 +1113,14 @@ export default function VideoSidebar({
               return (
                 <div key={vg.name}>
                   <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label={isVideoFolderCollapsed ? `Expand ${vg.name}` : `Collapse ${vg.name}`}
+                      onClick={() => toggleFolderCollapsed(videoFolderKey)}
+                    >
+                      {isVideoFolderCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
                     <input
                       type="checkbox"
                       checked={allGroupSelected}
@@ -1105,8 +1152,8 @@ export default function VideoSidebar({
                       {vg.name}
                     </button>
                   </div>
-                  {orderedGroupFiles.length === 0 ? (
-                    <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">Video is not approved.</p>
+                  {isVideoFolderCollapsed ? null : orderedGroupFiles.length === 0 ? (
+                    <p className="pl-14 pr-3 pb-2 text-xs text-muted-foreground/70 italic">Video is not approved.</p>
                   ) : (
                     orderedGroupFiles.map((file) => {
                       const fileKey = getDownloadableFileKey(file)
@@ -1123,7 +1170,7 @@ export default function VideoSidebar({
                           key={fileKey}
                           className={cn(
                             'flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors',
-                            isSubFile && dlGroup?.groupType === 'video' ? 'pl-11' : 'pl-9'
+                            isSubFile && dlGroup?.groupType === 'video' ? 'pl-14' : 'pl-12'
                           )}
                           onClick={() => {
                             if (file.type === 'video') {
@@ -1176,16 +1223,18 @@ export default function VideoSidebar({
               )
             })}
 
-            {hasAlbums && albumsList.map((a) => {
+            {!isProjectRootCollapsed && hasAlbums && albumsList.map((a) => {
               const dlGroup = downloadableFiles?.find((g) => g.name === a.name && g.groupType === 'album') ?? null
               const groupFiles: DownloadableFile[] = dlGroup
                 ? [...(dlGroup.mainFile ? [dlGroup.mainFile] : []), ...dlGroup.subFiles]
                 : []
-              const sortedGroupFiles = [...groupFiles].sort(compareFileNameAsc)
+              const sortedGroupFiles = [...groupFiles].sort(compareAlbumFilesForSidebar)
               const isActiveFolder = activeFilesFolderName === a.name
               const groupFileKeys = sortedGroupFiles.map((f) => getDownloadableFileKey(f))
               const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
               const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
+              const albumFolderKey = `files:album:${a.id}`
+              const isAlbumFolderCollapsed = isFolderCollapsed(albumFolderKey)
               const openMainFilesFolder = () => {
                 onAlbumSelect?.(a.id)
                 window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
@@ -1195,6 +1244,14 @@ export default function VideoSidebar({
               return (
                 <div key={a.id}>
                   <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label={isAlbumFolderCollapsed ? `Expand ${a.name}` : `Collapse ${a.name}`}
+                      onClick={() => toggleFolderCollapsed(albumFolderKey)}
+                    >
+                      {isAlbumFolderCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
                     <input
                       type="checkbox"
                       checked={allGroupSelected}
@@ -1226,8 +1283,8 @@ export default function VideoSidebar({
                       {a.name}
                     </button>
                   </div>
-                  {sortedGroupFiles.length === 0 ? (
-                    <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                  {isAlbumFolderCollapsed ? null : sortedGroupFiles.length === 0 ? (
+                    <p className="pl-14 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                   ) : (
                     sortedGroupFiles.map((file) => {
                       const fileKey = getDownloadableFileKey(file)
@@ -1239,7 +1296,7 @@ export default function VideoSidebar({
                           key={fileKey}
                           className={cn(
                             'flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors',
-                            isAlbumPhoto ? 'pl-11' : 'pl-9'
+                            isAlbumPhoto ? 'pl-14' : 'pl-12'
                           )}
                           onClick={() => {
                             if (!isAlbumPhoto) return
@@ -1279,9 +1336,17 @@ export default function VideoSidebar({
               )
             })}
 
-            {hasUploads ? (
+            {!isProjectRootCollapsed && hasUploads ? (
               <div>
                 <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isUploadsRootActive && 'rounded-md bg-primary/15')}>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label={isUploadsRootCollapsed ? 'Expand UPLOADS' : 'Collapse UPLOADS'}
+                    onClick={() => toggleFolderCollapsed(uploadsRootFolderKey)}
+                  >
+                    {isUploadsRootCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
                   <input
                     type="checkbox"
                     checked={allUploadsSelected}
@@ -1323,11 +1388,11 @@ export default function VideoSidebar({
                   </button>
                 </div>
 
-                {uploadRootGroup && uploadRootGroup.subFiles.length === 0 && nestedUploadGroups.length === 0 ? (
-                  <p className="pl-11 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                {!isUploadsRootCollapsed && uploadRootGroup && uploadRootGroup.subFiles.length === 0 && nestedUploadGroups.length === 0 ? (
+                  <p className="pl-14 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                 ) : null}
 
-                {sortedUploadRootFiles.map((file) => {
+                {!isUploadsRootCollapsed && sortedUploadRootFiles.map((file) => {
                   const fileKey = getDownloadableFileKey(file)
                   const isChecked = selectedFileIdsValue.has(fileKey)
                   const FileIcon = getFileIcon(file)
@@ -1335,7 +1400,7 @@ export default function VideoSidebar({
                   return (
                     <div
                       key={fileKey}
-                      className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-9"
+                      className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-12"
                     >
                       <input
                         type="checkbox"
@@ -1359,7 +1424,7 @@ export default function VideoSidebar({
                   )
                 })}
 
-                {nestedUploadGroups.map((group) => {
+                {!isUploadsRootCollapsed && nestedUploadGroups.map((group) => {
                   const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
                   const sortedGroupFiles = [...groupFiles].sort(compareFileNameAsc)
                   const isActiveFolder = activeFilesFolderName === group.name
@@ -1367,6 +1432,8 @@ export default function VideoSidebar({
                   const allGroupSelected = groupFileKeys.length > 0 && groupFileKeys.every((k) => selectedFileIdsValue.has(k))
                   const someGroupSelected = groupFileKeys.some((k) => selectedFileIdsValue.has(k))
                   const folderLabel = getUploadsRelativePath(group.name)
+                  const nestedUploadsFolderKey = `files:uploads:${group.name}`
+                  const isNestedUploadsFolderCollapsed = isFolderCollapsed(nestedUploadsFolderKey)
                   const openMainFilesFolder = () => {
                     setDesktopActiveTabValue('files')
                     window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
@@ -1376,7 +1443,15 @@ export default function VideoSidebar({
 
                   return (
                     <div key={`uploads-${group.name}`}>
-                      <div className={cn('flex items-center gap-2 pl-9 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                      <div className={cn('flex items-center gap-2 pl-12 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          aria-label={isNestedUploadsFolderCollapsed ? `Expand ${folderLabel}` : `Collapse ${folderLabel}`}
+                          onClick={() => toggleFolderCollapsed(nestedUploadsFolderKey)}
+                        >
+                          {isNestedUploadsFolderCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
                         <input
                           type="checkbox"
                           checked={allGroupSelected}
@@ -1408,8 +1483,8 @@ export default function VideoSidebar({
                           {folderLabel}
                         </button>
                       </div>
-                      {sortedGroupFiles.length === 0 ? (
-                        <p className="pl-14 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
+                      {isNestedUploadsFolderCollapsed ? null : sortedGroupFiles.length === 0 ? (
+                        <p className="pl-16 pr-3 pb-2 text-xs text-muted-foreground/70 italic">No files available.</p>
                       ) : (
                         sortedGroupFiles.map((file) => {
                           const fileKey = getDownloadableFileKey(file)
@@ -1419,7 +1494,7 @@ export default function VideoSidebar({
                           return (
                             <div
                               key={fileKey}
-                              className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-12"
+                              className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-16"
                             >
                               <input
                                 type="checkbox"

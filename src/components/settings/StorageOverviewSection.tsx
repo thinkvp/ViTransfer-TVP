@@ -122,10 +122,11 @@ export function StorageOverviewSection({
   const [backupDryRunning, setBackupDryRunning] = useState(false)
   const [backupDryRunResult, setBackupDryRunResult] = useState<string | null>(null)
   const [backupDryRunError, setBackupDryRunError] = useState<string | null>(null)
+  const isVisible = show || Boolean(hideCollapse)
 
   // Load backup status on mount when S3 is configured
   useEffect(() => {
-    if (!s3Configured) return
+    if (!s3Configured || !isVisible) return
     apiFetch('/api/settings/s3-local-backup/run')
       .then((res) => res.ok ? res.json() : null)
       .then((json) => {
@@ -135,12 +136,12 @@ export function StorageOverviewSection({
         if (json.running) setBackupRunning(true)
       })
       .catch(() => {})
-  }, [s3Configured])
+  }, [s3Configured, isVisible])
 
   // While a backup is running, poll the status endpoint every 2 s for live progress.
   // Also detects when a scheduled backup (started outside this session) finishes.
   useEffect(() => {
-    if (!backupRunning || !s3Configured) return
+    if (!backupRunning || !s3Configured || !isVisible) return
     const interval = setInterval(() => {
       apiFetch('/api/settings/s3-local-backup/run')
         .then((res) => res.ok ? res.json() : null)
@@ -152,9 +153,9 @@ export function StorageOverviewSection({
           if (json.running === false) setBackupRunning(false)
         })
         .catch(() => {})
-    }, 2000)
+    }, 5000)
     return () => clearInterval(interval)
-  }, [backupRunning, s3Configured])
+  }, [backupRunning, s3Configured, isVisible])
 
   useEffect(() => {
     if (!show || hasLoaded) return

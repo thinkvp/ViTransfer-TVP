@@ -62,6 +62,7 @@ type ShareFilesBrowserProps = {
   onOpenFolderNameChange?: (folderName: string | null) => void
   folderPreviewByName?: Record<string, string | null>
   resolveFilePreviewUrl?: (file: DownloadableFile) => Promise<string | null>
+  resolveFilePlaybackUrl?: (file: DownloadableFile) => Promise<string | null>
   shareSlug?: string
   shareToken?: string | null
   transferItems?: TransferItem[]
@@ -152,6 +153,7 @@ export function ShareFilesBrowser({
   onOpenFolderNameChange,
   folderPreviewByName,
   resolveFilePreviewUrl,
+  resolveFilePlaybackUrl,
   shareSlug,
   shareToken,
   transferItems = [],
@@ -171,6 +173,8 @@ export function ShareFilesBrowser({
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
   const [folderPreviewPosterByName, setFolderPreviewPosterByName] = useState<Record<string, string | null>>({})
   const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
+  const [audioLightboxState, setAudioLightboxState] = useState<{ files: DownloadableFile[]; currentIndex: number } | null>(null)
+  const [audioPlaybackUrlByFileKey, setAudioPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
   const [albumViewerState, setAlbumViewerState] = useState<{ images: DownloadableFile[]; currentIndex: number; albumId: string | null } | null>(null)
   const [albumPhotoMetaByPhotoId, setAlbumPhotoMetaByPhotoId] = useState<Record<string, { socialDownloadUrl: string; socialReady: boolean }>>({})
   const [albumSocialEnabledByAlbumId, setAlbumSocialEnabledByAlbumId] = useState<Record<string, boolean>>({})
@@ -180,6 +184,7 @@ export function ShareFilesBrowser({
   const [visibleFolderNames, setVisibleFolderNames] = useState<Set<string>>(new Set())
   const [visibleFileKeys, setVisibleFileKeys] = useState<Set<string>>(new Set())
   const previewRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
+  const audioPlaybackRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
   const previewRetryTimerRef = useRef<Map<string, number>>(new Map())
   const previewRetryAttemptRef = useRef<Map<string, number>>(new Map())
   const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
@@ -248,6 +253,22 @@ export function ShareFilesBrowser({
           changed = true
         }
       }
+      return changed ? next : prev
+    })
+
+    setAudioPlaybackUrlByFileKey((prev) => {
+      let changed = false
+      const next: Record<string, string | null> = {}
+
+      for (const [fileKey, playbackUrl] of Object.entries(prev)) {
+        if (availableFileKeys.has(fileKey)) {
+          next[fileKey] = playbackUrl
+        } else {
+          changed = true
+          audioPlaybackRequestRef.current.delete(fileKey)
+        }
+      }
+
       return changed ? next : prev
     })
   }, [groups])
@@ -731,27 +752,27 @@ export function ShareFilesBrowser({
 
       for (const group of groupsToResolve) {
         const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-        const imageCandidates = groupFiles
-          .filter((file) => getDownloadableFileKind(file) === 'image')
-          .slice(0, 3)
-
-        const resolvedUrls = await Promise.all(
-          imageCandidates.map(async (file) => {
-            try {
-              const url = await resolveFilePreviewUrl(file)
-              return typeof url === 'string' && url.length > 0 ? url : null
-            } catch {
-              return null
-            }
-          })
-        )
-
         const uniqueUrls: string[] = []
-        for (const url of resolvedUrls) {
-          if (!url) continue
-          if (uniqueUrls.includes(url)) continue
-          uniqueUrls.push(url)
-          if (uniqueUrls.length >= 3) break
+
+        // Scan a broader set of previewable files so uploads folders can fill
+        // a 3-tile mosaic even when early files have no ready preview yet.
+        const previewCandidates = groupFiles
+          .filter((file) => {
+            const kind = getDownloadableFileKind(file)
+            return kind === 'image' || kind === 'video'
+          })
+          .slice(0, 12)
+
+        for (const file of previewCandidates) {
+          try {
+            const url = await resolveFilePreviewUrl(file)
+            if (typeof url !== 'string' || url.length === 0) continue
+            if (uniqueUrls.includes(url)) continue
+            uniqueUrls.push(url)
+            if (uniqueUrls.length >= 3) break
+          } catch {
+            continue
+          }
         }
 
         if (uniqueUrls.length === 0) {
@@ -1221,6 +1242,42 @@ export function ShareFilesBrowser({
     return (typeof resolved === 'string' && resolved.length > 0) ? resolved : (file.thumbnailUrl || file.previewUrl || null)
   }
 
+  const getAudioPlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    const fileKey = getDownloadableFileKey(file)
+    const cached = audioPlaybackUrlByFileKey[fileKey]
+    if (cached !== undefined) return cached
+
+    if (typeof file.downloadUrl === 'string' && file.downloadUrl.length > 0) {
+      setAudioPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: file.downloadUrl! }))
+      return file.downloadUrl
+    }
+
+    const inFlight = audioPlaybackRequestRef.current.get(fileKey)
+    if (inFlight) return inFlight
+
+    if (!resolveFilePlaybackUrl) {
+      setAudioPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+      return null
+    }
+
+    const request = resolveFilePlaybackUrl(file)
+      .then((url) => {
+        const resolved = typeof url === 'string' && url.length > 0 ? url : null
+        setAudioPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: resolved }))
+        return resolved
+      })
+      .catch(() => {
+        setAudioPlaybackUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+        return null
+      })
+      .finally(() => {
+        audioPlaybackRequestRef.current.delete(fileKey)
+      })
+
+    audioPlaybackRequestRef.current.set(fileKey, request)
+    return request
+  }, [audioPlaybackUrlByFileKey, resolveFilePlaybackUrl])
+
   const openImageLightbox = (file: DownloadableFile, imageList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'image') return
     const imageOnly = imageList.filter((f) => getDownloadableFileKind(f) === 'image')
@@ -1247,6 +1304,15 @@ export function ShareFilesBrowser({
     setLightboxState({ images: source, currentIndex: Math.max(0, index) })
   }
 
+  const openAudioLightbox = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
+    if (getDownloadableFileKind(file) !== 'audio') return
+
+    const audioOnly = fileList.filter((f) => getDownloadableFileKind(f) === 'audio')
+    const source = audioOnly.length > 0 ? audioOnly : [file]
+    const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+    setAudioLightboxState({ files: source, currentIndex: Math.max(0, index) })
+  }, [])
+
   const lightboxNavigate = (delta: number) => {
     setLightboxState((prev) => {
       if (!prev) return prev
@@ -1262,6 +1328,14 @@ export function ShareFilesBrowser({
       return { ...prev, currentIndex: next }
     })
   }
+
+  const audioLightboxNavigate = useCallback((delta: number) => {
+    setAudioLightboxState((prev) => {
+      if (!prev) return prev
+      const next = (prev.currentIndex + delta + prev.files.length) % prev.files.length
+      return { ...prev, currentIndex: next }
+    })
+  }, [])
 
   const triggerDirectDownload = (url: string) => {
     const link = document.createElement('a')
@@ -1341,6 +1415,23 @@ export function ShareFilesBrowser({
   }, [albumViewerState !== null])
 
   useEffect(() => {
+    if (!audioLightboxState) return
+    const currentFile = audioLightboxState.files[audioLightboxState.currentIndex]
+    if (!currentFile) return
+    void getAudioPlaybackUrl(currentFile)
+  }, [audioLightboxState, getAudioPlaybackUrl])
+
+  useEffect(() => {
+    if (!audioLightboxState) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') audioLightboxNavigate(-1)
+      else if (event.key === 'ArrowRight') audioLightboxNavigate(1)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [audioLightboxState, audioLightboxNavigate])
+
+  useEffect(() => {
     const requestedKey = String(requestedOpenFileKey || '').trim()
     if (!requestedKey) return
     if (!openFolder) return
@@ -1349,6 +1440,13 @@ export function ShareFilesBrowser({
     if (requestedFile && getDownloadableFileKind(requestedFile) === 'image') {
       const imageList = requestedFile.type === 'album-photo' ? openFolderAlbumPhotos : openFolderVideoAssets
       openImageLightbox(requestedFile, imageList)
+    } else if (requestedFile && getDownloadableFileKind(requestedFile) === 'audio') {
+      const audioList = openFolder?.groupType === 'uploads'
+        ? openFolderUploadFiles
+        : openFolder?.groupType === 'video'
+          ? openFolderVideoAssets
+          : filesInOpenFolder
+      openAudioLightbox(requestedFile, audioList)
     }
 
     onOpenFileKeyHandled?.()
@@ -1357,7 +1455,9 @@ export function ShareFilesBrowser({
     openFolder,
     filesInOpenFolder,
     openFolderAlbumPhotos,
+    openFolderUploadFiles,
     openFolderVideoAssets,
+    openAudioLightbox,
     onOpenFileKeyHandled,
   ])
 
@@ -1366,6 +1466,7 @@ export function ShareFilesBrowser({
     const FileTypeIcon = getFileTypeIcon(file)
     const fileKind = getDownloadableFileKind(file)
     const isImageFile = fileKind === 'image'
+    const isAudioFile = fileKind === 'audio'
     const isSelected = selectedFileIds.has(fileKey)
     const resolvedPreview = previewUrlByFileKey[fileKey]
     const inlinePreview = file.thumbnailUrl || file.previewUrl || null
@@ -1460,7 +1561,7 @@ export function ShareFilesBrowser({
         data-file-preview-key={fileKey}
         className={cn(
           'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
-          isImageFile && 'cursor-zoom-in',
+          (isImageFile || isAudioFile) && 'cursor-zoom-in',
           muteInactiveVideoVersion && 'opacity-55 saturate-0',
           isSelected
             ? 'border-2 border-primary/85 hover:border-primary'
@@ -1468,7 +1569,13 @@ export function ShareFilesBrowser({
         )}
         onClick={() => {
           if (muteInactiveVideoVersion) return
-          openImageLightbox(file, imageList)
+          if (isImageFile) {
+            openImageLightbox(file, imageList)
+            return
+          }
+          if (isAudioFile) {
+            openAudioLightbox(file, imageList)
+          }
         }}
         onDoubleClick={() => {
           if (muteInactiveVideoVersion) return
@@ -1478,6 +1585,10 @@ export function ShareFilesBrowser({
           }
           if (fileKind === 'video' && file.type !== 'video') {
             openVideoLightbox(file, imageList)
+            return
+          }
+          if (isAudioFile) {
+            openAudioLightbox(file, imageList)
             return
           }
           if (!canDownloadFile) return
@@ -1894,8 +2005,8 @@ export function ShareFilesBrowser({
               className="flex-[28] min-w-0 justify-center gap-1.5 sm:flex-none sm:w-auto"
               onClick={openUploadFilePicker}
               disabled={isUploadActionBusy}
-              aria-label="Add upload file"
-              title="Add upload file"
+              aria-label="Add files"
+              title="Add files"
             >
               <Plus className="w-4 h-4" />
               <File className="w-4 h-4" />
@@ -1910,8 +2021,8 @@ export function ShareFilesBrowser({
               className="flex-[28] min-w-0 justify-center gap-1.5 sm:flex-none sm:w-auto"
               onClick={runCreateUploadFolder}
               disabled={isUploadActionBusy}
-              aria-label="Add upload folder"
-              title="Add upload folder"
+              aria-label="Add folder"
+              title="Add folder"
             >
               <Plus className="w-4 h-4" />
               <Folder className="w-4 h-4" />
@@ -2223,6 +2334,68 @@ export function ShareFilesBrowser({
                       </button>
                       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] text-white tabular-nums">
                         {lightboxState!.currentIndex + 1} / {lightboxState!.images.length}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </DialogContent>
+          </Dialog>
+        )
+      })()}
+
+      {(() => {
+        const audioFile = audioLightboxState ? audioLightboxState.files[audioLightboxState.currentIndex] : null
+        const audioFileKey = audioFile ? getDownloadableFileKey(audioFile) : null
+        const audioSrc = audioFileKey ? audioPlaybackUrlByFileKey[audioFileKey] : null
+        const isLoadingAudio = Boolean(audioFileKey && audioPlaybackUrlByFileKey[audioFileKey] === undefined)
+        const hasMultiple = audioLightboxState && audioLightboxState.files.length > 1
+
+        return (
+          <Dialog open={Boolean(audioLightboxState)} onOpenChange={(open) => { if (!open) setAudioLightboxState(null) }}>
+            <DialogContent className="max-w-[92vw] sm:max-w-3xl p-0 overflow-hidden bg-black border-border">
+              {audioFile ? (
+                <div className="relative w-full min-h-[260px] bg-black text-white p-5 sm:p-7 flex flex-col gap-5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileAudio className="w-5 h-5 shrink-0 text-white/75" />
+                    <p className="text-sm sm:text-base font-medium truncate" title={audioFile.fileName}>{audioFile.fileName}</p>
+                  </div>
+
+                  {audioSrc ? (
+                    <audio
+                      key={audioSrc}
+                      src={audioSrc}
+                      className="w-full"
+                      controls
+                      autoPlay
+                      preload="metadata"
+                    />
+                  ) : isLoadingAudio ? (
+                    <p className="text-sm text-white/75">Loading audio preview...</p>
+                  ) : (
+                    <p className="text-sm text-white/75">Audio playback is not available for this file yet.</p>
+                  )}
+
+                  {hasMultiple ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => audioLightboxNavigate(-1)}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
+                        aria-label="Previous audio"
+                      >
+                        <ChevronLeft className="w-6 h-6" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => audioLightboxNavigate(1)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 hover:bg-black/85 p-1.5 text-white transition-colors"
+                        aria-label="Next audio"
+                      >
+                        <ChevronRight className="w-6 h-6" />
+                      </button>
+                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] text-white tabular-nums">
+                        {audioLightboxState!.currentIndex + 1} / {audioLightboxState!.files.length}
                       </div>
                     </>
                   ) : null}

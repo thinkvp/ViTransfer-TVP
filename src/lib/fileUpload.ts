@@ -59,6 +59,25 @@ export const ALLOWED_FILE_TYPES = {
   "application/postscript": { ext: "ps", category: "document" },
   "application/vnd.adobe.illustrator": { ext: "ai", category: "document" },
 
+  // Audio
+  "audio/mpeg": { ext: "mp3", category: "audio" },
+  "audio/wav": { ext: "wav", category: "audio" },
+  "audio/x-wav": { ext: "wav", category: "audio" },
+  "audio/aac": { ext: "aac", category: "audio" },
+  "audio/flac": { ext: "flac", category: "audio" },
+  "audio/ogg": { ext: "ogg", category: "audio" },
+  "audio/mp4": { ext: "m4a", category: "audio" },
+  "audio/x-aiff": { ext: "aiff", category: "audio" },
+  "audio/aiff": { ext: "aiff", category: "audio" },
+  "audio/x-ms-wma": { ext: "wma", category: "audio" },
+
+  // Project files (Premiere Pro / DaVinci Resolve)
+  "application/vnd.adobe.premiere.project": { ext: "prproj", category: "project" },
+  "application/x-premiere-project": { ext: "prproj", category: "project" },
+  "application/x-davinci-resolve-project": { ext: "drp", category: "project" },
+  "application/x-davinci-resolve-archive": { ext: "dra", category: "project" },
+  "application/x-davinci-resolve-timeline": { ext: "drt", category: "project" },
+
   // Videos
   "video/mp4": { ext: "mp4", category: "video" },
   "video/quicktime": { ext: "mov", category: "video" },
@@ -66,6 +85,9 @@ export const ALLOWED_FILE_TYPES = {
   "video/webm": { ext: "webm", category: "video" },
   "video/x-matroska": { ext: "mkv", category: "video" },
   "video/x-msvideo": { ext: "avi", category: "video" },
+  "video/mxf": { ext: "mxf", category: "video" },
+  "application/mxf": { ext: "mxf", category: "video" },
+  "application/x-mxf": { ext: "mxf", category: "video" },
 
   // Compressed - ONLY allow standard archives (NO exe, dll, or other executables)
   "application/x-zip-compressed": { ext: "zip", category: "archive" },
@@ -163,7 +185,9 @@ export function validateCommentFile(
 export function getAllowedFileTypesDescription(): string {
   const categories = {
     image: "Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI)",
-    video: "Videos (MP4, MOV, M4V, WEBM, MKV, AVI)",
+    video: "Videos (MP4, MOV, M4V, WEBM, MKV, AVI, MXF)",
+    audio: "Audio (MP3, WAV, AAC, FLAC, OGG, M4A, AIFF, WMA)",
+    project: "Project Files (PRPROJ, DRP, DRA, DRT)",
     document: "Documents (PDF, Word, Excel, PowerPoint)",
     font: "Fonts (TTF, OTF, WOFF, WOFF2)",
     archive: "Archives (ZIP, RAR, 7Z, GZ, TAR)",

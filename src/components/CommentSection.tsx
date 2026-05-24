@@ -253,6 +253,7 @@ export function CommentSectionView({
   const [localApprovedVideoId, setLocalApprovedVideoId] = useState<string | null>(null)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
+  const commentPlaybackUrlCacheRef = useRef<Map<string, string>>(new Map())
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
   const canAdminDelete = isAdminView && canAdminDeleteComments
@@ -455,6 +456,45 @@ export function CommentSectionView({
       alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
+
+  const resolveCommentFilePlaybackUrl = async (commentId: string, fileId: string): Promise<string | null> => {
+    const cacheKey = `${commentId}:${fileId}`
+    const cached = commentPlaybackUrlCacheRef.current.get(cacheKey)
+    if (cached) return cached
+
+    const url = `/api/comments/${commentId}/files/${fileId}`
+    const response = isAdminView
+      ? await apiFetch(url)
+      : shareToken
+        ? await fetch(url, { headers: { Authorization: `Bearer ${shareToken}` } })
+        : await fetch(url)
+
+    if (!response.ok) {
+      return null
+    }
+
+    const isS3Redirect = response.url && !response.url.startsWith(window.location.origin) && !response.url.startsWith('/')
+    if (isS3Redirect) {
+      commentPlaybackUrlCacheRef.current.set(cacheKey, response.url)
+      return response.url
+    }
+
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    commentPlaybackUrlCacheRef.current.set(cacheKey, objectUrl)
+    return objectUrl
+  }
+
+  useEffect(() => {
+    return () => {
+      for (const url of commentPlaybackUrlCacheRef.current.values()) {
+        if (url.startsWith('blob:')) {
+          URL.revokeObjectURL(url)
+        }
+      }
+      commentPlaybackUrlCacheRef.current.clear()
+    }
+  }, [])
 
   const parseDownloadFilename = (contentDisposition: string | null): string | null => {
     if (!contentDisposition) return null
@@ -956,6 +996,9 @@ export function CommentSectionView({
                   onFileSelect={onFileSelect}
                   attachedFiles={attachedFiles}
                   onRemoveFile={onRemoveFile}
+                  voiceNoteDraft={management.voiceNoteDraft}
+                  onVoiceNoteSelect={management.onVoiceNoteSelect}
+                  onVoiceNoteClear={management.onVoiceNoteClear}
                   allowFileUpload={allowCommentFileUpload}
                   clientUploadQuota={clientUploadQuota}
                   onRefreshUploadQuota={refreshClientUploadQuota}
@@ -1272,6 +1315,9 @@ export function CommentSectionView({
             onFileSelect={onFileSelect}
             attachedFiles={attachedFiles}
             onRemoveFile={onRemoveFile}
+            voiceNoteDraft={management.voiceNoteDraft}
+            onVoiceNoteSelect={management.onVoiceNoteSelect}
+            onVoiceNoteClear={management.onVoiceNoteClear}
             allowFileUpload={allowCommentFileUpload}
             clientUploadQuota={clientUploadQuota}
             onRefreshUploadQuota={refreshClientUploadQuota}
@@ -1398,6 +1444,7 @@ export function CommentSectionView({
                         commentsDisabled={commentsDisabled}
                         isViewerMessage={isViewerMessage}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
+                        onResolveCommentFilePlaybackUrl={(shareToken || isAdminView) ? resolveCommentFilePlaybackUrl : undefined}
                         showAuthorAvatar
                         showColorEdge={false}
                         avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
@@ -1429,6 +1476,7 @@ export function CommentSectionView({
                         onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}
                         canDeleteReply={allowAnyReplyDelete ? canDeleteReply : undefined}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
+                        onResolveCommentFilePlaybackUrl={(shareToken || isAdminView) ? resolveCommentFilePlaybackUrl : undefined}
                         showAuthorAvatar
                         showColorEdge={false}
                         avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}

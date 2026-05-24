@@ -90,8 +90,10 @@ export async function GET(
     const isDownload = searchParams.get('download') === 'true'
     const isProbe = searchParams.get('probe') === 'true'
     const assetId = searchParams.get('assetId')
+    const wantsAssetGeneratedPreview = searchParams.get('assetPreview') === '1'
     const rawDownloadId = searchParams.get('downloadId')
     const downloadId = rawDownloadId && rawDownloadId.trim().length > 0 ? rawDownloadId.trim() : null
+    const isAssetPreview = Boolean(assetId && !isDownload)
 
     const securitySettings = await getSecuritySettings()
 
@@ -239,8 +241,8 @@ export async function GET(
     let selectedAsset: { fileName: string } | null = null
     const canServeOriginal = Boolean(originalPath && (isAdminRequest || video.approved))
 
-    // Handle asset download
-    if (assetId && isDownload) {
+    // Handle asset download or inline preview.
+    if (assetId) {
       const asset = await prisma.videoAsset.findUnique({
         where: { id: assetId }
       })
@@ -256,12 +258,29 @@ export async function GET(
         }
       }
 
-      filePath = asset.storagePath
-      filename = asset.fileName
-      selectedAsset = { fileName: asset.fileName }
       contentType = isValidMimeType(asset.fileType)
         ? asset.fileType
         : 'application/octet-stream'
+
+      filePath = asset.storagePath
+      filename = asset.fileName
+      selectedAsset = { fileName: asset.fileName }
+
+      if (wantsAssetGeneratedPreview) {
+        const hasReadyGeneratedPreview =
+          asset.previewStatus === 'READY'
+          && typeof asset.previewPath === 'string'
+          && asset.previewPath.length > 0
+
+        if (!hasReadyGeneratedPreview) {
+          return NextResponse.json({ error: 'Preview not ready' }, { status: 404 })
+        }
+
+        filePath = asset.previewPath
+        filename = `${asset.fileName}.jpg`
+        contentType = 'image/jpeg'
+        selectedAsset = { fileName: filename }
+      }
     } else {
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
@@ -314,7 +333,7 @@ export async function GET(
     if (!isAdminRequest && !isProbe) {
       const activityType = isDownload
         ? (assetId ? 'DOWNLOADING_ASSET' : 'DOWNLOADING_VIDEO')
-        : (!isThumbnail && !isTimelineAsset ? 'STREAMING_VIDEO' : null)
+        : (isAssetPreview ? null : (!isThumbnail && !isTimelineAsset ? 'STREAMING_VIDEO' : null))
 
       if (activityType) {
         // Fire-and-forget: activity tracking is analytics-only and must not
@@ -375,10 +394,20 @@ export async function GET(
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const dlContentType = isThumbnail ? 'image/jpeg' : contentType
         presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, dlContentType)
-      } else if (isThumbnail || isTimelineAsset) {
+      } else if (isThumbnail || isTimelineAsset || isAssetPreview) {
         // Keep timeline/thumbnail requests same-origin to avoid browser CORS issues
         // when these assets are fetched from JS (timeline VTT/sprites, hover thumbnails).
         presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, contentType)
+
+        if (isAssetPreview) {
+          return NextResponse.redirect(presignedUrl, {
+            status: 302,
+            headers: {
+              'Cache-Control': 'no-store',
+              'Referrer-Policy': 'strict-origin-when-cross-origin',
+            },
+          })
+        }
 
         const upstream = await fetch(presignedUrl, { cache: 'no-store' })
         if (!upstream.ok || !upstream.body) {
@@ -558,6 +587,24 @@ export async function GET(
           'X-Content-Type-Options': 'nosniff',
           'X-Frame-Options': 'SAMEORIGIN',
           'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+      })
+    }
+
+    if (isAssetPreview) {
+      const fileStream = createReadStream(fullPath, { highWaterMark: downloadChunkSizeBytes })
+      const readableStream = createWebReadableStream(fileStream)
+
+      return new NextResponse(readableStream, {
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': stat.size.toString(),
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'private, no-cache',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'SAMEORIGIN',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'CF-Cache-Status': 'DYNAMIC',
         },
       })
     }

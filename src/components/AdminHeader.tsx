@@ -228,7 +228,13 @@ export default function AdminHeader() {
                     <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="bottom" sideOffset={8} onCloseAutoFocus={(e) => e.preventDefault()}>
+                <DropdownMenuContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={8}
+                  onCloseAutoFocus={(e) => e.preventDefault()}
+                  className="max-h-[calc(100dvh-var(--admin-header-height)-1rem)] overflow-y-auto overscroll-contain"
+                >
                   {navLinks.map((link) => {
                     const Icon = link.icon
                     const isActive = pathname === link.href || (link.href !== '/admin/projects' && pathname?.startsWith(link.href))

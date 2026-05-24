@@ -67,14 +67,6 @@ export async function POST(
       )
     }
 
-    // Check if file uploads are allowed for this project (only applies to clients)
-    if (isClient && !projectSettings.allowClientUploadFiles) {
-      return NextResponse.json(
-        { error: 'File uploads are not allowed for this project' },
-        { status: 403 }
-      )
-    }
-
     // Rate limiting: 10 file uploads per minute per IP
     const rateLimitResult = await rateLimit(request, {
       windowMs: 60 * 1000,
@@ -89,6 +81,17 @@ export async function POST(
     // Parse the incoming FormData
     const formData = await request.formData()
     const file = formData.get('file') as File | null
+    const uploadIntent = String(formData.get('uploadIntent') || '').toLowerCase()
+    const isVoiceNoteUpload = uploadIntent === 'voice-note'
+
+    // Check if file uploads are allowed for this project (only applies to clients).
+    // Voice notes are intentionally always allowed.
+    if (isClient && !projectSettings.allowClientUploadFiles && !isVoiceNoteUpload) {
+      return NextResponse.json(
+        { error: 'File uploads are not allowed for this project' },
+        { status: 403 }
+      )
+    }
 
     if (!file) {
       return NextResponse.json(

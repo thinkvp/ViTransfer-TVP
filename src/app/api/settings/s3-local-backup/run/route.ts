@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   const rateLimitResult = await rateLimit(
     request,
-    { windowMs: 60 * 1000, maxRequests: 30, message: 'Too many requests.' },
+    { windowMs: 60 * 1000, maxRequests: 120, message: 'Too many requests.' },
     's3-local-backup-status',
     authResult.id,
   )

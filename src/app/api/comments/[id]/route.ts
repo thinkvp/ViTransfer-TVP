@@ -9,28 +9,11 @@ import { cancelCommentNotification } from '@/lib/comment-helpers'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
-import { readdir, rmdir, unlink } from 'fs/promises'
-import { dirname, join } from 'path'
+import { deleteFile } from '@/lib/storage'
 export const runtime = 'nodejs'
-
-
-
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
-
-const STORAGE_ROOT = process.env.STORAGE_ROOT || '/app/uploads'
-
-async function removeDirIfEmpty(dirPath: string) {
-  try {
-    const entries = await readdir(dirPath)
-    if (entries.length === 0) {
-      await rmdir(dirPath)
-    }
-  } catch {
-    // Best-effort only
-  }
-}
 
 // PATCH /api/comments/[id] - Update a comment
 export async function PATCH(
@@ -394,22 +377,14 @@ export async function DELETE(
 
     await recalculateAndStoreProjectTotalBytes(existingComment.projectId)
 
-    // Best-effort: remove files from disk
-    const directoriesToCheck = new Set<string>()
+    // Best-effort: remove attachment objects/files from storage
     for (const file of commentFiles) {
       try {
-        const fullPath = join(STORAGE_ROOT, file.storagePath)
-        await unlink(fullPath)
-        directoriesToCheck.add(dirname(fullPath))
+        await deleteFile(file.storagePath)
       } catch {
-        // Ignore missing/unremovable files to avoid blocking comment deletion
+        // Ignore missing/unremovable files to avoid blocking comment deletion.
+        // This now works for both local and S3-backed storage.
       }
-    }
-
-    // Best-effort: remove empty directories (commentId folder, then its parent)
-    for (const dirPath of directoriesToCheck) {
-      await removeDirIfEmpty(dirPath)
-      await removeDirIfEmpty(dirname(dirPath))
     }
 
     // Return success - client will refresh to get updated comments

@@ -96,13 +96,6 @@ export async function POST(
     )
   }
 
-  if (isClient && !projectSettings.allowClientUploadFiles) {
-    return NextResponse.json(
-      { error: 'File uploads are not allowed for this project' },
-      { status: 403 }
-    )
-  }
-
   let body: any
   try {
     body = await request.json()
@@ -110,7 +103,15 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { fileSize, fileName, contentType } = body
+  const { fileSize, fileName, contentType, uploadIntent } = body
+  const isVoiceNoteUpload = String(uploadIntent || '').toLowerCase() === 'voice-note'
+
+  if (isClient && !projectSettings.allowClientUploadFiles && !isVoiceNoteUpload) {
+    return NextResponse.json(
+      { error: 'File uploads are not allowed for this project' },
+      { status: 403 }
+    )
+  }
 
   if (!Number.isFinite(fileSize) || fileSize <= 0) {
     return NextResponse.json({ error: 'fileSize must be a positive number' }, { status: 400 })

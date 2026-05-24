@@ -34,7 +34,7 @@ export function getDownloadableFileKind(file: DownloadableFile): DownloadableFil
   const ext = getFileExtension(file.fileName)
 
   if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif'].includes(ext)) return 'image'
-  if (['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm'].includes(ext)) return 'video'
+  if (['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'mxf'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a'].includes(ext)) return 'audio'
   if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'archive'
   if (['pdf', 'txt', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx'].includes(ext)) return 'document'

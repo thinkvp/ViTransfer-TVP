@@ -1,11 +1,13 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Comment } from '@prisma/client'
 import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import DOMPurify from 'dompurify'
 import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import VoiceNotePlayer from './VoiceNotePlayer'
 
 let domPurifyConfigured = false
 
@@ -68,11 +70,82 @@ interface MessageBubbleProps {
   onDeleteReply?: (replyId: string) => void
   canDeleteReply?: (reply: Comment) => boolean
   onDownloadCommentFile?: (commentId: string, fileId: string, fileName: string) => Promise<void>
+  onResolveCommentFilePlaybackUrl?: (commentId: string, fileId: string) => Promise<string | null>
 
   // UI options
   showAuthorAvatar?: boolean
   showColorEdge?: boolean
   avatarClassName?: string // Override avatar size/class
+}
+
+function isVoiceNoteFile(fileName: string): boolean {
+  return /^voice-note-/i.test(String(fileName || '').trim())
+}
+
+function splitCommentFilesByVoiceNote(files: Array<{ id: string; fileName: string; fileSize: number }>) {
+  const voiceNoteFiles: Array<{ id: string; fileName: string; fileSize: number }> = []
+  const regularFiles: Array<{ id: string; fileName: string; fileSize: number }> = []
+
+  for (const file of files) {
+    if (isVoiceNoteFile(file.fileName)) {
+      voiceNoteFiles.push(file)
+    } else {
+      regularFiles.push(file)
+    }
+  }
+
+  return { voiceNoteFiles, regularFiles }
+}
+
+function VoiceNoteAttachment({
+  commentId,
+  fileId,
+  onResolvePlaybackUrl,
+}: {
+  commentId: string
+  fileId: string
+  onResolvePlaybackUrl?: (commentId: string, fileId: string) => Promise<string | null>
+}) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+
+    async function loadPlaybackSource() {
+      if (!onResolvePlaybackUrl) {
+        setError('Unable to load voice note.')
+        return
+      }
+
+      try {
+        const resolved = await onResolvePlaybackUrl(commentId, fileId)
+        if (!mounted) return
+        if (!resolved) {
+          setError('Unable to load voice note.')
+          return
+        }
+        setSrc(resolved)
+      } catch {
+        if (!mounted) return
+        setError('Unable to load voice note.')
+      }
+    }
+
+    void loadPlaybackSource()
+
+    return () => {
+      mounted = false
+    }
+  }, [commentId, fileId, onResolvePlaybackUrl])
+
+  return (
+    <div className="space-y-2">
+      {src ? <VoiceNotePlayer src={src} /> : null}
+      {!src && !error ? <p className="text-xs text-muted-foreground">Loading voice note...</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  )
 }
 
 /**
@@ -113,6 +186,7 @@ export default function MessageBubble({
   onDeleteReply,
   canDeleteReply,
   onDownloadCommentFile,
+  onResolveCommentFilePlaybackUrl,
   showAuthorAvatar = false,
   showColorEdge = true,
   avatarClassName,
@@ -138,6 +212,8 @@ export default function MessageBubble({
   const avatarEmail = (comment as any)?.authorEmail as string | null | undefined
 
   const textColor = 'text-foreground'
+  const commentFiles = ((comment as any).files || []) as Array<{ id: string; fileName: string; fileSize: number }>
+  const { voiceNoteFiles: commentVoiceNotes, regularFiles: commentRegularFiles } = splitCommentFilesByVoiceNote(commentFiles)
 
   const handleTimestampClick = () => {
     if (comment.timecode && onSeekToTimestamp) {
@@ -226,9 +302,18 @@ export default function MessageBubble({
           </div>
 
           {/* Attached Files */}
-          {(comment as any).files && (comment as any).files.length > 0 && (
+          {commentFiles.length > 0 && (
             <div className="mt-3 pt-3 border-t border-border space-y-2">
-              {(comment as any).files.map((file: any) => (
+              {commentVoiceNotes.map((file) => (
+                <VoiceNoteAttachment
+                  key={file.id}
+                  commentId={comment.id}
+                  fileId={file.id}
+                  onResolvePlaybackUrl={onResolveCommentFilePlaybackUrl}
+                />
+              ))}
+
+              {commentRegularFiles.map((file) => (
                 <CommentFileDisplay
                   key={file.id}
                   fileId={file.id}
@@ -277,6 +362,8 @@ export default function MessageBubble({
                     const replyAvatarEmail = (reply as any)?.authorEmail as string | null | undefined
 
                     const replyDeletable = onDeleteReply && (!canDeleteReply || canDeleteReply(reply))
+                    const replyFiles = ((reply as any).files || []) as Array<{ id: string; fileName: string; fileSize: number }>
+                    const { voiceNoteFiles: replyVoiceNotes, regularFiles: replyRegularFiles } = splitCommentFilesByVoiceNote(replyFiles)
 
                     return (
                       <div key={reply.id} className="pl-3">
@@ -318,9 +405,17 @@ export default function MessageBubble({
                         />
 
                         {/* Reply Attached Files */}
-                        {(reply as any).files && (reply as any).files.length > 0 && (
+                        {replyFiles.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-border space-y-2">
-                            {(reply as any).files.map((file: any) => (
+                            {replyVoiceNotes.map((file) => (
+                              <VoiceNoteAttachment
+                                key={file.id}
+                                commentId={reply.id}
+                                fileId={file.id}
+                                onResolvePlaybackUrl={onResolveCommentFilePlaybackUrl}
+                              />
+                            ))}
+                            {replyRegularFiles.map((file) => (
                               <CommentFileDisplay
                                 key={file.id}
                                 fileId={file.id}

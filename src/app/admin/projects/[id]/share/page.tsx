@@ -20,7 +20,7 @@ import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
-import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
+import { getDownloadableFileKey } from '@/lib/downloadable-file-utils'
 import type { DownloadQueueItem } from '@/lib/download-queue'
 import { useDownloadTransfers } from '@/hooks/useDownloadTransfers'
 import { calculateTransferSummary, createTransferId, isTransferActive, type TransferItem } from '@/lib/transfer-state'
@@ -1614,7 +1614,6 @@ export default function AdminSharePage() {
     }
 
     if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
-    if (!isImageFileName(file.fileName)) return null
 
     try {
       const response = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, {
@@ -1622,11 +1621,64 @@ export default function AdminSharePage() {
       })
       if (!response.ok) return null
       const data = await response.json().catch(() => ({}))
-      return typeof (data as any)?.url === 'string' ? String((data as any).url) : null
+      if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
+        return String((data as any).previewUrl)
+      }
+      return null
     } catch {
       return null
     }
   }, [filePreviewByVideoId, project?.slug, requestFilesRefresh])
+
+  const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    if (typeof file.downloadUrl === 'string' && file.downloadUrl) {
+      return file.downloadUrl
+    }
+
+    if (file.type === 'upload-file' && file.uploadFileId && project?.slug) {
+      try {
+        const response = await apiFetch(`/api/share/${project.slug}/uploads/download-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileId: file.uploadFileId }),
+        })
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            requestFilesRefresh(true)
+          }
+          return null
+        }
+
+        const data = await response.json().catch(() => ({}))
+        if (typeof (data as any)?.downloadUrl === 'string' && (data as any).downloadUrl) {
+          return String((data as any).downloadUrl)
+        }
+        if (typeof (data as any)?.url === 'string' && (data as any).url) {
+          return String((data as any).url)
+        }
+        return null
+      } catch {
+        return null
+      }
+    }
+
+    if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
+
+    try {
+      const response = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, {
+        method: 'POST',
+      })
+      if (!response.ok) return null
+      const data = await response.json().catch(() => ({}))
+      if (typeof (data as any)?.url === 'string' && (data as any).url) {
+        return String((data as any).url)
+      }
+      return null
+    } catch {
+      return null
+    }
+  }, [project?.slug, requestFilesRefresh])
 
   // Photos-only projects: default to first album once albums load.
   useEffect(() => {
@@ -1922,7 +1974,12 @@ export default function AdminSharePage() {
         />
 
         {/* Main Content Area */}
-        <div className={cn('flex-1 flex flex-col min-w-0 overflow-x-hidden', activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto')}>
+        <div
+          className={cn(
+            'flex-1 flex flex-col min-w-0 overflow-x-hidden lg:h-[calc(100dvh-var(--admin-header-height))] lg:overflow-hidden',
+            activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto'
+          )}
+        >
           <div
             className={cn(
               'w-full flex-1 min-h-0 flex flex-col',
@@ -1961,6 +2018,7 @@ export default function AdminSharePage() {
                 onOpenFolderNameChange={setRequestedFilesFolderName}
                 folderPreviewByName={folderPreviewByName}
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
+                resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
                 shareSlug={String(project.slug)}
                 shareToken={null}
                 transferItems={transferItemsCombined}
@@ -2316,6 +2374,9 @@ function AdminShareFeedbackGrid({
                 onFileSelect={management.onFileSelect}
                 attachedFiles={management.attachedFiles}
                 onRemoveFile={management.onRemoveFile}
+                voiceNoteDraft={management.voiceNoteDraft}
+                onVoiceNoteSelect={management.onVoiceNoteSelect}
+                onVoiceNoteClear={management.onVoiceNoteClear}
                 allowFileUpload={true}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
@@ -2407,6 +2468,9 @@ function AdminShareFeedbackGrid({
                 onFileSelect={management.onFileSelect}
                 attachedFiles={management.attachedFiles}
                 onRemoveFile={management.onRemoveFile}
+                voiceNoteDraft={management.voiceNoteDraft}
+                onVoiceNoteSelect={management.onVoiceNoteSelect}
+                onVoiceNoteClear={management.onVoiceNoteClear}
                 allowFileUpload={true}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}

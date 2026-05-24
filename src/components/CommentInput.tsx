@@ -6,13 +6,19 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
-import { Send, Paperclip, X, Clock, ChevronDown, Check, Trash2 } from 'lucide-react'
+import { Send, Paperclip, X, Clock, ChevronDown, Check, Trash2, Keyboard, Mic, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
+import VoiceNotePlayer from './VoiceNotePlayer'
 import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { cn, formatTimestamp } from '@/lib/utils'
+
+type VoiceNoteDraft = {
+  file: File
+  durationSeconds: number
+}
 
 interface CommentInputProps {
   newComment: string
@@ -25,6 +31,9 @@ interface CommentInputProps {
   attachedFiles?: Array<{ name: string; size: number }>
   onRemoveFile?: (index: number) => void
   allowFileUpload?: boolean
+  voiceNoteDraft?: VoiceNoteDraft | null
+  onVoiceNoteSelect?: (file: File, durationSeconds: number) => void
+  onVoiceNoteClear?: () => void
 
   // Timestamp
   selectedTimestamp: number | null
@@ -87,6 +96,9 @@ export default function CommentInput({
   attachedFiles = [],
   onRemoveFile,
   allowFileUpload = false,
+  voiceNoteDraft = null,
+  onVoiceNoteSelect,
+  onVoiceNoteClear,
   selectedTimestamp,
   onClearTimestamp,
   selectedVideoFps,
@@ -130,6 +142,16 @@ export default function CommentInput({
     Array<{ id: string; name: string; createdAtMs: number }>
   >([])
   const [deleteTick, setDeleteTick] = useState(0)
+  const [voiceNoteError, setVoiceNoteError] = useState('')
+  const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false)
+  const [voiceNoteElapsedSeconds, setVoiceNoteElapsedSeconds] = useState(0)
+  const [voiceNotePreviewUrl, setVoiceNotePreviewUrl] = useState<string | null>(null)
+  const voiceNoteElapsedRef = useRef(0)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recorderChunksRef = useRef<BlobPart[]>([])
+  const recorderIntervalRef = useRef<number | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const hasSavedRecordingRef = useRef(false)
   const customNameInputRef = useRef<HTMLInputElement>(null)
 
   const baseRecipientOptions = useMemo(() => {
@@ -334,10 +356,142 @@ export default function CommentInput({
     }
   }
 
+  const clearRecorderTimer = () => {
+    if (recorderIntervalRef.current != null) {
+      window.clearInterval(recorderIntervalRef.current)
+      recorderIntervalRef.current = null
+    }
+  }
+
+  const stopMediaStream = () => {
+    if (!streamRef.current) return
+    for (const track of streamRef.current.getTracks()) {
+      track.stop()
+    }
+    streamRef.current = null
+  }
+
+  const stopVoiceNoteRecording = (saveRecording: boolean) => {
+    const recorder = recorderRef.current
+    if (!recorder) return
+
+    hasSavedRecordingRef.current = saveRecording
+    if (recorder.state === 'recording') {
+      recorder.stop()
+    }
+  }
+
+  const startVoiceNoteRecording = async () => {
+    if (isRecordingVoiceNote) return
+    setVoiceNoteError('')
+
+    if (typeof window === 'undefined' || typeof window.MediaRecorder === 'undefined') {
+      setVoiceNoteError('Voice note recording is not supported in this browser.')
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+
+      streamRef.current = stream
+      recorderRef.current = recorder
+      recorderChunksRef.current = []
+      hasSavedRecordingRef.current = false
+      setVoiceNoteElapsedSeconds(0)
+      voiceNoteElapsedRef.current = 0
+      setIsRecordingVoiceNote(true)
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recorderChunksRef.current.push(event.data)
+        }
+      }
+
+      recorder.onerror = () => {
+        setVoiceNoteError('Recording failed. Please try again.')
+      }
+
+      recorder.onstop = () => {
+        clearRecorderTimer()
+        setIsRecordingVoiceNote(false)
+
+        const chunks = recorderChunksRef.current
+        recorderChunksRef.current = []
+        stopMediaStream()
+        recorderRef.current = null
+
+        if (!hasSavedRecordingRef.current || chunks.length === 0) {
+          return
+        }
+
+        const mimeType = recorder.mimeType || 'audio/webm'
+        const extension = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'm4a' : 'webm'
+        const durationSeconds = Math.max(1, voiceNoteElapsedRef.current)
+        const fileName = `voice-note-${Date.now()}-${durationSeconds}s.${extension}`
+        const blob = new Blob(chunks, { type: mimeType })
+        const file = new File([blob], fileName, { type: mimeType, lastModified: Date.now() })
+        onVoiceNoteSelect?.(file, durationSeconds)
+      }
+
+      recorder.start(250)
+      recorderIntervalRef.current = window.setInterval(() => {
+        setVoiceNoteElapsedSeconds((prev) => {
+          const next = prev + 1
+          voiceNoteElapsedRef.current = next
+          if (next >= 120) {
+            stopVoiceNoteRecording(true)
+            return 120
+          }
+          return next
+        })
+      }, 1000)
+    } catch (error) {
+      const errName = (error as DOMException | undefined)?.name || ''
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        setVoiceNoteError('Microphone permission was denied. Please allow microphone access in your browser.')
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setVoiceNoteError('No microphone was found on this device.')
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setVoiceNoteError('Microphone is already in use by another application.')
+      } else if (errName === 'SecurityError') {
+        setVoiceNoteError('Microphone access is blocked by browser security settings for this site.')
+      } else {
+        setVoiceNoteError('Unable to start microphone recording. Please check browser permissions and try again.')
+      }
+      setIsRecordingVoiceNote(false)
+      clearRecorderTimer()
+      stopMediaStream()
+      recorderRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    if (!voiceNoteDraft?.file) {
+      setVoiceNotePreviewUrl(null)
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(voiceNoteDraft.file)
+    setVoiceNotePreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [voiceNoteDraft])
+
+  useEffect(() => {
+    return () => {
+      clearRecorderTimer()
+      stopMediaStream()
+      recorderRef.current = null
+    }
+  }, [])
+
   if (commentsDisabled) return null
 
   const hasRequiredName = !showAuthorInput || Boolean(authorName.trim())
-  const canSubmit = !loading && newComment.trim() && hasRequiredName
+  const canSubmit = !loading && (Boolean(newComment.trim()) || Boolean(voiceNoteDraft)) && hasRequiredName
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Allow Ctrl+Space and other Ctrl shortcuts to pass through to VideoPlayer
@@ -580,7 +734,7 @@ export default function CommentInput({
             </DialogContent>
           </Dialog>
 
-          <div className="flex gap-2">
+          <div>
             <Textarea
               id="feedback-input"
               placeholder="Type your message..."
@@ -591,7 +745,32 @@ export default function CommentInput({
               rows={2}
               disabled={loading}
             />
-            <div className="flex flex-col gap-2 self-end">
+
+            <div className="mt-2 flex items-center gap-2">
+              <div className="min-w-0 flex-1 text-xs leading-tight">
+                {showAuthorInput && !authorName.trim() ? (
+                  <p className="text-warning">Enter your name to send</p>
+                ) : (
+                  <p className="hidden text-muted-foreground sm:block">
+                    <span className="block">Enter to send</span>
+                    <span className="block">Shift+Enter for new line</span>
+                  </p>
+                )}
+              </div>
+
+              {showShortcutsButton && onShowShortcuts && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={onShowShortcuts}
+                  aria-label="Keyboard shortcuts"
+                  title="Keyboard shortcuts"
+                >
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              )}
+
               {allowFileUpload && (
                 <Button
                   onClick={async () => {
@@ -605,24 +784,81 @@ export default function CommentInput({
                       setUploadModalOpen(true)
                     }
                   }}
+                  type="button"
                   variant="outline"
                   size="icon"
                   className="shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation"
                   title="Attach file"
+                  aria-label="Attach file"
                   disabled={loading || uploading || attachedFiles.length >= MAX_FILES_PER_COMMENT}
                 >
                   <Paperclip className="w-4 h-4" />
                 </Button>
               )}
+
+              <Button
+                type="button"
+                variant={isRecordingVoiceNote ? 'destructive' : 'outline'}
+                size="icon"
+                onClick={() => {
+                  if (isRecordingVoiceNote) {
+                    stopVoiceNoteRecording(true)
+                    return
+                  }
+                  void startVoiceNoteRecording()
+                }}
+                title={isRecordingVoiceNote ? 'Stop recording' : 'Record voice note'}
+                aria-label={isRecordingVoiceNote ? 'Stop recording' : 'Record voice note'}
+                disabled={loading || uploading}
+              >
+                {isRecordingVoiceNote ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </Button>
+
               <Button
                 onClick={onSubmit}
                 variant="default"
                 disabled={!canSubmit || uploading || loading}
                 size="icon"
+                aria-label="Send comment"
+                title="Send comment"
               >
                 <Send className="w-4 h-4" />
               </Button>
             </div>
+
+            {isRecordingVoiceNote ? (
+              <div className="mt-2 rounded-lg border border-destructive/35 bg-destructive/5 px-3 py-2 text-xs text-foreground">
+                Recording voice note: {formatTimestamp(Math.min(voiceNoteElapsedSeconds, 120))} / 2:00
+              </div>
+            ) : null}
+
+            {voiceNoteError ? (
+              <div className="mt-2 text-xs text-destructive">{voiceNoteError}</div>
+            ) : null}
+
+            {voiceNoteDraft && voiceNotePreviewUrl ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Voice note preview ({formatTimestamp(voiceNoteDraft.durationSeconds)})
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      onVoiceNoteClear?.()
+                      setVoiceNoteError('')
+                    }}
+                    disabled={loading || uploading}
+                  >
+                    Remove
+                  </Button>
+                </div>
+                <VoiceNotePlayer src={voiceNotePreviewUrl} />
+              </div>
+            ) : null}
           </div>
 
           {/* Attached File Display */}
@@ -657,33 +893,6 @@ export default function CommentInput({
               </div>
             </div>
           )}
-
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <p
-                className={`text-xs ${
-                  showAuthorInput && !authorName.trim()
-                    ? 'text-warning'
-                    : 'text-muted-foreground invisible sm:visible'
-                }`}
-              >
-                {showAuthorInput && !authorName.trim()
-                  ? 'Enter your name to send'
-                  : 'Press Enter to send & Shift+Enter for new line'}
-              </p>
-            </div>
-            {showShortcutsButton && onShowShortcuts && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={onShowShortcuts}
-                className="hidden self-start sm:inline-flex sm:self-auto"
-              >
-                Shortcuts
-              </Button>
-            )}
-          </div>
 
           {/* File Upload Modal */}
           {allowFileUpload && (

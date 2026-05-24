@@ -33,6 +33,17 @@ interface UseCommentManagementProps {
   allowClientUploadFiles?: boolean
 }
 
+type AttachedCommentFile = {
+  name: string
+  size: number
+  file: File
+}
+
+type VoiceNoteDraft = {
+  file: File
+  durationSeconds: number
+}
+
 export function useCommentManagement({
   projectId,
   initialComments,
@@ -61,7 +72,8 @@ export function useCommentManagement({
   const [loading, setLoading] = useState(false)
   const [hasAutoFilledTimestamp, setHasAutoFilledTimestamp] = useState(false)
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null)
-  const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; size: number; file: File }>>([])
+  const [attachedFiles, setAttachedFiles] = useState<AttachedCommentFile[]>([])
+  const [voiceNoteDraft, setVoiceNoteDraft] = useState<VoiceNoteDraft | null>(null)
   const [pendingCommentId, setPendingCommentId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStatusText, setUploadStatusText] = useState<string>('')
@@ -106,10 +118,11 @@ export function useCommentManagement({
   const uploadCommentFileWithProgress = async (
     commentId: string,
     file: File,
-    onProgress: (loaded: number, total: number) => void
+    onProgress: (loaded: number, total: number) => void,
+    uploadIntent: 'attachment' | 'voice-note' = 'attachment'
   ): Promise<void> => {
     if (await isS3Mode()) {
-      return uploadCommentFileS3(commentId, file, onProgress)
+      return uploadCommentFileS3(commentId, file, onProgress, uploadIntent)
     }
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
@@ -144,6 +157,9 @@ export function useCommentManagement({
 
       const formData = new FormData()
       formData.append('file', file)
+      if (uploadIntent === 'voice-note') {
+        formData.append('uploadIntent', 'voice-note')
+      }
       xhr.send(formData)
     })
   }
@@ -155,7 +171,8 @@ export function useCommentManagement({
   const uploadCommentFileS3 = async (
     commentId: string,
     file: File,
-    onProgress: (loaded: number, total: number) => void
+    onProgress: (loaded: number, total: number) => void,
+    uploadIntent: 'attachment' | 'voice-note' = 'attachment'
   ): Promise<void> => {
     const token = shareToken ? shareToken : (useAdminAuth ? getAccessToken() : null)
 
@@ -169,6 +186,7 @@ export function useCommentManagement({
         fileSize: file.size,
         fileName: file.name,
         contentType: file.type || 'application/octet-stream',
+        uploadIntent,
       }),
     })
 
@@ -236,6 +254,7 @@ export function useCommentManagement({
         fileSize: file.size,
         fileName: file.name,
         fileType: file.type || 'application/octet-stream',
+        uploadIntent,
       }),
     })
 
@@ -445,16 +464,17 @@ export function useCommentManagement({
     setHasAutoFilledTimestamp(false)
     setReplyingToCommentId(null)
     setAttachedFiles([])
+    setVoiceNoteDraft(null)
     setPendingCommentId(null)
     setUploadStatusText('')
     setUploadProgress(null)
   }, [])
 
-  const hasUnsentComment = Boolean(newComment.trim() || attachedFiles.length > 0)
+  const hasUnsentComment = Boolean(newComment.trim() || attachedFiles.length > 0 || voiceNoteDraft)
 
   // Submit comment
   const handleSubmitComment = async () => {
-    if (!newComment.trim()) return
+    if (!newComment.trim() && !voiceNoteDraft) return
 
     // Prevent rapid-fire submissions
     if (loading) return
@@ -488,11 +508,12 @@ export function useCommentManagement({
     }
 
     // Pre-check project-level upload allocation for clients (avoid posting the comment then failing uploads)
-    if (!useAdminAuth && allowClientUploadFiles && attachedFiles.length > 0) {
+    if (!useAdminAuth && (attachedFiles.length > 0 || voiceNoteDraft)) {
       const quota = await fetchClientUploadQuota()
       if (quota && quota.limitMB > 0) {
         const limitBytes = quota.limitMB * 1024 * 1024
         const pendingBytes = attachedFiles.reduce((sum, f) => sum + (f.file?.size || 0), 0)
+          + (voiceNoteDraft?.file?.size || 0)
         if (quota.usedBytes + pendingBytes > limitBytes) {
           const remainingBytes = Math.max(0, limitBytes - quota.usedBytes)
           const remainingMB = Math.floor(remainingBytes / (1024 * 1024))
@@ -503,8 +524,9 @@ export function useCommentManagement({
     }
 
     setLoading(true)
-    setUploadProgress(attachedFiles.length > 0 ? 0 : null)
-    setUploadStatusText(attachedFiles.length > 0 ? 'Uploading...' : 'Sending...')
+  const hasAnyUploads = attachedFiles.length > 0 || Boolean(voiceNoteDraft)
+  setUploadProgress(hasAnyUploads ? 0 : null)
+  setUploadStatusText(hasAnyUploads ? 'Uploading...' : 'Sending...')
 
     // OPTIMISTIC UPDATE
     const isAdminContext = useAdminAuth || !!adminUser
@@ -519,13 +541,16 @@ export function useCommentManagement({
     const fps = selectedVideo?.fps || 24 // Default to 24fps if not available
     const timecode = selectedTimestamp !== null ? secondsToTimecode(selectedTimestamp, fps) : '00:00:00:00'
 
+    const rawCommentInput = newComment
+    const finalCommentContent = rawCommentInput.trim() ? rawCommentInput : '*Voice Note*'
+
     const optimisticComment: CommentWithReplies = {
       id: `temp-${Date.now()}`,
       projectId,
       videoId: validatedVideoId,
       videoVersion: videos.find(v => v.id === validatedVideoId)?.version || null,
       timecode,
-      content: newComment,
+      content: finalCommentContent,
       authorName: isAdminContext
         ? (adminUser!.name || 'Admin')
         : (isPasswordProtected ? authorName : 'Client'),
@@ -544,11 +569,21 @@ export function useCommentManagement({
     setOptimisticComments(prev => [...prev, optimisticComment])
 
     // Snapshot current form state; keep UI visible until uploads finish
-    const commentContent = newComment
+    const commentContent = finalCommentContent
     const commentTimestamp = selectedTimestamp
     const commentVideoId = validatedVideoId
     const commentParentId = replyingToCommentId
-    const filesToUpload = attachedFiles
+    const filesToUpload: Array<AttachedCommentFile & { uploadIntent: 'attachment' | 'voice-note' }> = [
+      ...attachedFiles.map((file) => ({ ...file, uploadIntent: 'attachment' as const })),
+      ...(voiceNoteDraft
+        ? [{
+            name: voiceNoteDraft.file.name,
+            size: voiceNoteDraft.file.size,
+            file: voiceNoteDraft.file,
+            uploadIntent: 'voice-note' as const,
+          }]
+        : []),
+    ]
 
     try {
       // Convert timestamp to timecode for API
@@ -623,12 +658,16 @@ export function useCommentManagement({
 
         for (const file of filesToUpload) {
           const currentTotal = file.file.size
-          setUploadStatusText(`Uploading ${file.name}...`)
+          setUploadStatusText(
+            file.uploadIntent === 'voice-note'
+              ? 'Uploading voice note...'
+              : `Uploading ${file.name}...`
+          )
 
           await uploadCommentFileWithProgress(newCommentId, file.file, (loaded) => {
             const overall = totalBytes > 0 ? (completedBytes + Math.min(loaded, currentTotal)) / totalBytes : 0
             setUploadProgress(Math.max(0, Math.min(100, Math.round(overall * 100))))
-          })
+          }, file.uploadIntent)
 
           completedBytes += currentTotal
           const overall = totalBytes > 0 ? completedBytes / totalBytes : 1
@@ -677,7 +716,7 @@ export function useCommentManagement({
       setOptimisticComments(prev => prev.filter(c => c.id !== optimisticComment.id))
       setUploadStatusText('')
       setUploadProgress(null)
-      setNewComment(commentContent)
+      setNewComment(rawCommentInput)
       setSelectedTimestamp(commentTimestamp)
       setSelectedVideoId(commentVideoId)
       alert(`Failed to submit comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -821,6 +860,17 @@ export function useCommentManagement({
     setAttachedFiles((prev) => [...prev, ...validated])
   }
 
+  const onVoiceNoteSelect = (file: File, durationSeconds: number) => {
+    setVoiceNoteDraft({
+      file,
+      durationSeconds: Math.max(0, Math.min(120, Math.round(durationSeconds))),
+    })
+  }
+
+  const onVoiceNoteClear = () => {
+    setVoiceNoteDraft(null)
+  }
+
   // Remove one attached file by index
   const onRemoveFile = (index: number) => {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
@@ -854,6 +904,9 @@ export function useCommentManagement({
     attachedFiles,
     onFileSelect,
     onRemoveFile,
+    voiceNoteDraft,
+    onVoiceNoteSelect,
+    onVoiceNoteClear,
     clientUploadQuota,
     refreshClientUploadQuota,
   }

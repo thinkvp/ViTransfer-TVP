@@ -26,7 +26,7 @@ import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
-import { getDownloadableFileKey, isImageFileName } from '@/lib/downloadable-file-utils'
+import { getDownloadableFileKey } from '@/lib/downloadable-file-utils'
 import type { DownloadQueueItem } from '@/lib/download-queue'
 import { useDownloadTransfers } from '@/hooks/useDownloadTransfers'
 import { calculateTransferSummary, createTransferId, isTransferActive, type TransferItem } from '@/lib/transfer-state'
@@ -1781,7 +1781,6 @@ export default function SharePage() {
     }
 
     if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
-    if (!isImageFileName(file.fileName)) return null
 
     try {
       const url = `/api/videos/${file.videoId}/assets/${file.assetId}/download-token`
@@ -1793,11 +1792,48 @@ export default function SharePage() {
 
       if (!response.ok) return null
       const data = await response.json().catch(() => ({}))
-      return typeof (data as any)?.url === 'string' ? String((data as any).url) : null
+      if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
+        return String((data as any).previewUrl)
+      }
+      return null
     } catch {
       return null
     }
   }, [filePreviewByVideoId, getUploadAccessUrl, isAdminSession, shareToken])
+
+  const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    if (typeof file.downloadUrl === 'string' && file.downloadUrl) {
+      return file.downloadUrl
+    }
+
+    if (file.type === 'upload-file' && file.uploadFileId) {
+      const tokenizedUrls = await getUploadAccessUrl(file.uploadFileId)
+      if (typeof tokenizedUrls?.downloadUrl === 'string' && tokenizedUrls.downloadUrl) {
+        return tokenizedUrls.downloadUrl
+      }
+      return null
+    }
+
+    if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
+
+    try {
+      const url = `/api/videos/${file.videoId}/assets/${file.assetId}/download-token`
+      const response = isAdminSession
+        ? await apiFetch(url, { method: 'POST' })
+        : shareToken
+          ? await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${shareToken}` } })
+          : await fetch(url, { method: 'POST' })
+
+      if (!response.ok) return null
+      const data = await response.json().catch(() => ({}))
+      if (typeof (data as any)?.url === 'string' && (data as any).url) {
+        return String((data as any).url)
+      }
+      return null
+    } catch {
+      return null
+    }
+  }, [getUploadAccessUrl, isAdminSession, shareToken])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (project?.enableVideos === false) return videos
@@ -2825,6 +2861,7 @@ export default function SharePage() {
               onOpenFolderNameChange={setRequestedFilesFolderName}
               folderPreviewByName={folderPreviewByName}
               resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
+              resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}
@@ -3241,6 +3278,9 @@ function ShareFeedbackGrid({
                 onFileSelect={management.onFileSelect}
                 attachedFiles={management.attachedFiles}
                 onRemoveFile={management.onRemoveFile}
+                voiceNoteDraft={management.voiceNoteDraft}
+                onVoiceNoteSelect={management.onVoiceNoteSelect}
+                onVoiceNoteClear={management.onVoiceNoteClear}
                 allowFileUpload={Boolean(project.allowClientUploadFiles)}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
@@ -3334,6 +3374,9 @@ function ShareFeedbackGrid({
                 onFileSelect={management.onFileSelect}
                 attachedFiles={management.attachedFiles}
                 onRemoveFile={management.onRemoveFile}
+                voiceNoteDraft={management.voiceNoteDraft}
+                onVoiceNoteSelect={management.onVoiceNoteSelect}
+                onVoiceNoteClear={management.onVoiceNoteClear}
                 allowFileUpload={Boolean(project.allowClientUploadFiles)}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}

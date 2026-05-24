@@ -104,6 +104,7 @@ export async function GET(
     const serializedAssets = assets.map(asset => ({
       ...asset,
       fileSize: asset.fileSize.toString(),
+      previewFileSize: asset.previewFileSize != null ? asset.previewFileSize.toString() : null,
     }))
 
     return NextResponse.json({
