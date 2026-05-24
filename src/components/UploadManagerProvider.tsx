@@ -98,12 +98,45 @@ export type CompletedServerJob = {
   error?: boolean
 }
 
+export type ClearRunningJobTarget = {
+  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename'
+  id: string
+}
+
 function getCompletedServerJobKey(job: Pick<CompletedServerJob, 'id' | 'type'>): string {
   return `${job.type}:${job.id}`
 }
 
 function getCompletedServerJobKeyByParts(type: CompletedServerJob['type'], id: string): string {
   return `${type}:${id}`
+}
+
+const DISMISSED_SERVER_JOB_STORAGE_KEY = 'vitransfer-dismissed-running-jobs-v1'
+
+function loadDismissedServerJobIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_SERVER_JOB_STORAGE_KEY)
+    if (!raw) return new Set()
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+
+    return new Set(parsed.filter((value): value is string => typeof value === 'string' && value.length > 0))
+  } catch {
+    return new Set()
+  }
+}
+
+function persistDismissedServerJobIds(ids: Set<string>) {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(DISMISSED_SERVER_JOB_STORAGE_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Ignore storage failures (private mode / quota issues)
+  }
 }
 
 export type StartUploadConfig = {
@@ -142,13 +175,15 @@ export type UploadManagerContextType = {
   dismissUpload: (id: string) => void
   /** Remove a completed server-side job from the list. */
   dismissCompletedJob: (id: string) => void
+  /** Clear a queued server-side job and try to remove it from BullMQ too. */
+  clearRunningJob: (target: ClearRunningJobTarget) => Promise<void>
   /** Notify the provider when the Running Jobs dropdown opens/closes (adjusts poll rate). */
   setDropdownOpen: (open: boolean) => void
 }
 
 type UploadManagerActionsContextType = Pick<
   UploadManagerContextType,
-  'addUpload' | 'cancelUpload' | 'pauseUpload' | 'resumeUpload' | 'dismissUpload' | 'dismissCompletedJob' | 'setDropdownOpen'
+  'addUpload' | 'cancelUpload' | 'pauseUpload' | 'resumeUpload' | 'dismissUpload' | 'dismissCompletedJob' | 'clearRunningJob' | 'setDropdownOpen'
 >
 
 // ---------------------------------------------------------------------------
@@ -227,6 +262,10 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const prevFolderRenameMapRef = useRef<Map<string, FolderRenameJob>>(new Map())
   // Track IDs that the user has manually dismissed (so re-polls don't re-add them).
   const dismissedServerJobIdsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    dismissedServerJobIdsRef.current = loadDismissedServerJobIds()
+  }, [])
 
   // ------ helpers ------
 
@@ -654,12 +693,20 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           }
 
           if (Array.isArray(data.completedProcessingJobs) && data.completedProcessingJobs.length > 0) {
-            newCompleted.push(...(data.completedProcessingJobs as CompletedServerJob[]))
+            newCompleted.push(
+              ...(data.completedProcessingJobs as CompletedServerJob[]).filter(
+                (job) => !dismissedServerJobIdsRef.current.has(getCompletedServerJobKey(job)),
+              ),
+            )
           }
 
           // Errored video processing jobs from API
           if (Array.isArray(data.erroredProcessingJobs) && data.erroredProcessingJobs.length > 0) {
-            newCompleted.push(...(data.erroredProcessingJobs as CompletedServerJob[]))
+            newCompleted.push(
+              ...(data.erroredProcessingJobs as CompletedServerJob[]).filter(
+                (job) => !dismissedServerJobIdsRef.current.has(getCompletedServerJobKey(job)),
+              ),
+            )
           }
 
           // --- Album ZIP jobs ---
@@ -953,7 +1000,37 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const dismissCompletedJob = useCallback(
     (jobKey: string) => {
       dismissedServerJobIdsRef.current.add(jobKey)
+      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
       setCompletedServerJobs((prev) => prev.filter((j) => getCompletedServerJobKey(j) !== jobKey))
+    },
+    [],
+  )
+
+  const clearRunningJob = useCallback(
+    async (target: ClearRunningJobTarget) => {
+      await apiPost('/api/running-jobs', target)
+
+      const jobKey = getCompletedServerJobKeyByParts(target.type, target.id)
+      dismissedServerJobIdsRef.current.add(jobKey)
+      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
+      setCompletedServerJobs((prev) => prev.filter((job) => getCompletedServerJobKey(job) !== jobKey))
+
+      if (target.type === 'processing') {
+        setProcessingJobs((prev) => prev.filter((job) => job.id !== target.id))
+        return
+      }
+
+      if (target.type === 'albumZip') {
+        setAlbumZipJobs((prev) => prev.filter((job) => job.id !== target.id))
+        return
+      }
+
+      if (target.type === 'albumThumbnail') {
+        setAlbumThumbnailJobs((prev) => prev.filter((job) => job.id !== target.id))
+        return
+      }
+
+      setFolderRenameJobs((prev) => prev.filter((job) => job.id !== target.id))
     },
     [],
   )
@@ -974,8 +1051,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     resumeUpload,
     dismissUpload,
     dismissCompletedJob,
+    clearRunningJob,
     setDropdownOpen,
-  }), [addUpload, cancelUpload, dismissCompletedJob, dismissUpload, pauseUpload, resumeUpload])
+  }), [addUpload, cancelUpload, clearRunningJob, dismissCompletedJob, dismissUpload, pauseUpload, resumeUpload])
 
   const contextValue = useMemo<UploadManagerContextType>(() => ({
     uploads,
@@ -991,6 +1069,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     resumeUpload,
     dismissUpload,
     dismissCompletedJob,
+    clearRunningJob,
     setDropdownOpen,
   }), [
     uploads,
@@ -1006,6 +1085,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     resumeUpload,
     dismissUpload,
     dismissCompletedJob,
+    clearRunningJob,
   ])
 
   return (

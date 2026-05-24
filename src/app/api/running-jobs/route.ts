@@ -5,7 +5,9 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
 import { getRedis } from '@/lib/redis'
-import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue } from '@/lib/queue'
+import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue, getFolderRenameQueue } from '@/lib/queue'
+import { getAlbumZipJobId, type AlbumZipVariant } from '@/lib/album-photo-zip'
+import { getAlbumThumbnailQueueJobId } from '@/lib/album-photo-thumbnail'
 
 export const runtime = 'nodejs'
 
@@ -310,6 +312,149 @@ export async function GET(request: NextRequest) {
     })
   } catch (err: any) {
     console.error('[running-jobs]', err)
+    return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })
+  }
+}
+
+/**
+ * POST /api/running-jobs
+ *
+ * Clears a queued running job from the UI and best-effort removes the
+ * matching BullMQ job / DB record.
+ */
+export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuth(request)
+  if (authResult instanceof Response) return authResult
+
+  const rateLimitResult = await rateLimit(request, { windowMs: 10 * 1000, maxRequests: 20 }, 'running-jobs-clear')
+  if (rateLimitResult) return rateLimitResult
+
+  const body = await request.json().catch(() => ({}))
+  const type = body?.type
+  const id = typeof body?.id === 'string' ? body.id : ''
+
+  if (!id || !['processing', 'albumZip', 'albumThumbnail', 'folderRename'].includes(type)) {
+    return NextResponse.json({ error: 'Invalid running job target' }, { status: 400 })
+  }
+
+  try {
+    if (type === 'processing') {
+      const video = await prisma.video.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+        },
+      })
+
+      if (!video) {
+        return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+      }
+
+      if (video.status !== 'QUEUED') {
+        return NextResponse.json({ error: 'Only queued video jobs can be cleared' }, { status: 409 })
+      }
+
+      const videoQueue = getVideoQueue()
+      const queuedJobs = await videoQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      let removedJobs = 0
+
+      for (const job of queuedJobs) {
+        if (job?.data?.videoId === id) {
+          await job.remove().catch(() => {})
+          removedJobs++
+        }
+      }
+
+      await prisma.video.update({
+        where: { id },
+        data: {
+          status: 'READY',
+          processingPhase: null,
+          processingError: null,
+        },
+      })
+
+      return NextResponse.json({ ok: true, type, id, removedJobs })
+    }
+
+    if (type === 'albumZip') {
+      const [albumId, variant] = id.split(':') as [string, AlbumZipVariant | undefined]
+      if (!albumId || (variant !== 'full' && variant !== 'social')) {
+        return NextResponse.json({ error: 'Invalid album ZIP job id' }, { status: 400 })
+      }
+
+      const albumZipQueue = getAlbumPhotoZipQueue()
+      const queueJobId = getAlbumZipJobId({ albumId, variant })
+      const queueJob = await albumZipQueue.getJob(queueJobId)
+      if (queueJob) {
+        await queueJob.remove().catch(() => {})
+      }
+
+      return NextResponse.json({ ok: true, type, id, removedJobs: queueJob ? 1 : 0 })
+    }
+
+    if (type === 'albumThumbnail') {
+      const albumThumbnailJob = await prisma.albumThumbnailJob.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          albumId: true,
+          status: true,
+        },
+      })
+
+      if (!albumThumbnailJob) {
+        return NextResponse.json({ error: 'Album thumbnail job not found' }, { status: 404 })
+      }
+
+      if (albumThumbnailJob.status !== 'PENDING') {
+        return NextResponse.json({ error: 'Only queued album thumbnail jobs can be cleared' }, { status: 409 })
+      }
+
+      const thumbnailQueue = getAlbumPhotoThumbnailQueue()
+      const queueJob = await thumbnailQueue.getJob(getAlbumThumbnailQueueJobId(albumThumbnailJob.albumId))
+      if (queueJob) {
+        await queueJob.remove().catch(() => {})
+      }
+
+      await prisma.albumThumbnailJob.delete({ where: { id } })
+
+      return NextResponse.json({ ok: true, type, id, removedJobs: queueJob ? 1 : 0 })
+    }
+
+    const folderRenameJob = await prisma.folderRenameJob.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+      },
+    })
+
+    if (!folderRenameJob) {
+      return NextResponse.json({ error: 'Folder rename job not found' }, { status: 404 })
+    }
+
+    if (folderRenameJob.status !== 'PENDING') {
+      return NextResponse.json({ error: 'Only queued folder rename jobs can be cleared' }, { status: 409 })
+    }
+
+    const folderRenameQueue = getFolderRenameQueue()
+    const queuedJobs = await folderRenameQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+    let removedJobs = 0
+
+    for (const job of queuedJobs) {
+      if (job?.data?.folderRenameJobId === id) {
+        await job.remove().catch(() => {})
+        removedJobs++
+      }
+    }
+
+    await prisma.folderRenameJob.delete({ where: { id } })
+
+    return NextResponse.json({ ok: true, type, id, removedJobs })
+  } catch (err: any) {
+    console.error('[running-jobs-clear]', err)
     return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })
   }
 }

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
-import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob } from '@/components/UploadManagerProvider'
+import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob, type ClearRunningJobTarget } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
@@ -46,6 +46,30 @@ function VideoNameWithLabel({
         <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">{versionLabel}</div>
       ) : null}
     </div>
+  )
+}
+
+function ClearQueuedJobButton({
+  onClick,
+  disabled,
+}: {
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      disabled={disabled}
+      className="absolute right-2 top-2 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+      title="Clear queued job"
+      aria-label="Clear queued job"
+    >
+      <X className="h-3.5 w-3.5" />
+    </button>
   )
 }
 
@@ -161,7 +185,17 @@ function UploadJobRow({ job, onNavigate }: { job: UploadJob; onNavigate: (projec
   )
 }
 
-function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate: (projectId: string) => void }) {
+function ProcessingJobRow({
+  job,
+  onNavigate,
+  onClear,
+  clearDisabled,
+}: {
+  job: ProcessingJob
+  onNavigate: (projectId: string) => void
+  onClear?: () => void
+  clearDisabled?: boolean
+}) {
   const rawProgress = job.processingProgress ?? 0
   const progressPercent = Math.min(
     Math.round(rawProgress <= 1 ? rawProgress * 100 : rawProgress),
@@ -177,9 +211,10 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
 
   return (
     <div
-      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      className="relative px-4 py-3 pr-10 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
       onClick={() => onNavigate(job.projectId)}
     >
+      {job.status === 'QUEUED' && onClear ? <ClearQueuedJobButton onClick={onClear} disabled={clearDisabled} /> : null}
       <div className="min-w-0">
         <VideoNameWithLabel videoName={job.videoName} versionLabel={job.versionLabel} />
         <div className="text-[11px] text-muted-foreground truncate">{job.projectName}</div>
@@ -218,15 +253,26 @@ function ProcessingJobRow({ job, onNavigate }: { job: ProcessingJob; onNavigate:
   )
 }
 
-function AlbumZipJobRow({ job, onNavigate }: { job: AlbumZipJob; onNavigate: (projectId: string) => void }) {
+function AlbumZipJobRow({
+  job,
+  onNavigate,
+  onClear,
+  clearDisabled,
+}: {
+  job: AlbumZipJob
+  onNavigate: (projectId: string) => void
+  onClear?: () => void
+  clearDisabled?: boolean
+}) {
   const isPending = job.status === 'PENDING'
   const variantLabel = job.variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
 
   return (
     <div
-      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      className="relative px-4 py-3 pr-10 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
       onClick={() => onNavigate(job.projectId)}
     >
+      {isPending && onClear ? <ClearQueuedJobButton onClick={onClear} disabled={clearDisabled} /> : null}
       <div className="min-w-0">
         <div className="flex min-w-0 items-baseline gap-2">
           <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.albumName}</div>
@@ -263,7 +309,17 @@ function AlbumZipJobRow({ job, onNavigate }: { job: AlbumZipJob; onNavigate: (pr
   )
 }
 
-function AlbumThumbnailJobRow({ job, onNavigate }: { job: AlbumThumbnailJob; onNavigate: (projectId: string) => void }) {
+function AlbumThumbnailJobRow({
+  job,
+  onNavigate,
+  onClear,
+  clearDisabled,
+}: {
+  job: AlbumThumbnailJob
+  onNavigate: (projectId: string) => void
+  onClear?: () => void
+  clearDisabled?: boolean
+}) {
   const isPending = job.status === 'PENDING'
   const totalBytes = Number(job.totalBytes)
   const processedBytes = Number(job.processedBytes)
@@ -273,9 +329,10 @@ function AlbumThumbnailJobRow({ job, onNavigate }: { job: AlbumThumbnailJob; onN
 
   return (
     <div
-      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      className="relative px-4 py-3 pr-10 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
       onClick={() => onNavigate(job.projectId)}
     >
+      {isPending && onClear ? <ClearQueuedJobButton onClick={onClear} disabled={clearDisabled} /> : null}
       <div className="min-w-0">
         <div className="flex min-w-0 items-baseline gap-2">
           <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.albumName}</div>
@@ -315,7 +372,7 @@ function AlbumThumbnailJobRow({ job, onNavigate }: { job: AlbumThumbnailJob; onN
   )
 }
 
-function FolderRenameJobRow({ job }: { job: FolderRenameJob }) {
+function FolderRenameJobRow({ job, onClear, clearDisabled }: { job: FolderRenameJob; onClear?: () => void; clearDisabled?: boolean }) {
   const isPending = job.status === 'PENDING'
   const totalBytes = Number(job.totalBytes)
   const copiedBytes = Number(job.copiedBytes)
@@ -326,7 +383,8 @@ function FolderRenameJobRow({ job }: { job: FolderRenameJob }) {
     : 'Album'
 
   return (
-    <div className="px-4 py-3 space-y-2">
+    <div className="relative px-4 py-3 pr-10 space-y-2">
+      {isPending && onClear ? <ClearQueuedJobButton onClick={onClear} disabled={clearDisabled} /> : null}
       <div className="min-w-0">
         <div className="flex min-w-0 items-baseline gap-2">
           <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.entityName}</div>
@@ -439,14 +497,36 @@ function CompletedServerJobRow({
 }
 
 export default function RunningJobsBell() {
-  const { uploads, processingJobs, albumZipJobs, albumThumbnailJobs, folderRenameJobs, completedServerJobs, totalActiveCount, dismissCompletedJob, setDropdownOpen } = useUploadManager()
+  const {
+    uploads,
+    processingJobs,
+    albumZipJobs,
+    albumThumbnailJobs,
+    folderRenameJobs,
+    completedServerJobs,
+    totalActiveCount,
+    dismissCompletedJob,
+    clearRunningJob,
+    setDropdownOpen,
+  } = useUploadManager()
   const [open, setOpen] = useState(false)
+  const [clearingJobKey, setClearingJobKey] = useState<string | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const router = useRouter()
 
   function handleNavigate(projectId: string) {
     setOpen(false)
     router.push(`/admin/projects/${projectId}`)
+  }
+
+  async function handleClearJob(target: ClearRunningJobTarget) {
+    const jobKey = `${target.type}:${target.id}`
+    setClearingJobKey(jobKey)
+    try {
+      await clearRunningJob(target)
+    } finally {
+      setClearingJobKey((current) => (current === jobKey ? null : current))
+    }
   }
 
   useEffect(() => {
@@ -564,7 +644,17 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {albumZipJobs.map((job) => (
-                        <AlbumZipJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                        <AlbumZipJobRow
+                          key={job.id}
+                          job={job}
+                          onNavigate={handleNavigate}
+                          clearDisabled={clearingJobKey === `albumZip:${job.id}`}
+                          onClear={
+                            job.status === 'PENDING'
+                              ? () => handleClearJob({ type: 'albumZip', id: job.id })
+                              : undefined
+                          }
+                        />
                       ))}
                     </div>
                   </div>
@@ -578,7 +668,17 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {albumThumbnailJobs.map((job) => (
-                        <AlbumThumbnailJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                        <AlbumThumbnailJobRow
+                          key={job.id}
+                          job={job}
+                          onNavigate={handleNavigate}
+                          clearDisabled={clearingJobKey === `albumThumbnail:${job.id}`}
+                          onClear={
+                            job.status === 'PENDING'
+                              ? () => handleClearJob({ type: 'albumThumbnail', id: job.id })
+                              : undefined
+                          }
+                        />
                       ))}
                     </div>
                   </div>
@@ -592,7 +692,16 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {folderRenameJobs.map((job) => (
-                        <FolderRenameJobRow key={job.id} job={job} />
+                        <FolderRenameJobRow
+                          key={job.id}
+                          job={job}
+                          clearDisabled={clearingJobKey === `folderRename:${job.id}`}
+                          onClear={
+                            job.status === 'PENDING'
+                              ? () => handleClearJob({ type: 'folderRename', id: job.id })
+                              : undefined
+                          }
+                        />
                       ))}
                     </div>
                   </div>
@@ -606,7 +715,17 @@ export default function RunningJobsBell() {
                     </div>
                     <div className="divide-y divide-border">
                       {processingJobs.map((job) => (
-                        <ProcessingJobRow key={job.id} job={job} onNavigate={handleNavigate} />
+                        <ProcessingJobRow
+                          key={job.id}
+                          job={job}
+                          onNavigate={handleNavigate}
+                          clearDisabled={clearingJobKey === `processing:${job.id}`}
+                          onClear={
+                            job.status === 'QUEUED'
+                              ? () => handleClearJob({ type: 'processing', id: job.id })
+                              : undefined
+                          }
+                        />
                       ))}
                     </div>
                   </div>
