@@ -134,26 +134,6 @@ type NormalizeAccountingAttachmentPathsResult = {
   sampleTruncated: boolean
 }
 
-type PreviewPathMigrationResult = {
-  ok: true
-  dryRun: boolean
-  scannedVideos: number
-  scannedAlbumPhotos: number
-  scannedShareUploadFiles: number
-  scannedVideoAssets: number
-  updatedRecords: number
-  updatedFields: number
-  sample: Array<{
-    entity: 'video' | 'albumPhoto' | 'shareUploadFile' | 'videoAsset'
-    id: string
-    field: string
-    from: string
-    to: string
-  }>
-  sampleTruncated: boolean
-  errors?: Array<{ entity: string; id: string; error: string }>
-}
-
 interface DeveloperToolsSectionProps {
   excludeInternalIpsFromAnalytics: boolean
   setExcludeInternalIpsFromAnalytics: (value: boolean) => void
@@ -237,10 +217,6 @@ export function DeveloperToolsSection({
   const [accountingPathRepairLoading, setAccountingPathRepairLoading] = useState(false)
   const [accountingPathRepairResult, setAccountingPathRepairResult] = useState<NormalizeAccountingAttachmentPathsResult | null>(null)
   const [accountingPathRepairError, setAccountingPathRepairError] = useState<string | null>(null)
-
-  const [previewPathMigrationLoading, setPreviewPathMigrationLoading] = useState(false)
-  const [previewPathMigrationResult, setPreviewPathMigrationResult] = useState<PreviewPathMigrationResult | null>(null)
-  const [previewPathMigrationError, setPreviewPathMigrationError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -360,19 +336,6 @@ export function DeveloperToolsSection({
     }
   }
 
-  async function runPreviewPathMigration(dryRun: boolean) {
-    setPreviewPathMigrationLoading(true)
-    setPreviewPathMigrationError(null)
-    try {
-      const result = await apiPost('/api/settings/migrate-preview-paths', { dryRun })
-      setPreviewPathMigrationResult(result as PreviewPathMigrationResult)
-    } catch (error: any) {
-      setPreviewPathMigrationError(error?.message || 'Failed to migrate preview paths')
-    } finally {
-      setPreviewPathMigrationLoading(false)
-    }
-  }
-
   async function runBullmqPurge(dryRun: boolean) {
     setBullmqPurgeLoading(true)
     setBullmqPurgeError(null)
@@ -435,10 +398,6 @@ export function DeveloperToolsSection({
       return `[INVALID] ${entry.id} | ${entry.from} | error=${entry.error} | name=${entry.originalName}`
     }
     return `[NORMALIZE] ${entry.id} | ${entry.from} -> ${entry.to} | name=${entry.originalName}`
-  }
-
-  function formatPreviewMigrationSample(entry: PreviewPathMigrationResult['sample'][number]) {
-    return `[${entry.entity}] ${entry.id} | ${entry.field} | ${entry.from} -> ${entry.to}`
   }
 
   return (
@@ -861,47 +820,6 @@ export function DeveloperToolsSection({
                   {orphanProjectFilesLoading ? 'Running…' : 'Clean up orphans'}
                 </Button>
               </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="space-y-0.5">
-              <Label>Preview path migration</Label>
-              <p className="text-xs text-muted-foreground">
-                Rewrites existing preview and thumbnail DB paths into the project-root <code>.previews</code> tree.
-                Run the dry run first, then apply. Old files are left as orphans for the integrity scan to remove.
-              </p>
-            </div>
-
-            {previewPathMigrationError ? <p className="text-xs text-destructive">{previewPathMigrationError}</p> : null}
-
-            {previewPathMigrationResult ? (
-              <div className="space-y-1 rounded-md border border-border bg-background/40 p-3 text-xs">
-                <p className="text-muted-foreground">
-                  {previewPathMigrationResult.scannedVideos} videos, {previewPathMigrationResult.scannedAlbumPhotos} album photos, {previewPathMigrationResult.scannedShareUploadFiles} share-upload files, {previewPathMigrationResult.scannedVideoAssets} video assets scanned.
-                </p>
-                <p>
-                  {previewPathMigrationResult.updatedRecords} records need updates across {previewPathMigrationResult.updatedFields} fields.
-                  {previewPathMigrationResult.dryRun ? ' Dry run only.' : ' Applied.'}
-                </p>
-                {previewPathMigrationResult.sample.length > 0 ? (
-                  <div className="space-y-1">
-                    <p className="text-muted-foreground">Sample:</p>
-                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/60 p-2">{previewPathMigrationResult.sample.map(formatPreviewMigrationSample).join('\n')}</pre>
-                    {previewPathMigrationResult.sampleTruncated ? <p className="text-muted-foreground">Sample truncated.</p> : null}
-                  </div>
-                ) : null}
-                {previewPathMigrationResult.errors?.length ? <p className="text-muted-foreground">Errors: {previewPathMigrationResult.errors.length}</p> : null}
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" disabled={previewPathMigrationLoading} onClick={() => void runPreviewPathMigration(true)}>
-                {previewPathMigrationLoading ? 'Running…' : 'Dry run preview paths'}
-              </Button>
-              <Button type="button" variant="outline" disabled={previewPathMigrationLoading} onClick={() => void runPreviewPathMigration(false)}>
-                {previewPathMigrationLoading ? 'Running…' : 'Apply preview migration'}
-              </Button>
             </div>
           </div>
 

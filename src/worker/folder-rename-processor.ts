@@ -1,4 +1,5 @@
 import { Job } from 'bullmq'
+import path from 'path'
 import { FolderRenameJobPayload } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { isS3Mode, s3MoveDirectoryWithProgress } from '../lib/s3-storage'
@@ -41,7 +42,9 @@ async function updateProjectDbPaths(
 
     await tx.$executeRaw`
       UPDATE "VideoAsset"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
+      SET
+        "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix}),
+        "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPrefix}, ${newPrefix}) END
       WHERE "videoId" IN (SELECT "id" FROM "Video" WHERE "projectId" = ${projectId})
     `
 
@@ -113,7 +116,9 @@ async function updateClientDbPaths(
 
     await tx.$executeRaw`
       UPDATE "VideoAsset"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
+      SET
+        "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix}),
+        "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPrefix}, ${newPrefix}) END
       WHERE "videoId" IN (
         SELECT "id" FROM "Video"
         WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
@@ -218,24 +223,32 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
       await updateClientDbPaths(renameJob.entityId, renameJob.oldPrefix, renameJob.newPrefix)
     } else if (renameJob.entityType === 'VIDEO_GROUP') {
       // entityId = projectId; update video + asset paths for this folder only
+      const projectPrefix = path.posix.dirname(path.posix.dirname(renameJob.oldPrefix))
+      const oldFolderName = path.posix.basename(renameJob.oldPrefix)
+      const newFolderName = path.posix.basename(renameJob.newPrefix)
+      const oldPreviewPrefix = `${projectPrefix}/.previews/videos/${oldFolderName}`
+      const newPreviewPrefix = `${projectPrefix}/.previews/videos/${newFolderName}`
+
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`
           UPDATE "Video"
           SET
             "storageFolderName" = ${renameJob.entityName},
             "originalStoragePath" = REPLACE("originalStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE("preview480Path",      ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
-            "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE("preview720Path",      ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
-            "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE("preview1080Path",     ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
-            "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE("thumbnailPath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
-            "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath",     ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
-            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END
+            "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE(REPLACE("preview480Path",      ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE(REPLACE("preview720Path",      ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE(REPLACE("preview1080Path",     ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE(REPLACE("thumbnailPath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewVttPath",     ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewSpritesPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END
           WHERE "projectId" = ${renameJob.entityId}
             AND "originalStoragePath" LIKE ${renameJob.oldPrefix + '%'}
         `
         await tx.$executeRaw`
           UPDATE "VideoAsset"
-          SET "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix})
+          SET
+            "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
+            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("previewPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END
           WHERE "storagePath" LIKE ${renameJob.oldPrefix + '%'}
         `
       })

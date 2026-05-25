@@ -1889,7 +1889,10 @@ export default function AdminSharePage() {
               type="button"
               variant={desktopContentTab === 'view' ? 'default' : 'outline'}
               size="default"
-              className="h-full rounded-none border-y-0 border-l border-r-0 px-4"
+              className={cn(
+                'h-full rounded-none border-y-0 border-l border-r-0 px-4',
+                desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+              )}
               onClick={() => setDesktopContentTab('view')}
             >
               VIEW
@@ -1898,7 +1901,10 @@ export default function AdminSharePage() {
               type="button"
               variant={desktopContentTab === 'files' ? 'default' : 'outline'}
               size="default"
-              className="h-full rounded-none border-y-0 border-l px-4"
+              className={cn(
+                'h-full rounded-none border-y-0 border-l px-4',
+                desktopContentTab !== 'files' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+              )}
               onClick={() => setDesktopContentTab('files')}
             >
               FILES ({availableFileCount})
@@ -1914,7 +1920,10 @@ export default function AdminSharePage() {
               type="button"
               variant={desktopContentTab === 'view' ? 'default' : 'outline'}
               size="sm"
-              className="w-full"
+              className={cn(
+                'w-full',
+                desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+              )}
               onClick={() => setDesktopContentTab('view')}
             >
               VIEW
@@ -1923,7 +1932,10 @@ export default function AdminSharePage() {
               type="button"
               variant={desktopContentTab === 'files' ? 'default' : 'outline'}
               size="sm"
-              className="w-full"
+              className={cn(
+                'w-full',
+                desktopContentTab !== 'files' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+              )}
               onClick={() => setDesktopContentTab('files')}
             >
               FILES ({availableFileCount})
@@ -1933,7 +1945,10 @@ export default function AdminSharePage() {
       )}
 
       {/* Content */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row lg:gap-1 overflow-y-auto lg:overflow-hidden">
+      <div className={cn(
+        'flex-1 min-h-0 flex flex-col lg:flex-row lg:gap-1 overflow-y-auto lg:overflow-hidden',
+        desktopContentTab === 'files' ? 'gap-2 lg:gap-1' : 'gap-0'
+      )}>
         {/* Video Sidebar */}
         <VideoSidebar
           videosByName={sidebarVideosByName}
@@ -1973,7 +1988,8 @@ export default function AdminSharePage() {
         <div
           className={cn(
             'flex-1 flex flex-col min-w-0 overflow-x-hidden lg:h-[calc(100dvh-var(--admin-header-height))] lg:overflow-hidden',
-            activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto'
+            activeAlbumId ? 'overflow-hidden' : 'overflow-y-auto',
+            desktopContentTab === 'files' ? 'mt-2 lg:mt-0' : ''
           )}
         >
           <div

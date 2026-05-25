@@ -10,8 +10,8 @@ export const runtime = 'nodejs'
 /**
  * POST /api/settings/delete-closed-project-previews
  *
- * Deletes preview files (480p, 720p, 1080p) and timeline sprite directories
- * for all CLOSED projects.
+ * Deletes project video previews (480p, 720p, 1080p), timeline sprite directories,
+ * and video-asset generated previews for all CLOSED projects.
  *
  * Body: { dryRun?: boolean }   (default true)
  */
@@ -61,11 +61,44 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Only include projects that actually have videos with previews
-    const projectsWithPreviews = closedProjects.filter(p => p.videos.length > 0)
+    const closedProjectIds = closedProjects.map((p) => p.id)
+    const closedProjectAssetPreviews = closedProjectIds.length > 0
+      ? await prisma.videoAsset.findMany({
+          where: {
+            video: { projectId: { in: closedProjectIds } },
+            previewPath: { not: null },
+          },
+          select: {
+            id: true,
+            previewPath: true,
+            video: {
+              select: {
+                projectId: true,
+              },
+            },
+          },
+        })
+      : []
+
+    const assetPreviewsByProjectId = new Map<string, Array<{ id: string; previewPath: string }>>()
+    for (const asset of closedProjectAssetPreviews) {
+      const previewPath = String(asset.previewPath || '').trim()
+      if (!previewPath) continue
+      const projectId = asset.video.projectId
+      const current = assetPreviewsByProjectId.get(projectId) || []
+      current.push({ id: asset.id, previewPath })
+      assetPreviewsByProjectId.set(projectId, current)
+    }
+
+    // Only include projects that actually have video previews/timelines or asset previews
+    const projectsWithPreviews = closedProjects.filter((project) => {
+      const assetPreviews = assetPreviewsByProjectId.get(project.id) || []
+      return project.videos.length > 0 || assetPreviews.length > 0
+    })
 
     let totalProjects = projectsWithPreviews.length
     let totalVideos = 0
+    let totalVideoAssets = 0
     let totalPreviewFiles = 0
     let totalTimelineDirs = 0
     let deletedPreviewFiles = 0
@@ -75,6 +108,8 @@ export async function POST(request: NextRequest) {
     const errors: Array<{ projectId: string; path: string; error: string }> = []
 
     for (const project of projectsWithPreviews) {
+      const projectAssetPreviews = assetPreviewsByProjectId.get(project.id) || []
+
       for (const video of project.videos) {
         totalVideos++
 
@@ -150,6 +185,39 @@ export async function POST(request: NextRequest) {
           }
         }
       }
+
+      for (const asset of projectAssetPreviews) {
+        totalVideoAssets++
+
+        totalPreviewFiles += 1
+
+        if (!dryRun) {
+          try {
+            await deleteFile(asset.previewPath)
+            deletedPreviewFiles++
+          } catch (err: any) {
+            failedPreviewFiles++
+            errors.push({ projectId: project.id, path: asset.previewPath, error: err?.message || 'Unknown error' })
+          }
+
+          await prisma.videoAsset.update({
+            where: { id: asset.id },
+            data: {
+              previewPath: null,
+              previewStatus: null,
+              previewError: null,
+              previewGeneratedAt: null,
+              previewFileSize: null,
+            },
+          }).catch((err: any) => {
+            errors.push({
+              projectId: project.id,
+              path: `videoAsset:${asset.id}`,
+              error: err?.message || 'Failed to clear video asset preview metadata',
+            })
+          })
+        }
+      }
     }
 
     // Compute the set of affected projects
@@ -159,6 +227,7 @@ export async function POST(request: NextRequest) {
         id: p.id,
         title: p.title,
         videos: p.videos.length,
+        videoAssets: (assetPreviewsByProjectId.get(p.id) || []).length,
       }))
 
     return NextResponse.json({
@@ -167,6 +236,7 @@ export async function POST(request: NextRequest) {
       closedProjects: closedProjects.length,
       projectsWithPreviews: totalProjects,
       videosWithPreviews: totalVideos,
+      videoAssetsWithPreviews: totalVideoAssets,
       previewFiles: totalPreviewFiles,
       timelineDirs: totalTimelineDirs,
       ...(!dryRun

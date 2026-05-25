@@ -5,6 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.7] - 2026-05-25
+
+### Fixed
+- **Storage integrity scan now recognizes companion JPG previews for video assets** — video-asset preview generation writes both an MP4 playback preview and a JPG card thumbnail; orphan/missing reference builders now include the canonical JPG companion path for video assets so valid preview thumbnails are no longer falsely reported as storage orphans.
+- **Project reopen regeneration now respects configured preview resolutions and requeues all preview families** — reopening from CLOSED now checks each READY video against the project's selected preview resolutions (instead of only `preview720Path`), regenerates only missing preview/timeline/thumbnail work, and also requeues missing or stale share-upload and video-asset preview jobs.
+- **Video-asset preview paths now stay aligned during rename flows** — single-video rename, batch video-group rename, and background folder-rename SQL rebases now keep `VideoAsset.previewPath` and its companion JPG path synchronized with moved storage roots/folders.
+- **Closed-project preview cleanup now also removes Video Asset previews** — both auto-delete-on-close and the manual "Delete previews for closed projects" action now delete `VideoAsset.previewPath` files and clear related preview metadata on `VideoAsset` records.
+
+### Removed
+- **Developer Tools preview-path migration action has been removed** — the `POST /api/settings/migrate-preview-paths` endpoint, the backing preview-path migration module, and the Developer Tools UI controls/results for that action have been deleted.
+
 ## [1.8.6] - 2026-05-24
 
 ### Fixed

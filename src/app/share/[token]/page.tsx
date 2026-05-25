@@ -2670,7 +2670,7 @@ export default function SharePage() {
               className={cn(
                 'h-full rounded-none border-y-0 border-l border-r-0 px-4',
                 desktopContentTab !== 'view' &&
-                  'bg-primary/10 text-primary/75 border-primary/30 hover:bg-primary/15 hover:text-primary'
+                  'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('view')}
             >
@@ -2683,7 +2683,7 @@ export default function SharePage() {
               className={cn(
                 'h-full rounded-none border-y-0 border-l px-4',
                 desktopContentTab !== 'files' &&
-                  'bg-primary/10 text-primary/75 border-primary/30 hover:bg-primary/15 hover:text-primary'
+                  'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('files')}
             >
@@ -2700,7 +2700,10 @@ export default function SharePage() {
               type="button"
               variant={desktopContentTab === 'view' ? 'default' : 'outline'}
               size="sm"
-              className="w-full"
+              className={cn(
+                'w-full',
+                desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+              )}
               onClick={() => setDesktopContentTab('view')}
             >
               VIEW
@@ -2709,7 +2712,10 @@ export default function SharePage() {
               type="button"
               variant={desktopContentTab === 'files' ? 'default' : 'outline'}
               size="sm"
-              className="w-full"
+              className={cn(
+                'w-full',
+                desktopContentTab !== 'files' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+              )}
               onClick={() => setDesktopContentTab('files')}
             >
               FILES ({availableFileCount})
@@ -2721,6 +2727,7 @@ export default function SharePage() {
       {/* Main content row: sidebar + content area */}
       <div className={cn(
         'flex-1 min-h-0 flex flex-col lg:flex-row lg:gap-1 lg:overflow-hidden',
+        desktopContentTab === 'files' ? 'gap-2 lg:gap-1' : 'gap-0',
         isVideoOnlyShareMode ? 'overflow-hidden' : 'overflow-y-auto',
       )}>
       {/* Video Sidebar - contains both desktop and mobile versions internally */}
@@ -2762,7 +2769,11 @@ export default function SharePage() {
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${activeAlbumId ? 'overflow-hidden' : 'lg:overflow-y-auto'}`}>
+      <div className={cn(
+        'flex-1 flex flex-col min-w-0 min-h-0',
+        activeAlbumId ? 'overflow-hidden' : 'lg:overflow-y-auto',
+        desktopContentTab === 'files' ? 'mt-2 lg:mt-0' : ''
+      )}>
         {/* Content Area */}
         <div
           className={cn(

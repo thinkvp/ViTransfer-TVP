@@ -1,3 +1,4 @@
+import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
@@ -8,6 +9,7 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
+  buildVideoAssetPreviewStoragePath,
   buildProjectStorageRoot,
   buildVideoStorageRoot,
   getStoragePathBasename,
@@ -76,6 +78,7 @@ export async function PATCH(request: NextRequest) {
         projectId: true,
         name: true,
         storageFolderName: true,
+        versionLabel: true,
         originalStoragePath: true,
         preview480Path: true,
         preview720Path: true,
@@ -149,7 +152,7 @@ export async function PATCH(request: NextRequest) {
       const groupAssets = needsPathRebase
         ? await prisma.videoAsset.findMany({
             where: { videoId: { in: group.map((video) => video.id) } },
-            select: { id: true, storagePath: true },
+            select: { id: true, videoId: true, storagePath: true, previewPath: true, fileType: true },
           })
         : []
 
@@ -174,11 +177,34 @@ export async function PATCH(request: NextRequest) {
         }
 
         if (needsPathRebase) {
+          const groupByVideoId = new Map(group.map((video) => [video.id, video] as const))
+
           for (const asset of groupAssets) {
+            const assetVideo = groupByVideoId.get(asset.videoId)
+            if (!assetVideo) continue
+
+            const rebasedStoragePath = replaceStoredStoragePathPrefix(asset.storagePath, oldVideoStorageRoot, newVideoStorageRoot)!
+            const currentPreviewExt = path.posix.extname(String(asset.previewPath || '')).toLowerCase()
+            const desiredPreviewExt = currentPreviewExt === '.mp4' || currentPreviewExt === '.jpg'
+              ? currentPreviewExt
+              : String(asset.fileType || '').toLowerCase().startsWith('video/')
+                ? '.mp4'
+                : '.jpg'
+            const rebasedPreviewPath = asset.previewPath
+              ? buildVideoAssetPreviewStoragePath(
+                  projectStoragePath,
+                  nextFolderName,
+                  assetVideo.versionLabel,
+                  rebasedStoragePath,
+                  desiredPreviewExt,
+                )
+              : null
+
             await tx.videoAsset.update({
               where: { id: asset.id },
               data: {
-                storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldVideoStorageRoot, newVideoStorageRoot)!,
+                storagePath: rebasedStoragePath,
+                previewPath: rebasedPreviewPath,
               },
             })
           }

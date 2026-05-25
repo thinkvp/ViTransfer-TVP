@@ -97,6 +97,15 @@ const formatEta = (etaSeconds: number | null): string => {
   return `Time left: ${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
+const formatSelectedTotalSize = (bytes: number): string => {
+  const safeBytes = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  const mb = safeBytes / (1024 * 1024)
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(2)} GB`
+  }
+  return `${mb.toFixed(2)} MB`
+}
+
 // Keep thumbnails aspect-correct inside a 16:9 container.
 const calculateThumbnailDimensions = (
   videoWidth: number | null,
@@ -521,6 +530,24 @@ export default function VideoSidebar({
   const effectiveSpeed = effectiveDownloadProgress?.speedBytesPerSecond ?? null
   const effectiveEta = effectiveDownloadProgress?.etaSeconds ?? null
   const hasActiveTransferMetrics = Boolean(transferSummary?.activeCount)
+  const selectedFilesTotalSizeBytes = useMemo(() => {
+    if (!downloadableFiles || selectedFileIdsValue.size === 0) return 0
+
+    const fileByKey = new Map<string, DownloadableFile>()
+    downloadableFiles.forEach((group) => {
+      ;[...(group.mainFile ? [group.mainFile] : []), ...group.subFiles].forEach((file) => {
+        fileByKey.set(getDownloadableFileKey(file), file)
+      })
+    })
+
+    return Array.from(selectedFileIdsValue).reduce((total, key) => {
+      const file = fileByKey.get(key)
+      if (!file) return total
+      const rawSize = typeof file.fileSizeBytes === 'string' ? Number(file.fileSizeBytes) : file.fileSizeBytes
+      const size = Number.isFinite(rawSize) && (rawSize as number) > 0 ? Number(rawSize) : 0
+      return total + size
+    }, 0)
+  }, [downloadableFiles, selectedFileIdsValue])
 
   const canOpenProjectSwitcher = showProjectSwitcher && typeof onProjectSwitcherOpen === 'function'
 
@@ -1939,6 +1966,12 @@ export default function VideoSidebar({
                 </div>
               )
             })()}
+
+            {isMobileFilesMode && selectedFileIdsValue.size > 0 ? (
+              <span className="text-xs text-muted-foreground text-right tabular-nums whitespace-nowrap ml-2">
+                {selectedFileIdsValue.size} file{selectedFileIdsValue.size === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedFilesTotalSizeBytes)}
+              </span>
+            ) : null}
           </div>
 
           {/* Collapsible thumbnails area */}

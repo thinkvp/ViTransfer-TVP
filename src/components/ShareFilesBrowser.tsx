@@ -15,10 +15,12 @@ import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloada
 import type { TransferItem } from '@/lib/transfer-state'
 import {
   ArrowLeft,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Download,
   File,
+  Files,
   FileArchive,
   FileAudio,
   FileImage,
@@ -29,6 +31,7 @@ import {
   MoreHorizontal,
   Play,
   Plus,
+  Square,
   Trash2,
   X,
 } from 'lucide-react'
@@ -189,6 +192,8 @@ export function ShareFilesBrowser({
   const [albumSocialEnabledByAlbumId, setAlbumSocialEnabledByAlbumId] = useState<Record<string, boolean>>({})
   const [albumMetaLoadedByAlbumId, setAlbumMetaLoadedByAlbumId] = useState<Record<string, boolean>>({})
   const [isUploadActionBusy, setIsUploadActionBusy] = useState(false)
+  const [videoAssetsThumbnailSize, setVideoAssetsThumbnailSize] = useState<'default' | 'large'>('default')
+  const [albumPhotosThumbnailSize, setAlbumPhotosThumbnailSize] = useState<'default' | 'large'>('default')
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
   const [visibleFolderNames, setVisibleFolderNames] = useState<Set<string>>(new Set())
   const [visibleFileKeys, setVisibleFileKeys] = useState<Set<string>>(new Set())
@@ -1061,6 +1066,25 @@ export function ShareFilesBrowser({
     })
   }
 
+  const clearSelection = () => {
+    setSelectedFileIds(new Set())
+  }
+
+  const allVisibleSelected = useMemo(() => {
+    const visibleSelectableKeys = visibleFiles
+      .filter((file) => isSelectableDownloadableFile(file))
+      .map(getDownloadableFileKey)
+    return visibleSelectableKeys.length > 0 && visibleSelectableKeys.every((key) => selectedFileIds.has(key))
+  }, [visibleFiles, selectedFileIds])
+
+  const toggleAllVisibleSelection = () => {
+    if (allVisibleSelected) {
+      clearSelection()
+      return
+    }
+    selectAllVisible()
+  }
+
   const downloadSelected = async () => {
     const scopedFiles = openFolder
       ? filesInOpenFolder
@@ -1627,6 +1651,7 @@ export function ShareFilesBrowser({
                 : 'Queued for upload'
       : null
     const keepActionsOnTitleRow = file.type === 'video'
+    const showPlayableVideoOverlay = (isVideoAssetFile || (file.type === 'video' && !muteInactiveVideoVersion)) && (showImagePreview || showVideoPreview)
     const actionButtons = canDownloadFile ? (
       <div className="flex items-center gap-1">
         {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (
@@ -1746,7 +1771,7 @@ export function ShareFilesBrowser({
                 </div>
               )}
 
-              {isVideoAssetFile && (showImagePreview || showVideoPreview) ? (
+              {showPlayableVideoOverlay ? (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/65 text-white shadow-lg">
                     <Play className="h-5 w-5 fill-current" />
@@ -2073,7 +2098,7 @@ export function ShareFilesBrowser({
           event.currentTarget.value = ''
         }}
       />
-      <div className="px-4 py-3 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="px-4 py-3 border-b border-border flex flex-col gap-2">
         <div className="min-w-0 flex items-center justify-between gap-2 sm:flex-1">
           <div className="min-w-0">
             {openFolder ? (
@@ -2083,14 +2108,14 @@ export function ShareFilesBrowser({
                   <span className="hidden sm:inline">Back</span>
                 </Button>
                 {selectedCount > 0 ? (
-                  <span className="text-xs sm:text-sm text-muted-foreground truncate">
+                  <span className="hidden sm:inline text-xs sm:text-sm text-muted-foreground truncate">
                     {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
                   </span>
                 ) : null}
               </div>
             ) : (
               selectedCount > 0 ? (
-                <span className="text-xs sm:text-sm text-muted-foreground truncate">
+                <span className="hidden sm:inline text-xs sm:text-sm text-muted-foreground truncate">
                   {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
                 </span>
               ) : (
@@ -2098,118 +2123,169 @@ export function ShareFilesBrowser({
               )
             )}
           </div>
-          {onCloseFilesView ? (
-            <Button
-              type="button"
-              variant="destructive"
-              size="icon"
-              className="h-8 w-8 sm:hidden"
-              onClick={onCloseFilesView}
-              aria-label="Close files view"
-              title="Close files view"
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          ) : null}
-        </div>
-        <div className="flex w-full flex-nowrap items-center gap-2 shrink-0 sm:ml-auto sm:w-auto">
-          {isUploadsContext && canUploadToProjects && onUploadFiles ? (
+          <div className="ml-auto flex items-center gap-2 sm:hidden">
+            {isUploadsContext && canUploadToProjects && onUploadFiles ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 px-2 gap-1"
+                onClick={openUploadFilePicker}
+                disabled={isUploadActionBusy}
+                aria-label="Add files"
+                title="Add files"
+              >
+                <Plus className="w-4 h-4" />
+                <File className="w-4 h-4" />
+              </Button>
+            ) : null}
+            {isUploadsContext && canUploadToProjects && onCreateUploadFolder ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 px-2 gap-1"
+                onClick={runCreateUploadFolder}
+                disabled={isUploadActionBusy}
+                aria-label="Add folder"
+                title="Add folder"
+              >
+                <Plus className="w-4 h-4" />
+                <Folder className="w-4 h-4" />
+              </Button>
+            ) : null}
+            {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => void deleteSelectedUploadFiles()}
+                disabled={isUploadActionBusy || selectedUploadFilesInContext.length === 0}
+                aria-label={`Delete ${selectedUploadFilesInContext.length} selected upload files`}
+                title={`Delete ${selectedUploadFilesInContext.length} selected upload files`}
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="flex-[28] min-w-0 justify-center gap-1.5 sm:flex-none sm:w-auto"
-              onClick={openUploadFilePicker}
-              disabled={isUploadActionBusy}
-              aria-label="Add files"
-              title="Add files"
+              className="h-8 px-2"
+              disabled={visibleFiles.length === 0}
+              onClick={toggleAllVisibleSelection}
+              aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
+              title={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
             >
-              <Plus className="w-4 h-4" />
-              <File className="w-4 h-4" />
-              <span className="sr-only">File</span>
+              {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+              <Files className="w-4 h-4" />
             </Button>
-          ) : null}
-          {isUploadsContext && canUploadToProjects && onCreateUploadFolder ? (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 px-2"
+              onClick={downloadSelected}
+              disabled={selectedCount === 0 || isDownloadBusy}
+              aria-label={`Download ${selectedCount} selected files`}
+              title={`Download ${selectedCount} selected files`}
+            >
+              <Download className="w-4 h-4" />
+              <span className="text-xs font-semibold tabular-nums">{selectedCount}</span>
+            </Button>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 ml-auto">
+            {isUploadsContext && canUploadToProjects && onUploadFiles ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-w-0 justify-center gap-1.5"
+                onClick={openUploadFilePicker}
+                disabled={isUploadActionBusy}
+                aria-label="Add files"
+                title="Add files"
+              >
+                <Plus className="w-4 h-4" />
+                <File className="w-4 h-4" />
+                <span className="sr-only">File</span>
+              </Button>
+            ) : null}
+            {isUploadsContext && canUploadToProjects && onCreateUploadFolder ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-w-0 justify-center gap-1.5"
+                onClick={runCreateUploadFolder}
+                disabled={isUploadActionBusy}
+                aria-label="Add folder"
+                title="Add folder"
+              >
+                <Plus className="w-4 h-4" />
+                <Folder className="w-4 h-4" />
+                <span className="sr-only">Folder</span>
+              </Button>
+            ) : null}
+            {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="min-w-0"
+                onClick={() => void deleteSelectedUploadFiles()}
+                disabled={isUploadActionBusy || selectedUploadFilesInContext.length === 0}
+              >
+                <Trash2 className="w-4 h-4 mr-1.5" />
+                <span>Delete ({selectedUploadFilesInContext.length})</span>
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="flex-[28] min-w-0 justify-center gap-1.5 sm:flex-none sm:w-auto"
-              onClick={runCreateUploadFolder}
-              disabled={isUploadActionBusy}
-              aria-label="Add folder"
-              title="Add folder"
+              className="h-8 px-2"
+              disabled={visibleFiles.length === 0}
+              onClick={toggleAllVisibleSelection}
+              aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
+              title={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
             >
-              <Plus className="w-4 h-4" />
-              <Folder className="w-4 h-4" />
-              <span className="sr-only">Folder</span>
+              {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+              <Files className="w-4 h-4" />
             </Button>
-          ) : null}
-          {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
             <Button
               type="button"
-              variant="destructive"
               size="sm"
-              className="flex-[34] min-w-0 sm:flex-none sm:w-auto"
-              onClick={() => void deleteSelectedUploadFiles()}
-              disabled={isUploadActionBusy || selectedUploadFilesInContext.length === 0}
+              className="min-w-0"
+              onClick={downloadSelected}
+              disabled={selectedCount === 0 || isDownloadBusy}
             >
-              <Trash2 className="w-4 h-4 mr-1.5" />
-              <span>Delete ({selectedUploadFilesInContext.length})</span>
+              <Download className="w-4 h-4" />
+              {isDownloadBusy
+                ? activeProgress
+                  ? `Downloading… ${Math.round(activeProgress.percent)}%`
+                  : 'Preparing…'
+                : `Download (${selectedCount})`}
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="flex-[30] min-w-0 sm:flex-none sm:w-auto"
-            onClick={selectAllVisible}
-            disabled={visibleFiles.length === 0}
-          >
-            Select All
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="flex-[25] min-w-0 sm:flex-none sm:w-auto"
-            onClick={() => setSelectedFileIds(new Set())}
-            disabled={selectedCount === 0}
-          >
-            Clear
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="flex-[45] min-w-0 sm:flex-none sm:w-auto"
-            onClick={downloadSelected}
-            disabled={selectedCount === 0 || isDownloadBusy}
-          >
-            <Download className="w-4 h-4" />
-            {isDownloadBusy
-              ? activeProgress
-                ? `Downloading… ${Math.round(activeProgress.percent)}%`
-                : 'Preparing…'
-              : `Download (${selectedCount})`}
-          </Button>
-          {onCloseFilesView ? (
-            <Button
-              type="button"
-              variant="destructive"
-              size="icon"
-              className="hidden h-8 w-8 sm:inline-flex"
-              onClick={onCloseFilesView}
-              aria-label="Close files view"
-              title="Close files view"
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          ) : null}
+            {onCloseFilesView ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="icon"
+                className="h-8 w-8"
+                onClick={onCloseFilesView}
+                aria-label="Close files view"
+                title="Close files view"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 
       <div
-        className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-0"
+        className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-4"
         onDragOverCapture={(event) => {
           if (!isUploadsContext) return
           void allowUploadDrop(event)
@@ -2308,10 +2384,41 @@ export function ShareFilesBrowser({
                       aria-label="Select all video assets"
                     />
                     <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Video Assets</h4>
+                    <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors',
+                          videoAssetsThumbnailSize === 'default'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setVideoAssetsThumbnailSize('default')}
+                      >
+                        Default
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                          videoAssetsThumbnailSize === 'large'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setVideoAssetsThumbnailSize('large')}
+                      >
+                        Large
+                      </button>
+                    </div>
                   </div>
                   {openFolderVideoAssets.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
-                      {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, true, openFolderVideoAssets))}
+                    <div className={cn(
+                      'grid',
+                      videoAssetsThumbnailSize === 'large'
+                        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
+                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                    )}>
+                      {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize !== 'large', openFolderVideoAssets))}
                     </div>
                   ) : (
                     <p className="px-1 text-xs text-muted-foreground italic">There are currently no Video Assets for this video.</p>
@@ -2344,10 +2451,41 @@ export function ShareFilesBrowser({
                       aria-label="Select all photos"
                     />
                     <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Photos</h4>
+                    <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors',
+                          albumPhotosThumbnailSize === 'default'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setAlbumPhotosThumbnailSize('default')}
+                      >
+                        Default
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                          albumPhotosThumbnailSize === 'large'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setAlbumPhotosThumbnailSize('large')}
+                      >
+                        Large
+                      </button>
+                    </div>
                   </div>
                   {openFolderAlbumPhotos.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
-                      {openFolderAlbumPhotos.map((file) => renderOpenFolderFileCard(file, true, openFolderAlbumPhotos))}
+                    <div className={cn(
+                      'grid',
+                      albumPhotosThumbnailSize === 'large'
+                        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
+                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                    )}>
+                      {openFolderAlbumPhotos.map((file) => renderOpenFolderFileCard(file, albumPhotosThumbnailSize !== 'large', openFolderAlbumPhotos))}
                     </div>
                   ) : (
                     <p className="px-1 text-xs text-muted-foreground italic">No photos available.</p>
@@ -2445,6 +2583,14 @@ export function ShareFilesBrowser({
                       className="w-full h-full object-contain"
                     />
                   )}
+                  <div className="absolute top-2 left-2 right-2 pointer-events-none">
+                    <p
+                      className="mx-auto max-w-[95%] rounded bg-black/70 px-2 py-1 text-center text-xs text-white truncate"
+                      title={lightboxFile.fileName}
+                    >
+                      {lightboxFile.fileName}
+                    </p>
+                  </div>
                   {hasMultiple ? (
                     <>
                       <button
@@ -2551,9 +2697,12 @@ export function ShareFilesBrowser({
               {viewerFile && viewerSrc ? (
                 <div className="flex-1 min-h-0 flex flex-col gap-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <p className="text-sm text-muted-foreground">
-                      This is a low resolution preview. Use the buttons to download the original versions.
-                    </p>
+                    <div className="min-w-0">
+                      <p className="text-sm text-muted-foreground">
+                        This is a low resolution preview. Use the buttons to download the original versions.
+                      </p>
+                      <p className="mt-1 text-sm font-medium truncate" title={viewerFile.fileName}>{viewerFile.fileName}</p>
+                    </div>
                     <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center sm:gap-2 sm:shrink-0">
                       {socialEnabled ? (
                         <Button

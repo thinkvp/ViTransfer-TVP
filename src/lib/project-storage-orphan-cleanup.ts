@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import {
   getFilePath,
   getRawStoragePath,
@@ -26,7 +26,22 @@ const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 type ShareUploadFilePathRow = { storagePath: string | null }
 type ShareUploadFolderPathRow = { storagePath: string | null }
 type ShareUploadPreviewPathRow = { storagePath: string | null; previewPath: string | null }
-type VideoAssetPreviewPathRow = { storagePath: string | null; previewPath: string | null }
+type VideoAssetPreviewPathRow = {
+  storagePath: string | null
+  previewPath: string | null
+  fileType: string | null
+  video: {
+    storageFolderName: string | null
+    name: string
+    versionLabel: string
+    project: {
+      storagePath: string | null
+      title: string
+      companyName: string | null
+      client: { name: string | null } | null
+    }
+  }
+}
 
 export type ProjectStorageOrphanCleanupResult = {
   ok: true
@@ -247,7 +262,28 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         },
       },
     }),
-    prisma.videoAsset.findMany({ select: { storagePath: true, previewPath: true } }),
+    prisma.videoAsset.findMany({
+      select: {
+        storagePath: true,
+        previewPath: true,
+        fileType: true,
+        video: {
+          select: {
+            storageFolderName: true,
+            name: true,
+            versionLabel: true,
+            project: {
+              select: {
+                storagePath: true,
+                title: true,
+                companyName: true,
+                client: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
     prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
@@ -337,6 +373,26 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const videoAsset of videoAssets) {
     addResolvedFilePath(exactFilePaths, videoAsset.storagePath)
     addResolvedFilePath(exactFilePaths, videoAsset.previewPath)
+
+    const previewPath = String(videoAsset.previewPath || '').toLowerCase()
+    const fileType = String(videoAsset.fileType || '').toLowerCase()
+    if (fileType.startsWith('video/') && previewPath.endsWith('.mp4')) {
+      const projectStoragePath = videoAsset.video.project.storagePath
+        || buildProjectStorageRoot(
+          videoAsset.video.project.client?.name || videoAsset.video.project.companyName || 'Client',
+          videoAsset.video.project.title,
+        )
+      addResolvedFilePath(
+        exactFilePaths,
+        buildVideoAssetPreviewStoragePath(
+          projectStoragePath,
+          videoAsset.video.storageFolderName || videoAsset.video.name,
+          videoAsset.video.versionLabel,
+          videoAsset.storagePath || '',
+          '.jpg',
+        ),
+      )
+    }
   }
   for (const commentFile of commentFiles) addResolvedFilePath(exactFilePaths, commentFile.storagePath)
   for (const shareUploadFile of shareUploadFiles) {
@@ -585,7 +641,28 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
         timelinePreviewSpritesPath: true,
       },
     }),
-    prisma.videoAsset.findMany({ select: { storagePath: true, previewPath: true } }),
+    prisma.videoAsset.findMany({
+      select: {
+        storagePath: true,
+        previewPath: true,
+        fileType: true,
+        video: {
+          select: {
+            storageFolderName: true,
+            name: true,
+            versionLabel: true,
+            project: {
+              select: {
+                storagePath: true,
+                title: true,
+                companyName: true,
+                client: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
     prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
@@ -649,6 +726,23 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   for (const a of videoAssets) {
     addMain(a.storagePath)
     addMain(a.previewPath)
+
+    const previewPath = String(a.previewPath || '').toLowerCase()
+    const fileType = String(a.fileType || '').toLowerCase()
+    if (fileType.startsWith('video/') && previewPath.endsWith('.mp4')) {
+      const projectStoragePath = a.video.project.storagePath
+        || buildProjectStorageRoot(
+          a.video.project.client?.name || a.video.project.companyName || 'Client',
+          a.video.project.title,
+        )
+      addMain(buildVideoAssetPreviewStoragePath(
+        projectStoragePath,
+        a.video.storageFolderName || a.video.name,
+        a.video.versionLabel,
+        a.storagePath || '',
+        '.jpg',
+      ))
+    }
   }
   for (const c of commentFiles) addMain(c.storagePath)
   for (const f of shareUploadFiles) {

@@ -6,7 +6,7 @@ import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { getProjectRecipients } from '@/lib/recipients'
-import { getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { enqueueShareUploadPreview, getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
@@ -64,6 +64,11 @@ function parsePreviewResolutions(raw: string | null | undefined): PreviewResolut
     }
     return ['720p']
   }
+}
+
+function isPreviewableMediaFileType(fileType: string | null | undefined): boolean {
+  const normalized = String(fileType || '').toLowerCase()
+  return normalized.startsWith('image/') || normalized.startsWith('video/')
 }
 
 
@@ -427,6 +432,7 @@ export async function PATCH(
         enableVideos: true,
         enablePhotos: true,
         previewResolutions: true,
+        timelinePreviewsEnabled: true,
         clientId: true,
         companyName: true,
         storagePath: true,
@@ -1314,29 +1320,48 @@ export async function PATCH(
           select: { autoDeletePreviewsOnClose: true },
         })
         if (globalSettings?.autoDeletePreviewsOnClose) {
-          const videos = await prisma.video.findMany({
-            where: { projectId: project.id },
-            select: {
-              id: true,
-              preview480Path: true,
-              preview720Path: true,
-              preview1080Path: true,
-              timelinePreviewSpritesPath: true,
-              timelinePreviewsReady: true,
-            },
-          })
+          const [videos, videoAssets] = await Promise.all([
+            prisma.video.findMany({
+              where: { projectId: project.id },
+              select: {
+                id: true,
+                preview480Path: true,
+                preview720Path: true,
+                preview1080Path: true,
+                timelinePreviewSpritesPath: true,
+                timelinePreviewsReady: true,
+              },
+            }),
+            prisma.videoAsset.findMany({
+              where: {
+                video: { projectId: project.id },
+                previewPath: { not: null },
+              },
+              select: {
+                id: true,
+                previewPath: true,
+              },
+            }),
+          ])
 
-          // Delete files first (can run in parallel across videos)
+          // Delete files first (can run in parallel across videos/assets)
           await Promise.allSettled(
-            videos.flatMap((video) => {
-              const paths: Promise<unknown>[] = []
-              const previewPaths = [video.preview480Path, video.preview720Path, video.preview1080Path].filter(Boolean) as string[]
-              paths.push(...previewPaths.map(p => deleteFile(p)))
-              if (video.timelinePreviewSpritesPath) {
-                paths.push(deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {}))
-              }
-              return paths
-            })
+            [
+              ...videos.flatMap((video) => {
+                const paths: Promise<unknown>[] = []
+                const previewPaths = [video.preview480Path, video.preview720Path, video.preview1080Path].filter(Boolean) as string[]
+                paths.push(...previewPaths.map(p => deleteFile(p)))
+                if (video.timelinePreviewSpritesPath) {
+                  paths.push(deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {}))
+                }
+                return paths
+              }),
+              ...videoAssets.flatMap((asset) => {
+                const previewPath = String(asset.previewPath || '').trim()
+                if (!previewPath) return [] as Promise<unknown>[]
+                return [deleteFile(previewPath)]
+              }),
+            ]
           )
 
           // Null out path columns using raw SQL to avoid bumping updatedAt.
@@ -1370,6 +1395,20 @@ export async function PATCH(
               WHERE "id" = ANY(${videoIdsWithTimeline})
             `
           }
+
+          const videoAssetIdsWithPreviews = videoAssets.map((asset) => asset.id)
+          if (videoAssetIdsWithPreviews.length > 0) {
+            await prisma.videoAsset.updateMany({
+              where: { id: { in: videoAssetIdsWithPreviews } },
+              data: {
+                previewPath: null,
+                previewStatus: null,
+                previewError: null,
+                previewGeneratedAt: null,
+                previewFileSize: null,
+              },
+            })
+          }
         }
       } catch (err) {
         console.error('[PROJECT UPDATE] Error auto-deleting previews/zips on close:', err)
@@ -1379,32 +1418,176 @@ export async function PATCH(
     // Re-generate previews, timeline sprites, and album ZIPs when project is reopened from CLOSED
     if (previousStatus === 'CLOSED' && validatedBody.status !== undefined && validatedBody.status !== 'CLOSED') {
       try {
-        // Check if any videos are missing previews (indicating they were auto-deleted)
-        const videosNeedingPreviews = await prisma.video.findMany({
+        const requiredPreviewResolutions = new Set<PreviewResolution>(
+          parsePreviewResolutions(currentProject.previewResolutions)
+        )
+
+        // Check READY videos for missing configured previews and/or timeline assets.
+        const videosToEvaluate = await prisma.video.findMany({
           where: {
             projectId: project.id,
-            preview720Path: null,
             status: 'READY',
           },
-          select: { id: true, originalStoragePath: true },
+          select: {
+            id: true,
+            originalStoragePath: true,
+            preview480Path: true,
+            preview720Path: true,
+            preview1080Path: true,
+            thumbnailPath: true,
+            timelinePreviewsReady: true,
+            timelinePreviewVttPath: true,
+            timelinePreviewSpritesPath: true,
+          },
         })
-        if (videosNeedingPreviews.length > 0) {
+
+        let queuedVideoPreviewJobs = 0
+        if (videosToEvaluate.length > 0) {
           const videoQueue = getVideoQueue()
-          for (const video of videosNeedingPreviews) {
+
+          for (const video of videosToEvaluate) {
+            const missingPreviewResolutions: PreviewResolution[] = []
+            if (requiredPreviewResolutions.has('480p') && !video.preview480Path) missingPreviewResolutions.push('480p')
+            if (requiredPreviewResolutions.has('720p') && !video.preview720Path) missingPreviewResolutions.push('720p')
+            if (requiredPreviewResolutions.has('1080p') && !video.preview1080Path) missingPreviewResolutions.push('1080p')
+
+            const regenerateThumbnail = !video.thumbnailPath
+            const regenerateTimelinePreviews = Boolean(
+              currentProject.timelinePreviewsEnabled && (
+                !video.timelinePreviewsReady ||
+                !video.timelinePreviewVttPath ||
+                !video.timelinePreviewSpritesPath
+              )
+            )
+
+            if (
+              missingPreviewResolutions.length === 0 &&
+              !regenerateThumbnail &&
+              !regenerateTimelinePreviews
+            ) {
+              continue
+            }
+
             await prisma.video.update({
               where: { id: video.id },
               data: { status: 'QUEUED', processingProgress: 0, processingPhase: null },
             })
-            await videoQueue.add('process-video', {
-              videoId: video.id,
-              originalStoragePath: video.originalStoragePath!,
-              projectId: project.id,
-            })
+            if (missingPreviewResolutions.length > 0) {
+              await videoQueue.add('process-video', {
+                videoId: video.id,
+                originalStoragePath: video.originalStoragePath!,
+                projectId: project.id,
+                requestedPreviewResolutions: missingPreviewResolutions,
+                regenerateThumbnail,
+                regenerateTimelinePreviews,
+              })
+            } else if (regenerateThumbnail && !regenerateTimelinePreviews) {
+              await videoQueue.add('process-video', {
+                videoId: video.id,
+                originalStoragePath: video.originalStoragePath!,
+                projectId: project.id,
+                thumbnailOnly: true,
+              })
+            } else if (!regenerateThumbnail && regenerateTimelinePreviews) {
+              await videoQueue.add('process-video', {
+                videoId: video.id,
+                originalStoragePath: video.originalStoragePath!,
+                projectId: project.id,
+                timelineOnly: true,
+              })
+            } else {
+              await videoQueue.add('process-video', {
+                videoId: video.id,
+                originalStoragePath: video.originalStoragePath!,
+                projectId: project.id,
+                regenerateThumbnail: true,
+                regenerateTimelinePreviews: true,
+              })
+            }
+            queuedVideoPreviewJobs += 1
           }
-          console.log(`[PROJECT UPDATE] Re-queued ${videosNeedingPreviews.length} video(s) for preview regeneration after reopen`)
+
+          if (queuedVideoPreviewJobs > 0) {
+            console.log(`[PROJECT UPDATE] Re-queued ${queuedVideoPreviewJobs} video job(s) for preview/timeline regeneration after reopen`)
+          }
+        }
+
+        // Requeue share-upload previews that are missing, failed, or stale.
+        const shareUploadFilesNeedingPreviews = await prisma.shareUploadFile.findMany({
+          where: {
+            projectId: project.id,
+          },
+          select: {
+            id: true,
+            storagePath: true,
+            fileType: true,
+            fileName: true,
+            mediaDurationSeconds: true,
+            previewPath: true,
+            previewStatus: true,
+          },
+        })
+
+        let queuedShareUploadPreviewJobs = 0
+        for (const file of shareUploadFilesNeedingPreviews) {
+          if (!isPreviewableMediaFileType(file.fileType)) continue
+          const needsPreview = !file.previewPath || file.previewStatus !== 'READY'
+          if (!needsPreview) continue
+          await enqueueShareUploadPreview({
+            type: 'shareUploadFile',
+            recordId: file.id,
+            storagePath: file.storagePath,
+            fileType: file.fileType,
+            fileName: file.fileName,
+            durationSeconds: file.mediaDurationSeconds,
+          }).catch(() => {})
+          queuedShareUploadPreviewJobs += 1
+        }
+
+        // Requeue video-asset previews that are missing, failed, or stale.
+        const videoAssetsNeedingPreviews = await prisma.videoAsset.findMany({
+          where: {
+            video: { projectId: project.id },
+          },
+          select: {
+            id: true,
+            storagePath: true,
+            fileType: true,
+            fileName: true,
+            previewPath: true,
+            previewStatus: true,
+          },
+        })
+
+        let queuedVideoAssetPreviewJobs = 0
+        for (const asset of videoAssetsNeedingPreviews) {
+          const normalizedType = String(asset.fileType || '').toLowerCase()
+          if (!isPreviewableMediaFileType(normalizedType)) continue
+
+          const normalizedPreviewPath = String(asset.previewPath || '').toLowerCase()
+          const hasPlaybackPreview = normalizedType.startsWith('video/')
+            ? normalizedPreviewPath.endsWith('.mp4')
+            : normalizedPreviewPath.length > 0
+          const needsPreview = !hasPlaybackPreview || asset.previewStatus !== 'READY'
+          if (!needsPreview) continue
+
+          await enqueueShareUploadPreview({
+            type: 'videoAsset',
+            recordId: asset.id,
+            storagePath: asset.storagePath,
+            fileType: asset.fileType,
+            fileName: asset.fileName,
+          }).catch(() => {})
+          queuedVideoAssetPreviewJobs += 1
+        }
+
+        if (queuedShareUploadPreviewJobs > 0 || queuedVideoAssetPreviewJobs > 0) {
+          console.log(
+            `[PROJECT UPDATE] Re-queued ${queuedShareUploadPreviewJobs} share-upload and ${queuedVideoAssetPreviewJobs} video-asset preview job(s) after reopen`
+          )
         }
       } catch (err) {
-        console.error('[PROJECT UPDATE] Error re-queuing videos after reopen:', err)
+        console.error('[PROJECT UPDATE] Error re-queuing previews after reopen:', err)
       }
 
       // Re-generate album ZIPs if they were auto-deleted

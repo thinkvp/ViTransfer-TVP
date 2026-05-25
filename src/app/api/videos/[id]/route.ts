@@ -11,6 +11,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import {
   allocateUniqueStorageName,
+  buildVideoAssetPreviewStoragePath,
   buildProjectStorageRoot,
   buildVideoAssetsStorageRoot,
   buildVideoStorageRoot,
@@ -289,6 +290,7 @@ export async function PATCH(
             id: string
             name: string
             storageFolderName: string | null
+            versionLabel: string
             originalStoragePath: string
             preview480Path: string | null
             preview720Path: string | null
@@ -301,6 +303,8 @@ export async function PATCH(
             id: string
             videoId: string
             storagePath: string
+            previewPath: string | null
+            fileType: string | null
           }>
         }
       | null = null
@@ -343,6 +347,7 @@ export async function PATCH(
             id: true,
             name: true,
             storageFolderName: true,
+            versionLabel: true,
             originalStoragePath: true,
             preview480Path: true,
             preview720Path: true,
@@ -367,7 +372,7 @@ export async function PATCH(
 
         const siblingAssets = await prisma.videoAsset.findMany({
           where: { videoId: { in: siblingVideos.map((row) => row.id) } },
-          select: { id: true, videoId: true, storagePath: true },
+          select: { id: true, videoId: true, storagePath: true, previewPath: true, fileType: true },
         })
 
         videoRenamePlan = {
@@ -464,15 +469,37 @@ export async function PATCH(
           const oldFolderName = siblingFolderByVideoId.get(asset.videoId)
           if (!oldFolderName) continue
 
+          const siblingVideo = videoRenamePlan.siblingVideos.find((row) => row.id === asset.videoId)
+          if (!siblingVideo) continue
+
           const oldVideoStorageRoot = buildVideoStorageRoot(videoRenamePlan.projectStoragePath, oldFolderName)
+          const rebasedStoragePath = replaceStoredStoragePathPrefix(
+            asset.storagePath,
+            oldVideoStorageRoot,
+            newVideoStorageRoot,
+          )!
+
+          const currentPreviewExt = path.posix.extname(String(asset.previewPath || '')).toLowerCase()
+          const desiredPreviewExt = currentPreviewExt === '.mp4' || currentPreviewExt === '.jpg'
+            ? currentPreviewExt
+            : String(asset.fileType || '').toLowerCase().startsWith('video/')
+              ? '.mp4'
+              : '.jpg'
+          const rebasedPreviewPath = asset.previewPath
+            ? buildVideoAssetPreviewStoragePath(
+                videoRenamePlan.projectStoragePath,
+                videoRenamePlan.newVideoFolderName,
+                siblingVideo.versionLabel,
+                rebasedStoragePath,
+                desiredPreviewExt,
+              )
+            : null
+
           await tx.videoAsset.update({
             where: { id: asset.id },
             data: {
-              storagePath: replaceStoredStoragePathPrefix(
-                asset.storagePath,
-                oldVideoStorageRoot,
-                newVideoStorageRoot,
-              )!,
+              storagePath: rebasedStoragePath,
+              previewPath: rebasedPreviewPath,
             },
           })
         }
