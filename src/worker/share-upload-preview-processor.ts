@@ -352,12 +352,44 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     const playbackExists = Boolean(playbackPreviewStoragePath) && await previewExists(playbackPreviewStoragePath!)
     const thumbnailExists = await previewExists(previewStoragePath)
     if (playbackExists && thumbnailExists) {
+      // Both exist — already fully complete.
       const size = await getPreviewFileSize(playbackPreviewStoragePath!)
       await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, size)
       if (projectIdForPreviewBytes) {
         await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
       }
       console.log(`[PREVIEW] Already exists for ${type}:${recordId}, marked READY`)
+      return
+    }
+    if (playbackExists && !thumbnailExists) {
+      // MP4 playback already exists; generate only the missing companion JPG thumbnail
+      // without re-encoding the full video (which would be expensive).
+      await updateRecordProcessing(type, recordId)
+      const fastTempDir = path.join(os.tmpdir(), 'vitransfer-preview')
+      await fs.promises.mkdir(fastTempDir, { recursive: true })
+      const fastSafeName = path.basename(resolvedFileName || resolvedStoragePath).replace(/[^\w.-]/g, '_')
+      const fastTempThumbnailPath = path.join(fastTempDir, `${recordId}-${Date.now()}-${fastSafeName}.jpg`)
+      try {
+        await generateVideoPreview(resolvedStoragePath, fastTempThumbnailPath, durationSeconds)
+        const thumbnailStat = fs.statSync(fastTempThumbnailPath)
+        if (!thumbnailStat.isFile() || thumbnailStat.size === 0) {
+          throw new Error('Companion thumbnail output file is empty')
+        }
+        await uploadFile(previewStoragePath, fs.createReadStream(fastTempThumbnailPath) as any, thumbnailStat.size, 'image/jpeg')
+        const size = await getPreviewFileSize(playbackPreviewStoragePath!)
+        await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, size)
+        if (projectIdForPreviewBytes) {
+          await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
+        }
+        console.log(`[PREVIEW] Generated missing companion JPG for ${type}:${recordId} → ${previewStoragePath} (${thumbnailStat.size} bytes)`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[PREVIEW] Failed to generate companion JPG for ${type}:${recordId}:`, msg)
+        await updateRecordFailed(type, recordId, msg)
+        throw err
+      } finally {
+        try { fs.unlinkSync(fastTempThumbnailPath) } catch { /* ignore */ }
+      }
       return
     }
   } else if (await previewExists(previewStoragePath)) {
@@ -549,7 +581,8 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     take: Math.floor(BATCH_CAP / 4),
   })
 
-  const videoAssetsVideoToQueue = videoAssetsVideo.filter((asset) => {
+  const videoAssetsVideoToQueue: typeof videoAssetsVideo = []
+  for (const asset of videoAssetsVideo) {
     const previewPath = String(asset.previewPath || '').toLowerCase()
     const isStaleReadyPreview = asset.previewStatus === 'READY' && previewPath.length > 0 && !previewPath.endsWith('.mp4')
     const needsRetry =
@@ -560,8 +593,20 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
         (asset.previewAttempts ?? 0) < MAX_PREVIEW_ATTEMPTS &&
         (!asset.previewGeneratedAt || asset.previewGeneratedAt < twoHoursAgo)
       )
-    return isStaleReadyPreview || needsRetry
-  })
+    if (isStaleReadyPreview || needsRetry) {
+      videoAssetsVideoToQueue.push(asset)
+    } else if (asset.previewStatus === 'READY' && previewPath.endsWith('.mp4') && asset.previewPath) {
+      // The MP4 playback preview exists in the DB; check whether the companion JPG thumbnail
+      // was also generated. Assets processed before companion-JPG generation was introduced
+      // will have only the MP4 — detect and re-enqueue so the worker can backfill the JPG
+      // without re-encoding the video.
+      const companionJpgPath = asset.previewPath.replace(/\.mp4$/i, '.jpg')
+      const companionExists = await previewExists(companionJpgPath)
+      if (!companionExists) {
+        videoAssetsVideoToQueue.push(asset)
+      }
+    }
+  }
 
   let queued = 0
 

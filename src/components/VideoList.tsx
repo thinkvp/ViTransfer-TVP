@@ -58,6 +58,10 @@ export default function VideoList({
   const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<string | null>(null)
   const [pendingApprovalVideo, setPendingApprovalVideo] = useState<{ id: string; approved: boolean } | null>(null)
 
+  // S3 version label rename confirmation
+  const [versionRenameConfirm, setVersionRenameConfirm] = useState<{ videoId: string; newLabel: string; shouldReprocess: boolean } | null>(null)
+  const [versionRenameConfirming, setVersionRenameConfirming] = useState(false)
+
   // Polling removed from VideoList to prevent duplicate polling
   // Parent component (Project page) handles polling for processing videos
 
@@ -250,7 +254,14 @@ export default function VideoList({
 
     setSavingId(pendingVideoUpdate.videoId)
     try {
-      await apiPatch(`/api/videos/${pendingVideoUpdate.videoId}`, { versionLabel: pendingVideoUpdate.newLabel })
+      const result = await apiPatch<any>(`/api/videos/${pendingVideoUpdate.videoId}`, { versionLabel: pendingVideoUpdate.newLabel })
+
+      // S3 mode: server returns 202 asking user to confirm the background rename
+      if (result?.requiresJobConfirmation) {
+        setShowReprocessModal(false)
+        setVersionRenameConfirm({ videoId: pendingVideoUpdate.videoId, newLabel: pendingVideoUpdate.newLabel, shouldReprocess })
+        return
+      }
 
       // Reprocess if requested
       if (shouldReprocess) {
@@ -723,6 +734,36 @@ export default function VideoList({
         confirmLabel={pendingApprovalVideo?.approved ? 'Unapprove' : 'Approve'}
         variant="default"
         onConfirm={confirmToggleApproval}
+      />
+      <ConfirmDialog
+        open={versionRenameConfirm !== null}
+        onOpenChange={(v) => { if (!v) setVersionRenameConfirm(null) }}
+        title="Rename Version on S3?"
+        description={`Renaming this version to "${versionRenameConfirm?.newLabel ?? ''}" requires copying all associated video files to a new S3 location. This will run as a background job — you can track progress in the Running Jobs indicator.`}
+        confirmLabel={versionRenameConfirming ? 'Starting…' : 'Start Rename'}
+        onConfirm={async () => {
+          if (!versionRenameConfirm) return
+          setVersionRenameConfirming(true)
+          try {
+            await apiPatch(`/api/videos/${versionRenameConfirm.videoId}`, {
+              versionLabel: versionRenameConfirm.newLabel,
+              confirmed: true,
+            })
+            if (versionRenameConfirm.shouldReprocess) {
+              await reprocessVideo(versionRenameConfirm.videoId)
+            }
+            setEditingId(null)
+            setEditValue('')
+            setPendingVideoUpdate(null)
+            setVersionRenameConfirm(null)
+            await onRefresh?.()
+          } catch (e) {
+            toast.error('Failed to start version rename')
+          } finally {
+            setVersionRenameConfirming(false)
+          }
+        }}
+        onCancel={() => setVersionRenameConfirm(null)}
       />
     </div>
   )

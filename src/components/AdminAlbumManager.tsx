@@ -78,6 +78,11 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const [editAlbumValue, setEditAlbumValue] = useState('')
   const [savingAlbumId, setSavingAlbumId] = useState<string | null>(null)
 
+  // S3 rename confirmation modal
+  const [renameConfirmAlbumId, setRenameConfirmAlbumId] = useState<string | null>(null)
+  const [renameConfirmAlbumName, setRenameConfirmAlbumName] = useState('')
+  const [renameConfirming, setRenameConfirming] = useState(false)
+
   const [photosByAlbumId, setPhotosByAlbumId] = useState<Record<string, AlbumPhoto[]>>({})
   const [photosLoadingByAlbumId, setPhotosLoadingByAlbumId] = useState<Record<string, boolean>>({})
   const [photoSortModeByAlbumId, setPhotoSortModeByAlbumId] = useState<Record<string, PhotoSortMode>>({})
@@ -234,18 +239,25 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     }
 
     setSavingAlbumId(albumId)
-    apiPatch(`/api/albums/${albumId}`, { name: nextName })
-      .then(() => {
-        setAlbums((prev) => prev.map((a) => (a.id === albumId ? { ...a, name: nextName } : a)))
-        setEditingAlbumId(null)
-        setEditAlbumValue('')
-      })
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : 'Failed to update album name')
-      })
-      .finally(() => {
-        setSavingAlbumId(null)
-      })
+    try {
+      const result = await apiPatch<any>(`/api/albums/${albumId}`, { name: nextName })
+
+      // S3 mode: server returns 202 asking user to confirm the background rename
+      if (result?.requiresJobConfirmation) {
+        setRenameConfirmAlbumId(albumId)
+        setRenameConfirmAlbumName(nextName)
+        // Keep the edit field open so the user can see what they typed
+        return
+      }
+
+      setAlbums((prev) => prev.map((a) => (a.id === albumId ? { ...a, name: nextName } : a)))
+      setEditingAlbumId(null)
+      setEditAlbumValue('')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update album name')
+    } finally {
+      setSavingAlbumId(null)
+    }
   }
 
   const fetchZipStatus = useCallback(async (albumId: string) => {
@@ -864,6 +876,38 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       description="This action cannot be undone."
       confirmLabel="Delete"
       onConfirm={confirmDeletePhoto}
+    />
+    <ConfirmDialog
+      open={renameConfirmAlbumId !== null}
+      onOpenChange={(v) => {
+        if (!v) {
+          setRenameConfirmAlbumId(null)
+          setRenameConfirmAlbumName('')
+        }
+      }}
+      title="Rename Album on S3?"
+      description={`Renaming this album to "${renameConfirmAlbumName}" requires copying all photo files to a new S3 location. This will run as a background job — you can track progress in the Running Jobs indicator.`}
+      confirmLabel={renameConfirming ? 'Starting…' : 'Start Rename'}
+      onConfirm={async () => {
+        if (!renameConfirmAlbumId) return
+        setRenameConfirming(true)
+        try {
+          await apiPatch(`/api/albums/${renameConfirmAlbumId}`, { name: renameConfirmAlbumName, confirmed: true })
+          setAlbums((prev) => prev.map((a) => (a.id === renameConfirmAlbumId ? { ...a, name: renameConfirmAlbumName } : a)))
+          setEditingAlbumId(null)
+          setEditAlbumValue('')
+          setRenameConfirmAlbumId(null)
+          setRenameConfirmAlbumName('')
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Failed to start album rename')
+        } finally {
+          setRenameConfirming(false)
+        }
+      }}
+      onCancel={() => {
+        setRenameConfirmAlbumId(null)
+        setRenameConfirmAlbumName('')
+      }}
     />
   </>
   )

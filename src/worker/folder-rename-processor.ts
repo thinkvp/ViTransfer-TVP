@@ -229,6 +229,13 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
       const oldPreviewPrefix = `${projectPrefix}/.previews/videos/${oldFolderName}`
       const newPreviewPrefix = `${projectPrefix}/.previews/videos/${newFolderName}`
 
+      // Move the .previews/videos/{folder} prefix (non-fatal if absent)
+      try {
+        await s3MoveDirectoryWithProgress(oldPreviewPrefix, newPreviewPrefix, async () => {})
+      } catch (previewMoveError) {
+        console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: video group previews move failed (non-fatal):`, previewMoveError)
+      }
+
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`
           UPDATE "Video"
@@ -254,6 +261,20 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
       })
     } else if (renameJob.entityType === 'ALBUM') {
       // entityId = albumId; update album + photo paths
+      // oldPrefix / newPrefix = {proj}/albums/{folder}
+      const projectStoragePath = path.posix.dirname(path.posix.dirname(renameJob.oldPrefix))
+      const oldAlbumFolder = path.posix.basename(renameJob.oldPrefix)
+      const newAlbumFolder = path.posix.basename(renameJob.newPrefix)
+      const oldAlbumPreviewsPrefix = `${projectStoragePath}/.previews/albums/${oldAlbumFolder}`
+      const newAlbumPreviewsPrefix = `${projectStoragePath}/.previews/albums/${newAlbumFolder}`
+
+      // Move the .previews/albums/{folder} prefix (non-fatal if absent)
+      try {
+        await s3MoveDirectoryWithProgress(oldAlbumPreviewsPrefix, newAlbumPreviewsPrefix, async () => {})
+      } catch (previewMoveError) {
+        console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: album previews move failed (non-fatal):`, previewMoveError)
+      }
+
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`
           UPDATE "Album"
@@ -263,10 +284,52 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         await tx.$executeRaw`
           UPDATE "AlbumPhoto"
           SET
-            "storagePath"       = REPLACE("storagePath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END,
-            "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}) END
+            "storagePath"          = REPLACE("storagePath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
+            "socialStoragePath"    = CASE WHEN "socialStoragePath"    IS NULL THEN NULL ELSE REPLACE("socialStoragePath",    ${renameJob.oldPrefix},       ${renameJob.newPrefix})       END,
+            "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${oldAlbumPreviewsPrefix}, ${newAlbumPreviewsPrefix}) END
           WHERE "albumId" = ${renameJob.entityId}
+        `
+      })
+    } else if (renameJob.entityType === 'VIDEO_VERSION') {
+      // entityId = videoId; entityName = new version label
+      // Derive the previews-root prefix from the main prefix:
+      //   oldPrefix = {projectStoragePath}/videos/{videoFolderName}/{oldVersionLabel}
+      //   oldPreviewPrefix = {projectStoragePath}/.previews/videos/{videoFolderName}/{oldVersionLabel}
+      const videoFolderName = path.posix.basename(path.posix.dirname(renameJob.oldPrefix))
+      const projectStoragePath = path.posix.dirname(path.posix.dirname(path.posix.dirname(renameJob.oldPrefix)))
+      const oldVersionLabelFolder = path.posix.basename(renameJob.oldPrefix)
+      const newVersionLabelFolder = path.posix.basename(renameJob.newPrefix)
+      const oldPreviewPrefix = `${projectStoragePath}/.previews/videos/${videoFolderName}/${oldVersionLabelFolder}`
+      const newPreviewPrefix = `${projectStoragePath}/.previews/videos/${videoFolderName}/${newVersionLabelFolder}`
+
+      // Move the previews folder (no-ops silently if no preview objects exist yet).
+      try {
+        await s3MoveDirectoryWithProgress(oldPreviewPrefix, newPreviewPrefix, async () => {})
+      } catch (previewMoveError) {
+        console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: previews move failed (non-fatal):`, previewMoveError)
+      }
+
+      // Rebase all stored path columns for this video and its assets.
+      await prisma.$transaction(async (tx) => {
+        // originalStoragePath lives under the main prefix; preview paths live under the preview prefix.
+        await tx.$executeRaw`
+          UPDATE "Video"
+          SET
+            "originalStoragePath" = REPLACE("originalStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
+            "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE("preview480Path",      ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE("preview720Path",      ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE("preview1080Path",     ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE("thumbnailPath",       ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath",     ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END
+          WHERE "id" = ${renameJob.entityId}
+        `
+        await tx.$executeRaw`
+          UPDATE "VideoAsset"
+          SET
+            "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
+            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END
+          WHERE "videoId" = ${renameJob.entityId}
         `
       })
     }

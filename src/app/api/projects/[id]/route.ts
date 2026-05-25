@@ -613,21 +613,6 @@ export async function PATCH(
       updateData.enablePhotos = next
     }
 
-    // Prevent invalid state where neither is enabled (accounting for current values)
-    const finalEnableVideos = validatedBody.enableVideos !== undefined
-      ? Boolean(validatedBody.enableVideos)
-      : Boolean((currentProject as any).enableVideos ?? true)
-
-    const finalEnablePhotos = validatedBody.enablePhotos !== undefined
-      ? Boolean(validatedBody.enablePhotos)
-      : Boolean((currentProject as any).enablePhotos ?? false)
-
-    if (!finalEnableVideos && !finalEnablePhotos) {
-      return NextResponse.json(
-        { error: 'Project must have at least one type enabled (Video and/or Photo)' },
-        { status: 400 }
-      )
-    }
     if (validatedBody.slug !== undefined) {
       // Check if slug is unique (excluding current project)
       const existingProject = await prisma.project.findFirst({
@@ -1048,7 +1033,7 @@ export async function PATCH(
 
           const assets = await tx.videoAsset.findMany({
             where: { video: { projectId: id } },
-            select: { id: true, storagePath: true },
+            select: { id: true, storagePath: true, previewPath: true },
           })
           for (const asset of assets) {
             await tx.videoAsset.update({
@@ -1059,6 +1044,11 @@ export async function PATCH(
                   projectStorageRename.oldProjectStoragePath,
                   projectStorageRename.newProjectStoragePath,
                 )!,
+                previewPath: replaceStoredStoragePathPrefix(
+                  asset.previewPath,
+                  projectStorageRename.oldProjectStoragePath,
+                  projectStorageRename.newProjectStoragePath,
+                ),
               },
             })
           }

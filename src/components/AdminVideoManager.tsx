@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { apiPatch } from '@/lib/api-client'
 import MultiVideoUploadModal from '@/components/MultiVideoUploadModal'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
 interface VideoGroup {
@@ -68,6 +69,10 @@ export default function AdminVideoManager({
   const [editGroupValue, setEditGroupValue] = useState('')
   const [savingGroupName, setSavingGroupName] = useState<string | null>(null)
 
+  // S3 rename confirmation modal
+  const [renameConfirmGroup, setRenameConfirmGroup] = useState<{ oldName: string; videoIds: string[]; proposedName: string } | null>(null)
+  const [renameGroupConfirming, setRenameGroupConfirming] = useState(false)
+
   // Notify parent when component mounts with first video
   useEffect(() => {
     // No auto-expansion on mount; admin will expand explicitly
@@ -117,22 +122,26 @@ export default function AdminVideoManager({
 
     const videosInGroup = videoGroups[oldName]
     const videoIds = videosInGroup.map(v => v.id)
+    const newName = editGroupValue.trim()
 
-    // Single batch update for all videos (non-blocking)
-    apiPatch('/api/videos/batch', { videoIds, name: editGroupValue.trim() })
-      .then(() => {
-        setEditingGroupName(null)
-        setEditGroupValue('')
-        // Refresh in background
-        onRefresh?.()
-        router.refresh()
-      })
-      .catch((error) => {
-        toast.error('Failed to update video name')
-      })
-      .finally(() => {
-        setSavingGroupName(null)
-      })
+    try {
+      const result = await apiPatch<any>('/api/videos/batch', { videoIds, name: newName })
+
+      // S3 mode: server returns 202 asking user to confirm the background rename
+      if (result?.requiresJobConfirmation) {
+        setRenameConfirmGroup({ oldName, videoIds, proposedName: result.proposedName ?? newName })
+        return
+      }
+
+      setEditingGroupName(null)
+      setEditGroupValue('')
+      onRefresh?.()
+      router.refresh()
+    } catch {
+      toast.error('Failed to update video name')
+    } finally {
+      setSavingGroupName(null)
+    }
   }
 
   const sortedGroupNames = Object.keys(videoGroups).sort((nameA, nameB) => {
@@ -154,6 +163,7 @@ export default function AdminVideoManager({
   })
 
   return (
+    <>
     <div className="space-y-4">
       {sortedGroupNames.map((groupName) => {
         const groupVideos = videoGroups[groupName]
@@ -343,5 +353,35 @@ export default function AdminVideoManager({
         </div>
       )}
     </div>
+
+    <ConfirmDialog
+      open={renameConfirmGroup !== null}
+      onOpenChange={(v) => { if (!v) setRenameConfirmGroup(null) }}
+      title="Rename Video on S3?"
+      description={`Renaming this video to "${renameConfirmGroup?.proposedName ?? ''}" requires copying all video files to a new S3 location. This will run as a background job — you can track progress in the Running Jobs indicator.`}
+      confirmLabel={renameGroupConfirming ? 'Starting…' : 'Start Rename'}
+      onConfirm={async () => {
+        if (!renameConfirmGroup) return
+        setRenameGroupConfirming(true)
+        try {
+          await apiPatch('/api/videos/batch', {
+            videoIds: renameConfirmGroup.videoIds,
+            name: renameConfirmGroup.proposedName,
+            confirmed: true,
+          })
+          setEditingGroupName(null)
+          setEditGroupValue('')
+          setRenameConfirmGroup(null)
+          onRefresh?.()
+          router.refresh()
+        } catch (e: any) {
+          toast.error(e?.message || 'Failed to start video rename')
+        } finally {
+          setRenameGroupConfirming(false)
+        }
+      }}
+      onCancel={() => setRenameConfirmGroup(null)}
+    />
+  </>
   )
 }

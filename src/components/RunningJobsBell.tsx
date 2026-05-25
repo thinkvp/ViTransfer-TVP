@@ -380,6 +380,7 @@ function FolderRenameJobRow({ job, onClear, clearDisabled }: { job: FolderRename
   const typeLabel = job.entityType === 'PROJECT' ? 'Project'
     : job.entityType === 'CLIENT' ? 'Client'
     : job.entityType === 'VIDEO_GROUP' ? 'Video'
+    : job.entityType === 'VIDEO_VERSION' ? 'Version'
     : 'Album'
 
   return (

@@ -904,6 +904,25 @@ export default function SharePage() {
     setActiveAlbumId(firstAlbumId)
   }, [activeAlbumId, albums, project?.enableVideos, project?.enablePhotos, project?.videosByName])
 
+  // True when the project has at least one video or album to show in VIEW mode.
+  const hasViewContent = useMemo(() => {
+    if (!project) return true
+    const hasVideos = project.enableVideos !== false &&
+      project.videosByName &&
+      Object.keys(project.videosByName).length > 0
+    if (hasVideos) return true
+    if (albumsLoading) return true
+    return project.enablePhotos !== false && albums.length > 0
+  }, [project, albumsLoading, albums])
+
+  // Auto-switch to FILES mode when there is nothing to show in VIEW mode.
+  useEffect(() => {
+    if (!project || albumsLoading) return
+    if (!hasViewContent) {
+      setDesktopContentTab('files')
+    }
+  }, [project, albumsLoading, hasViewContent])
+
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
     const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
@@ -2667,6 +2686,7 @@ export default function SharePage() {
               type="button"
               variant={desktopContentTab === 'view' ? 'default' : 'outline'}
               size="default"
+              disabled={!hasViewContent}
               className={cn(
                 'h-full rounded-none border-y-0 border-l border-r-0 px-4',
                 desktopContentTab !== 'view' &&
@@ -2700,6 +2720,7 @@ export default function SharePage() {
               type="button"
               variant={desktopContentTab === 'view' ? 'default' : 'outline'}
               size="sm"
+              disabled={!hasViewContent}
               className={cn(
                 'w-full',
                 desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'

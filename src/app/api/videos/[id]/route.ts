@@ -9,6 +9,8 @@ import { getSecuritySettings } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { isS3Mode } from '@/lib/s3-storage'
+import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
   buildVideoAssetPreviewStoragePath,
@@ -16,6 +18,7 @@ import {
   buildVideoAssetsStorageRoot,
   buildVideoStorageRoot,
   buildVideoVersionRoot,
+  buildVideoVersionPreviewsRoot,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 export const runtime = 'nodejs'
@@ -196,7 +199,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel, videoNotes, allowApproval } = body
+    const { approved, name, versionLabel, videoNotes, allowApproval, confirmed } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
@@ -282,6 +285,24 @@ export async function PATCH(
     }
 
     let autoUnapprovedIds: string[] = []
+    let versionLabelRenamePlan:
+      | {
+          oldMainPrefix: string
+          newMainPrefix: string
+          oldPreviewPrefix: string
+          newPreviewPrefix: string
+          currentVideo: {
+            originalStoragePath: string
+            preview480Path: string | null
+            preview720Path: string | null
+            preview1080Path: string | null
+            thumbnailPath: string | null
+            timelinePreviewVttPath: string | null
+            timelinePreviewSpritesPath: string | null
+          }
+          videoAssets: Array<{ id: string; storagePath: string; previewPath: string | null }>
+        }
+      | null = null
     let videoRenamePlan:
       | {
           projectStoragePath: string
@@ -385,7 +406,82 @@ export async function PATCH(
     }
 
     if (versionLabel !== undefined) {
-      updateData.versionLabel = versionLabel.trim()
+      const trimmedLabel = versionLabel.trim()
+      updateData.versionLabel = trimmedLabel
+
+      // If the sanitized folder name changes and we are not already doing a video name
+      // rename (which would conflict), move the version subfolder in storage too.
+      if (trimmedLabel !== video.versionLabel && !videoRenamePlan) {
+        const projectStoragePath = video.project.storagePath
+          || buildProjectStorageRoot(video.project.client?.name || (video.project as any).companyName || 'Client', video.project.title)
+        const videoFolderName = (video as any).storageFolderName || video.name
+        const oldMainPrefix = buildVideoVersionRoot(projectStoragePath, videoFolderName, video.versionLabel)
+        const newMainPrefix = buildVideoVersionRoot(projectStoragePath, videoFolderName, trimmedLabel)
+
+        if (oldMainPrefix !== newMainPrefix) {
+          const oldPreviewPrefix = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, video.versionLabel)
+          const newPreviewPrefix = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, trimmedLabel)
+
+          const videoAssets = await prisma.videoAsset.findMany({
+            where: { videoId: id },
+            select: { id: true, storagePath: true, previewPath: true },
+          })
+
+          if (isS3Mode()) {
+            const activeRenameJob = await prisma.folderRenameJob.findFirst({
+              where: { entityType: 'VIDEO_VERSION', entityId: id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+            })
+            if (activeRenameJob) {
+              return NextResponse.json(
+                { error: 'A rename is already in progress for this video version. Please wait for it to complete.' },
+                { status: 423 },
+              )
+            }
+
+            if (!confirmed) {
+              return NextResponse.json(
+                {
+                  requiresJobConfirmation: true,
+                  proposedLabel: trimmedLabel,
+                },
+                { status: 202 },
+              )
+            }
+
+            const folderRenameJob = await prisma.folderRenameJob.create({
+              data: {
+                entityType: 'VIDEO_VERSION',
+                entityId: id,
+                entityName: trimmedLabel,
+                oldPrefix: oldMainPrefix,
+                newPrefix: newMainPrefix,
+                status: 'PENDING',
+              },
+            })
+            await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
+            // In S3 mode only update the versionLabel field now; path columns will be
+            // rebased by the background worker once the S3 copy completes.
+          } else {
+            // Local mode: plan an inline directory move + path rebase.
+            versionLabelRenamePlan = {
+              oldMainPrefix,
+              newMainPrefix,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+              currentVideo: {
+                originalStoragePath: (video as any).originalStoragePath,
+                preview480Path: (video as any).preview480Path ?? null,
+                preview720Path: (video as any).preview720Path ?? null,
+                preview1080Path: (video as any).preview1080Path ?? null,
+                thumbnailPath: (video as any).thumbnailPath ?? null,
+                timelinePreviewVttPath: (video as any).timelinePreviewVttPath ?? null,
+                timelinePreviewSpritesPath: (video as any).timelinePreviewSpritesPath ?? null,
+              },
+              videoAssets,
+            }
+          }
+        }
+      }
     }
 
     if (videoNotes !== undefined) {
@@ -500,6 +596,67 @@ export async function PATCH(
             data: {
               storagePath: rebasedStoragePath,
               previewPath: rebasedPreviewPath,
+            },
+          })
+        }
+      })
+    } else if (versionLabelRenamePlan) {
+      // Move both the main version folder and its previews folder, then rebase all paths.
+      await moveDirectory(versionLabelRenamePlan.oldMainPrefix, versionLabelRenamePlan.newMainPrefix)
+      // Previews may not exist yet (unprocessed video) — moveDirectory returns early if src is absent.
+      await moveDirectory(versionLabelRenamePlan.oldPreviewPrefix, versionLabelRenamePlan.newPreviewPrefix)
+
+      const { oldMainPrefix, newMainPrefix, oldPreviewPrefix, newPreviewPrefix } = versionLabelRenamePlan
+
+      await prisma.$transaction(async (tx) => {
+        await tx.video.update({
+          where: { id },
+          data: {
+            ...updateData,
+            originalStoragePath: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.originalStoragePath,
+              oldMainPrefix,
+              newMainPrefix,
+            )!,
+            preview480Path: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.preview480Path,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+            ),
+            preview720Path: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.preview720Path,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+            ),
+            preview1080Path: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.preview1080Path,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+            ),
+            thumbnailPath: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.thumbnailPath,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+            ),
+            timelinePreviewVttPath: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.timelinePreviewVttPath,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+            ),
+            timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(
+              versionLabelRenamePlan.currentVideo.timelinePreviewSpritesPath,
+              oldPreviewPrefix,
+              newPreviewPrefix,
+            ),
+          },
+        })
+
+        for (const asset of versionLabelRenamePlan.videoAssets) {
+          await tx.videoAsset.update({
+            where: { id: asset.id },
+            data: {
+              storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldMainPrefix, newMainPrefix)!,
+              previewPath: replaceStoredStoragePathPrefix(asset.previewPath, oldPreviewPrefix, newPreviewPrefix),
             },
           })
         }

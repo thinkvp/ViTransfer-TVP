@@ -248,12 +248,6 @@ export async function POST(request: NextRequest) {
 
     const finalEnableVideos = enableVideos !== undefined ? Boolean(enableVideos) : true
     const finalEnablePhotos = enablePhotos !== undefined ? Boolean(enablePhotos) : false
-    if (!finalEnableVideos && !finalEnablePhotos) {
-      return NextResponse.json(
-        { error: 'Project must have at least one type enabled (Video and/or Photo)' },
-        { status: 400 }
-      )
-    }
 
     const requestedAssignmentsRaw: Array<{ userId: string; receiveNotifications: boolean }> =
       Array.isArray((validation.data as any).assignedUsers)

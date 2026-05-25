@@ -76,7 +76,7 @@ export type AlbumThumbnailJob = {
 
 export type FolderRenameJob = {
   id: string
-  entityType: 'PROJECT' | 'CLIENT' | 'VIDEO_GROUP' | 'ALBUM'
+  entityType: 'PROJECT' | 'CLIENT' | 'VIDEO_GROUP' | 'ALBUM' | 'VIDEO_VERSION'
   entityId: string
   entityName: string
   status: 'PENDING' | 'IN_PROGRESS'
@@ -785,6 +785,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     sublabel: prev.entityType === 'PROJECT' ? 'Project rename complete'
                       : prev.entityType === 'CLIENT' ? 'Client rename complete'
                       : prev.entityType === 'VIDEO_GROUP' ? 'Video rename complete'
+                      : prev.entityType === 'VIDEO_VERSION' ? 'Video version rename complete'
                       : 'Album rename complete',
                     projectId: prev.entityType === 'PROJECT' ? prev.entityId : '',
                     completedAt: now,

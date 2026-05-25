@@ -84,6 +84,7 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
             preview480Path: true,
             preview720Path: true,
             preview1080Path: true,
+            timelinePreviewVttPath: true,
             timelinePreviewSpritesPath: true,
             timelinePreviewsReady: true,
           },
@@ -100,10 +101,14 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
             updateData.preview1080Path = null
           }
 
+          if (video.timelinePreviewVttPath) {
+            await deleteFile(video.timelinePreviewVttPath).catch(() => {})
+            updateData.timelinePreviewVttPath = null
+          }
+
           if (video.timelinePreviewSpritesPath) {
             await deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {})
             updateData.timelinePreviewsReady = false
-            updateData.timelinePreviewVttPath = null
             updateData.timelinePreviewSpritesPath = null
           }
 
@@ -114,6 +119,32 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
             })
           }
         }
+
+        // Also clear VideoAsset preview files and metadata
+        const videoAssets = await prisma.videoAsset.findMany({
+          where: {
+            video: { projectId },
+            previewPath: { not: null },
+          },
+          select: { id: true, previewPath: true },
+        })
+
+        for (const asset of videoAssets) {
+          if (asset.previewPath) {
+            await deleteFile(asset.previewPath).catch(() => {})
+          }
+          await prisma.videoAsset.update({
+            where: { id: asset.id },
+            data: {
+              previewPath: null,
+              previewStatus: null,
+              previewError: null,
+              previewGeneratedAt: null,
+              previewFileSize: null,
+            },
+          }).catch(() => {})
+        }
+
         console.log(`[AUTO-CLOSE] Deleted previews and timeline sprites for project ${projectId}`)
       } catch (err) {
         console.error(`[AUTO-CLOSE] Error deleting previews for project ${projectId}:`, err)

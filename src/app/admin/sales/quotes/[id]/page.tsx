@@ -373,7 +373,7 @@ export default function QuoteDetailPage() {
       })
       setQuote(next)
       setStatus(next.status)
-      setSavedSnapshot(currentSnapshot)
+      setSavedSnapshot(JSON.stringify({ status: next.status, clientId, projectId, issueDate, validUntil, notes, terms, items }))
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
     } finally {

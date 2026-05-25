@@ -10,6 +10,7 @@ import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import {
   allocateUniqueStorageName,
   buildAlbumStorageRoot,
+  buildProjectPreviewsRoot,
   buildProjectStorageRoot,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
@@ -20,6 +21,7 @@ export const dynamic = 'force-dynamic'
 
 const updateAlbumSchema = z.object({
   name: z.string().min(1).max(200).optional(),
+  confirmed: z.boolean().optional(),
 })
 
 // PATCH /api/albums/[albumId] - update album (admin)
@@ -81,6 +83,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let albumRenamePlan: null | {
     oldAlbumStorageRoot: string
     newAlbumStorageRoot: string
+    oldAlbumPreviewsRoot: string
+    newAlbumPreviewsRoot: string
     newAlbumFolderName: string
   } = null
 
@@ -107,10 +111,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         album.storageFolderName || album.name,
       )
       const newAlbumStorageRoot = buildAlbumStorageRoot(projectStoragePath, newAlbumFolderName)
+      const projectPreviewsRoot = buildProjectPreviewsRoot(projectStoragePath)
+      // Derive the sanitized folder name from the already-computed storage roots
+      const oldSanitizedAlbumFolder = oldAlbumStorageRoot.slice(oldAlbumStorageRoot.lastIndexOf('/') + 1)
+      const newSanitizedAlbumFolder = newAlbumStorageRoot.slice(newAlbumStorageRoot.lastIndexOf('/') + 1)
+      const oldAlbumPreviewsRoot = `${projectPreviewsRoot}/albums/${oldSanitizedAlbumFolder}`
+      const newAlbumPreviewsRoot = `${projectPreviewsRoot}/albums/${newSanitizedAlbumFolder}`
       data.storageFolderName = newAlbumFolderName
 
       if (oldAlbumStorageRoot !== newAlbumStorageRoot) {
-        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot, newAlbumFolderName }
+        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot, oldAlbumPreviewsRoot, newAlbumPreviewsRoot, newAlbumFolderName }
       }
     }
   }
@@ -118,6 +128,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (albumRenamePlan) {
     if (isS3Mode()) {
       // In S3 mode, schedule a background job; paths will be updated by the worker.
+      const activeRenameJob = await prisma.folderRenameJob.findFirst({
+        where: { entityType: 'ALBUM', entityId: albumId, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      })
+      if (activeRenameJob) {
+        return NextResponse.json(
+          { error: 'A folder rename is already in progress for this album. Please wait for it to complete.' },
+          { status: 423 },
+        )
+      }
+
+      if (!parsed.data.confirmed) {
+        return NextResponse.json(
+          {
+            requiresJobConfirmation: true,
+            proposedName: albumRenamePlan.newAlbumFolderName,
+          },
+          { status: 202 },
+        )
+      }
+
+      // User confirmed — create the background job. The worker will move both the main
+      // album folder and its .previews mirror, then update all DB path columns.
       // Clear storageFolderName from the inline data update — the worker sets it via raw SQL.
       delete data.storageFolderName
       const folderRenameJob = await prisma.folderRenameJob.create({
@@ -132,7 +164,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       })
       await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
     } else {
+      // Local mode: move both the main album folder and its .previews mirror.
       await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
+      await moveDirectory(albumRenamePlan.oldAlbumPreviewsRoot, albumRenamePlan.newAlbumPreviewsRoot)
     }
   }
 
@@ -161,6 +195,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         await tx.albumPhoto.update({
           where: { id: photo.id },
           data: {
+            // storagePath and socialStoragePath live under albums/{folder}/ (the main root)
             storagePath: replaceStoredStoragePathPrefix(
               photo.storagePath,
               albumRenamePlan.oldAlbumStorageRoot,
@@ -171,10 +206,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               albumRenamePlan.oldAlbumStorageRoot,
               albumRenamePlan.newAlbumStorageRoot,
             ),
+            // thumbnailStoragePath lives under .previews/albums/{folder}/thumbnails/
             thumbnailStoragePath: replaceStoredStoragePathPrefix(
               photo.thumbnailStoragePath,
-              albumRenamePlan.oldAlbumStorageRoot,
-              albumRenamePlan.newAlbumStorageRoot,
+              albumRenamePlan.oldAlbumPreviewsRoot,
+              albumRenamePlan.newAlbumPreviewsRoot,
             ),
           },
         })

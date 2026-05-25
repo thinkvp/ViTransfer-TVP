@@ -240,6 +240,16 @@ export function buildVideoTimelineStorageRoot(projectStoragePath: string, videoF
   return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'timeline-previews')
 }
 
+/**
+ * Returns the root of the preview folder for a specific video version.
+ * All preview derivatives (MP4 previews, thumbnail, timeline sprites, asset previews)
+ * live under this root. Used when moving or renaming a version label.
+ * e.g. {projectStoragePath}/.previews/videos/{videoFolderName}/{versionLabel}
+ */
+export function buildVideoVersionPreviewsRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel))
+}
+
 export function buildAlbumStorageRoot(projectStoragePath: string, albumFolderName: string): string {
   return path.posix.join(projectStoragePath, 'albums', sanitizeStorageName(albumFolderName))
 }

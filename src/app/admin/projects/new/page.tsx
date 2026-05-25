@@ -220,12 +220,6 @@ export default function NewProjectPage() {
       return
     }
 
-    if (!enableVideos && !enablePhotos) {
-      setProjectTypeError('Select at least one project type (Video and/or Photo)')
-      setLoading(false)
-      return
-    }
-
     if (passwordProtected && (authMode === 'OTP' || authMode === 'BOTH')) {
       if (!smtpConfigured) {
         setAuthModeError('SMTP must be configured in Settings to use Email OTP')

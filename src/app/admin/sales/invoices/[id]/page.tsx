@@ -556,15 +556,16 @@ export default function InvoiceDetailPage() {
           taxRatePercent: normalizeTaxRatePercent(it.taxRatePercent, settings.taxRatePercent),
         })),
       })
-      setInvoice(next)
-      setItems(next.items.map((it) => ({
+      const nextItems = next.items.map((it) => ({
         ...it,
         id: it.id || (globalThis.crypto?.randomUUID?.() ?? `li-${Date.now()}-${Math.random()}`),
         details: (it as any).details ?? '',
         taxRatePercent: normalizeTaxRatePercent((it as any).taxRatePercent, settings.taxRatePercent),
-      })))
+      }))
+      setInvoice(next)
+      setItems(nextItems)
       setStatus(next.status)
-      setSavedSnapshot(currentSnapshot)
+      setSavedSnapshot(JSON.stringify({ status: next.status, clientId, projectId, issueDate, dueDate, notes, terms, items: nextItems }))
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
     } catch (e) {

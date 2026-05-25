@@ -650,7 +650,11 @@ async function buildFolderRenameJobs() {
       id: j.id,
       type: 'folderRename' as const,
       label: j.entityName,
-      sublabel: j.entityType === 'PROJECT' ? 'Project rename complete' : 'Client rename complete',
+      sublabel: j.entityType === 'PROJECT' ? 'Project rename complete'
+        : j.entityType === 'CLIENT' ? 'Client rename complete'
+        : j.entityType === 'VIDEO_GROUP' ? 'Video rename complete'
+        : j.entityType === 'VIDEO_VERSION' ? 'Video version rename complete'
+        : 'Album rename complete',
       projectId: j.entityType === 'PROJECT' ? j.entityId : '',
       completedAt: (j.completedAt ?? j.updatedAt).getTime(),
     })),
@@ -658,7 +662,11 @@ async function buildFolderRenameJobs() {
       id: j.id,
       type: 'folderRename' as const,
       label: j.entityName,
-      sublabel: j.entityType === 'PROJECT' ? 'Project rename failed' : 'Client rename failed',
+      sublabel: j.entityType === 'PROJECT' ? 'Project rename failed'
+        : j.entityType === 'CLIENT' ? 'Client rename failed'
+        : j.entityType === 'VIDEO_GROUP' ? 'Video rename failed'
+        : j.entityType === 'VIDEO_VERSION' ? 'Video version rename failed'
+        : 'Album rename failed',
       projectId: j.entityType === 'PROJECT' ? j.entityId : '',
       completedAt: (j.completedAt ?? j.updatedAt).getTime(),
       error: true,

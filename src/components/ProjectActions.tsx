@@ -707,7 +707,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       {canSendNotifications && (
       <Dialog open={showNotificationModal} onOpenChange={setShowNotificationModal}>
         <DialogContent
-          className="max-w-[95vw] sm:max-w-md"
+          className="max-w-[95vw] sm:max-w-md flex flex-col max-h-[90vh]"
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -716,6 +716,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             </DialogTitle>
           </DialogHeader>
 
+          <div className="overflow-y-auto flex-1 min-h-0">
           <div className="space-y-4">
             {/* Notification Type Selection */}
             <div>
@@ -1071,6 +1072,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 ? 'This will send an email to the selected internal users with a link to access this project.'
                 : 'This will send an email to the selected recipients with a link to view the selected video version.'}
             </p>
+          </div>
           </div>
         </DialogContent>
       </Dialog>

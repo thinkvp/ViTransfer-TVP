@@ -10,6 +10,7 @@ import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
   buildVideoAssetPreviewStoragePath,
+  buildProjectPreviewsRoot,
   buildProjectStorageRoot,
   buildVideoStorageRoot,
   getStoragePathBasename,
@@ -45,7 +46,7 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { videoIds, name } = body
+    const { videoIds, name, confirmed } = body
 
     if (!Array.isArray(videoIds) || videoIds.length === 0) {
       return NextResponse.json(
@@ -126,10 +127,39 @@ export async function PATCH(request: NextRequest) {
 
       const oldVideoStorageRoot = buildVideoStorageRoot(projectStoragePath, currentFolderName)
       const newVideoStorageRoot = buildVideoStorageRoot(projectStoragePath, nextFolderName)
+      // Preview files live under .previews/videos/{folder}/ (sibling to videos/{folder}/)
+      const oldVideoPreviewRoot = `${buildProjectPreviewsRoot(projectStoragePath)}/videos/${path.posix.basename(oldVideoStorageRoot)}`
+      const newVideoPreviewRoot = `${buildProjectPreviewsRoot(projectStoragePath)}/videos/${path.posix.basename(newVideoStorageRoot)}`
 
       if (oldVideoStorageRoot !== newVideoStorageRoot) {
         if (isS3Mode()) {
-          // In S3 mode, schedule a background job to move the folder.
+          // In S3 mode, check for an active job and optionally require confirmation.
+          const activeRenameJob = await prisma.folderRenameJob.findFirst({
+            where: {
+              entityType: 'VIDEO_GROUP',
+              entityId: sampleVideo.projectId,
+              oldPrefix: oldVideoStorageRoot,
+              status: { in: ['PENDING', 'IN_PROGRESS'] },
+            },
+          })
+          if (activeRenameJob) {
+            return NextResponse.json(
+              { error: 'A folder rename is already in progress for this video group. Please wait for it to complete.' },
+              { status: 423 },
+            )
+          }
+
+          if (!confirmed) {
+            return NextResponse.json(
+              {
+                requiresJobConfirmation: true,
+                proposedName: nextFolderName,
+              },
+              { status: 202 },
+            )
+          }
+
+          // User confirmed — schedule a background job to move the folder.
           // The DB name fields are updated below; path fields will be updated by the worker.
           const folderRenameJob = await prisma.folderRenameJob.create({
             data: {
@@ -143,7 +173,9 @@ export async function PATCH(request: NextRequest) {
           })
           await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
         } else {
+          // Local mode: move both the main video folder and its .previews mirror.
           await moveDirectory(oldVideoStorageRoot, newVideoStorageRoot)
+          await moveDirectory(oldVideoPreviewRoot, newVideoPreviewRoot)
         }
       }
 
@@ -164,13 +196,15 @@ export async function PATCH(request: NextRequest) {
               name: trimmedName,
               storageFolderName: nextFolderName,
               ...(needsPathRebase ? {
+                // originalStoragePath lives under the main videos/{folder}/ root
                 originalStoragePath: replaceStoredStoragePathPrefix(video.originalStoragePath, oldVideoStorageRoot, newVideoStorageRoot)!,
-                preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldVideoStorageRoot, newVideoStorageRoot),
-                preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldVideoStorageRoot, newVideoStorageRoot),
-                preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldVideoStorageRoot, newVideoStorageRoot),
-                thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldVideoStorageRoot, newVideoStorageRoot),
-                timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldVideoStorageRoot, newVideoStorageRoot),
-                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldVideoStorageRoot, newVideoStorageRoot),
+                // Preview paths live under .previews/videos/{folder}/ — use the preview prefix pair
+                preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldVideoPreviewRoot, newVideoPreviewRoot),
+                preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldVideoPreviewRoot, newVideoPreviewRoot),
+                preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldVideoPreviewRoot, newVideoPreviewRoot),
+                thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldVideoPreviewRoot, newVideoPreviewRoot),
+                timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldVideoPreviewRoot, newVideoPreviewRoot),
+                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldVideoPreviewRoot, newVideoPreviewRoot),
               } : {}),
             },
           })

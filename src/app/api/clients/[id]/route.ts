@@ -269,13 +269,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
           const assets = await tx.videoAsset.findMany({
             where: { video: { project: { clientId: id } } },
-            select: { id: true, storagePath: true },
+            select: { id: true, storagePath: true, previewPath: true },
           })
           for (const asset of assets) {
             await tx.videoAsset.update({
               where: { id: asset.id },
               data: {
                 storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
+                previewPath: replaceStoredStoragePathPrefix(asset.previewPath, oldClientStorageRoot, newClientStorageRoot),
               },
             })
           }
