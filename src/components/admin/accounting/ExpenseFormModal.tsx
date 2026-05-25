@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Trash2, CheckCircle, Paperclip, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import type { Expense, AccountTaxCode, ExpenseStatus, AccountingAttachment, BankTransaction } from '@/lib/accounting/types'
@@ -17,6 +18,7 @@ import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accoun
 import { CameraCaptureButton } from '@/components/admin/accounting/CameraCaptureButton'
 import { buildAccountOptions, type AccountOption } from '@/lib/accounting/account-options'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 function NewExpenseDropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [dragOver, setDragOver] = useState(false)
@@ -81,6 +83,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [pendingDeleteAttachmentId, setPendingDeleteAttachmentId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   const [receiptFiles, setReceiptFiles] = useState<File[]>([])
@@ -264,7 +267,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
   async function downloadAccountingAttachment(attachmentId: string, filename: string) {
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
-      if (!res.ok) { alert('Failed to download'); return }
+      if (!res.ok) { toast.error('Failed to download'); return }
       const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
       if (isS3Redirect) {
         void res.body?.cancel()
@@ -285,13 +288,19 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
       a.remove()
       URL.revokeObjectURL(url)
     } catch {
-      alert('Failed to download')
+      toast.error('Failed to download')
     }
   }
 
   async function handleDeleteAccountingAttachment(attachmentId: string) {
     if (!expenseId) return
-    if (!confirm('Delete this attachment? This cannot be undone.')) return
+    setPendingDeleteAttachmentId(attachmentId)
+  }
+
+  async function confirmDeleteAccountingAttachment() {
+    const attachmentId = pendingDeleteAttachmentId
+    if (!attachmentId) return
+    setPendingDeleteAttachmentId(null)
     setDeletingAttachmentId(attachmentId)
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
@@ -351,7 +360,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
       const res = await apiFetch(`/api/admin/accounting/expenses/${expenseId}`, { method: 'DELETE' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to delete')
+        toast.error(d.error || 'Failed to delete')
         return
       }
       setShowDeleteDialog(false)
@@ -601,6 +610,15 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
         open={!!linkedTransactionId}
         transactionId={linkedTransactionId}
         onOpenChange={open => { if (!open) setLinkedTransactionId(null) }}
+      />
+
+      <ConfirmDialog
+        open={pendingDeleteAttachmentId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteAttachmentId(null) }}
+        title="Delete Attachment?"
+        description="This attachment will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteAccountingAttachment}
       />
     </>
   )

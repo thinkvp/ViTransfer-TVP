@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { apiFetch } from '@/lib/api-client'
 import { Camera, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface AvatarUploadCropProps {
   userId: string
@@ -83,6 +84,7 @@ export function AvatarUploadCrop({
 }: AvatarUploadCropProps) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Crop state
@@ -267,7 +269,6 @@ export function AvatarUploadCrop({
 
   // ─── Delete avatar ────────────────────────────────────────────────────────
   async function handleDelete() {
-    if (!confirm('Remove this profile picture?')) return
     setSaving(true)
     setError(null)
     try {
@@ -316,7 +317,7 @@ export function AvatarUploadCrop({
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleDelete}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={saving}
               title="Remove photo"
             >
@@ -431,6 +432,13 @@ export function AvatarUploadCrop({
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Remove Profile Picture?"
+        description="Your profile picture will be permanently removed."
+        confirmLabel="Remove"
+        onConfirm={handleDelete}
+      />    </div>
   )
 }

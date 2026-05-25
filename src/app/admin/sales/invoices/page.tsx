@@ -35,6 +35,8 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 type InvoiceRow = {
   invoice: SalesInvoiceWithVersion
@@ -48,6 +50,7 @@ export default function SalesInvoicesPage() {
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [sendTarget, setSendTarget] = useState<SalesInvoiceWithVersion | null>(null)
+  const [pendingDeleteInvoice, setPendingDeleteInvoice] = useState<SalesInvoiceWithVersion | null>(null)
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -143,11 +146,11 @@ export default function SalesInvoicesPage() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Failed to update invoice'
         if (msg === 'Conflict') {
-          alert('This invoice was updated in another session. Reloading.')
+          toast.error('This invoice was updated in another session. Reloading.')
           setTick((v) => v + 1)
           return
         }
-        alert(msg)
+        toast.error(msg)
       }
     },
     []
@@ -384,8 +387,13 @@ export default function SalesInvoicesPage() {
     setSendOpen(true)
   }
 
-  const onDelete = async (inv: SalesInvoiceWithVersion) => {
-    if (!confirm(`Delete invoice ${inv.invoiceNumber}?`)) return
+  const onDelete = (inv: SalesInvoiceWithVersion) => {
+    setPendingDeleteInvoice(inv)
+  }
+
+  const confirmDeleteInvoice = async () => {
+    const inv = pendingDeleteInvoice!
+    setPendingDeleteInvoice(null)
     try {
       await deleteSalesInvoice(inv.id)
       setInvoices((prev) => prev.filter((x) => x.id !== inv.id))
@@ -395,12 +403,13 @@ export default function SalesInvoicesPage() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete invoice'
-      alert(msg)
+      toast.error(msg)
     }
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <>
+      <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">Invoices</h2>
@@ -709,12 +718,22 @@ export default function SalesInvoicesPage() {
                 setInvoices((prev) => prev.map((x) => (x.id === next.id ? next : x)))
                 setSendTarget(next)
               } catch (e) {
-                alert(e instanceof Error ? e.message : 'Failed to refresh invoice')
+                toast.error(e instanceof Error ? e.message : 'Failed to refresh invoice')
               }
             })()
           }}
         />
       ) : null}
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteInvoice !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteInvoice(null) }}
+        title={`Delete Invoice ${pendingDeleteInvoice?.invoiceNumber ?? ''}?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteInvoice}
+      />
+    </>
   )
 }

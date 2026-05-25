@@ -8,6 +8,7 @@ import { Edit, Trash2, Plus, Star, Check, Bell, BellOff } from 'lucide-react'
 import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 import { generateRandomHexDisplayColor } from '@/lib/display-color'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface Recipient {
   id?: string
@@ -35,6 +36,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
   const [editEmail, setEditEmail] = useState('')
   const [editName, setEditName] = useState('')
   const [editDisplayColor, setEditDisplayColor] = useState('#22C55E')
+  const [pendingDeleteRecipientId, setPendingDeleteRecipientId] = useState<string | null>(null)
 
   const loadRecipients = useCallback(async () => {
     setLoading(true)
@@ -86,13 +88,16 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
     }
   }
 
-  const deleteRecipient = async (recipientId: string) => {
-    if (!confirm('Are you sure you want to remove this recipient?')) {
-      return
-    }
+  const deleteRecipient = (recipientId: string) => {
+    setPendingDeleteRecipientId(recipientId)
+  }
 
+  const confirmDeleteRecipient = async () => {
+    const id = pendingDeleteRecipientId
+    if (!id) return
+    setPendingDeleteRecipientId(null)
     try {
-      await apiDelete(`/api/projects/${projectId}/recipients/${recipientId}`)
+      await apiDelete(`/api/projects/${projectId}/recipients/${id}`)
       await loadRecipients()
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Failed to delete recipient')
@@ -167,6 +172,7 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
   }
 
   return (
+    <>
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
@@ -397,5 +403,15 @@ export function RecipientManager({ projectId, onError, onRecipientsChange }: Rec
         </div>
       )}
     </div>
+
+    <ConfirmDialog
+      open={pendingDeleteRecipientId !== null}
+      onOpenChange={(v) => { if (!v) setPendingDeleteRecipientId(null) }}
+      title="Remove Recipient?"
+      description="This recipient will be removed from the project."
+      confirmLabel="Remove"
+      onConfirm={confirmDeleteRecipient}
+    />
+  </>
   )
 }

@@ -18,6 +18,7 @@ import { LineItemAutocomplete } from '@/components/sales/LineItemAutocomplete'
 import type { SalesItem, SalesLabel } from '@/lib/sales/admin-api'
 import type { ClientOption, ProjectOption, SalesLineItem, SalesSettings, SalesTaxRate } from '@/lib/sales/types'
 import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
+import { toast } from 'sonner'
 import {
   calcLineSubtotalCents,
   centsToDollars,
@@ -223,12 +224,12 @@ export default function NewInvoicePage() {
 
   const onCreate = async () => {
     if (!clientId) {
-      alert('Select a client.')
+      toast.error('Select a client.')
       return
     }
 
     if (items.every((it) => !it.description.trim())) {
-      alert('Add at least one line item item name.')
+      toast.error('Add at least one line item item name.')
       return
     }
 
@@ -250,11 +251,11 @@ export default function NewInvoicePage() {
         })),
       })
 
-      alert(`Created invoice ${inv.invoiceNumber}`)
+      toast.success(`Created invoice ${inv.invoiceNumber}`)
       window.location.href = `/admin/sales/invoices/${inv.id}`
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create invoice'
-      alert(msg)
+      toast.error(msg)
     } finally {
       setCreating(false)
     }

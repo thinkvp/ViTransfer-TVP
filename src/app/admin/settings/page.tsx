@@ -25,6 +25,7 @@ import {
   MIN_UPLOAD_CHUNK_SIZE_MB,
 } from '@/lib/transfer-tuning'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface Settings {
   id: string
@@ -132,6 +133,8 @@ export default function GlobalSettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null)
   const [loading, setLoading] = useState(true)
+  const [pendingRemoveIpId, setPendingRemoveIpId] = useState<string | null>(null)
+  const [pendingRemoveDomainId, setPendingRemoveDomainId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -581,16 +584,19 @@ export default function GlobalSettingsPage() {
     }
   }
 
-  const handleRemoveIP = async (id: string) => {
-    if (!confirm('Remove this IP from blocklist?')) return
+  const handleRemoveIP = (id: string) => {
+    setPendingRemoveIpId(id)
+  }
 
+  const confirmRemoveIP = async () => {
+    const id = pendingRemoveIpId!
+    setPendingRemoveIpId(null)
     try {
       await apiFetch('/api/security/blocklist/ips', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id })
       })
-
       loadBlocklists()
     } catch {
       setError('Failed to remove IP from blocklist')
@@ -622,16 +628,19 @@ export default function GlobalSettingsPage() {
     }
   }
 
-  const handleRemoveDomain = async (id: string) => {
-    if (!confirm('Remove this domain from blocklist?')) return
+  const handleRemoveDomain = (id: string) => {
+    setPendingRemoveDomainId(id)
+  }
 
+  const confirmRemoveDomain = async () => {
+    const id = pendingRemoveDomainId!
+    setPendingRemoveDomainId(null)
     try {
       await apiFetch('/api/security/blocklist/domains', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id })
       })
-
       loadBlocklists()
     } catch {
       setError('Failed to remove domain from blocklist')
@@ -1695,6 +1704,21 @@ export default function GlobalSettingsPage() {
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemoveIpId !== null}
+        onOpenChange={(v) => { if (!v) setPendingRemoveIpId(null) }}
+        title="Remove IP from Blocklist?"
+        confirmLabel="Remove"
+        onConfirm={confirmRemoveIP}
+      />
+      <ConfirmDialog
+        open={pendingRemoveDomainId !== null}
+        onOpenChange={(v) => { if (!v) setPendingRemoveDomainId(null) }}
+        title="Remove Domain from Blocklist?"
+        confirmLabel="Remove"
+        onConfirm={confirmRemoveDomain}
+      />
     </div>
   )
 }

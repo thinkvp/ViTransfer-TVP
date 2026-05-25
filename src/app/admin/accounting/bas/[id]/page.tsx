@@ -18,6 +18,8 @@ import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accoun
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
 import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
 import { cn, formatDate } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 function fmtAud(cents: number) {
   const abs = (Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -74,6 +76,8 @@ export default function BasDetailPage() {
   const [error, setError] = useState('')
 
   const [lodgeConfirm, setLodgeConfirm] = useState(false)
+  const [pendingDeletePayment, setPendingDeletePayment] = useState(false)
+  const [pendingDeleteAttachment, setPendingDeleteAttachment] = useState<{ id: string; name: string } | null>(null)
 
   // Payment recording
   interface CoaOption { id: string; code: string; name: string; type: string }
@@ -155,7 +159,7 @@ export default function BasDetailPage() {
           notes: jeNotes.trim() || undefined,
         }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to save journal entry'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to save journal entry'); return }
       setJeOpen(false)
       setEditingJe(null)
       if (calculation) void handleCalculate()
@@ -234,7 +238,7 @@ export default function BasDetailPage() {
   async function handleDownloadAttachment(attachmentId: string, filename: string) {
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
-      if (!res.ok) { alert('Failed to download attachment'); return }
+      if (!res.ok) { toast.error('Failed to download attachment'); return }
       const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
       if (isS3Redirect) {
         void res.body?.cancel()
@@ -255,7 +259,7 @@ export default function BasDetailPage() {
       a.remove()
       URL.revokeObjectURL(url)
     } catch {
-      alert('Failed to download attachment')
+      toast.error('Failed to download attachment')
     }
   }
 
@@ -263,7 +267,7 @@ export default function BasDetailPage() {
     setDeletingAttachmentId(attachmentId)
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
-      if (!res.ok) { alert('Failed to delete attachment'); return false }
+      if (!res.ok) { toast.error('Failed to delete attachment'); return false }
       setAttachments(prev => prev.filter(a => a.id !== attachmentId))
       return true
     } finally {
@@ -318,7 +322,7 @@ export default function BasDetailPage() {
       const res = await apiFetch(`/api/admin/accounting/bas/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed'); return }
       await load()
     } finally { setSaving(false) }
   }
@@ -355,7 +359,7 @@ export default function BasDetailPage() {
     setDeletingPayment(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/bas/${id}/payment`, { method: 'DELETE' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to remove payment'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to remove payment'); return }
       await load()
     } finally { setDeletingPayment(false) }
   }
@@ -366,7 +370,8 @@ export default function BasDetailPage() {
   const isLodged = period.status === 'LODGED'
 
   return (
-    <div className="space-y-5">
+    <>
+      <div className="space-y-5">
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => router.push('/admin/accounting/bas')}>
           <ArrowLeft className="w-4 h-4" />
@@ -532,7 +537,7 @@ export default function BasDetailPage() {
                     </span>
                   )}
                 </div>
-                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => { if (!confirm('Remove this payment record? This will delete the associated expense entry and cannot be undone.')) return; void handleDeletePayment() }}>
+                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setPendingDeletePayment(true)}>
                   <Trash2 className="w-3.5 h-3.5 mr-1.5" />Remove Payment
                 </Button>
               </div>
@@ -576,7 +581,7 @@ export default function BasDetailPage() {
             label={null}
             onUpload={handleUploadAttachments}
             onDownload={async (item: AttachmentItem) => { await handleDownloadAttachment(item.id, item.name) }}
-            onDelete={async (item: AttachmentItem) => { if (!confirm(`Delete "${item.name}"? This cannot be undone.`)) return; await handleDeleteAttachment(item.id) }}
+            onDelete={async (item: AttachmentItem) => { setPendingDeleteAttachment({ id: item.id, name: item.name }) }}
           />
         </CardContent>
       </Card>
@@ -1074,7 +1079,30 @@ export default function BasDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeletePayment}
+        onOpenChange={(v) => { if (!v) setPendingDeletePayment(false) }}
+        title="Remove Payment Record?"
+        description="This will delete the associated expense entry and cannot be undone."
+        confirmLabel="Remove"
+        onConfirm={() => { setPendingDeletePayment(false); void handleDeletePayment() }}
+      />
+
+      <ConfirmDialog
+        open={pendingDeleteAttachment !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteAttachment(null) }}
+        title={`Delete "${pendingDeleteAttachment?.name ?? ''}"?`}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const a = pendingDeleteAttachment!
+          setPendingDeleteAttachment(null)
+          void handleDeleteAttachment(a.id)
+        }}
+      />
+    </>
   )
 }
 

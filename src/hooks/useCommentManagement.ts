@@ -8,6 +8,7 @@ import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
 import { getAccessToken } from '@/lib/token-store'
 import { isS3Mode } from '@/lib/storage-provider-client'
+import { toast } from 'sonner'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -75,6 +76,7 @@ export function useCommentManagement({
   const [attachedFiles, setAttachedFiles] = useState<AttachedCommentFile[]>([])
   const [voiceNoteDraft, setVoiceNoteDraft] = useState<VoiceNoteDraft | null>(null)
   const [pendingCommentId, setPendingCommentId] = useState<string | null>(null)
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStatusText, setUploadStatusText] = useState<string>('')
   const previousSelectedVideoIdRef = useRef<string | null>(null)
@@ -480,18 +482,18 @@ export function useCommentManagement({
     if (loading) return
 
     if (!selectedVideoId) {
-      alert('Please select a video before commenting.')
+      toast.error('Please select a video before commenting.')
       return
     }
 
     if (useAdminAuth && !adminUser) {
-      alert('Admin session not loaded yet. Please wait a moment and try again.')
+      toast.error('Admin session not loaded yet. Please wait a moment and try again.')
       return
     }
 
     // Require a name for clients on password-protected shares
     if (!useAdminAuth && isPasswordProtected && !authorName.trim()) {
-      alert('Please enter your name before commenting.')
+      toast.error('Please enter your name before commenting.')
       return
     }
 
@@ -502,7 +504,7 @@ export function useCommentManagement({
       const latestVideoVersion = videos.length > 0 ? Math.max(...videos.map(v => v.version)) : null
       const selectedVideo = videos.find(v => v.id === validatedVideoId)
       if (selectedVideo && selectedVideo.version !== latestVideoVersion) {
-        alert('Comments are only allowed on the latest version of this project.')
+        toast.error('Comments are only allowed on the latest version of this project.')
         return
       }
     }
@@ -517,7 +519,7 @@ export function useCommentManagement({
         if (quota.usedBytes + pendingBytes > limitBytes) {
           const remainingBytes = Math.max(0, limitBytes - quota.usedBytes)
           const remainingMB = Math.floor(remainingBytes / (1024 * 1024))
-          alert(`Upload limit exceeded. Remaining allowance: ${remainingMB}MB.`)
+          toast.error(`Upload limit exceeded. Remaining allowance: ${remainingMB}MB.`)
           return
         }
       }
@@ -533,7 +535,7 @@ export function useCommentManagement({
     const isInternalComment = typeof isInternalOverride === 'boolean' ? isInternalOverride : isAdminContext
 
     if (isAdminContext && canAdminManageComments === false) {
-      alert('You do not have permission to make or delete comments on the Share Page.')
+      toast.error('You do not have permission to make or delete comments on the Share Page.')
       return
     }
     // Convert seconds to timecode for API and storage
@@ -719,7 +721,7 @@ export function useCommentManagement({
       setNewComment(rawCommentInput)
       setSelectedTimestamp(commentTimestamp)
       setSelectedVideoId(commentVideoId)
-      alert(`Failed to submit comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Failed to submit comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       // Clear loading only after send/upload finishes
       setLoading(false)
@@ -753,19 +755,19 @@ export function useCommentManagement({
   const handleDeleteComment = async (commentId: string) => {
     const isAdminContext = useAdminAuth || !!adminUser
     if (isAdminContext && canAdminManageComments === false) {
-      alert('You do not have permission to make or delete comments on the Share Page.')
+      toast.error('You do not have permission to make or delete comments on the Share Page.')
       return
     }
     const targetComment = findCommentById(commentId)
 
     if (!isAdminContext) {
       if (!allowClientDeleteComments) {
-        alert('Comment deletion is disabled for this project.')
+        toast.error('Comment deletion is disabled for this project.')
         return
       }
 
       if (!targetComment) {
-        alert('Unable to find that comment. Please refresh and try again.')
+        toast.error('Unable to find that comment. Please refresh and try again.')
         return
       }
 
@@ -775,19 +777,23 @@ export function useCommentManagement({
           : !targetComment.isInternal
 
       if (!canClientDeleteThis) {
-        alert('Only recipient comments can be deleted.')
+        toast.error('Only recipient comments can be deleted.')
         return
       }
 
       if (!shareToken) {
-        alert('Authentication required to delete comments.')
+        toast.error('Authentication required to delete comments.')
         return
       }
     }
 
-    if (!confirm('Are you sure you want to delete this comment? This action cannot be undone.')) {
-      return
-    }
+    setPendingDeleteCommentId(commentId)
+  }
+
+  const confirmDeleteComment = async () => {
+    const commentId = pendingDeleteCommentId
+    if (!commentId) return
+    setPendingDeleteCommentId(null)
 
     try {
       if (shareToken) {
@@ -810,7 +816,7 @@ export function useCommentManagement({
       // Trigger immediate re-fetch via window event (CommentSection polling will pick it up)
       window.dispatchEvent(new CustomEvent('commentDeleted'))
     } catch (error) {
-      alert(`Failed to delete comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Failed to delete comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -898,6 +904,9 @@ export function useCommentManagement({
     handleCancelReply,
     handleClearTimestamp,
     handleDeleteComment,
+    pendingDeleteCommentId,
+    setPendingDeleteCommentId,
+    confirmDeleteComment,
     resetDraft,
     setAuthorName: handleAuthorNameChange,
     setRecipient: handleRecipientSelection,

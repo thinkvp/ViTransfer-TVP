@@ -14,6 +14,8 @@ import { Switch } from '@/components/ui/switch'
 import { defaultRolePermissions, normalizeRolePermissions, type RolePermissions } from '@/lib/rbac'
 import { PROJECT_STATUS_OPTIONS, projectStatusBadgeClass, type ProjectStatus } from '@/lib/project-status'
 import { cn, formatDateTime } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface User {
   id: string
@@ -108,6 +110,11 @@ export default function UsersPage() {
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null)
+  const [pendingDeleteUserEmail, setPendingDeleteUserEmail] = useState<string>('')
+  const [pendingDeleteRoleId, setPendingDeleteRoleId] = useState<string | null>(null)
+  const [pendingDeleteRoleName, setPendingDeleteRoleName] = useState<string>('')
+  const [showRoleUnsavedDialog, setShowRoleUnsavedDialog] = useState(false)
 
   const [rolesLoading, setRolesLoading] = useState(false)
   const [roleDialogOpen, setRoleDialogOpen] = useState(false)
@@ -145,18 +152,19 @@ export default function UsersPage() {
     }
   }
 
-  const handleDelete = async (userId: string, userEmail: string) => {
-    if (!confirm(`Are you sure you want to delete user ${userEmail}?`)) {
-      return
-    }
+  const handleDelete = (userId: string, userEmail: string) => {
+    setPendingDeleteUserId(userId)
+    setPendingDeleteUserEmail(userEmail)
+  }
 
+  const confirmDeleteUser = async () => {
+    const userId = pendingDeleteUserId!
+    setPendingDeleteUserId(null)
     try {
       await apiDelete(`/api/users/${userId}`)
-
-      // Refresh user list
       void fetchUsersAndRoles()
     } catch (err: any) {
-      alert(err.message)
+      toast.error(err.message)
     }
   }
 
@@ -222,7 +230,8 @@ export default function UsersPage() {
 
   const handleRoleDialogClose = (open: boolean) => {
     if (!open && hasRoleUnsavedChanges()) {
-      if (!window.confirm('You have unsaved changes. Are you sure you want to close?')) return
+      setShowRoleUnsavedDialog(true)
+      return
     }
     setRoleDialogOpen(open)
   }
@@ -274,12 +283,18 @@ export default function UsersPage() {
   const deleteRole = async (role: Role) => {
     if (role.isSystemAdmin) return
     if (role.userCount > 0) return
-    if (!confirm(`Delete role "${role.name}"?`)) return
+    setPendingDeleteRoleId(role.id)
+    setPendingDeleteRoleName(role.name)
+  }
+
+  const confirmDeleteRole = async () => {
+    const roleId = pendingDeleteRoleId!
+    setPendingDeleteRoleId(null)
     try {
-      await apiDelete(`/api/roles/${role.id}`)
+      await apiDelete(`/api/roles/${roleId}`)
       void fetchUsersAndRoles()
     } catch (err: any) {
-      alert(err?.message || 'Operation failed')
+      toast.error(err?.message || 'Operation failed')
     }
   }
 
@@ -692,6 +707,31 @@ export default function UsersPage() {
             </DialogFooter>
           </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteUserId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteUserId(null) }}
+        title={`Delete User "${pendingDeleteUserEmail}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteUser}
+      />
+      <ConfirmDialog
+        open={pendingDeleteRoleId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteRoleId(null) }}
+        title={`Delete Role "${pendingDeleteRoleName}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteRole}
+      />
+      <ConfirmDialog
+        open={showRoleUnsavedDialog}
+        onOpenChange={setShowRoleUnsavedDialog}
+        title="Discard Unsaved Changes?"
+        description="You have unsaved changes. Are you sure you want to close?"
+        confirmLabel="Discard"
+        onConfirm={() => { setShowRoleUnsavedDialog(false); setRoleDialogOpen(false) }}
+      />
     </div>
   )
 }

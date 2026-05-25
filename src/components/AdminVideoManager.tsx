@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { apiPatch } from '@/lib/api-client'
 import MultiVideoUploadModal from '@/components/MultiVideoUploadModal'
+import { toast } from 'sonner'
 
 interface VideoGroup {
   name: string
@@ -108,7 +109,7 @@ export default function AdminVideoManager({
 
   const handleSaveGroupName = async (oldName: string) => {
     if (!editGroupValue.trim()) {
-      alert('Video name cannot be empty')
+      toast.error('Video name cannot be empty')
       return
     }
 
@@ -127,7 +128,7 @@ export default function AdminVideoManager({
         router.refresh()
       })
       .catch((error) => {
-        alert('Failed to update video name')
+        toast.error('Failed to update video name')
       })
       .finally(() => {
         setSavingGroupName(null)

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDate } from '@/lib/utils'
 import { CardDialog, type KanbanCardData, type KanbanColumnData, type KanbanUser } from '@/components/KanbanBoard'
+import { toast } from 'sonner'
 
 type TaskMember = {
   userId: string
@@ -192,7 +193,7 @@ export function ProjectTasks({
     await loadBoardData()
     const firstColumn = boardColumnsRef.current[0]
     if (!firstColumn) {
-      window.alert('Unable to load task columns right now. Please refresh and try again.')
+      toast.error('Unable to load task columns right now. Please refresh and try again.')
       return
     }
     const newCard: KanbanCardData = {

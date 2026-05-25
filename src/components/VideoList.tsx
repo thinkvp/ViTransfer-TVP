@@ -14,6 +14,8 @@ import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
 import { withDownloadTracking } from '@/lib/download-url'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface VideoListProps {
   videos: Video[]
@@ -53,6 +55,8 @@ export default function VideoList({
   const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
   const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
+  const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<string | null>(null)
+  const [pendingApprovalVideo, setPendingApprovalVideo] = useState<{ id: string; approved: boolean } | null>(null)
 
   // Polling removed from VideoList to prevent duplicate polling
   // Parent component (Project page) handles polling for processing videos
@@ -95,71 +99,63 @@ export default function VideoList({
     setExpandedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]))
   }
 
-  const handleDelete = async (videoId: string) => {
+  const handleDelete = (videoId: string) => {
     if (!effectiveCanDelete) return
-    // Prevent double-clicks during deletion
     if (deletingId) return
+    setPendingDeleteVideoId(videoId)
+  }
 
-    if (!confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
-      return
-    }
-
+  const confirmDeleteVideo = () => {
+    const videoId = pendingDeleteVideoId!
+    setPendingDeleteVideoId(null)
     setDeletingId(videoId)
 
-    // Optimistically remove from UI immediately
     setVideos(prev => prev.filter(v => v.id !== videoId))
 
-    // Perform deletion in background without blocking UI
     apiDelete(`/api/videos/${videoId}`)
       .then(() => {
         try {
           window.dispatchEvent(new CustomEvent('video-deleted', { detail: { videoId } }))
         } catch {}
-        // Refresh in background
         onRefresh?.()
       })
-      .catch((error) => {
-        // Restore video on error
+      .catch(() => {
         setVideos(initialVideos)
-        alert('Failed to delete video')
+        toast.error('Failed to delete video')
       })
       .finally(() => {
         setDeletingId(null)
       })
   }
 
-  const handleToggleApproval = async (videoId: string, currentlyApproved: boolean) => {
+  const handleToggleApproval = (videoId: string, currentlyApproved: boolean) => {
     if (!effectiveCanApprove) return
-    // Prevent double-clicks during approval toggle
     if (approvingId) return
+    setPendingApprovalVideo({ id: videoId, approved: currentlyApproved })
+  }
 
+  const confirmToggleApproval = () => {
+    const { id: videoId, approved: currentlyApproved } = pendingApprovalVideo!
+    setPendingApprovalVideo(null)
     const action = currentlyApproved ? 'unapprove' : 'approve'
-    if (!confirm(`Are you sure you want to ${action} this video?`)) {
-      return
-    }
 
     setApprovingId(videoId)
 
-    // Optimistically update UI immediately
     setVideos(prev => prev.map(v =>
       v.id === videoId ? { ...v, approved: !currentlyApproved } as Video : v
     ))
 
-    // Trigger immediate UI update for comment section approval banner
     window.dispatchEvent(new CustomEvent('videoApprovalChanged'))
 
-    // Perform approval in background without blocking UI
     apiPatch(`/api/videos/${videoId}`, { approved: !currentlyApproved })
       .then(() => {
-        // Refresh in background
         onRefresh?.()
       })
-      .catch((error) => {
-        // Revert optimistic update on error
+      .catch(() => {
         setVideos(prev => prev.map(v =>
           v.id === videoId ? { ...v, approved: currentlyApproved } as Video : v
         ))
-        alert(`Failed to ${action} video`)
+        toast.error(`Failed to ${action} video`)
       })
       .finally(() => {
         setApprovingId(null)
@@ -186,7 +182,7 @@ export default function VideoList({
       setVideos(prev => prev.map(v =>
         v.id === videoId ? ({ ...(v as any), allowApproval: previous } as any) : v
       ))
-      alert('Failed to update approval setting')
+      toast.error('Failed to update approval setting')
     } finally {
       setSavingAllowApprovalId(null)
     }
@@ -215,7 +211,7 @@ export default function VideoList({
   const handleSaveNotes = async (videoId: string) => {
     const trimmed = notesEditValue.trim()
     if (trimmed.length > 500) {
-      alert('Version notes must be 500 characters or fewer')
+      toast.error('Version notes must be 500 characters or fewer')
       return
     }
 
@@ -232,7 +228,7 @@ export default function VideoList({
       setNotesEditValue('')
       onRefresh?.()
     } catch (error) {
-      alert('Failed to update version notes')
+      toast.error('Failed to update version notes')
     } finally {
       setSavingNotesId(null)
     }
@@ -240,7 +236,7 @@ export default function VideoList({
 
   const handleSaveEdit = async (videoId: string) => {
     if (!editValue.trim()) {
-      alert('Version label cannot be empty')
+      toast.error('Version label cannot be empty')
       return
     }
 
@@ -267,7 +263,7 @@ export default function VideoList({
       setShowReprocessModal(false)
       await onRefresh?.()
     } catch (error) {
-      alert('Failed to update version label')
+      toast.error('Failed to update version label')
     } finally {
       setSavingId(null)
     }
@@ -323,7 +319,7 @@ export default function VideoList({
       })
       .catch((error) => {
         console.error('Download error:', error)
-        alert(error instanceof Error ? error.message : 'Failed to generate download link')
+        toast.error(error instanceof Error ? error.message : 'Failed to generate download link')
       })
       .finally(() => {
         setDownloadingId(null)
@@ -709,6 +705,24 @@ export default function VideoList({
         title="Version Label Changed"
         description="Version labels appear in watermarks. The change will only apply to newly uploaded videos."
         isSingleVideo={true}
+      />
+
+      <ConfirmDialog
+        open={pendingDeleteVideoId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteVideoId(null) }}
+        title="Delete Video?"
+        description="Are you sure you want to delete this video? This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteVideo}
+      />
+      <ConfirmDialog
+        open={pendingApprovalVideo !== null}
+        onOpenChange={(v) => { if (!v) setPendingApprovalVideo(null) }}
+        title={pendingApprovalVideo?.approved ? 'Unapprove Video?' : 'Approve Video?'}
+        description={`Are you sure you want to ${pendingApprovalVideo?.approved ? 'unapprove' : 'approve'} this video?`}
+        confirmLabel={pendingApprovalVideo?.approved ? 'Unapprove' : 'Approve'}
+        variant="default"
+        onConfirm={confirmToggleApproval}
       />
     </div>
   )

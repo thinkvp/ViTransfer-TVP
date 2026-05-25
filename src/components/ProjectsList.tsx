@@ -17,6 +17,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
+import { toast } from 'sonner'
 
 type ProjectAssignedUser = {
   id: string
@@ -609,7 +610,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                           await apiPatch(`/api/projects/${project.id}`, { status: nextStatus })
                           setStatusOverrides((prev) => ({ ...prev, [project.id]: nextStatus }))
                         } catch (error) {
-                          alert('Failed to update project status')
+                          toast.error('Failed to update project status')
                         } finally {
                           setStatusToggleLoading((prev) => ({ ...prev, [project.id]: false }))
                         }

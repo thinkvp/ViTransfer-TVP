@@ -8,6 +8,7 @@ import { TimePicker24h } from '@/components/ui/time-picker-24h'
 import { Textarea } from '@/components/ui/textarea'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Bell, Check, Pencil, Plus, Trash2, X } from 'lucide-react'
 
@@ -233,6 +234,7 @@ export function ProjectKeyDates({
   const [draft, setDraft] = useState<Draft | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [pendingDeleteKeyDateId, setPendingDeleteKeyDateId] = useState<string | null>(null)
   const [reminderOptions, setReminderOptions] = useState<ReminderOptions | null>(null)
 
   const refresh = useCallback(async () => {
@@ -409,10 +411,15 @@ export function ProjectKeyDates({
     }
   }
 
-  const deleteItem = async (id: string) => {
+  const deleteItem = (id: string) => {
     if (!canEdit) return
-    if (!confirm('Delete this key date?')) return
+    setPendingDeleteKeyDateId(id)
+  }
 
+  const confirmDeleteItem = async () => {
+    const id = pendingDeleteKeyDateId
+    if (!id) return
+    setPendingDeleteKeyDateId(null)
     setError(null)
     try {
       await apiDelete(`/api/projects/${projectId}/key-dates/${id}`)
@@ -723,6 +730,13 @@ export function ProjectKeyDates({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      <ConfirmDialog
+        open={pendingDeleteKeyDateId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteKeyDateId(null) }}
+        title="Delete Key Date?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteItem}
+      />    </div>
   )
 }

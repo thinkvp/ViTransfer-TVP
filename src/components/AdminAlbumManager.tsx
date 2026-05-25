@@ -9,6 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Loader2, Layers } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 import { Checkbox } from '@/components/ui/checkbox'
 import { AlbumPhotoUploadQueue } from '@/components/AlbumPhotoUploadQueue'
 import { InlineEdit } from '@/components/InlineEdit'
@@ -87,6 +89,9 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const [togglingSocialCopiesAlbumId, setTogglingSocialCopiesAlbumId] = useState<string | null>(null)
+  const [pendingDisableSocialAlbumId, setPendingDisableSocialAlbumId] = useState<string | null>(null)
+  const [pendingDeleteAlbum, setPendingDeleteAlbum] = useState<{ id: string; name: string } | null>(null)
+  const [pendingDeletePhoto, setPendingDeletePhoto] = useState<{ albumId: string; photoId: string; fileName: string } | null>(null)
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => {
@@ -224,7 +229,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const handleSaveAlbumName = async (albumId: string) => {
     const nextName = editAlbumValue.trim()
     if (!nextName) {
-      alert('Album name cannot be empty')
+      toast.error('Album name cannot be empty')
       return
     }
 
@@ -236,8 +241,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         setEditAlbumValue('')
       })
       .catch((e) => {
-        const message = e instanceof Error ? e.message : 'Failed to update album name'
-        alert(message)
+        toast.error(e instanceof Error ? e.message : 'Failed to update album name')
       })
       .finally(() => {
         setSavingAlbumId(null)
@@ -288,7 +292,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       void fetchZipStatus(albumId)
       onProjectDataChanged?.()
     } catch (e: any) {
-      alert(e?.message || 'Failed to regenerate ZIPs')
+      toast.error(e?.message || 'Failed to regenerate ZIPs')
     }
   }, [fetchZipStatus, onProjectDataChanged])
 
@@ -296,25 +300,34 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     if (togglingSocialCopiesAlbumId) return
 
     if (currentlyEnabled) {
-      if (!confirm('Disable social media downloads? The social-sized ZIP will be deleted.')) return
+      setPendingDisableSocialAlbumId(albumId)
+      return
     }
 
+    await executeSocialToggle(albumId, false)
+  }, [togglingSocialCopiesAlbumId])
+
+  const executeSocialToggle = useCallback(async (albumId: string, enable: boolean) => {
     setTogglingSocialCopiesAlbumId(albumId)
     try {
-      await apiPost(`/api/albums/${albumId}/social-copies`, { enabled: !currentlyEnabled })
-      setAlbums((prev) => prev.map((a) => a.id === albumId ? { ...a, socialCopiesEnabled: !currentlyEnabled } : a))
+      await apiPost(`/api/albums/${albumId}/social-copies`, { enabled: enable })
+      setAlbums((prev) => prev.map((a) => a.id === albumId ? { ...a, socialCopiesEnabled: enable } : a))
       void fetchZipStatus(albumId)
     } catch (e: any) {
-      alert(e?.message || 'Failed to toggle social downloads')
+      toast.error(e?.message || 'Failed to toggle social downloads')
     } finally {
       setTogglingSocialCopiesAlbumId(null)
     }
-  }, [togglingSocialCopiesAlbumId, fetchZipStatus])
+  }, [fetchZipStatus])
 
-  const handleDeleteAlbum = async (albumId: string, albumName: string) => {
+  const handleDeleteAlbum = (albumId: string, albumName: string) => {
     if (!canDelete) return
-    if (!confirm(`Delete album "${albumName}" and all photos?`)) return
+    setPendingDeleteAlbum({ id: albumId, name: albumName })
+  }
 
+  const confirmDeleteAlbum = async () => {
+    const { id: albumId } = pendingDeleteAlbum!
+    setPendingDeleteAlbum(null)
     try {
       await apiDelete(`/api/albums/${albumId}`)
 
@@ -352,14 +365,18 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         setExpandedAlbumId(null)
       }
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete album')
+      toast.error(e?.message || 'Failed to delete album')
     }
   }
 
-  const handleDeletePhoto = async (albumId: string, photoId: string, fileName: string) => {
+  const handleDeletePhoto = (albumId: string, photoId: string, fileName: string) => {
     if (!canDelete) return
-    if (!confirm(`Delete photo "${fileName}"?`)) return
+    setPendingDeletePhoto({ albumId, photoId, fileName })
+  }
 
+  const confirmDeletePhoto = async () => {
+    const { albumId, photoId } = pendingDeletePhoto!
+    setPendingDeletePhoto(null)
     try {
       await apiDelete(`/api/albums/${albumId}/photos/${photoId}`)
 
@@ -394,7 +411,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         void fetchAlbums()
       }, 1000)
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete photo')
+      toast.error(e?.message || 'Failed to delete photo')
     }
   }
 
@@ -438,6 +455,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   }
 
   return (
+    <>
     <div className="space-y-4">
       {error && (
         <div className="p-3 bg-destructive/10 border border-destructive rounded-md">
@@ -820,5 +838,33 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         </div>
       )}
     </div>
+
+    <ConfirmDialog
+      open={pendingDisableSocialAlbumId !== null}
+      onOpenChange={(v) => { if (!v) setPendingDisableSocialAlbumId(null) }}
+      title="Disable Social Media Downloads?"
+      description="The social-sized ZIP will be deleted. You can re-enable this later."
+      confirmLabel="Disable"
+      variant="destructive"
+      onConfirm={() => executeSocialToggle(pendingDisableSocialAlbumId!, false)}
+      onCancel={() => setPendingDisableSocialAlbumId(null)}
+    />
+    <ConfirmDialog
+      open={pendingDeleteAlbum !== null}
+      onOpenChange={(v) => { if (!v) setPendingDeleteAlbum(null) }}
+      title={`Delete Album "${pendingDeleteAlbum?.name ?? ''}"?`}
+      description="This will delete the album and all its photos. This action cannot be undone."
+      confirmLabel="Delete"
+      onConfirm={confirmDeleteAlbum}
+    />
+    <ConfirmDialog
+      open={pendingDeletePhoto !== null}
+      onOpenChange={(v) => { if (!v) setPendingDeletePhoto(null) }}
+      title={`Delete Photo "${pendingDeletePhoto?.fileName ?? ''}"?`}
+      description="This action cannot be undone."
+      confirmLabel="Delete"
+      onConfirm={confirmDeletePhoto}
+    />
+  </>
   )
 }

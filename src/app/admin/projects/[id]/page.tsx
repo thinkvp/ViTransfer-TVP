@@ -12,6 +12,7 @@ import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
 import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, X } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
+import { toast } from 'sonner'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
@@ -293,7 +294,7 @@ export default function ProjectPage() {
 
       fetchProject()
     } catch (e: any) {
-      alert(e?.message || 'Failed to update recipients')
+      toast.error(e?.message || 'Failed to update recipients')
       fetchProject()
     }
   }, [canChangeProjectSettings, editableRecipients, fetchProject, id])
@@ -307,7 +308,7 @@ export default function ProjectPage() {
         })),
       })
     } catch {
-      alert('Failed to update assigned users')
+      toast.error('Failed to update assigned users')
     } finally {
       fetchProject()
     }
@@ -485,7 +486,7 @@ export default function ProjectPage() {
       setIsEditingStartDate(false)
       await fetchProject()
     } catch {
-      alert('Failed to update start date')
+      toast.error('Failed to update start date')
     } finally {
       setIsSavingStartDate(false)
     }
@@ -499,7 +500,7 @@ export default function ProjectPage() {
       await apiPatch(`/api/projects/${id}`, { status: nextStatus })
       setProject((prev: any) => prev ? { ...prev, status: nextStatus } : prev)
     } catch (error) {
-      alert('Failed to update project status')
+      toast.error('Failed to update project status')
     } finally {
       setIsUpdatingStatus(false)
     }

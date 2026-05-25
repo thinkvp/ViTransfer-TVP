@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.7] - 2026-05-25
 
+### Changed
+- **All browser-native dialogs replaced with consistent in-app UI** — every remaining `confirm()`, `alert()`, and `prompt()` call across admin pages and shared components has been replaced with modal confirmation dialogs (`ConfirmDialog`) and toast notifications (`sonner`), giving the app a uniform interaction pattern and eliminating browser-chrome interruptions across sales, accounting, BAS, chart-of-accounts, bank accounts, vehicles, settings, and kanban pages.
+- **Kanban Add Task / Edit Task close guard now works correctly** — Cancel and the ✕ button on the task dialog now close immediately when no changes have been made; if real edits are present a "Discard changes?" confirmation is shown instead of silently blocking close.
+
 ### Fixed
 - **Storage integrity scan now recognizes companion JPG previews for video assets** — video-asset preview generation writes both an MP4 playback preview and a JPG card thumbnail; orphan/missing reference builders now include the canonical JPG companion path for video assets so valid preview thumbnails are no longer falsely reported as storage orphans.
 - **Project reopen regeneration now respects configured preview resolutions and requeues all preview families** — reopening from CLOSED now checks each READY video against the project's selected preview resolutions (instead of only `preview720Path`), regenerates only missing preview/timeline/thumbnail work, and also requeues missing or stale share-upload and video-asset preview jobs.

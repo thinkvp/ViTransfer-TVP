@@ -48,6 +48,8 @@ import { formatDate } from '@/lib/utils'
 import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
 import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
 import { LineItemAutocomplete } from '@/components/sales/LineItemAutocomplete'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 function normalizeTaxRatePercent(rate: unknown, defaultRate: number): number {
   const n = Number(rate)
@@ -156,6 +158,7 @@ export default function InvoiceDetailPage() {
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
+  const [showDeleteInvoiceConfirm, setShowDeleteInvoiceConfirm] = useState(false)
   const [labels, setLabels] = useState<SalesLabel[]>([])
   const [libraryItems, setLibraryItems] = useState<SalesItem[]>([])
   const descInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
@@ -530,7 +533,7 @@ export default function InvoiceDetailPage() {
   const onSave = async () => {
     if (!invoice) return
     if (!clientId) {
-      alert('Select a client.')
+      toast.error('Select a client.')
       return
     }
     setSaving(true)
@@ -567,11 +570,11 @@ export default function InvoiceDetailPage() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to save invoice'
       if (msg === 'Conflict') {
-        alert('This invoice was updated in another session. Reloading.')
+        toast.error('This invoice was updated in another session. Reloading.')
         window.location.reload()
         return
       }
-      alert(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -579,16 +582,19 @@ export default function InvoiceDetailPage() {
 
   const onDelete = () => {
     if (!invoice) return
-    if (!confirm(`Delete invoice ${invoice.invoiceNumber}?`)) return
-    ;(async () => {
-      try {
-        await deleteSalesInvoice(invoice.id)
-        window.location.href = '/admin/sales/invoices'
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Failed to delete invoice'
-        alert(msg)
-      }
-    })()
+    setShowDeleteInvoiceConfirm(true)
+  }
+
+  const confirmDeleteInvoice = async () => {
+    if (!invoice) return
+    setShowDeleteInvoiceConfirm(false)
+    try {
+      await deleteSalesInvoice(invoice.id)
+      window.location.href = '/admin/sales/invoices'
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to delete invoice'
+      toast.error(msg)
+    }
   }
 
   const onViewPublic = async () => {
@@ -666,7 +672,8 @@ export default function InvoiceDetailPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <>
+      <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -696,11 +703,11 @@ export default function InvoiceDetailPage() {
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : 'Failed to update invoice'
                     if (msg === 'Conflict') {
-                      alert('This invoice was updated in another session. Reloading.')
+                      toast.error('This invoice was updated in another session. Reloading.')
                       window.location.reload()
                       return
                     }
-                    alert(msg)
+                    toast.error(msg)
                   }
                 })()
               }}
@@ -1167,7 +1174,7 @@ export default function InvoiceDetailPage() {
               setShareToken(token)
               setTrackingRefreshKey((v) => v + 1)
             } catch (e) {
-              alert(e instanceof Error ? e.message : 'Failed to refresh invoice')
+              toast.error(e instanceof Error ? e.message : 'Failed to refresh invoice')
             }
           })()
         }}
@@ -1182,6 +1189,16 @@ export default function InvoiceDetailPage() {
         onImport={(newItems) => setItems((prev) => [...prev, ...newItems])}
       />
 
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={showDeleteInvoiceConfirm}
+        onOpenChange={(v) => { if (!v) setShowDeleteInvoiceConfirm(false) }}
+        title={`Delete Invoice ${invoice?.invoiceNumber ?? ''}?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteInvoice}
+      />
+    </>
   )
 }

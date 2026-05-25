@@ -20,6 +20,8 @@ import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/a
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
 import { LinkedBankTransactionDialog } from '@/components/admin/accounting/LinkedBankTransactionDialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: AccountTaxCode; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
 type BankAccountTxnEntry = { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null }
@@ -98,6 +100,7 @@ export default function AccountLedgerPage() {
 
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState<{ row: Entry; message: string } | null>(null)
   const [linkedTransactionId, setLinkedTransactionId] = useState<string | null>(null)
   const [linkedInvoiceTransactions, setLinkedInvoiceTransactions] = useState<SalesInvoiceEntry['linkedBankTransactions']>([])
 
@@ -183,7 +186,7 @@ export default function AccountLedgerPage() {
       )
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to delete entry')
+        toast.error(d.error || 'Failed to delete entry')
         return
       }
       void load(page, from, to, search)
@@ -213,7 +216,7 @@ export default function AccountLedgerPage() {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || (isEditingJournal ? 'Failed to update journal entry' : 'Failed to create journal entry'))
+        toast.error(d.error || (isEditingJournal ? 'Failed to update journal entry' : 'Failed to create journal entry'))
         return
       }
       setJeOpen(false)
@@ -299,7 +302,8 @@ export default function AccountLedgerPage() {
   }
 
   return (
-    <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-4 max-w-screen-2xl mx-auto">
+    <>
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-4 max-w-screen-2xl mx-auto">
       <div className="flex items-center gap-3">
         <Link href="/admin/accounting/chart-of-accounts">
           <Button variant="ghost" size="sm" className="gap-1.5">
@@ -469,7 +473,7 @@ export default function AccountLedgerPage() {
                                 </AccountingTableActionButton>
                               )}
                               {isOwn && (
-                                <AccountingTableActionButton destructive onClick={() => { if (!confirm('Delete this expense? This cannot be undone.')) return; void handleDeleteEntry(row) }} title="Delete expense" aria-label="Delete expense">
+                                <AccountingTableActionButton destructive onClick={() => setPendingDeleteEntry({ row, message: 'Delete this expense? This cannot be undone.' })} title="Delete expense" aria-label="Delete expense">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
                               )}
@@ -496,7 +500,7 @@ export default function AccountLedgerPage() {
                                 <Eye className="w-3.5 h-3.5" />
                               </AccountingTableActionButton>
                               {isOwn && (
-                                <AccountingTableActionButton destructive onClick={() => { if (!confirm('Unpost this bank transaction? This will return it to Pending status and remove any linked expense or invoice payment.')) return; void handleDeleteEntry(row) }} title="Unpost bank transaction" aria-label="Unpost bank transaction">
+                                <AccountingTableActionButton destructive onClick={() => setPendingDeleteEntry({ row, message: 'Unpost this bank transaction? This will return it to Pending status and remove any linked expense or invoice payment.' })} title="Unpost bank transaction" aria-label="Unpost bank transaction">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
                               )}
@@ -523,7 +527,7 @@ export default function AccountLedgerPage() {
                                 <AccountingTableActionButton onClick={() => openEditJournalEntry(j)} title="Edit journal entry" aria-label="Edit journal entry">
                                   <Pencil className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
-                                <AccountingTableActionButton destructive onClick={() => { if (!confirm('Delete this journal entry? This cannot be undone.')) return; void handleDeleteEntry(row) }} title="Delete journal entry" aria-label="Delete journal entry">
+                                <AccountingTableActionButton destructive onClick={() => setPendingDeleteEntry({ row, message: 'Delete this journal entry? This cannot be undone.' })} title="Delete journal entry" aria-label="Delete journal entry">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </AccountingTableActionButton>
                               </div>
@@ -735,13 +739,27 @@ export default function AccountLedgerPage() {
         </DialogContent>
       </Dialog>
 
-      <ExpenseFormModal
-        open={editExpenseId !== null}
-        expenseId={editExpenseId}
-        onClose={() => setEditExpenseId(null)}
-        onSaved={() => { setEditExpenseId(null); void load(page, from, to, search) }}
-        onDeleted={() => { setEditExpenseId(null); void load(page, from, to, search) }}
+        <ExpenseFormModal
+          open={editExpenseId !== null}
+          expenseId={editExpenseId}
+          onClose={() => setEditExpenseId(null)}
+          onSaved={() => { setEditExpenseId(null); void load(page, from, to, search) }}
+          onDeleted={() => { setEditExpenseId(null); void load(page, from, to, search) }}
+        />
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteEntry !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteEntry(null) }}
+        title="Confirm Action"
+        description={pendingDeleteEntry?.message ?? ''}
+        confirmLabel="Confirm"
+        onConfirm={() => {
+          const entry = pendingDeleteEntry!
+          setPendingDeleteEntry(null)
+          void handleDeleteEntry(entry.row)
+        }}
       />
-    </div>
+    </>
   )
 }

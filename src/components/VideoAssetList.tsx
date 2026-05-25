@@ -20,6 +20,8 @@ import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { AssetCopyMoveModal } from './AssetCopyMoveModal'
 import { withDownloadTracking } from '@/lib/download-url'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface VideoAsset {
   id: string
@@ -56,6 +58,8 @@ export function VideoAssetList({
   const [showCopyModal, setShowCopyModal] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currentThumbnailPath, setCurrentThumbnailPath] = useState<string | null>(null)
+  const [pendingDeleteAsset, setPendingDeleteAsset] = useState<{ id: string; name: string } | null>(null)
+  const [pendingThumbnailAsset, setPendingThumbnailAsset] = useState<{ id: string; name: string; action: 'set' | 'remove'; message: string } | null>(null)
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -82,12 +86,14 @@ export function VideoAssetList({
     fetchAssets()
   }, [fetchAssets, refreshTrigger])
 
-  const handleDelete = async (assetId: string, fileName: string) => {
+  const handleDelete = (assetId: string, fileName: string) => {
     if (!canManage) return
-    if (!confirm(`Are you sure you want to delete "${fileName}"? This action cannot be undone.`)) {
-      return
-    }
+    setPendingDeleteAsset({ id: assetId, name: fileName })
+  }
 
+  const confirmDeleteAsset = () => {
+    const { id: assetId, name: fileName } = pendingDeleteAsset!
+    setPendingDeleteAsset(null)
     setDeletingId(assetId)
 
     // Optimistically remove from UI
@@ -97,15 +103,13 @@ export function VideoAssetList({
     // Delete in background without blocking UI
     apiDelete(`/api/videos/${videoId}/assets/${assetId}`)
       .then(() => {
-        // Notify parent component
         if (onAssetDeleted) {
           onAssetDeleted()
         }
       })
-      .catch((err) => {
-        // Restore on error
+      .catch(() => {
         setAssets(previousAssets)
-        alert('Failed to delete asset')
+        toast.error('Failed to delete asset')
       })
       .finally(() => {
         setDeletingId(null)
@@ -201,42 +205,35 @@ export function VideoAssetList({
         triggerDownload(url)
       })
       .catch((err) => {
-        alert('Failed to download asset')
+        toast.error('Failed to download asset')
       })
   }
 
-  const handleSetThumbnail = async (assetId: string, fileName: string) => {
+  const handleSetThumbnail = (assetId: string, fileName: string) => {
     if (!canManage) return
-    // Find the asset to check if it's currently active
     const asset = assets.find(a => a.id === assetId)
     const isCurrent = asset ? isCurrentThumbnail(asset) : false
-
-    // Toggle behavior: if current, remove it; if not current, set it
     const action = isCurrent ? 'remove' : 'set'
-    const confirmMessage = isCurrent
+    const message = isCurrent
       ? `Remove "${fileName}" as the video thumbnail? The system-generated thumbnail will be used instead.`
       : `Set "${fileName}" as the video thumbnail?`
+    setPendingThumbnailAsset({ id: assetId, name: fileName, action, message })
+  }
 
-    if (!confirm(confirmMessage)) {
-      return
-    }
-
+  const confirmSetThumbnail = () => {
+    const { id: assetId, action } = pendingThumbnailAsset!
+    setPendingThumbnailAsset(null)
     setSettingThumbnail(assetId)
 
-    // Set thumbnail in background without blocking UI
     apiPost(`/api/videos/${videoId}/assets/${assetId}/set-thumbnail`, { action })
+      .then(() => fetchAssets())
       .then(() => {
-        // Refresh assets to get updated thumbnail path
-        return fetchAssets()
-      })
-      .then(() => {
-        // Notify parent to refresh if needed
         if (onAssetDeleted) {
           onAssetDeleted()
         }
       })
-      .catch((err) => {
-        alert(`Failed to ${action} thumbnail`)
+      .catch(() => {
+        toast.error(`Failed to ${action} thumbnail`)
       })
       .finally(() => {
         setSettingThumbnail(null)
@@ -269,7 +266,8 @@ export function VideoAssetList({
   }
 
   return (
-    <div className="mt-4 pt-4 border-t">
+    <>
+      <div className="mt-4 pt-4 border-t">
       <div className="space-y-2">
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-medium text-muted-foreground">
@@ -362,6 +360,25 @@ export function VideoAssetList({
           }
         }}
       />
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteAsset !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteAsset(null) }}
+        title={`Delete Asset "${pendingDeleteAsset?.name ?? ''}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteAsset}
+      />
+      <ConfirmDialog
+        open={pendingThumbnailAsset !== null}
+        onOpenChange={(v) => { if (!v) setPendingThumbnailAsset(null) }}
+        title={pendingThumbnailAsset?.action === 'remove' ? 'Remove Thumbnail' : 'Set Thumbnail'}
+        description={pendingThumbnailAsset?.message}
+        confirmLabel={pendingThumbnailAsset?.action === 'remove' ? 'Remove' : 'Set'}
+        variant="default"
+        onConfirm={confirmSetThumbnail}
+      />
+    </>
   )
 }

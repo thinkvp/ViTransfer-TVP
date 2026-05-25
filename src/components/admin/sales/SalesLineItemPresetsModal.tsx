@@ -25,6 +25,8 @@ import {
 } from '@/lib/sales/admin-api'
 import type { SalesItem, SalesLabel, SalesPreset } from '@/lib/sales/admin-api'
 import type { SalesLineItem, SalesTaxRate } from '@/lib/sales/types'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 // Types
 
@@ -115,6 +117,8 @@ export function SalesLineItemPresetsModal({
   const [submittingItem, setSubmittingItem] = useState(false)
   const [itemError, setItemError] = useState<string | null>(null)
   const [reorderingItems, setReorderingItems] = useState(false)
+  const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null)
+  const [pendingDeletePreset, setPendingDeletePreset] = useState<boolean>(false)
   const dragEnabledRef = useRef(false)
   const dragIndexRef = useRef<number | null>(null)
   const dragOverIndexRef = useRef<number | null>(null)
@@ -294,17 +298,21 @@ export function SalesLineItemPresetsModal({
       setItems(reorderedItems)
     } catch {
       setItems(previousItems)
-      alert('Failed to save item order.')
+      toast.error('Failed to save item order.')
     } finally {
       setReorderingItems(false)
     }
   }
 
-  // Delete library item permanently
   async function handleDeleteItem(id: string) {
     const item = items.find((it) => it.id === id)
     if (!item) return
-    if (!confirm(`Delete "${item.description}" from the library? This cannot be undone.`)) return
+    setPendingDeleteItemId(id)
+  }
+
+  async function confirmDeleteItem() {
+    const id = pendingDeleteItemId!
+    setPendingDeleteItemId(null)
     try {
       await deleteSalesItem(id)
       setItems((prev) => prev.filter((it) => it.id !== id))
@@ -315,7 +323,7 @@ export function SalesLineItemPresetsModal({
       })
       if (editingItemId === id) handleCancelItemForm()
     } catch {
-      alert('Failed to delete item.')
+      toast.error('Failed to delete item.')
     }
   }
 
@@ -353,7 +361,12 @@ export function SalesLineItemPresetsModal({
     if (!selectedPresetId) return
     const preset = presets.find((p) => p.id === selectedPresetId)
     if (!preset) return
-    if (!confirm(`Delete preset "${preset.name}"? Items in your library will not be affected.`)) return
+    setPendingDeletePreset(true)
+  }
+
+  async function confirmDeletePreset() {
+    setPendingDeletePreset(false)
+    if (!selectedPresetId) return
     setDeleting(true)
     try {
       await deleteSalesPreset(selectedPresetId)
@@ -361,7 +374,7 @@ export function SalesLineItemPresetsModal({
       setPresets(list)
       setSelectedPresetId('')
     } catch {
-      alert('Failed to delete preset.')
+      toast.error('Failed to delete preset.')
     } finally {
       setDeleting(false)
     }
@@ -382,7 +395,8 @@ export function SalesLineItemPresetsModal({
   const selectedPreset = presets.find((p) => p.id === selectedPresetId)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl w-full max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <DialogTitle>Line Item Library</DialogTitle>
@@ -749,6 +763,24 @@ export function SalesLineItemPresetsModal({
           </div>
         </div>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteItemId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteItemId(null) }}
+        title={`Delete "${items.find(it => it.id === pendingDeleteItemId)?.description ?? ''}" from Library?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteItem}
+      />
+      <ConfirmDialog
+        open={pendingDeletePreset}
+        onOpenChange={(v) => { if (!v) setPendingDeletePreset(false) }}
+        title={`Delete Preset "${presets.find(p => p.id === selectedPresetId)?.name ?? ''}"?`}
+        description="Items in your library will not be affected."
+        confirmLabel="Delete"
+        onConfirm={confirmDeletePreset}
+      />
+    </>
   )
 }

@@ -8,6 +8,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
 import { cn, formatDate } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import ShareLink from '@/components/ShareLink'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -274,6 +275,7 @@ export default function ProjectsDashboardKeyDates({
   const [personalOpen, setPersonalOpen] = useState(false)
   const [personalSaving, setPersonalSaving] = useState(false)
   const [personalError, setPersonalError] = useState<string | null>(null)
+  const [pendingDeleteKeyDateId, setPendingDeleteKeyDateId] = useState<string | null>(null)
   const [personalDraft, setPersonalDraft] = useState<{
     id: string | null
     date: string
@@ -685,8 +687,14 @@ export default function ProjectsDashboardKeyDates({
     }
   }
 
-  const deletePersonalKeyDate = async (id: string) => {
-    if (!confirm('Delete this key date?')) return
+  const deletePersonalKeyDate = (id: string) => {
+    setPendingDeleteKeyDateId(id)
+  }
+
+  const confirmDeletePersonalKeyDate = async () => {
+    const id = pendingDeleteKeyDateId
+    if (!id) return
+    setPendingDeleteKeyDateId(null)
     try {
       await apiDelete(`/api/users/me/key-dates/${id}`)
       await reload()
@@ -1608,6 +1616,15 @@ export default function ProjectsDashboardKeyDates({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteKeyDateId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteKeyDateId(null) }}
+        title="Delete Key Date?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeletePersonalKeyDate}
+      />
     </div>
   )
 }

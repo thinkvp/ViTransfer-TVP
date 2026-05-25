@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 
 type StorageOverview = {
@@ -108,6 +109,7 @@ export function StorageOverviewSection({
   const [hasLoaded, setHasLoaded] = useState(false)
 
   const [closedPreviewsLoading, setClosedPreviewsLoading] = useState(false)
+  const [pendingDeletePreviews, setPendingDeletePreviews] = useState(false)
   const [closedPreviewsResult, setClosedPreviewsResult] =
     useState<ClosedProjectPreviewCleanupResult | null>(null)
   const [closedPreviewsError, setClosedPreviewsError] = useState<string | null>(null)
@@ -294,7 +296,8 @@ export function StorageOverviewSection({
   const showBackupColumn = s3Configured && s3LocalBackupEnabled
 
   return (
-    <Card className="border-border">
+    <>
+      <Card className="border-border">
       <CardHeader
         className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"}
         onClick={hideCollapse ? undefined : () => setShow(!show)}
@@ -649,15 +652,7 @@ export function StorageOverviewSection({
                   type="button"
                   variant="secondary"
                   disabled={closedPreviewsLoading}
-                  onClick={() => {
-                    if (
-                      !confirm(
-                        'Delete all preview files and timeline sprites for CLOSED projects? This cannot be undone.'
-                      )
-                    )
-                      return
-                    void runClosedPreviewsCleanup(false)
-                  }}
+                  onClick={() => setPendingDeletePreviews(true)}
                 >
                   {closedPreviewsLoading ? 'Running…' : 'Delete previews'}
                 </Button>
@@ -666,6 +661,16 @@ export function StorageOverviewSection({
           </div>
         </CardContent>
       )}
-    </Card>
+      </Card>
+
+      <ConfirmDialog
+        open={pendingDeletePreviews}
+        onOpenChange={(v) => { if (!v) setPendingDeletePreviews(false) }}
+        title="Delete Closed Project Previews?"
+        description="Delete all preview files and timeline sprites for CLOSED projects? This cannot be undone."
+        confirmLabel="Delete Previews"
+        onConfirm={() => { setPendingDeletePreviews(false); void runClosedPreviewsCleanup(false) }}
+      />
+    </>
   )
 }

@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { apiJson, apiPost } from '@/lib/api-client'
+import { toast } from 'sonner'
 
 export type SectionVisibility = {
   sales: boolean
@@ -77,7 +78,7 @@ export function ProjectSectionVisibilityToggle({
       // Don't show alert on success - silent save is better UX
     } catch (error: any) {
       console.error('Error saving section visibility:', error)
-      alert(error?.message || 'Failed to save section visibility')
+      toast.error(error?.message || 'Failed to save section visibility')
     } finally {
       setIsSaving(false)
     }

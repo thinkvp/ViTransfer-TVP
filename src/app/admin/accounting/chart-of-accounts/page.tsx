@@ -16,6 +16,8 @@ import { AccountingTableActionButton } from '@/components/admin/accounting/Accou
 import { cn } from '@/lib/utils'
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 const TYPE_BADGE: Record<AccountType, string> = {
   ASSET: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
@@ -61,6 +63,7 @@ export default function ChartOfAccountsPage() {
 
 
   const [deleting, setDeleting] = useState(false)
+  const [pendingDeleteAccount, setPendingDeleteAccount] = useState<Account | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -221,7 +224,7 @@ export default function ChartOfAccountsPage() {
       const res = await apiFetch(`/api/admin/accounting/accounts/${target.id}`, { method: 'DELETE' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to delete account')
+        toast.error(d.error || 'Failed to delete account')
         return
       }
       await load()
@@ -231,7 +234,8 @@ export default function ChartOfAccountsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <>
+      <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold">Chart of Accounts</h2>
@@ -352,7 +356,7 @@ export default function ChartOfAccountsPage() {
                             <Pencil className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
                           {!a.isSystem && (
-                            <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete account ${a.code} — ${a.name}? This cannot be undone.`)) return; void handleDelete(a) }} title="Delete account" aria-label="Delete account">
+                            <AccountingTableActionButton destructive onClick={() => setPendingDeleteAccount(a)} title="Delete account" aria-label="Delete account">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </AccountingTableActionButton>
                           )}
@@ -457,6 +461,20 @@ export default function ChartOfAccountsPage() {
         </DialogContent>
       </Dialog>
 
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteAccount !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteAccount(null) }}
+        title={`Delete Account ${pendingDeleteAccount?.code ?? ''} — ${pendingDeleteAccount?.name ?? ''}?`}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const a = pendingDeleteAccount!
+          setPendingDeleteAccount(null)
+          void handleDelete(a)
+        }}
+      />
+    </>
   )
 }

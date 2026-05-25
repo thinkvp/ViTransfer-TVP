@@ -19,6 +19,8 @@ import { buildAccountOptions, type AccountOption } from '@/lib/accounting/accoun
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface TaxRateOption { id: string; name: string; code: string; rate: number; isDefault: boolean }
 
@@ -128,6 +130,9 @@ export default function BankAccountsPage() {
 
   const [deletingTransaction, setDeletingTransaction] = useState(false)
   const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null)
+  const [pendingDeleteAttachment, setPendingDeleteAttachment] = useState<{ attachmentId: string; txnId: string } | null>(null)
+  const [pendingDeleteAccount, setPendingDeleteAccount] = useState<BankAccount | null>(null)
+  const [pendingDeleteTransaction, setPendingDeleteTransaction] = useState<BankTransaction | null>(null)
   const [uploadingAttachmentTxnId, setUploadingAttachmentTxnId] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -326,7 +331,7 @@ export default function BankAccountsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoiceIds: [invoiceId] }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to match invoice'); return }
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txn.id ? null : prev)
@@ -341,7 +346,7 @@ export default function BankAccountsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ matchType: 'EXPENSE', expenseId }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match expense'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to match expense'); return }
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txn.id ? null : prev)
@@ -394,14 +399,14 @@ export default function BankAccountsPage() {
 
   async function handlePost(txn: BankTransaction) {
     const form = getPostForm(txn)
-    if (!form.accountId) { alert('Please select an account'); return }
+    if (!form.accountId) { toast.error('Please select an account'); return }
     setPosting(txn.id)
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/post`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionType: form.transactionType, accountId: form.accountId, taxCode: form.taxCode, memo: form.memo || null, supplierName: form.supplierName || null }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to post'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to post'); return }
       let attachmentUploadError: string | null = null
       if (form.files.length > 0) {
         for (const file of form.files) {
@@ -415,7 +420,7 @@ export default function BankAccountsPage() {
           }
         }
       }
-      if (attachmentUploadError) alert(`Transaction posted, but attachment upload failed: ${attachmentUploadError}`)
+      if (attachmentUploadError) toast.error(`Transaction posted, but attachment upload failed: ${attachmentUploadError}`)
       // Remove from list without full reload so the page scroll position is preserved
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
@@ -428,7 +433,7 @@ export default function BankAccountsPage() {
     setIgnoring(txnId)
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/exclude`, { method: 'POST' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to ignore'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to ignore'); return }
       setTransactions(prev => prev.filter(t => t.id !== txnId))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txnId ? null : prev)
@@ -440,7 +445,7 @@ export default function BankAccountsPage() {
     setUndoing(txnId)
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/unmatch`, { method: 'POST' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to undo'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to undo'); return }
       setTransactions(prev => prev.filter(t => t.id !== txnId))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txnId ? null : prev)
@@ -472,8 +477,8 @@ export default function BankAccountsPage() {
       amountCents: Math.round(parseFloat(l.amountCents || '0') * 100) * (txn.amountCents < 0 ? -1 : 1),
       taxCode: l.taxCode,
     }))
-    if (lines.some(l => !l.accountId)) { alert('All split lines must have an account'); return }
-    if (lines.some(l => l.amountCents === 0)) { alert('All split lines must have a non-zero amount'); return }
+    if (lines.some(l => !l.accountId)) { toast.error('All split lines must have an account'); return }
+    if (lines.some(l => l.amountCents === 0)) { toast.error('All split lines must have a non-zero amount'); return }
     setSplitting(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/split`, {
@@ -481,7 +486,7 @@ export default function BankAccountsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lines }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to split'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to split'); return }
       setSplitTxnId(null)
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
@@ -494,7 +499,7 @@ export default function BankAccountsPage() {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to download attachment')
+        toast.error(d.error || 'Failed to download attachment')
         return
       }
       const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
@@ -517,16 +522,22 @@ export default function BankAccountsPage() {
       a.remove()
       URL.revokeObjectURL(url)
     } catch {
-      alert('Failed to download attachment')
+      toast.error('Failed to download attachment')
     }
   }
 
   async function handleDeleteAccountingAttachment(attachmentId: string, txnId: string) {
-    if (!confirm('Delete this attachment? This cannot be undone.')) return
+    setPendingDeleteAttachment({ attachmentId, txnId })
+  }
+
+  async function confirmDeleteAccountingAttachment() {
+    if (!pendingDeleteAttachment) return
+    const { attachmentId, txnId } = pendingDeleteAttachment
+    setPendingDeleteAttachment(null)
     setDeletingAttachment(attachmentId)
     try {
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`, { method: 'DELETE' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete attachment'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to delete attachment'); return }
       setTransactions(prev => prev.map(t => t.id === txnId
         ? { ...t, attachments: (t.attachments ?? []).filter(a => a.id !== attachmentId) }
         : t
@@ -542,7 +553,7 @@ export default function BankAccountsPage() {
         const fd = new FormData()
         fd.append('file', file)
         const res = await apiFetch(`/api/admin/accounting/transactions/${txnId}/attachments`, { method: 'POST', body: fd })
-        if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Upload failed'); return }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Upload failed'); return }
         const d = await res.json()
         newAttachments.push(...(d.attachments ?? []))
       }
@@ -557,7 +568,7 @@ export default function BankAccountsPage() {
     setDeleting(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/bank-accounts/${target.id}`, { method: 'DELETE' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to delete'); return }
       if (selectedAccountId === target.id) { setSelectedAccountId(null); setTransactions([]) }
       await loadAccounts()
     } finally { setDeleting(false) }
@@ -567,7 +578,7 @@ export default function BankAccountsPage() {
     setDeletingTransaction(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/transactions/${target.id}`, { method: 'DELETE' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete transaction'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to delete transaction'); return }
       const txnId = target.id
       setTransactions(prev => prev.filter(t => t.id !== txnId))
       setTxnTotal(prev => Math.max(0, prev - 1))
@@ -583,7 +594,7 @@ export default function BankAccountsPage() {
       fd.append('bankAccountId', selectedAccountId)
       fd.append('file', importFile)
       const res = await apiFetch('/api/admin/accounting/transactions/import/preview', { method: 'POST', body: fd })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Preview failed'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Preview failed'); return }
       const d = await res.json()
       const rows: PreviewRow[] = d.rows ?? []
       setPreviewRows(rows)
@@ -602,7 +613,7 @@ export default function BankAccountsPage() {
       fd.append('file', importFile)
       fd.append('selectedIndices', JSON.stringify([...selectedImportIndices]))
       const res = await apiFetch('/api/admin/accounting/transactions/import', { method: 'POST', body: fd })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Import failed'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Import failed'); return }
       const d = await res.json()
       setImportResult({ imported: d.batch?.rowCount ?? 0, duplicates: d.batch?.skippedCount ?? 0 })
       setImportFile(null)
@@ -652,7 +663,7 @@ export default function BankAccountsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoiceIds, ...(isReconcile ? { reconcile: true } : {}) }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match invoice'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to match invoice'); return }
       const matchedId = matchInvoiceTarget.id
       setMatchInvoiceTarget(null)
       setSelectedInvoiceIsReconcile(false)
@@ -689,7 +700,7 @@ export default function BankAccountsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ matchType: 'EXPENSE', expenseId: selectedExpenseId }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match expense'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to match expense'); return }
       const matchedId = matchExpenseTarget.id
       setMatchExpenseTarget(null)
       setTransactions(prev => prev.filter(t => t.id !== matchedId))
@@ -722,7 +733,7 @@ export default function BankAccountsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ basPeriodId: selectedBasPeriodId }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to match BAS payment'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to match BAS payment'); return }
       const matchedId = matchBasTarget.id
       const matchedBasPeriodId = selectedBasPeriodId
       setMatchBasTarget(null)
@@ -735,7 +746,8 @@ export default function BankAccountsPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <>
+      <div className="space-y-4 sm:space-y-6">
       {/* Bank Account Cards */}
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -780,8 +792,8 @@ export default function BankAccountsPage() {
                     ><Pencil className="w-3.5 h-3.5" /></span>
                     <span
                       role="button" tabIndex={0}
-                      onClick={e => { e.stopPropagation(); if (!confirm(`Delete bank account "${a.name}" and all its transaction data? This cannot be undone.`)) return; void handleDeleteAccount(a) }}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); if (!confirm(`Delete bank account "${a.name}" and all its transaction data? This cannot be undone.`)) return; void handleDeleteAccount(a) } }}
+                      onClick={e => { e.stopPropagation(); setPendingDeleteAccount(a) }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setPendingDeleteAccount(a) } }}
                       className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                       aria-label={`Delete ${a.name}`}
                     ><Trash2 className="w-3.5 h-3.5" /></span>
@@ -1001,7 +1013,7 @@ export default function BankAccountsPage() {
                                 <AccountingTableActionButton onClick={() => void handleUndo(t.id)} disabled={isUndoing || isDeletingTxn} title="Undo ignored transaction" aria-label="Undo ignored transaction">
                                   {isUndoing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                                 </AccountingTableActionButton>
-                                <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete "${t.description}"? This will permanently remove the ignored transaction.`)) return; void handleDeleteTransaction(t) }} disabled={isUndoing || isDeletingTxn} title="Delete ignored transaction" aria-label="Delete ignored transaction">
+                                <AccountingTableActionButton destructive onClick={() => setPendingDeleteTransaction(t)} disabled={isUndoing || isDeletingTxn} title="Delete ignored transaction" aria-label="Delete ignored transaction">
                                   {isDeletingTxn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-destructive" />}
                                 </AccountingTableActionButton>
                               </div>
@@ -1728,6 +1740,42 @@ export default function BankAccountsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteAttachment !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteAttachment(null) }}
+        title="Delete Attachment?"
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => void confirmDeleteAccountingAttachment()}
+      />
+
+      <ConfirmDialog
+        open={pendingDeleteAccount !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteAccount(null) }}
+        title={`Delete Bank Account "${pendingDeleteAccount?.name ?? ''}"?`}
+        description="This will delete all its transaction data and cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const a = pendingDeleteAccount!
+          setPendingDeleteAccount(null)
+          void handleDeleteAccount(a)
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingDeleteTransaction !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteTransaction(null) }}
+        title={`Delete "${pendingDeleteTransaction?.description ?? ''}"?`}
+        description="This will permanently remove the ignored transaction."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const t = pendingDeleteTransaction!
+          setPendingDeleteTransaction(null)
+          void handleDeleteTransaction(t)
+        }}
+      />
+    </>
   )
 }

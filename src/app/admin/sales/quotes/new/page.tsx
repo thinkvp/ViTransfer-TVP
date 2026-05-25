@@ -27,6 +27,7 @@ import {
   sumLineItemsTax,
 } from '@/lib/sales/money'
 import { getCurrencySymbol } from '@/lib/sales/currency'
+import { toast } from 'sonner'
 
 function getTodayYmdLocal(): string {
   const d = new Date()
@@ -223,12 +224,12 @@ export default function NewQuotePage() {
 
   const onCreate = async () => {
     if (!clientId) {
-      alert('Select a client.')
+      toast.error('Select a client.')
       return
     }
 
     if (items.every((it) => !it.description.trim())) {
-      alert('Add at least one line item item name.')
+      toast.error('Add at least one line item item name.')
       return
     }
 
@@ -250,11 +251,11 @@ export default function NewQuotePage() {
         })),
       })
 
-      alert(`Created quote ${quote.quoteNumber}`)
+      toast.success(`Created quote ${quote.quoteNumber}`)
       window.location.href = `/admin/sales/quotes/${quote.id}`
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create quote'
-      alert(msg)
+      toast.error(msg)
     } finally {
       setCreating(false)
     }

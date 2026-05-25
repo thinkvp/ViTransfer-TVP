@@ -28,6 +28,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
 type CommentWithReplies = Comment & {
@@ -137,6 +139,9 @@ export function CommentSectionView({
     handleCancelReply,
     handleClearTimestamp,
     handleDeleteComment,
+    pendingDeleteCommentId,
+    setPendingDeleteCommentId,
+    confirmDeleteComment,
     setAuthorName,
     attachedFiles,
     onFileSelect,
@@ -453,7 +458,7 @@ export function CommentSectionView({
       a.remove()
       URL.revokeObjectURL(objectUrl)
     } catch (error) {
-      alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -517,7 +522,7 @@ export function CommentSectionView({
   const handleExportCommentsSrt = async () => {
     try {
       if (!selectedVideoId) {
-        alert('No video selected to export comments for.')
+        toast.error('No video selected to export comments for.')
         return
       }
 
@@ -542,7 +547,7 @@ export function CommentSectionView({
       a.remove()
       URL.revokeObjectURL(objectUrl)
     } catch (error) {
-      alert(`Failed to export comments: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Failed to export comments: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setExportingSrt(false)
     }
@@ -904,7 +909,7 @@ export function CommentSectionView({
     const video = headerVideo
     if (!video) return
     if (!approvalEnabledForHeaderVideo) {
-      alert('Approval is disabled for this version.')
+      toast.error('Approval is disabled for this version.')
       return
     }
     if (approvingRef.current) return
@@ -953,7 +958,7 @@ export function CommentSectionView({
       setShowApproveConfirm(false)
       router.refresh()
     } catch (error) {
-      alert(`Approval failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Approval failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       approvingRef.current = false
       setApproving(false)
@@ -1493,6 +1498,15 @@ export function CommentSectionView({
         </div>
       </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={pendingDeleteCommentId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteCommentId(null) }}
+        title="Delete Comment?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteComment}
+      />
     </>
   )
 }

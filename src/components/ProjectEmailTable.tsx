@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { formatFileSize, formatDateTime } from '@/lib/utils'
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Paperclip, Trash2, Download, ChevronDown } from 'lucide-react'
+import { toast } from 'sonner'
 
 type SortKey = 'sentAt' | 'subject' | 'from' | 'attachments'
 
@@ -86,6 +88,7 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
   const [detailError, setDetailError] = useState<string | null>(null)
 
   const [expandedMobileId, setExpandedMobileId] = useState<string | null>(null)
+  const [pendingDeleteEmailId, setPendingDeleteEmailId] = useState<string | null>(null)
 
   async function loadList(nextPage = page, nextSortKey = sortKey, nextSortDir = sortDir) {
     setLoading(true)
@@ -197,18 +200,20 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
     }
   }
 
-  const handleDelete = async (emailId: string) => {
-    const row = emails.find((e) => e.id === emailId)
-    const label = row?.subject?.trim() ? row.subject.trim() : 'this email'
+  const handleDelete = (emailId: string) => {
+    setPendingDeleteEmailId(emailId)
+  }
 
-    if (!confirm(`Delete ${label}?`)) return
-
+  const confirmDelete = async () => {
+    const emailId = pendingDeleteEmailId
+    if (!emailId) return
+    setPendingDeleteEmailId(null)
     try {
       await apiDelete(`/api/projects/${projectId}/emails/${emailId}`)
       setEmails((prev) => prev.filter((e) => e.id !== emailId))
       onExternalFilesChanged?.()
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete email')
+      toast.error(e?.message || 'Failed to delete email')
     }
   }
 
@@ -244,7 +249,7 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
       a.remove()
       URL.revokeObjectURL(url)
     } catch (e: any) {
-      alert(e?.message || 'Failed to download attachment')
+      toast.error(e?.message || 'Failed to download attachment')
     }
   }
 
@@ -487,6 +492,15 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
           )}
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteEmailId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteEmailId(null) }}
+        title="Delete Email?"
+        description={(() => { const row = emails.find(e => e.id === pendingDeleteEmailId); return `Delete "${row?.subject?.trim() || 'this email'}"? This action cannot be undone.` })()}
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+      />
     </>
   )
 }

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { apiFetch, apiPost } from '@/lib/api-client'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   MAX_DOWNLOAD_CHUNK_SIZE_MB,
   MAX_UPLOAD_CHUNK_SIZE_MB,
@@ -218,6 +219,11 @@ export function DeveloperToolsSection({
   const [accountingPathRepairResult, setAccountingPathRepairResult] = useState<NormalizeAccountingAttachmentPathsResult | null>(null)
   const [accountingPathRepairError, setAccountingPathRepairError] = useState<string | null>(null)
 
+  const [pendingS3Start, setPendingS3Start] = useState(false)
+  const [pendingOrphanCleanup, setPendingOrphanCleanup] = useState(false)
+  const [pendingBacklogPurge, setPendingBacklogPurge] = useState(false)
+  const [pendingBullmqPurge, setPendingBullmqPurge] = useState(false)
+
   useEffect(() => {
     let cancelled = false
 
@@ -401,7 +407,8 @@ export function DeveloperToolsSection({
   }
 
   return (
-    <Card className="border-border">
+    <>
+      <Card className="border-border">
       <CardHeader className={hideCollapse ? undefined : "cursor-pointer hover:bg-accent/50 transition-colors"} onClick={hideCollapse ? undefined : () => setShow(!show)}>
         <div className="flex items-center justify-between">
           <div>
@@ -545,10 +552,7 @@ export function DeveloperToolsSection({
                 type="button"
                 variant="secondary"
                 disabled={s3MigrationLoading || s3Status?.active}
-                onClick={() => {
-                  if (!confirm('Start local to S3 migration now? Keep STORAGE_PROVIDER=local until copy completes.')) return
-                  void runS3Start()
-                }}
+                onClick={() => setPendingS3Start(true)}
               >
                 {s3MigrationLoading ? 'Starting...' : 'Start migration'}
               </Button>
@@ -812,10 +816,7 @@ export function DeveloperToolsSection({
                   type="button"
                   variant="secondary"
                   disabled={orphanProjectFilesLoading}
-                  onClick={() => {
-                    if (!confirm('Delete orphan files from storage? Missing files (DB records with no file) will NOT be deleted and must be re-uploaded manually. This cannot be undone.')) return
-                    void runOrphanProjectFilesCleanup(false)
-                  }}
+                  onClick={() => setPendingOrphanCleanup(true)}
                 >
                   {orphanProjectFilesLoading ? 'Running…' : 'Clean up orphans'}
                 </Button>
@@ -885,10 +886,7 @@ export function DeveloperToolsSection({
                   type="button"
                   variant="secondary"
                   disabled={backlogLoading}
-                  onClick={() => {
-                    if (!confirm('Mark all unsent notification queue entries older than 7 days as already sent? They will not be delivered.')) return
-                    void runBacklogPurge(false)
-                  }}
+                  onClick={() => setPendingBacklogPurge(true)}
                 >
                   {backlogLoading ? 'Running…' : 'Dismiss backlog'}
                 </Button>
@@ -955,10 +953,7 @@ export function DeveloperToolsSection({
                   type="button"
                   variant="secondary"
                   disabled={bullmqPurgeLoading}
-                  onClick={() => {
-                    if (!confirm('Purge all stale completed and failed BullMQ jobs from Redis? Active and waiting jobs are not affected.')) return
-                    void runBullmqPurge(false)
-                  }}
+                  onClick={() => setPendingBullmqPurge(true)}
                 >
                   {bullmqPurgeLoading ? 'Running\u2026' : 'Purge jobs'}
                 </Button>
@@ -967,6 +962,41 @@ export function DeveloperToolsSection({
           </div>
         </CardContent>
       )}
-    </Card>
+      </Card>
+
+      <ConfirmDialog
+        open={pendingS3Start}
+        onOpenChange={(v) => { if (!v) setPendingS3Start(false) }}
+        title="Start S3 Migration?"
+        description="Start local to S3 migration now? Keep STORAGE_PROVIDER=local until copy completes."
+        confirmLabel="Start Migration"
+        variant="default"
+        onConfirm={() => { setPendingS3Start(false); void runS3Start() }}
+      />
+      <ConfirmDialog
+        open={pendingOrphanCleanup}
+        onOpenChange={(v) => { if (!v) setPendingOrphanCleanup(false) }}
+        title="Clean Up Orphan Files?"
+        description="Delete orphan files from storage? Missing files (DB records with no file) will NOT be deleted and must be re-uploaded manually. This cannot be undone."
+        confirmLabel="Clean Up"
+        onConfirm={() => { setPendingOrphanCleanup(false); void runOrphanProjectFilesCleanup(false) }}
+      />
+      <ConfirmDialog
+        open={pendingBacklogPurge}
+        onOpenChange={(v) => { if (!v) setPendingBacklogPurge(false) }}
+        title="Dismiss Notification Backlog?"
+        description="Mark all unsent notification queue entries older than 7 days as already sent? They will not be delivered."
+        confirmLabel="Dismiss Backlog"
+        onConfirm={() => { setPendingBacklogPurge(false); void runBacklogPurge(false) }}
+      />
+      <ConfirmDialog
+        open={pendingBullmqPurge}
+        onOpenChange={(v) => { if (!v) setPendingBullmqPurge(false) }}
+        title="Purge Stale BullMQ Jobs?"
+        description="Purge all stale completed and failed BullMQ jobs from Redis? Active and waiting jobs are not affected."
+        confirmLabel="Purge Jobs"
+        onConfirm={() => { setPendingBullmqPurge(false); void runBullmqPurge(false) }}
+      />
+    </>
   )
 }

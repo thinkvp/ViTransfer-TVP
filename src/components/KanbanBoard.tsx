@@ -52,6 +52,8 @@ import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 // ---------- Types ----------
 
@@ -1043,14 +1045,15 @@ export function CardDialog({
   const { user: currentUser } = useAuth()
   const [title, setTitle] = useState(initial?.title || '')
   const [description, setDescription] = useState(initial?.description || '')
-  const [memberIds, setMemberIds] = useState<string[]>(() => {
+  const initialMemberIds = useMemo(() => {
     const existing = initial?.members?.map((m) => m.userId) || []
     // Auto-select the creating user on new tasks
     if (!initial?.id && currentUserId && !existing.includes(currentUserId)) {
       return [currentUserId, ...existing]
     }
     return existing
-  })
+  }, [initial, currentUserId])
+  const [memberIds, setMemberIds] = useState<string[]>(() => initialMemberIds)
   const [memberNotifications, setMemberNotifications] = useState<Record<string, boolean>>(() => {
     const map: Record<string, boolean> = {}
     if (initial?.members) {
@@ -1073,13 +1076,12 @@ export function CardDialog({
     initial?.dueDate ? new Date(initial.dueDate).toISOString().slice(0, 10) : ''
   )
   const [saving, setSaving] = useState(false)
-
-  // Load clients on mount
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false)
   useEffect(() => {
     setLoadingClients(true)
     fetchClientOptions()
       .then((list) => setClientOptions(list.map((c) => ({ value: c.id, label: c.name }))))
-      .catch(() => {})
+      .catch(() => setClientOptions([]))
       .finally(() => setLoadingClients(false))
   }, [])
 
@@ -1100,23 +1102,23 @@ export function CardDialog({
   const hasUnsavedChanges = useMemo(() => {
     const initTitle = initial?.title || ''
     const initDescription = initial?.description || ''
-    const initMemberIds = initial?.members?.map((m) => m.userId) || []
     const initProjectId = initial?.projectId || ''
     const initClientId = initial?.clientId || ''
     const initDueDate = initial?.dueDate ? new Date(initial.dueDate).toISOString().slice(0, 10) : ''
     if (title !== initTitle) return true
     if (description !== initDescription) return true
-    if (JSON.stringify([...memberIds].sort()) !== JSON.stringify([...initMemberIds].sort())) return true
+    if (JSON.stringify([...memberIds].sort()) !== JSON.stringify([...initialMemberIds].sort())) return true
     if (projectId !== initProjectId) return true
     if (clientId !== initClientId) return true
     if (selectedColumnId !== columnId) return true
     if (dueDate !== initDueDate) return true
     return false
-  }, [title, description, memberIds, projectId, clientId, selectedColumnId, dueDate, initial, columnId])
+  }, [title, description, memberIds, initialMemberIds, projectId, clientId, selectedColumnId, dueDate, initial, columnId])
 
   const guardedClose = useCallback(() => {
     if (hasUnsavedChanges) {
-      if (!window.confirm('You have unsaved changes. Are you sure you want to close?')) return
+      setShowUnsavedChangesDialog(true)
+      return
     }
     onClose()
   }, [hasUnsavedChanges, onClose])
@@ -1178,7 +1180,7 @@ export function CardDialog({
       }
       await onSave(data)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Failed to save task')
+      toast.error(error instanceof Error ? error.message : 'Failed to save task')
     } finally {
       setSaving(false)
     }
@@ -1192,6 +1194,7 @@ export function CardDialog({
   }, [memberIds, users])
 
   return (
+    <>
     <Dialog open onOpenChange={(open) => !open && guardedClose()}>
       <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
@@ -1469,6 +1472,19 @@ export function CardDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={showUnsavedChangesDialog}
+      onOpenChange={setShowUnsavedChangesDialog}
+      title="Discard changes?"
+      description="You have unsaved changes. Discard them and close this task?"
+      confirmLabel="Discard"
+      variant="default"
+      onConfirm={() => {
+        setShowUnsavedChangesDialog(false)
+        onClose()
+      }}
+    />
+    </>
   )
 }
 
@@ -1647,6 +1663,7 @@ function TaskComments({
   const [newComment, setNewComment] = useState('')
   const [replyingTo, setReplyingTo] = useState<TaskComment | null>(null)
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
+  const [pendingDeleteComment, setPendingDeleteComment] = useState<TaskComment | null>(null)
 
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef(true)
@@ -1725,24 +1742,28 @@ function TaskComments({
 
   const deleteOne = useCallback(
     async (comment: TaskComment) => {
-      const ok = confirm('Delete this comment?')
-      if (!ok) return
-
-      setLoading(true)
-      setError(null)
-      try {
-        await apiDelete(`/api/kanban/cards/${cardId}/comments/${comment.id}`)
-        if (replyingTo?.id === comment.id) setReplyingTo(null)
-        await fetchComments()
-      } catch (e: any) {
-        console.error('[TASK COMMENTS] Failed to delete:', e)
-        setError(e?.message || 'Failed to delete comment')
-      } finally {
-        setLoading(false)
-      }
+      setPendingDeleteComment(comment)
     },
-    [cardId, fetchComments, replyingTo?.id]
+    [setPendingDeleteComment]
   )
+
+  const confirmDeleteComment = useCallback(async () => {
+    const comment = pendingDeleteComment
+    if (!comment) return
+    setPendingDeleteComment(null)
+    setLoading(true)
+    setError(null)
+    try {
+      await apiDelete(`/api/kanban/cards/${cardId}/comments/${comment.id}`)
+      if (replyingTo?.id === comment.id) setReplyingTo(null)
+      await fetchComments()
+    } catch (e: any) {
+      console.error('[TASK COMMENTS] Failed to delete:', e)
+      setError(e?.message || 'Failed to delete comment')
+    } finally {
+      setLoading(false)
+    }
+  }, [pendingDeleteComment, cardId, fetchComments, replyingTo])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1752,7 +1773,8 @@ function TaskComments({
   }
 
   return (
-    <div className="border rounded-lg">
+    <>
+      <div className="border rounded-lg">
       <div className="px-3 py-2 border-b">
         <h3 className="text-sm font-semibold">Comments</h3>
       </div>
@@ -1814,7 +1836,16 @@ function TaskComments({
           </Button>
         </div>
       </div>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={pendingDeleteComment !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteComment(null) }}
+        title="Delete Comment?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteComment}
+      />
+    </>
   )
 }
 

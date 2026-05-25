@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Eye, EyeOff, RefreshCw, Copy, Check, Plus, X, Mail, AlertCircle } from 'lucide-react'
 import { apiPost, apiFetch } from '@/lib/api-client'
+import { toast } from 'sonner'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -267,7 +268,7 @@ export default function NewProjectPage() {
       const project = await apiPost('/api/projects', data)
       router.push(`/admin/projects/${project.id}`)
     } catch (error) {
-      alert(error instanceof Error ? `Failed to create project: ${error.message}` : 'Failed to create project')
+      toast.error(error instanceof Error ? `Failed to create project: ${error.message}` : 'Failed to create project')
     } finally {
       setLoading(false)
     }

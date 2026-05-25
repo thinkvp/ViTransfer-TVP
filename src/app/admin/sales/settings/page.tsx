@@ -17,6 +17,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { BarChart3, Bell, Building2, CreditCard, Link2, Pencil, Plus, ReceiptText, Save, Star, Tag, Trash2 } from 'lucide-react'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 const SALES_SECTIONS = [
   { id: 'sales-details', label: 'Sales Details', icon: Building2 },
@@ -35,6 +37,8 @@ const NO_LABEL_ACCOUNT_VALUE = '__NO_LABEL_ACCOUNT__'
 
 export default function SalesSettingsPage() {
   const [loaded, setLoaded] = useState(false)
+  const [pendingRemoveTaxRate, setPendingRemoveTaxRate] = useState<{ id: string; name: string } | null>(null)
+  const [pendingDeleteLabel, setPendingDeleteLabel] = useState<{ id: string; name: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -282,7 +286,7 @@ export default function SalesSettingsPage() {
       })
       const json = await res.json().catch(() => null)
       if (!res.ok) {
-        alert(typeof json?.error === 'string' ? json.error : 'Failed to save Sales Notifications settings')
+        toast.error(typeof json?.error === 'string' ? json.error : 'Failed to save Sales Notifications settings')
         return
       }
 
@@ -590,7 +594,7 @@ export default function SalesSettingsPage() {
       const json = await res.json().catch(() => null)
       if (!res.ok) {
         const message = typeof json?.error === 'string' ? json.error : 'Unable to save Stripe settings'
-        alert(message)
+        toast.error(message)
         return
       }
 
@@ -741,7 +745,7 @@ export default function SalesSettingsPage() {
       setSavedSnapshot('')
       setTimeout(() => setUniversalSuccess(false), 2500)
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to save settings')
+      toast.error(e instanceof Error ? e.message : 'Failed to save settings')
     } finally {
       setUniversalSaving(false)
     }
@@ -754,7 +758,8 @@ export default function SalesSettingsPage() {
   }
 
   return (
-    <div>
+    <>
+      <div>
       <div className="mb-4 sm:mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -1027,7 +1032,7 @@ export default function SalesSettingsPage() {
                                 const def = savedRates.find((x) => x.isDefault)
                                 if (def) setTaxRatePercent(String(def.rate))
                               } catch (e) {
-                                alert(e instanceof Error ? e.message : 'Failed to update primary rate')
+                                toast.error(e instanceof Error ? e.message : 'Failed to update primary rate')
                               } finally {
                                 setTaxRatesBusy(false)
                               }
@@ -1043,26 +1048,9 @@ export default function SalesSettingsPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={async () => {
+                            onClick={() => {
                               if (taxRates.length <= 1) return
-                              if (!confirm(`Remove "${r.name}"?`)) return
-                              setTaxRatesBusy(true)
-                              try {
-                                const res = await apiFetch(`/api/admin/sales/tax-rates?id=${encodeURIComponent(r.id)}`, { method: 'DELETE' })
-                                if (!res.ok) {
-                                  const json = await res.json().catch(() => null)
-                                  alert(typeof json?.error === 'string' ? json.error : 'Failed to remove tax rate')
-                                  return
-                                }
-                                const rates = await fetchTaxRates()
-                                setTaxRates(rates)
-                                const def = rates.find((x) => x.isDefault)
-                                if (def) setTaxRatePercent(String(def.rate))
-                              } catch (e) {
-                                alert(e instanceof Error ? e.message : 'Failed to remove tax rate')
-                              } finally {
-                                setTaxRatesBusy(false)
-                              }
+                              setPendingRemoveTaxRate({ id: r.id, name: r.name })
                             }}
                             title="Remove"
                             aria-label="Remove"
@@ -1185,14 +1173,8 @@ export default function SalesSettingsPage() {
                             variant="outline"
                             size="sm"
                             className="h-8 w-8 p-0"
-                            onClick={async () => {
-                              if (!confirm(`Delete label "${lbl.name}"? It will be removed from any library items that use it. Labels already captured on quotes/invoices will retain their name snapshot.`)) return
-                              try {
-                                await deleteSalesLabel(lbl.id)
-                                setLabels((prev) => prev.filter((x) => x.id !== lbl.id))
-                              } catch (e) {
-                                alert(e instanceof Error ? e.message : 'Failed to delete label')
-                              }
+                            onClick={() => {
+                              setPendingDeleteLabel({ id: lbl.id, name: lbl.name })
                             }}
                           >
                             <Trash2 className="w-3.5 h-3.5 text-destructive" />
@@ -1662,7 +1644,7 @@ export default function SalesSettingsPage() {
 
                     setTaxRateModalOpen(false)
                   } catch (e) {
-                    alert(e instanceof Error ? e.message : 'Failed to save tax rate')
+                    toast.error(e instanceof Error ? e.message : 'Failed to save tax rate')
                   } finally {
                     setTaxRateModalSaving(false)
                   }
@@ -1674,6 +1656,53 @@ export default function SalesSettingsPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+
+      <ConfirmDialog
+        open={pendingRemoveTaxRate !== null}
+        onOpenChange={(v) => { if (!v) setPendingRemoveTaxRate(null) }}
+        title={`Remove Tax Rate "${pendingRemoveTaxRate?.name ?? ''}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Remove"
+        onConfirm={async () => {
+          const rate = pendingRemoveTaxRate!
+          setPendingRemoveTaxRate(null)
+          setTaxRatesBusy(true)
+          try {
+            const res = await apiFetch(`/api/admin/sales/tax-rates?id=${encodeURIComponent(rate.id)}`, { method: 'DELETE' })
+            if (!res.ok) {
+              const json = await res.json().catch(() => null)
+              toast.error(typeof json?.error === 'string' ? json.error : 'Failed to remove tax rate')
+              return
+            }
+            const rates = await fetchTaxRates()
+            setTaxRates(rates)
+            const def = rates.find((x) => x.isDefault)
+            if (def) setTaxRatePercent(String(def.rate))
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Failed to remove tax rate')
+          } finally {
+            setTaxRatesBusy(false)
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={pendingDeleteLabel !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteLabel(null) }}
+        title={`Delete Label "${pendingDeleteLabel?.name ?? ''}"?`}
+        description="It will be removed from any library items that use it. Labels already captured on quotes/invoices will retain their name snapshot."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          const lbl = pendingDeleteLabel!
+          setPendingDeleteLabel(null)
+          try {
+            await deleteSalesLabel(lbl.id)
+            setLabels((prev) => prev.filter((x) => x.id !== lbl.id))
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Failed to delete label')
+          }
+        }}
+      />
+      </div>
+    </>
   )
 }

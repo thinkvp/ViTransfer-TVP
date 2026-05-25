@@ -18,6 +18,7 @@ import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLef
 import type { Expense, ExpenseStatus } from '@/lib/accounting/types'
 import { EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
 import { cn, formatDate } from '@/lib/utils'
+import { toast } from 'sonner'
 
 type SortKey = 'date' | 'supplier' | 'description' | 'category' | 'amountExGst' | 'gstAmount' | 'amountIncGst' | 'status'
 
@@ -124,7 +125,7 @@ export default function ExpensesPage() {
       const res = await apiFetch(`/api/admin/accounting/expenses/${deleteTarget.id}`, { method: 'DELETE' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to delete expense')
+        toast.error(d.error || 'Failed to delete expense')
         return
       }
       setDeleteTarget(null)

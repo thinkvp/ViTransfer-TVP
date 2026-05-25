@@ -11,6 +11,7 @@ import { Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X, DollarSign } from 
 import type { ButtonProps } from '@/components/ui/button'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from '@/lib/display-color'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import { toast } from 'sonner'
 
 export interface EditableRecipient {
   id?: string
@@ -164,18 +165,18 @@ export function RecipientsEditor({
     const email = newEmail.trim()
 
     if (!name && !email) {
-      alert('Please enter at least a name or email address')
+      toast.error('Please enter at least a name or email address')
       return
     }
 
     if (email && !email.includes('@')) {
-      alert('Please enter a valid email address')
+      toast.error('Please enter a valid email address')
       return
     }
 
     const emailKey = normalizeEmail(email)
     if (emailKey && recipients.some((r) => normalizeEmail(r.email) === emailKey)) {
-      alert('That email is already in the list')
+      toast.error('That email is already in the list')
       return
     }
 
@@ -268,17 +269,17 @@ export function RecipientsEditor({
     const name = editName.trim()
     const email = editEmail.trim()
     if (!name && !email) {
-      alert('Please enter at least a name or email address')
+      toast.error('Please enter at least a name or email address')
       return
     }
     if (email && !email.includes('@')) {
-      alert('Please enter a valid email address')
+      toast.error('Please enter a valid email address')
       return
     }
 
     const emailKey = normalizeEmail(email)
     if (emailKey && recipients.some((r, i) => i !== editingIdx && normalizeEmail(r.email) === emailKey)) {
-      alert('That email is already in the list')
+      toast.error('That email is already in the list')
       return
     }
 
@@ -288,7 +289,7 @@ export function RecipientsEditor({
       if (rawColor) {
         const normalized = normalizeHexDisplayColor(rawColor)
         if (!normalized) {
-          alert('Invalid display colour. Use a hex value like #RRGGBB.')
+          toast.error('Invalid display colour. Use a hex value like #RRGGBB.')
           return
         }
         nextColor = normalized

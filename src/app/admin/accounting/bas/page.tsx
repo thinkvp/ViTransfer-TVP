@@ -10,6 +10,8 @@ import type { BasPeriod, BasPeriodStatus } from '@/lib/accounting/types'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 type BasSortKey = 'label' | 'startDate' | 'quarter' | 'basis' | 'status' | 'lodgedAt'
 
@@ -31,6 +33,7 @@ export default function BasPage() {
   const [loading, setLoading] = useState(true)
 
   const [deleting, setDeleting] = useState(false)
+  const [pendingDeletePeriod, setPendingDeletePeriod] = useState<BasPeriod | null>(null)
   const [sortKey, setSortKey] = useState<BasSortKey>('startDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -71,13 +74,14 @@ export default function BasPage() {
     setDeleting(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/bas/${target.id}`, { method: 'DELETE' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to delete'); return }
       await load()
     } finally { setDeleting(false) }
   }
 
   return (
-    <div className="space-y-4">
+    <>
+      <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold">BAS / GST</h2>
@@ -167,7 +171,7 @@ export default function BasPage() {
                             <Pencil className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
                           {p.status !== 'LODGED' && (
-                            <AccountingTableActionButton destructive onClick={() => { if (!confirm(`Delete BAS period "${p.label}"?`)) return; void handleDelete(p) }} title="Delete BAS period" aria-label="Delete BAS period">
+                            <AccountingTableActionButton destructive onClick={() => setPendingDeletePeriod(p)} title="Delete BAS period" aria-label="Delete BAS period">
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </AccountingTableActionButton>
                           )}
@@ -182,6 +186,20 @@ export default function BasPage() {
         </CardContent>
       </Card>
 
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeletePeriod !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeletePeriod(null) }}
+        title={`Delete BAS Period "${pendingDeletePeriod?.label ?? ''}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const p = pendingDeletePeriod!
+          setPendingDeletePeriod(null)
+          void handleDelete(p)
+        }}
+      />
+    </>
   )
 }

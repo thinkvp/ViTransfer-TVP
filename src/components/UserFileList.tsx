@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
 import { Download, Trash2 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface UserFile {
   id: string
@@ -26,6 +28,7 @@ export function UserFileList({ userId, refreshTrigger }: UserFileListProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeleteFile, setPendingDeleteFile] = useState<{ id: string; name: string } | null>(null)
 
   async function load() {
     setLoading(true)
@@ -82,19 +85,23 @@ export function UserFileList({ userId, refreshTrigger }: UserFileListProps) {
       a.remove()
       URL.revokeObjectURL(url)
     } catch (e: any) {
-      alert(e?.message || 'Failed to download file')
+      toast.error(e?.message || 'Failed to download file')
     }
   }
 
-  const handleDelete = async (fileId: string, fileName: string) => {
-    if (!confirm(`Delete file "${fileName}"?`)) return
+  const handleDelete = (fileId: string, fileName: string) => {
+    setPendingDeleteFile({ id: fileId, name: fileName })
+  }
 
+  const confirmDeleteFile = async () => {
+    const { id: fileId } = pendingDeleteFile!
+    setPendingDeleteFile(null)
     setDeletingId(fileId)
     try {
       await apiDelete(`/api/users/${userId}/files/${fileId}`)
       setFiles((prev) => prev.filter((file) => file.id !== fileId))
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete file')
+      toast.error(e?.message || 'Failed to delete file')
     } finally {
       setDeletingId(null)
     }
@@ -113,7 +120,8 @@ export function UserFileList({ userId, refreshTrigger }: UserFileListProps) {
   }
 
   return (
-    <div className="space-y-2">
+    <>
+      <div className="space-y-2">
       {files.map((file) => (
         <div key={file.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
           <div className="min-w-0">
@@ -138,6 +146,16 @@ export function UserFileList({ userId, refreshTrigger }: UserFileListProps) {
           </div>
         </div>
       ))}
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteFile !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteFile(null) }}
+        title={`Delete File "${pendingDeleteFile?.name ?? ''}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteFile}
+      />
+    </>
   )
 }

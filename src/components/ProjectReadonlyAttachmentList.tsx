@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
+import { toast } from 'sonner'
 
 type AttachmentFile = {
   id: string
@@ -97,7 +98,7 @@ export function ProjectReadonlyAttachmentList({
       a.remove()
       URL.revokeObjectURL(blobUrl)
     } catch (e: any) {
-      alert(e?.message || 'Failed to download attachment')
+      toast.error(e?.message || 'Failed to download attachment')
     }
   }
 

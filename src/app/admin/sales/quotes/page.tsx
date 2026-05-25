@@ -29,6 +29,8 @@ import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDia
 import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { quoteEffectiveStatus } from '@/lib/sales/status'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 type QuoteRow = {
   quote: SalesQuoteWithVersion
@@ -42,6 +44,7 @@ export default function SalesQuotesPage() {
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [sendTarget, setSendTarget] = useState<SalesQuoteWithVersion | null>(null)
+  const [pendingDeleteQuote, setPendingDeleteQuote] = useState<SalesQuoteWithVersion | null>(null)
   const [acceptBusyId, setAcceptBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -135,11 +138,11 @@ export default function SalesQuotesPage() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Failed to update quote'
         if (msg === 'Conflict') {
-          alert('This quote was updated in another session. Reloading.')
+          toast.error('This quote was updated in another session. Reloading.')
           setTick((v) => v + 1)
           return
         }
-        alert(msg)
+        toast.error(msg)
       }
     },
     []
@@ -331,16 +334,19 @@ export default function SalesQuotesPage() {
         return
       }
       setActionError(msg)
-      // Keep the legacy alert for now so errors are still visible even if the
-      // table is scrolled away from the banner.
-      alert(msg)
+      toast.error(msg)
     } finally {
       setAcceptBusyId((current) => (current === q.id ? null : current))
     }
   }
 
-  const onDelete = async (q: SalesQuoteWithVersion) => {
-    if (!confirm(`Delete quote ${q.quoteNumber}?`)) return
+  const onDelete = (q: SalesQuoteWithVersion) => {
+    setPendingDeleteQuote(q)
+  }
+
+  const confirmDeleteQuote = async () => {
+    const q = pendingDeleteQuote!
+    setPendingDeleteQuote(null)
     try {
       await deleteSalesQuote(q.id)
       setQuotes((prev) => prev.filter((x) => x.id !== q.id))
@@ -350,7 +356,7 @@ export default function SalesQuotesPage() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete quote'
-      alert(msg)
+      toast.error(msg)
     }
   }
 
@@ -387,20 +393,21 @@ export default function SalesQuotesPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold">Quotes</h2>
-          <p className="text-sm text-muted-foreground">Create, view, and send quotes.</p>
+    <>
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Quotes</h2>
+            <p className="text-sm text-muted-foreground">Create, view, and send quotes.</p>
+          </div>
+          <Link href="/admin/sales/quotes/new">
+            <Button variant="default">Create quote</Button>
+          </Link>
         </div>
-        <Link href="/admin/sales/quotes/new">
-          <Button variant="default">Create quote</Button>
-        </Link>
-      </div>
 
-      {actionError ? (
-        <div className="text-sm text-red-600">{actionError}</div>
-      ) : null}
+        {actionError ? (
+          <div className="text-sm text-red-600">{actionError}</div>
+        ) : null}
 
       <div className="flex flex-nowrap items-center justify-between gap-2 mb-3">
         <div className="flex-1 min-w-0 sm:max-w-sm">
@@ -723,12 +730,22 @@ export default function SalesQuotesPage() {
                 setQuotes((prev) => prev.map((x) => (x.id === next.id ? next : x)))
                 setSendTarget(next)
               } catch (e) {
-                alert(e instanceof Error ? e.message : 'Failed to refresh quote')
+                toast.error(e instanceof Error ? e.message : 'Failed to refresh quote')
               }
             })()
           }}
         />
       ) : null}
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteQuote !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteQuote(null) }}
+        title={`Delete Quote ${pendingDeleteQuote?.quoteNumber ?? ''}?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteQuote}
+      />
+    </>
   )
 }

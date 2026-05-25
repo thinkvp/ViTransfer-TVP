@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Download, CheckCircle2, CreditCard } from 'lucide-react'
 import { downloadInvoicePdf, downloadQuotePdf } from '@/lib/sales/pdf'
 import { getCurrencySymbol } from '@/lib/sales/currency'
+import { toast } from 'sonner'
 
 type DocType = 'QUOTE' | 'INVOICE'
 
@@ -76,7 +77,7 @@ export default function PublicSalesDocActions(props: Props) {
       if (!res.ok) {
         const data = await res.json().catch(() => null)
         const message = typeof data?.error === 'string' ? data.error : 'Unable to accept quote'
-        alert(message)
+        toast.error(message)
         return
       }
 
@@ -100,13 +101,13 @@ export default function PublicSalesDocActions(props: Props) {
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         const message = typeof data?.error === 'string' ? data.error : 'Unable to start payment'
-        alert(message)
+        toast.error(message)
         return
       }
 
       const url = typeof data?.url === 'string' ? data.url : ''
       if (!url) {
-        alert('Unable to start payment')
+        toast.error('Unable to start payment')
         return
       }
 

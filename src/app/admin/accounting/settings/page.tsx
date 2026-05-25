@@ -11,6 +11,8 @@ import { Plus, Pencil, Trash2, Check, X, Loader2, Save } from 'lucide-react'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { cn } from '@/lib/utils'
 import type { AccountingSettings } from '@/lib/accounting/types'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface TaxRate {
   id: string
@@ -63,6 +65,7 @@ export default function AccountingSettingsPage() {
   const [settingsSaving, setSettingsSaving] = useState(false)
 
   const [deleting, setDeleting] = useState(false)
+  const [pendingDeleteRate, setPendingDeleteRate] = useState<TaxRate | null>(null)
   const [error, setError] = useState('')
   const [settingsError, setSettingsError] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
@@ -220,13 +223,14 @@ export default function AccountingSettingsPage() {
     setDeleting(true)
     try {
       const res = await apiFetch(`/api/admin/accounting/tax-rates/${target.id}`, { method: 'DELETE' })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete'); return }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to delete'); return }
       await load()
     } finally { setDeleting(false) }
   }
 
   return (
-    <div className="space-y-6">
+    <>
+      <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Accounting Settings</h2>
@@ -475,7 +479,7 @@ export default function AccountingSettingsPage() {
                           <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate">
                             <Pencil className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
-                          <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => { if (!confirm(`Delete tax rate "${rate.name}"?`)) return; void handleDelete(rate) }} title="Delete tax rate" aria-label="Delete tax rate">
+                          <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => setPendingDeleteRate(rate)} title="Delete tax rate" aria-label="Delete tax rate">
                             <Trash2 className="w-3.5 h-3.5" />
                           </AccountingTableActionButton>
                         </div>
@@ -488,7 +492,7 @@ export default function AccountingSettingsPage() {
                           </div>
                           <div className="flex items-center gap-1">
                             <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate"><Pencil className="w-3.5 h-3.5" /></AccountingTableActionButton>
-                            <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => { if (!confirm(`Delete tax rate "${rate.name}"?`)) return; void handleDelete(rate) }} title="Delete tax rate" aria-label="Delete tax rate"><Trash2 className="w-3.5 h-3.5" /></AccountingTableActionButton>
+                            <AccountingTableActionButton className="h-8 w-8" destructive onClick={() => setPendingDeleteRate(rate)} title="Delete tax rate" aria-label="Delete tax rate"><Trash2 className="w-3.5 h-3.5" /></AccountingTableActionButton>
                           </div>
                         </div>
                       </div>
@@ -501,7 +505,21 @@ export default function AccountingSettingsPage() {
         </CardContent>
       </Card>
 
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeleteRate !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteRate(null) }}
+        title={`Delete Tax Rate "${pendingDeleteRate?.name ?? ''}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const rate = pendingDeleteRate!
+          setPendingDeleteRate(null)
+          void handleDelete(rate)
+        }}
+      />
+    </>
   )
 }
 

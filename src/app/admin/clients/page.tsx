@@ -8,6 +8,8 @@ import { Building2, Plus, Trash2, ArrowUp, ArrowDown, Filter, Download, ChevronL
 import { apiDelete, apiFetch, apiPatch } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   DropdownMenu,
@@ -36,6 +38,7 @@ type ActiveFilter = 'all' | 'active' | 'inactive'
 export default function ClientsPage() {
   const router = useRouter()
   const [clients, setClients] = useState<ClientRow[]>([])
+  const [pendingDeleteClient, setPendingDeleteClient] = useState<{ id: string; name: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -147,14 +150,18 @@ export default function ClientsPage() {
     })
   }
 
-  const handleDelete = async (clientId: string, clientName: string) => {
-    if (!confirm(`Delete client "${clientName}"?`)) return
+  const handleDelete = (clientId: string, clientName: string) => {
+    setPendingDeleteClient({ id: clientId, name: clientName })
+  }
 
+  const confirmDeleteClient = async () => {
+    const { id } = pendingDeleteClient!
+    setPendingDeleteClient(null)
     try {
-      await apiDelete(`/api/clients/${clientId}`)
-      setClients((prev) => prev.filter((c) => c.id !== clientId))
+      await apiDelete(`/api/clients/${id}`)
+      setClients((prev) => prev.filter((c) => c.id !== id))
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete client')
+      toast.error(e?.message || 'Failed to delete client')
     }
   }
 
@@ -512,6 +519,15 @@ export default function ClientsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={pendingDeleteClient !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteClient(null) }}
+        title={`Delete Client "${pendingDeleteClient?.name ?? ''}"?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteClient}
+      />
     </div>
   )
 }

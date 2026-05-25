@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api-client'
 import type { BankTransaction } from '@/lib/accounting/types'
 import { cn, formatDate } from '@/lib/utils'
 import { Loader2, Paperclip } from 'lucide-react'
+import { toast } from 'sonner'
 
 function fmtAud(cents: number) {
   const abs = Math.abs(cents)
@@ -74,7 +75,7 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
       const res = await apiFetch(`/api/admin/accounting/attachments/${attachmentId}`)
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to download attachment')
+        toast.error(d.error || 'Failed to download attachment')
         return
       }
       const isS3Redirect = res.url && !res.url.startsWith(window.location.origin) && !res.url.startsWith('/')
@@ -97,7 +98,7 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
       anchor.remove()
       URL.revokeObjectURL(url)
     } catch {
-      alert('Failed to download attachment')
+      toast.error('Failed to download attachment')
     }
   }
 

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
 import { Download, Trash2 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface ClientFile {
   id: string
@@ -26,6 +28,7 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeleteFile, setPendingDeleteFile] = useState<{ id: string; name: string } | null>(null)
 
   async function load() {
     setLoading(true)
@@ -82,19 +85,24 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
       a.remove()
       URL.revokeObjectURL(url)
     } catch (e: any) {
-      alert(e?.message || 'Failed to download file')
+      toast.error(e?.message || 'Failed to download file')
     }
   }
 
-  const handleDelete = async (fileId: string, fileName: string) => {
-    if (!confirm(`Delete file "${fileName}"?`)) return
+  const handleDelete = (fileId: string, fileName: string) => {
+    setPendingDeleteFile({ id: fileId, name: fileName })
+  }
 
+  const confirmDelete = async () => {
+    if (!pendingDeleteFile) return
+    const { id: fileId } = pendingDeleteFile
+    setPendingDeleteFile(null)
     setDeletingId(fileId)
     try {
       await apiDelete(`/api/clients/${clientId}/files/${fileId}`)
       setFiles((prev) => prev.filter((f) => f.id !== fileId))
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete file')
+      toast.error(e?.message || 'Failed to delete file')
     } finally {
       setDeletingId(null)
     }
@@ -113,6 +121,7 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
   }
 
   return (
+    <>
     <div className="space-y-2">
       {files.map((f) => (
         <div key={f.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
@@ -139,5 +148,15 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
         </div>
       ))}
     </div>
+
+    <ConfirmDialog
+      open={pendingDeleteFile !== null}
+      onOpenChange={(v) => { if (!v) setPendingDeleteFile(null) }}
+      title={`Delete "${pendingDeleteFile?.name ?? 'file'}"?`}
+      description="This file will be permanently deleted."
+      confirmLabel="Delete"
+      onConfirm={confirmDelete}
+    />
+  </>
   )
 }

@@ -3,6 +3,9 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { InputDialog } from '@/components/ui/input-dialog'
+import { toast } from 'sonner'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -192,6 +195,12 @@ export function ShareFilesBrowser({
   const [albumSocialEnabledByAlbumId, setAlbumSocialEnabledByAlbumId] = useState<Record<string, boolean>>({})
   const [albumMetaLoadedByAlbumId, setAlbumMetaLoadedByAlbumId] = useState<Record<string, boolean>>({})
   const [isUploadActionBusy, setIsUploadActionBusy] = useState(false)
+  const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false)
+  const [showRenameFolderDialog, setShowRenameFolderDialog] = useState(false)
+  const [renameFolderTarget, setRenameFolderTarget] = useState<{ path: string; name: string } | null>(null)
+  const [showDeleteSelectedDialog, setShowDeleteSelectedDialog] = useState(false)
+  const [pendingDeleteFileId, setPendingDeleteFileId] = useState<string | null>(null)
+  const [pendingDeleteFolderPath, setPendingDeleteFolderPath] = useState<string | null>(null)
   const [videoAssetsThumbnailSize, setVideoAssetsThumbnailSize] = useState<'default' | 'large'>('default')
   const [albumPhotosThumbnailSize, setAlbumPhotosThumbnailSize] = useState<'default' | 'large'>('default')
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
@@ -1110,21 +1119,23 @@ export function ShareFilesBrowser({
   const isDownloadBusy = isDownloadingSelected
   const activeProgress = localDownloadProgress
 
-  const runCreateUploadFolder = useCallback(async () => {
+  const runCreateUploadFolder = useCallback(() => {
     if (!canUploadToProjects || !onCreateUploadFolder || isUploadActionBusy) return
-    const folderName = window.prompt('Folder name')
-    const normalizedName = String(folderName || '').trim()
-    if (!normalizedName) return
+    setShowCreateFolderDialog(true)
+  }, [canUploadToProjects, onCreateUploadFolder, isUploadActionBusy])
 
+  const confirmCreateUploadFolder = useCallback(async (folderName: string) => {
+    if (!onCreateUploadFolder) return
     setIsUploadActionBusy(true)
     try {
-      await onCreateUploadFolder(uploadsTargetFolderPath, normalizedName)
+      await onCreateUploadFolder(uploadsTargetFolderPath, folderName)
+      setShowCreateFolderDialog(false)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to create folder')
+      toast.error(error instanceof Error ? error.message : 'Unable to create folder')
     } finally {
       setIsUploadActionBusy(false)
     }
-  }, [canUploadToProjects, onCreateUploadFolder, isUploadActionBusy, uploadsTargetFolderPath])
+  }, [onCreateUploadFolder, uploadsTargetFolderPath])
 
   const openUploadFilePicker = useCallback(() => {
     if (!canUploadToProjects || !onUploadFiles || isUploadActionBusy) return
@@ -1132,35 +1143,29 @@ export function ShareFilesBrowser({
     uploadInputRef.current?.click()
   }, [canUploadToProjects, onUploadFiles, isUploadActionBusy, uploadsTargetFolderPath])
 
-  const deleteSelectedUploadFiles = useCallback(async () => {
+  const deleteSelectedUploadFiles = useCallback(() => {
     if (!canDeleteUploads || !onDeleteUploadFile || isUploadActionBusy) return
     if (selectedUploadFilesInContext.length === 0) return
+    setShowDeleteSelectedDialog(true)
+  }, [canDeleteUploads, onDeleteUploadFile, isUploadActionBusy, selectedUploadFilesInContext])
 
-    const count = selectedUploadFilesInContext.length
-    const shouldDelete = window.confirm(`Delete ${count} selected upload file${count === 1 ? '' : 's'}?`)
-    if (!shouldDelete) return
-
+  const confirmDeleteSelectedUploadFiles = useCallback(async () => {
+    if (!onDeleteUploadFile) return
     setIsUploadActionBusy(true)
     try {
       for (const file of selectedUploadFilesInContext) {
         if (!file.uploadFileId) continue
         await onDeleteUploadFile(file.uploadFileId)
       }
-
       const deletedKeys = new Set(selectedUploadFilesInContext.map((file) => getDownloadableFileKey(file)))
       setSelectedFileIds((prev) => new Set(Array.from(prev).filter((key) => !deletedKeys.has(key))))
+      setShowDeleteSelectedDialog(false)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to delete selected files')
+      toast.error(error instanceof Error ? error.message : 'Unable to delete selected files')
     } finally {
       setIsUploadActionBusy(false)
     }
-  }, [
-    canDeleteUploads,
-    onDeleteUploadFile,
-    isUploadActionBusy,
-    selectedUploadFilesInContext,
-    setSelectedFileIds,
-  ])
+  }, [onDeleteUploadFile, selectedUploadFilesInContext, setSelectedFileIds])
 
   const submitUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
     if (!canUploadToProjects || !onUploadFiles || !Array.isArray(files) || files.length === 0) return
@@ -1189,51 +1194,63 @@ export function ShareFilesBrowser({
     return true
   }, [canUploadToProjects, onUploadFiles, isUploadActionBusy, hasDraggedFiles])
 
-  const deleteUploadFile = useCallback(async (fileId: string) => {
+  const deleteUploadFile = useCallback((fileId: string) => {
     if (!canDeleteUploads || !onDeleteUploadFile || !fileId || isUploadActionBusy) return
-    const shouldDelete = window.confirm('Delete this uploaded file?')
-    if (!shouldDelete) return
-    setIsUploadActionBusy(true)
-    try {
-      await onDeleteUploadFile(fileId)
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to delete file')
-    } finally {
-      setIsUploadActionBusy(false)
-    }
+    setPendingDeleteFileId(fileId)
   }, [canDeleteUploads, onDeleteUploadFile, isUploadActionBusy])
 
-  const deleteUploadFolder = useCallback(async (folderPath: string) => {
-    if (!canDeleteUploads || !onDeleteUploadFolder || !folderPath || isUploadActionBusy) return
-    const shouldDelete = window.confirm('Delete this folder and all nested files?')
-    if (!shouldDelete) return
+  const confirmDeleteUploadFile = useCallback(async () => {
+    if (!onDeleteUploadFile || !pendingDeleteFileId) return
     setIsUploadActionBusy(true)
     try {
-      await onDeleteUploadFolder(folderPath)
-      setOpenFolderName(null)
+      await onDeleteUploadFile(pendingDeleteFileId)
+      setPendingDeleteFileId(null)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to delete folder')
+      toast.error(error instanceof Error ? error.message : 'Unable to delete file')
     } finally {
       setIsUploadActionBusy(false)
     }
+  }, [onDeleteUploadFile, pendingDeleteFileId])
+
+  const deleteUploadFolder = useCallback((folderPath: string) => {
+    if (!canDeleteUploads || !onDeleteUploadFolder || !folderPath || isUploadActionBusy) return
+    setPendingDeleteFolderPath(folderPath)
   }, [canDeleteUploads, onDeleteUploadFolder, isUploadActionBusy])
 
-  const renameUploadFolder = useCallback(async (folderPath: string, currentFolderName: string) => {
-    if (!canDeleteUploads || !onRenameUploadFolder || !folderPath || isUploadActionBusy) return
-
-    const nextName = window.prompt('New folder name', currentFolderName)
-    const normalizedName = String(nextName || '').trim()
-    if (!normalizedName || normalizedName === currentFolderName) return
-
+  const confirmDeleteUploadFolder = useCallback(async () => {
+    if (!onDeleteUploadFolder || !pendingDeleteFolderPath) return
     setIsUploadActionBusy(true)
     try {
-      await onRenameUploadFolder(folderPath, normalizedName)
+      await onDeleteUploadFolder(pendingDeleteFolderPath)
+      setPendingDeleteFolderPath(null)
+      setOpenFolderName(null)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to rename folder')
+      toast.error(error instanceof Error ? error.message : 'Unable to delete folder')
     } finally {
       setIsUploadActionBusy(false)
     }
+  }, [onDeleteUploadFolder, pendingDeleteFolderPath])
+
+  const renameUploadFolder = useCallback((folderPath: string, currentFolderName: string) => {
+    if (!canDeleteUploads || !onRenameUploadFolder || !folderPath || isUploadActionBusy) return
+    setRenameFolderTarget({ path: folderPath, name: currentFolderName })
+    setShowRenameFolderDialog(true)
   }, [canDeleteUploads, onRenameUploadFolder, isUploadActionBusy])
+
+  const confirmRenameUploadFolder = useCallback(async (newName: string) => {
+    if (!onRenameUploadFolder || !renameFolderTarget) return
+    if (newName === renameFolderTarget.name) { setShowRenameFolderDialog(false); return }
+    setIsUploadActionBusy(true)
+    try {
+      await onRenameUploadFolder(renameFolderTarget.path, newName)
+      setShowRenameFolderDialog(false)
+      setRenameFolderTarget(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to rename folder')
+    } finally {
+      setIsUploadActionBusy(false)
+    }
+  }, [onRenameUploadFolder, renameFolderTarget])
 
   const compareFileNameAsc = useCallback((a: DownloadableFile, b: DownloadableFile) => {
     return String(a.fileName || '').localeCompare(String(b.fileName || ''), undefined, { sensitivity: 'base' })
@@ -2778,6 +2795,63 @@ export function ShareFilesBrowser({
           </Dialog>
         )
       })()}
+
+      {/* Create folder dialog */}
+      <InputDialog
+        open={showCreateFolderDialog}
+        onOpenChange={setShowCreateFolderDialog}
+        title="Create Folder"
+        label="Folder name"
+        placeholder="e.g. Raw Files"
+        confirmLabel="Create"
+        onConfirm={confirmCreateUploadFolder}
+        loading={isUploadActionBusy}
+      />
+
+      {/* Rename folder dialog */}
+      <InputDialog
+        open={showRenameFolderDialog}
+        onOpenChange={(v) => { setShowRenameFolderDialog(v); if (!v) setRenameFolderTarget(null) }}
+        title="Rename Folder"
+        label="New folder name"
+        defaultValue={renameFolderTarget?.name ?? ''}
+        confirmLabel="Rename"
+        onConfirm={confirmRenameUploadFolder}
+        loading={isUploadActionBusy}
+      />
+
+      {/* Delete selected files dialog */}
+      <ConfirmDialog
+        open={showDeleteSelectedDialog}
+        onOpenChange={setShowDeleteSelectedDialog}
+        title={`Delete ${selectedUploadFilesInContext.length} Selected File${selectedUploadFilesInContext.length === 1 ? '' : 's'}?`}
+        description="This will permanently delete the selected upload files. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteSelectedUploadFiles}
+        loading={isUploadActionBusy}
+      />
+
+      {/* Delete single file dialog */}
+      <ConfirmDialog
+        open={pendingDeleteFileId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteFileId(null) }}
+        title="Delete File?"
+        description="This will permanently delete the uploaded file. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteUploadFile}
+        loading={isUploadActionBusy}
+      />
+
+      {/* Delete folder dialog */}
+      <ConfirmDialog
+        open={pendingDeleteFolderPath !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteFolderPath(null) }}
+        title="Delete Folder?"
+        description="This will permanently delete the folder and all files inside it. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteUploadFolder}
+        loading={isUploadActionBusy}
+      />
     </div>
   )
 }

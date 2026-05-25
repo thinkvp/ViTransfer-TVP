@@ -16,6 +16,7 @@ import { cn, formatDate } from '@/lib/utils'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import type { Vehicle, VehicleLogbook, VehicleTrip, VehicleYearlyOdometer, VehicleTripType } from '@/lib/accounting/types'
 import { TRIP_PURPOSE_PRESETS } from '@/lib/accounting/types'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -769,6 +770,11 @@ export default function VehiclesPage() {
   const [tripModalOpen, setTripModalOpen] = useState(false)
   const [editingTrip, setEditingTrip] = useState<VehicleTrip | null>(null)
   const [exportLoading, setExportLoading] = useState(false)
+  const [pendingDeleteVehicle, setPendingDeleteVehicle] = useState<Vehicle | null>(null)
+  const [pendingFinaliseLogbook, setPendingFinaliseLogbook] = useState<VehicleLogbook | null>(null)
+  const [pendingDeleteLogbook, setPendingDeleteLogbook] = useState<VehicleLogbook | null>(null)
+  const [pendingCloseLogbook, setPendingCloseLogbook] = useState<VehicleLogbook | null>(null)
+  const [pendingDeleteTrip, setPendingDeleteTrip] = useState<VehicleTrip | null>(null)
 
   const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId) ?? null
   const selectedLogbook = logbooks.find(l => l.id === selectedLogbookId) ?? null
@@ -866,7 +872,12 @@ export default function VehiclesPage() {
   }
 
   async function handleDeleteVehicle(v: Vehicle) {
-    if (!confirm(`Delete vehicle "${v.year ? v.year + ' ' : ''}${v.make} ${v.model}" and all logbook data? This cannot be undone.`)) return
+    setPendingDeleteVehicle(v)
+  }
+
+  async function confirmDeleteVehicle() {
+    const v = pendingDeleteVehicle!
+    setPendingDeleteVehicle(null)
     const res = await apiFetch(`/api/admin/accounting/vehicles/${v.id}`, { method: 'DELETE' })
     if (res.ok) {
       setVehicles(prev => prev.filter(x => x.id !== v.id))
@@ -879,7 +890,12 @@ export default function VehiclesPage() {
   }
 
   async function handleFinaliseLogbook(logbook: VehicleLogbook) {
-    if (!confirm(`Finalise logbook "${logbook.label}"? This will close it and lock the business-use percentage.`)) return
+    setPendingFinaliseLogbook(logbook)
+  }
+
+  async function confirmFinaliseLogbook() {
+    const logbook = pendingFinaliseLogbook!
+    setPendingFinaliseLogbook(null)
     if (!selectedVehicleId) return
     const today = todayYmd()
     const res = await apiFetch(`/api/admin/accounting/vehicles/${selectedVehicleId}/logbooks/${logbook.id}`, {
@@ -890,13 +906,17 @@ export default function VehiclesPage() {
     if (res.ok) {
       const d = await res.json()
       setLogbooks(prev => prev.map(l => l.id === logbook.id ? d.logbook : l))
-      // Refresh the vehicle list so the card updates
       void loadVehicles()
     }
   }
 
   async function handleDeleteLogbook(logbook: VehicleLogbook) {
-    if (!confirm(`Delete logbook "${logbook.label}" and ALL its trips? This cannot be undone.`)) return
+    setPendingDeleteLogbook(logbook)
+  }
+
+  async function confirmDeleteLogbook() {
+    const logbook = pendingDeleteLogbook!
+    setPendingDeleteLogbook(null)
     if (!selectedVehicleId) return
     const res = await apiFetch(`/api/admin/accounting/vehicles/${selectedVehicleId}/logbooks/${logbook.id}`, { method: 'DELETE' })
     if (res.ok) {
@@ -911,7 +931,12 @@ export default function VehiclesPage() {
   }
 
   async function handleCloseLogbook(logbook: VehicleLogbook) {
-    if (!confirm(`Close logbook "${logbook.label}"? The logbook period is shorter than 12 weeks.`)) return
+    setPendingCloseLogbook(logbook)
+  }
+
+  async function confirmCloseLogbook() {
+    const logbook = pendingCloseLogbook!
+    setPendingCloseLogbook(null)
     if (!selectedVehicleId) return
     const res = await apiFetch(`/api/admin/accounting/vehicles/${selectedVehicleId}/logbooks/${logbook.id}`, {
       method: 'PUT',
@@ -925,7 +950,12 @@ export default function VehiclesPage() {
   }
 
   async function handleDeleteTrip(trip: VehicleTrip) {
-    if (!confirm('Delete this trip?')) return
+    setPendingDeleteTrip(trip)
+  }
+
+  async function confirmDeleteTrip() {
+    const trip = pendingDeleteTrip!
+    setPendingDeleteTrip(null)
     if (!selectedVehicleId || !selectedLogbookId) return
     const res = await apiFetch(
       `/api/admin/accounting/vehicles/${selectedVehicleId}/logbooks/${selectedLogbookId}/trips/${trip.id}`,
@@ -934,9 +964,7 @@ export default function VehiclesPage() {
     if (res.ok) {
       setTrips(prev => prev.filter(t => t.id !== trip.id))
       setTripsTotal(prev => Math.max(0, prev - 1))
-      // Refresh logbook stats
       void loadLogbooks(selectedVehicleId)
-      // Refresh vehicle cards (tips/business %) at the top
       void loadVehicles()
     }
   }
@@ -1293,6 +1321,49 @@ export default function VehiclesPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDeleteVehicle !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteVehicle(null) }}
+        title={`Delete Vehicle "${pendingDeleteVehicle ? `${pendingDeleteVehicle.year ? pendingDeleteVehicle.year + ' ' : ''}${pendingDeleteVehicle.make} ${pendingDeleteVehicle.model}` : ''}"?`}
+        description="All logbook data will also be deleted. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteVehicle}
+      />
+      <ConfirmDialog
+        open={pendingFinaliseLogbook !== null}
+        onOpenChange={(v) => { if (!v) setPendingFinaliseLogbook(null) }}
+        title={`Finalise Logbook "${pendingFinaliseLogbook?.label ?? ''}"?`}
+        description="This will close the logbook and lock the business-use percentage."
+        confirmLabel="Finalise"
+        variant="default"
+        onConfirm={confirmFinaliseLogbook}
+      />
+      <ConfirmDialog
+        open={pendingDeleteLogbook !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteLogbook(null) }}
+        title={`Delete Logbook "${pendingDeleteLogbook?.label ?? ''}"?`}
+        description="All trips in this logbook will also be deleted. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteLogbook}
+      />
+      <ConfirmDialog
+        open={pendingCloseLogbook !== null}
+        onOpenChange={(v) => { if (!v) setPendingCloseLogbook(null) }}
+        title={`Close Logbook "${pendingCloseLogbook?.label ?? ''}"?`}
+        description="The logbook period is shorter than 12 weeks."
+        confirmLabel="Close"
+        variant="default"
+        onConfirm={confirmCloseLogbook}
+      />
+      <ConfirmDialog
+        open={pendingDeleteTrip !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteTrip(null) }}
+        title="Delete This Trip?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteTrip}
+      />
     </div>
   )
 }
@@ -1315,6 +1386,7 @@ function AnnualOdometerSection({
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [pendingDeleteOdometer, setPendingDeleteOdometer] = useState<VehicleYearlyOdometer | null>(null)
 
   function startEdit(r?: VehicleYearlyOdometer) {
     if (r) {
@@ -1353,7 +1425,12 @@ function AnnualOdometerSection({
   }
 
   async function handleDelete(r: VehicleYearlyOdometer) {
-    if (!confirm(`Delete odometer record for ${r.financialYear}?`)) return
+    setPendingDeleteOdometer(r)
+  }
+
+  async function confirmDeleteOdometer() {
+    const r = pendingDeleteOdometer!
+    setPendingDeleteOdometer(null)
     setDeleting(r.id)
     try {
       const res = await apiFetch(`/api/admin/accounting/vehicles/${vehicleId}/odometer/${r.id}`, { method: 'DELETE' })
@@ -1362,7 +1439,8 @@ function AnnualOdometerSection({
   }
 
   return (
-    <Card>
+    <>
+      <Card>
       <CardContent className="pt-4 space-y-3">
         {records.length === 0 && editingFY === null && (
           <p className="text-sm text-muted-foreground">No annual odometer readings recorded yet.</p>
@@ -1395,7 +1473,17 @@ function AnnualOdometerSection({
           </Button>
         )}
       </CardContent>
-    </Card>
+      </Card>
+
+      <ConfirmDialog
+        open={pendingDeleteOdometer !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteOdometer(null) }}
+        title={`Delete Odometer Record for ${pendingDeleteOdometer?.financialYear ?? ''}?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteOdometer}
+      />
+    </>
   )
 }
 

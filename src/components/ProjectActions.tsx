@@ -26,6 +26,8 @@ import { Textarea } from './ui/textarea'
 import { UnapproveModal } from './UnapproveModal'
 import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface Video {
   id: string
@@ -57,6 +59,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Unapprove modal state
   const [showUnapproveModal, setShowUnapproveModal] = useState(false)
+  const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
+  const [showApproveConfirm, setShowApproveConfirm] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showDeleteConfirm2, setShowDeleteConfirm2] = useState(false)
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
@@ -438,34 +444,31 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     router.push(`/admin/projects/${project.id}/analytics`)
   }
 
-  const handleReprocessPreviews = async () => {
+  const handleReprocessPreviews = () => {
     if (!canReprocessPreviews || isReprocessingPreviews) return
+    setShowReprocessConfirm(true)
+  }
 
-    const confirmed = confirm(
-      'Reprocess all project previews? This will delete stored preview files, clear preview references in the database, and queue regeneration for videos, video assets, uploads, album thumbnails, and album photo preview derivatives.'
-    )
-    if (!confirmed) return
-
+  const confirmReprocessPreviews = async () => {
     setIsReprocessingPreviews(true)
     setIsMonitoringReprocessPreviews(false)
 
     apiPost(`/api/projects/${project.id}/reprocess-previews`, {})
       .then((data: any) => {
-        alert(
-          `Preview reprocessing started. Cleared jobs: ${Number(data?.cancelledJobs || 0)}. ` +
+        toast.success(
+          `Preview reprocessing started. Cleared: ${Number(data?.cancelledJobs || 0)} jobs. ` +
           `Videos: ${Number(data?.queuedVideoJobs || 0)}, ` +
           `Uploads: ${Number(data?.queuedUploadPreviewJobs || 0)}, ` +
           `Video assets: ${Number(data?.queuedVideoAssetPreviewJobs || 0)}, ` +
           `Album photo previews: ${Number(data?.queuedAlbumPhotoSocialJobs || 0)}, ` +
-          `Album thumbnails: ${Number(data?.queuedAlbumThumbnailJobs || 0)}. ` +
-          `This button will remain busy until all preview work is complete.`
+          `Album thumbnails: ${Number(data?.queuedAlbumThumbnailJobs || 0)}.`
         )
         setIsMonitoringReprocessPreviews(true)
         onRefresh?.()
         router.refresh()
       })
       .catch((error) => {
-        alert(error instanceof Error ? error.message : 'Failed to reprocess previews')
+        toast.error(error instanceof Error ? error.message : 'Failed to reprocess previews')
         setIsMonitoringReprocessPreviews(false)
         setIsReprocessingPreviews(false)
       })
@@ -482,28 +485,24 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       // Show the unapprove modal to let user choose
       setShowUnapproveModal(true)
     } else {
-      // For approval, just confirm and proceed
-      if (!confirm(`Are you sure you want to approve this project?`)) {
-        return
-      }
-
-      setIsTogglingApproval(true)
-
-      // Approve project in background without blocking UI
-      apiPatch(`/api/projects/${project.id}`, { status: 'APPROVED' })
-        .then(() => {
-          alert('Project approved successfully')
-          // Refresh in background
-          onRefresh?.()
-          router.refresh()
-        })
-        .catch((error) => {
-          alert('Failed to approve project')
-        })
-        .finally(() => {
-          setIsTogglingApproval(false)
-        })
+      setShowApproveConfirm(true)
     }
+  }
+
+  const confirmApprove = () => {
+    setIsTogglingApproval(true)
+    apiPatch(`/api/projects/${project.id}`, { status: 'APPROVED' })
+      .then(() => {
+        toast.success('Project approved successfully')
+        onRefresh?.()
+        router.refresh()
+      })
+      .catch(() => {
+        toast.error('Failed to approve project')
+      })
+      .finally(() => {
+        setIsTogglingApproval(false)
+      })
   }
 
   const handleUnapprove = async (unapproveVideos: boolean) => {
@@ -519,18 +518,18 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       .then((data) => {
         // Show appropriate success message
         if (data.unapprovedVideos && data.unapprovedCount > 0) {
-          alert(`Project unapproved successfully. ${data.unapprovedCount} video(s) were also unapproved.`)
+          toast.success(`Project unapproved. ${data.unapprovedCount} video(s) were also unapproved.`)
         } else if (data.unapprovedVideos && data.unapprovedCount === 0) {
-          alert('Project unapproved successfully. No videos were approved.')
+          toast.success('Project unapproved. No videos were approved.')
         } else {
-          alert('Project unapproved successfully. Videos remain approved.')
+          toast.success('Project unapproved. Videos remain approved.')
         }
         // Refresh in background
         onRefresh?.()
         router.refresh()
       })
       .catch((error) => {
-        alert('Failed to unapprove project')
+        toast.error('Failed to unapprove project')
       })
       .finally(() => {
         setIsTogglingApproval(false)
@@ -549,33 +548,26 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setShowUnapproveModal(false)
   }
 
-  const handleDelete = async () => {
-    if (!canDeleteProjects) return
-    // Prevent double-clicks during deletion
-    if (isDeleting) return
+  const handleDelete = () => {
+    if (!canDeleteProjects || isDeleting) return
+    setShowDeleteConfirm(true)
+  }
 
-    if (!confirm(
-      'Are you sure you want to delete this project? This will permanently delete all videos and files. This action cannot be undone.'
-    )) {
-      return
-    }
+  const confirmDeleteStep1 = () => {
+    setShowDeleteConfirm(false)
+    setShowDeleteConfirm2(true)
+  }
 
-    // Double confirmation for safety
-    if (!confirm('This is your last warning. Delete permanently?')) {
-      return
-    }
-
+  const confirmDeleteFinal = () => {
+    setShowDeleteConfirm2(false)
     setIsDeleting(true)
-
-    // Delete project in background without blocking UI
     apiDelete(`/api/projects/${project.id}`)
       .then(() => {
-        // Redirect to admin page after successful deletion
         router.push('/admin/projects')
         router.refresh()
       })
-      .catch((error) => {
-        alert('Failed to delete project')
+      .catch(() => {
+        toast.error('Failed to delete project')
         setIsDeleting(false)
       })
   }
@@ -1091,6 +1083,38 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         onUnapproveProjectOnly={handleUnapproveProjectOnly}
         onUnapproveAll={handleUnapproveAll}
         processing={isTogglingApproval}
+      />
+      <ConfirmDialog
+        open={showReprocessConfirm}
+        onOpenChange={setShowReprocessConfirm}
+        title="Reprocess All Previews?"
+        description="This will delete stored preview files, clear preview references in the database, and queue regeneration for videos, video assets, uploads, album thumbnails, and album photo preview derivatives."
+        confirmLabel="Reprocess"
+        onConfirm={confirmReprocessPreviews}
+      />
+      <ConfirmDialog
+        open={showApproveConfirm}
+        onOpenChange={setShowApproveConfirm}
+        title="Approve This Project?"
+        confirmLabel="Approve"
+        variant="default"
+        onConfirm={confirmApprove}
+      />
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Delete This Project?"
+        description="This will permanently delete all videos and files. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteStep1}
+      />
+      <ConfirmDialog
+        open={showDeleteConfirm2}
+        onOpenChange={setShowDeleteConfirm2}
+        title="Final Warning: Delete Permanently?"
+        description="There is no recovery. All project data will be gone forever."
+        confirmLabel="Delete Permanently"
+        onConfirm={confirmDeleteFinal}
       />
     </>
   )

@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Shield, AlertTriangle, Info, XCircle, Trash2, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Unlock, Tag, ArrowUp, ArrowDown } from 'lucide-react'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { formatDateTime } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 import {
   formatSecurityEventType,
   formatSecurityEventTypeWithDetails,
@@ -117,6 +119,8 @@ export default function SecurityEventsClient() {
   const [stats, setStats] = useState<Array<{ type: string; count: number }>>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
+  const [pendingUnblockKey, setPendingUnblockKey] = useState<string | null>(null)
+  const [pendingDeleteDays, setPendingDeleteDays] = useState<number | null>(null)
   const [filterType, setFilterType] = useState<string>('')
   const [filterSeverity, setFilterSeverity] = useState<string>('')
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
@@ -165,21 +169,22 @@ export default function SecurityEventsClient() {
     }
   }
 
-  const handleUnblockRateLimit = async (key: string) => {
-    if (!confirm('Unblock this rate limit entry? The user/IP will be able to attempt login again.')) {
-      return
-    }
+  const handleUnblockRateLimit = (key: string) => {
+    setPendingUnblockKey(key)
+  }
 
+  const confirmUnblockRateLimit = async () => {
+    const key = pendingUnblockKey!
+    setPendingUnblockKey(null)
     try {
       const data = await apiDelete('/api/security/rate-limits', {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key })
       })
-
-      alert(data.message)
+      toast.success(data.message)
       loadRateLimits()
     } catch (error) {
-      alert('Failed to unblock rate limit')
+      toast.error('Failed to unblock rate limit')
     }
   }
 
@@ -255,29 +260,23 @@ export default function SecurityEventsClient() {
     })
   }, [events, eventsSortDirection, eventsSortKey])
 
-  const handleDeleteOld = async (days: number) => {
-    let confirmMessage
-    if (days === 0) {
-      confirmMessage = 'Delete ALL security events? This will permanently delete every security event in the system and CANNOT be undone.'
-    } else {
-      confirmMessage = `Delete all security events older than ${days} days? This cannot be undone.`
-    }
+  const handleDeleteOld = (days: number) => {
+    setPendingDeleteDays(days)
+  }
 
-    if (!confirm(confirmMessage)) {
-      return
-    }
-
+  const confirmDeleteOld = async () => {
+    const days = pendingDeleteDays!
+    setPendingDeleteDays(null)
     setDeleting(true)
     try {
       const data = await apiDelete('/api/security/events', {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ olderThan: days })
       })
-
-      alert(data.message)
+      toast.success(data.message)
       loadEvents()
     } catch (error) {
-      alert('Failed to delete events')
+      toast.error('Failed to delete events')
     } finally {
       setDeleting(false)
     }
@@ -752,6 +751,24 @@ export default function SecurityEventsClient() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={pendingUnblockKey !== null}
+        onOpenChange={(v) => { if (!v) setPendingUnblockKey(null) }}
+        title="Unblock Rate Limit Entry?"
+        description="The user/IP will be able to attempt login again."
+        confirmLabel="Unblock"
+        variant="default"
+        onConfirm={confirmUnblockRateLimit}
+      />
+      <ConfirmDialog
+        open={pendingDeleteDays !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteDays(null) }}
+        title={pendingDeleteDays === 0 ? 'Delete ALL Security Events?' : `Delete Events Older Than ${pendingDeleteDays} Days?`}
+        description={pendingDeleteDays === 0 ? 'This will permanently delete every security event in the system and cannot be undone.' : 'This action cannot be undone.'}
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteOld}
+      />
     </div>
   )
 }

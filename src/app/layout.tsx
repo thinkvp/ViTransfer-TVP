@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { getBrandingSettingsSnapshot } from '@/lib/settings'
 import { unstable_noStore as noStore } from 'next/cache'
+import { Toaster } from 'sonner'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -126,6 +127,7 @@ export default async function RootLayout({
       </head>
       <body className="flex flex-col min-h-dvh overflow-x-hidden">
         <main className="flex-1 min-h-0 flex flex-col">{children}</main>
+        <Toaster richColors closeButton position="bottom-right" />
       </body>
     </html>
   )

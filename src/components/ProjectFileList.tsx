@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
 import { Trash2 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface ProjectFile {
   id: string
@@ -31,6 +33,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeleteFile, setPendingDeleteFile] = useState<ProjectFile | null>(null)
 
   async function load() {
     setLoading(true)
@@ -88,21 +91,26 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
       a.remove()
       URL.revokeObjectURL(blobUrl)
     } catch (e: any) {
-      alert(e?.message || 'Failed to download file')
+      toast.error(e?.message || 'Failed to download file')
     }
   }
 
-  const handleDelete = async (file: ProjectFile) => {
+  const handleDelete = (file: ProjectFile) => {
     if (!file.deleteUrl) return
-    if (!confirm(`Delete file "${file.fileName}"?`)) return
+    setPendingDeleteFile(file)
+  }
 
+  const confirmDelete = async () => {
+    const file = pendingDeleteFile
+    if (!file?.deleteUrl) return
+    setPendingDeleteFile(null)
     setDeletingId(file.id)
     try {
       await apiDelete(file.deleteUrl)
       setFiles((prev) => prev.filter((f) => f.id !== file.id))
       onFilesChanged?.()
     } catch (e: any) {
-      alert(e?.message || 'Failed to delete file')
+      toast.error(e?.message || 'Failed to delete file')
     } finally {
       setDeletingId(null)
     }
@@ -125,6 +133,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
   }
 
   return (
+    <>
     <div className="space-y-2">
       {files.map((f) => (
         <div key={f.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
@@ -158,5 +167,15 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
         </div>
       ))}
     </div>
+
+    <ConfirmDialog
+      open={pendingDeleteFile !== null}
+      onOpenChange={(v) => { if (!v) setPendingDeleteFile(null) }}
+      title={`Delete "${pendingDeleteFile?.fileName ?? 'file'}"?`}
+      description="This file will be permanently deleted."
+      confirmLabel="Delete"
+      onConfirm={confirmDelete}
+    />
+  </>
   )
 }

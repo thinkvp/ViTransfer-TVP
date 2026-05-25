@@ -36,6 +36,8 @@ import { apiFetch } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { quoteEffectiveStatus } from '@/lib/sales/status'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 function quoteStatusLabel(status: QuoteStatus): string {
   switch (status) {
@@ -144,6 +146,7 @@ export default function QuoteDetailPage() {
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
+  const [showDeleteQuoteConfirm, setShowDeleteQuoteConfirm] = useState(false)
   const [labels, setLabels] = useState<SalesLabel[]>([])
   const [libraryItems, setLibraryItems] = useState<SalesItem[]>([])
   const descInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
@@ -344,7 +347,7 @@ export default function QuoteDetailPage() {
   const onSave = async () => {
     if (!quote) return
     if (!clientId) {
-      alert('Select a client.')
+      toast.error('Select a client.')
       return
     }
     setSaving(true)
@@ -380,16 +383,19 @@ export default function QuoteDetailPage() {
 
   const onDelete = () => {
     if (!quote) return
-    if (!confirm(`Delete quote ${quote.quoteNumber}?`)) return
-    ;(async () => {
-      try {
-        await deleteSalesQuote(quote.id)
-        window.location.href = '/admin/sales/quotes'
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Failed to delete quote'
-        alert(msg)
-      }
-    })()
+    setShowDeleteQuoteConfirm(true)
+  }
+
+  const confirmDeleteQuote = async () => {
+    if (!quote) return
+    setShowDeleteQuoteConfirm(false)
+    try {
+      await deleteSalesQuote(quote.id)
+      window.location.href = '/admin/sales/quotes'
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to delete quote'
+      toast.error(msg)
+    }
   }
 
   const onAcceptToggle = async () => {
@@ -414,11 +420,11 @@ export default function QuoteDetailPage() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update quote'
       if (msg === 'Conflict') {
-        alert('This quote was updated in another session. Reloading.')
+        toast.error('This quote was updated in another session. Reloading.')
         window.location.reload()
         return
       }
-      alert(msg)
+      toast.error(msg)
     } finally {
       setAcceptBusy(false)
     }
@@ -495,13 +501,13 @@ export default function QuoteDetailPage() {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        alert(d.error || 'Failed to create invoice')
+        toast.error(d.error || 'Failed to create invoice')
         return
       }
       const d = await res.json()
       router.push(`/admin/sales/invoices/${d.invoice?.id ?? d.id}`)
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to convert to invoice')
+      toast.error(e instanceof Error ? e.message : 'Failed to convert to invoice')
     } finally {
       setConverting(false)
     }
@@ -540,7 +546,8 @@ export default function QuoteDetailPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <>
+      <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold">{quote.quoteNumber}</h2>
@@ -565,11 +572,11 @@ export default function QuoteDetailPage() {
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : 'Failed to update quote'
                     if (msg === 'Conflict') {
-                      alert('This quote was updated in another session. Reloading.')
+                      toast.error('This quote was updated in another session. Reloading.')
                       window.location.reload()
                       return
                     }
-                    alert(msg)
+                    toast.error(msg)
                   }
                 })()
               }}
@@ -1056,7 +1063,7 @@ export default function QuoteDetailPage() {
               setShareToken(token)
               setTrackingRefreshKey((v) => v + 1)
             } catch (e) {
-              alert(e instanceof Error ? e.message : 'Failed to refresh quote')
+              toast.error(e instanceof Error ? e.message : 'Failed to refresh quote')
             }
           })()
         }}
@@ -1071,6 +1078,16 @@ export default function QuoteDetailPage() {
         onImport={(newItems) => setItems((prev) => [...prev, ...newItems])}
       />
 
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={showDeleteQuoteConfirm}
+        onOpenChange={(v) => { if (!v) setShowDeleteQuoteConfirm(false) }}
+        title={`Delete Quote ${quote?.quoteNumber ?? ''}?`}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteQuote}
+      />
+    </>
   )
 }

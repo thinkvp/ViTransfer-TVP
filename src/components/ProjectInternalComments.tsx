@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { apiDelete, apiJson, apiPost } from '@/lib/api-client'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { formatDateTime } from '@/lib/utils'
@@ -220,6 +221,8 @@ export function ProjectInternalComments(props: {
   const { projectId, currentUserId, canMakeComments, canDeleteAll, canDeleteOthers } = props
 
   const [loading, setLoading] = useState(false)
+  const [pendingDeleteComment, setPendingDeleteComment] = useState<InternalComment | null>(null)
+  const [pendingDeleteAll, setPendingDeleteAll] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [comments, setComments] = useState<InternalComment[]>([])
   const [newComment, setNewComment] = useState('')
@@ -324,30 +327,37 @@ export function ProjectInternalComments(props: {
   }, [canMakeComments, fetchComments, newComment, projectId, replyingTo, resetDraft])
 
   const deleteOne = useCallback(
-    async (comment: InternalComment) => {
-      const ok = confirm('Delete this comment?')
-      if (!ok) return
-
-      setLoading(true)
-      setError(null)
-      try {
-        await apiDelete(`/api/projects/${projectId}/internal-comments/${comment.id}`)
-        if (replyingTo?.id === comment.id) setReplyingTo(null)
-        await fetchComments()
-      } catch (e: any) {
-        console.error('[INTERNAL COMMENTS] Failed to delete:', e)
-        setError(e?.message || 'Failed to delete comment')
-      } finally {
-        setLoading(false)
-      }
+    (comment: InternalComment) => {
+      setPendingDeleteComment(comment)
     },
-    [fetchComments, projectId, replyingTo?.id]
+    []
   )
 
-  const deleteAll = useCallback(async () => {
-    const ok = confirm('Delete ALL internal comments on this project? This cannot be undone.')
-    if (!ok) return
+  const confirmDeleteOne = useCallback(async () => {
+    const comment = pendingDeleteComment
+    if (!comment) return
+    setPendingDeleteComment(null)
 
+    setLoading(true)
+    setError(null)
+    try {
+      await apiDelete(`/api/projects/${projectId}/internal-comments/${comment.id}`)
+      if (replyingTo?.id === comment.id) setReplyingTo(null)
+      await fetchComments()
+    } catch (e: any) {
+      console.error('[INTERNAL COMMENTS] Failed to delete:', e)
+      setError(e?.message || 'Failed to delete comment')
+    } finally {
+      setLoading(false)
+    }
+  }, [pendingDeleteComment, fetchComments, projectId, replyingTo?.id])
+
+  const deleteAll = useCallback(() => {
+    setPendingDeleteAll(true)
+  }, [])
+
+  const confirmDeleteAll = useCallback(async () => {
+    setPendingDeleteAll(false)
     setLoading(true)
     setError(null)
     try {
@@ -370,6 +380,7 @@ export function ProjectInternalComments(props: {
   }
 
   return (
+    <>
     <Card className="bg-card border border-border">
       <CardHeader className="border-b border-border">
         <div className="flex items-center justify-between gap-3">
@@ -487,5 +498,23 @@ export function ProjectInternalComments(props: {
       </CardContent>
 
     </Card>
+
+    <ConfirmDialog
+      open={pendingDeleteComment !== null}
+      onOpenChange={(v) => { if (!v) setPendingDeleteComment(null) }}
+      title="Delete Comment?"
+      description="This action cannot be undone."
+      confirmLabel="Delete"
+      onConfirm={confirmDeleteOne}
+    />
+    <ConfirmDialog
+      open={pendingDeleteAll}
+      onOpenChange={(v) => { if (!v) setPendingDeleteAll(false) }}
+      title="Delete All Internal Comments?"
+      description="This will permanently delete all internal comments on this project. This action cannot be undone."
+      confirmLabel="Delete All"
+      onConfirm={confirmDeleteAll}
+    />
+  </>
   )
 }

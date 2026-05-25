@@ -20,6 +20,7 @@ import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { AvatarUploadCrop } from '@/components/AvatarUploadCrop'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface Role {
   id: string
@@ -59,6 +60,7 @@ export default function EditUserPage() {
   const [fileRefresh, setFileRefresh] = useState(0)
   const [savedFormData, setSavedFormData] = useState(formData)
   const [avatarPath, setAvatarPath] = useState<string | null>(null)
+  const [pendingDeletePasskeyId, setPendingDeletePasskeyId] = useState<string | null>(null)
 
   const hasUnsavedChanges = formData.email !== savedFormData.email ||
     formData.username !== savedFormData.username ||
@@ -185,9 +187,13 @@ export default function EditUserPage() {
     }
   }
 
-  const handleDeletePasskey = async (id: string) => {
-    if (!confirm('Delete this PassKey?')) return
+  const handleDeletePasskey = (id: string) => {
+    setPendingDeletePasskeyId(id)
+  }
 
+  const confirmDeletePasskey = async () => {
+    const id = pendingDeletePasskeyId!
+    setPendingDeletePasskeyId(null)
     setPasskeyError('')
     try {
       await apiDelete(`/api/auth/passkey/${id}`)
@@ -347,14 +353,15 @@ export default function EditUserPage() {
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-x-hidden">
-      <div className="max-w-4xl mx-auto space-y-6 min-w-0">
-        <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
-          <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
-        </div>
-
-        <Card className="min-w-0 overflow-hidden">
+    <>
+      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-x-hidden">
+        <div className="max-w-4xl mx-auto space-y-6 min-w-0">
+          <div className="mb-6">
+            <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
+            <p className="text-muted-foreground mt-1 text-sm sm:text-base">Update user account details</p>
+          </div>
+          <div className="space-y-4 sm:space-y-6">
+            <Card className="min-w-0 overflow-hidden">
           <CardHeader>
             <CardTitle>Profile Picture</CardTitle>
           </CardHeader>
@@ -738,7 +745,18 @@ export default function EditUserPage() {
             <UserFileList userId={userId} refreshTrigger={fileRefresh} />
           </CardContent>
         </Card>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <ConfirmDialog
+        open={pendingDeletePasskeyId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeletePasskeyId(null) }}
+        title="Delete PassKey?"
+        description="This PassKey will be permanently removed."
+        confirmLabel="Delete"
+        onConfirm={confirmDeletePasskey}
+      />
+    </>
   )
 }

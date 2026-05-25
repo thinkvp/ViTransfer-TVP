@@ -27,6 +27,8 @@ import {
   fetchSalesSettings,
 } from '@/lib/sales/admin-api'
 import type { SalesRollupResponse, SalesRollupPaymentRow } from '@/lib/sales/admin-api'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 type PaymentFilter = 'LINKED' | 'UNLINKED'
 
@@ -39,6 +41,7 @@ export default function SalesPaymentsPage() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeletePaymentId, setPendingDeletePaymentId] = useState<string | null>(null)
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
   const [payments, setPayments] = useState<SalesRollupPaymentRow[]>([])
   const [taxRatePercent, setTaxRatePercent] = useState<number>(0)
@@ -165,7 +168,7 @@ export default function SalesPaymentsPage() {
     if (creating) return
     const amountCents = dollarsToCents(amount)
     if (!amountCents || amountCents <= 0) {
-      alert('Enter a payment amount.')
+      toast.error('Enter a payment amount.')
       return
     }
 
@@ -184,21 +187,25 @@ export default function SalesPaymentsPage() {
       setReference('')
       setTick((v) => v + 1)
     } catch {
-      alert('Failed to save payment.')
+      toast.error('Failed to save payment.')
     } finally {
       setCreating(false)
     }
   }
 
-  const onDelete = async (paymentId: string) => {
-    if (!confirm('Delete this payment?')) return
+  const onDelete = (paymentId: string) => {
+    setPendingDeletePaymentId(paymentId)
+  }
 
+  const confirmDeletePayment = async () => {
+    const paymentId = pendingDeletePaymentId!
+    setPendingDeletePaymentId(null)
     try {
       setDeletingId(paymentId)
       await deleteSalesPayment(paymentId)
       setTick((v) => v + 1)
     } catch {
-      alert('Failed to delete payment.')
+      toast.error('Failed to delete payment.')
     } finally {
       setDeletingId(null)
     }
@@ -262,11 +269,11 @@ export default function SalesPaymentsPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Payments</h2>
-        <p className="text-sm text-muted-foreground">Record payments and link them to invoices.</p>
-      </div>
+    <>
+      <div className="space-y-4 sm:space-y-6">
+        <div>
+          <p className="text-sm text-muted-foreground">Record payments and link them to invoices.</p>
+        </div>
 
       <Card>
         <CardHeader>
@@ -563,6 +570,16 @@ export default function SalesPaymentsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeletePaymentId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeletePaymentId(null) }}
+        title="Delete Payment?"
+        description="This payment will be permanently removed."
+        confirmLabel="Delete"
+        onConfirm={confirmDeletePayment}
+      />
+    </>
   )
 }
