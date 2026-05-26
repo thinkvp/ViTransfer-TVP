@@ -56,7 +56,7 @@ export async function GET(
   const size = Math.max(0, Number(access.fileSize || 0))
   const headers: Record<string, string> = {
     'Content-Type': access.fileType || 'application/octet-stream',
-    'Cache-Control': 'private, max-age=60',
+    'Cache-Control': isImageUpload && !isDownload ? 'private, max-age=300' : 'private, max-age=60',
     'Content-Disposition': isDownload
       ? `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(access.fileName)}`
       : `inline; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(access.fileName)}`,

@@ -497,6 +497,21 @@ export function ShareFilesBrowser({
     })
   }, [])
 
+  const invalidateFolderPreviewTiles = useCallback((groupName: string) => {
+    setFolderPreviewTilesByName((prev) => {
+      if (prev[groupName] === undefined) return prev
+      const next = { ...prev }
+      delete next[groupName]
+      return next
+    })
+    setFolderPreviewPosterByName((prev) => {
+      if (prev[groupName] === undefined) return prev
+      const next = { ...prev }
+      delete next[groupName]
+      return next
+    })
+  }, [])
+
   const captureVideoPoster = useCallback(async (videoUrl: string): Promise<string | null> => {
     if (!videoUrl) return null
 
@@ -1950,6 +1965,7 @@ export function ShareFilesBrowser({
                       alt={group.name}
                       className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
                       loading="lazy"
+                      onError={() => invalidateFolderPreviewTiles(group.name)}
                     />
 
                     {sidePreviewTop ? (
@@ -1960,6 +1976,7 @@ export function ShareFilesBrowser({
                         aria-hidden="true"
                         className="h-full w-full object-contain bg-black"
                         loading="lazy"
+                        onError={() => invalidateFolderPreviewTiles(group.name)}
                       />
                     ) : (
                       <div className="h-full w-full bg-primary/35" aria-hidden="true" />
@@ -1973,6 +1990,7 @@ export function ShareFilesBrowser({
                         aria-hidden="true"
                         className="h-full w-full object-contain bg-black"
                         loading="lazy"
+                        onError={() => invalidateFolderPreviewTiles(group.name)}
                       />
                     ) : (
                       <div className="h-full w-full bg-primary/30" aria-hidden="true" />
@@ -1997,6 +2015,7 @@ export function ShareFilesBrowser({
                     alt={group.name}
                     className="col-span-3 row-span-2 h-full w-full object-contain bg-black"
                     loading="lazy"
+                    onError={() => invalidateFolderPreviewTiles(group.name)}
                   />
                 ) : (
                   <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
@@ -2171,6 +2190,19 @@ export function ShareFilesBrowser({
                 <Folder className="w-4 h-4" />
               </Button>
             ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 px-2"
+              disabled={visibleFiles.length === 0}
+              onClick={toggleAllVisibleSelection}
+              aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
+              title={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
+            >
+              {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+              <Files className="w-4 h-4" />
+            </Button>
             {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
               <Button
                 type="button"
@@ -2185,19 +2217,6 @@ export function ShareFilesBrowser({
                 <Trash2 className="w-4 h-4" />
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 px-2"
-              disabled={visibleFiles.length === 0}
-              onClick={toggleAllVisibleSelection}
-              aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
-              title={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
-            >
-              {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-              <Files className="w-4 h-4" />
-            </Button>
             <Button
               type="button"
               size="sm"
@@ -2244,19 +2263,6 @@ export function ShareFilesBrowser({
                 <span className="sr-only">Folder</span>
               </Button>
             ) : null}
-            {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                className="min-w-0"
-                onClick={() => void deleteSelectedUploadFiles()}
-                disabled={isUploadActionBusy || selectedUploadFilesInContext.length === 0}
-              >
-                <Trash2 className="w-4 h-4 mr-1.5" />
-                <span>Delete ({selectedUploadFilesInContext.length})</span>
-              </Button>
-            ) : null}
             <Button
               type="button"
               variant="outline"
@@ -2270,6 +2276,19 @@ export function ShareFilesBrowser({
               {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
               <Files className="w-4 h-4" />
             </Button>
+            {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="min-w-0"
+                onClick={() => void deleteSelectedUploadFiles()}
+                disabled={isUploadActionBusy || selectedUploadFilesInContext.length === 0}
+              >
+                <Trash2 className="w-4 h-4 mr-1.5" />
+                <span>Delete ({selectedUploadFilesInContext.length})</span>
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"

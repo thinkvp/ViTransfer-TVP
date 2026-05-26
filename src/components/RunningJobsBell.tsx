@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Activity, CheckCircle2, Cloud, FileArchive, FolderSync, ImageIcon, Loader2, Pause, Play, X, XCircle } from 'lucide-react'
+import { Activity, CheckCircle2, Cloud, FileArchive, Film, FolderSync, ImageIcon, Loader2, Pause, Play, Share2, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
-import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob, type ClearRunningJobTarget } from '@/components/UploadManagerProvider'
+import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob, type VideoAssetPreviewJob, type AlbumSocialJob, type ClearRunningJobTarget } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
@@ -423,6 +423,87 @@ function FolderRenameJobRow({ job, onClear, clearDisabled }: { job: FolderRename
   )
 }
 
+function VideoAssetPreviewJobRow({ job, onNavigate }: { job: VideoAssetPreviewJob; onNavigate: (projectId: string) => void }) {
+  const isProcessing = job.processingCount > 0
+
+  return (
+    <div
+      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      onClick={() => onNavigate(job.projectId)}
+    >
+      <div className="min-w-0">
+        <div className="min-w-0 truncate text-sm font-medium text-foreground">
+          {job.totalCount} asset preview{job.totalCount !== 1 ? 's' : ''}
+        </div>
+        <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
+          <Film className="w-3 h-3 flex-shrink-0" />
+          {job.projectName}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className={cn('h-full rounded-full transition-all', !isProcessing ? 'bg-warning' : 'bg-primary')}
+            style={{ width: !isProcessing ? '100%' : '60%' }}
+          />
+        </div>
+        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          {!isProcessing ? (
+            `${job.pendingCount} queued…`
+          ) : (
+            <>
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Generating previews…
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AlbumSocialJobRow({ job, onNavigate }: { job: AlbumSocialJob; onNavigate: (projectId: string) => void }) {
+  const isProcessing = job.processingCount > 0
+
+  return (
+    <div
+      className="px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/40 transition-colors"
+      onClick={() => onNavigate(job.projectId)}
+    >
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">{job.albumName}</div>
+          <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">Social Copies</div>
+        </div>
+        <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
+          <Share2 className="w-3 h-3 flex-shrink-0" />
+          {job.projectName}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className={cn('h-full rounded-full transition-all', !isProcessing ? 'bg-warning' : 'bg-primary')}
+            style={{ width: !isProcessing ? '100%' : '60%' }}
+          />
+        </div>
+        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          {!isProcessing ? (
+            'Queued for social copies…'
+          ) : (
+            <>
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Generating social copies… ({job.processingCount}/{job.totalCount})
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CompletedServerJobRow({
   job,
   onNavigate,
@@ -441,19 +522,29 @@ function CompletedServerJobRow({
           ? 'ZIP build failed'
           : job.type === 'albumThumbnail'
             ? 'Thumbnail generation failed'
-          : 'Folder rename failed'
+            : job.type === 'videoAssetPreview'
+              ? 'Asset preview generation failed'
+              : job.type === 'albumSocial'
+                ? 'Social copy generation failed'
+                : 'Folder rename failed'
     : job.type === 'processing'
       ? 'Processing complete'
       : job.type === 'albumZip'
           ? 'ZIP build complete'
           : job.type === 'albumThumbnail'
             ? 'Thumbnail generation complete'
-          : 'Folder rename complete'
+            : job.type === 'videoAssetPreview'
+              ? 'Asset preview generation complete'
+              : job.type === 'albumSocial'
+                ? 'Social copy generation complete'
+                : 'Folder rename complete'
 
   const TypeIcon =
     job.type === 'albumZip' ? FileArchive
     : job.type === 'albumThumbnail' ? ImageIcon
     : job.type === 'folderRename' ? FolderSync
+    : job.type === 'videoAssetPreview' ? Film
+    : job.type === 'albumSocial' ? Share2
     : Activity
 
   return (
@@ -504,6 +595,8 @@ export default function RunningJobsBell() {
     albumZipJobs,
     albumThumbnailJobs,
     folderRenameJobs,
+    videoAssetPreviewJobs,
+    albumSocialJobs,
     completedServerJobs,
     totalActiveCount,
     dismissCompletedJob,
@@ -558,7 +651,9 @@ export default function RunningJobsBell() {
     processingJobs.length > 0 ||
     albumZipJobs.length > 0 ||
     albumThumbnailJobs.length > 0 ||
-    folderRenameJobs.length > 0
+    folderRenameJobs.length > 0 ||
+    videoAssetPreviewJobs.length > 0 ||
+    albumSocialJobs.length > 0
 
   return (
     <DropdownMenu
@@ -702,6 +797,42 @@ export default function RunningJobsBell() {
                               ? () => handleClearJob({ type: 'folderRename', id: job.id })
                               : undefined
                           }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Video asset preview generation jobs */}
+                {videoAssetPreviewJobs.length > 0 && (
+                  <div>
+                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                      Asset Previews ({videoAssetPreviewJobs.length})
+                    </div>
+                    <div className="divide-y divide-border">
+                      {videoAssetPreviewJobs.map((job) => (
+                        <VideoAssetPreviewJobRow
+                          key={job.projectId}
+                          job={job}
+                          onNavigate={handleNavigate}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Album photo social derivative jobs */}
+                {albumSocialJobs.length > 0 && (
+                  <div>
+                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                      Social Copies ({albumSocialJobs.length})
+                    </div>
+                    <div className="divide-y divide-border">
+                      {albumSocialJobs.map((job) => (
+                        <AlbumSocialJobRow
+                          key={job.albumId}
+                          job={job}
+                          onNavigate={handleNavigate}
                         />
                       ))}
                     </div>

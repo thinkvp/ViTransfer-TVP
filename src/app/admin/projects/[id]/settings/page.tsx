@@ -139,6 +139,7 @@ export default function ProjectSettingsPage() {
   const [hideFeedback, setHideFeedback] = useState(false)
   const [useFullTimecode, setUseFullTimecode] = useState(false)
   const [allowClientDeleteComments, setAllowClientDeleteComments] = useState(false)
+  const [enableClientUploads, setEnableClientUploads] = useState(true)
   const [allowClientUploadFiles, setAllowClientUploadFiles] = useState(false)
   const [allowAuthenticatedProjectSwitching, setAllowAuthenticatedProjectSwitching] = useState(true)
   const [maxClientUploadAllocationMB, setMaxClientUploadAllocationMB] = useState<number | ''>(1000)
@@ -259,6 +260,7 @@ export default function ProjectSettingsPage() {
         setHideFeedback(data.hideFeedback || false)
         setUseFullTimecode(data.useFullTimecode ?? false)
         setAllowClientDeleteComments(data.allowClientDeleteComments ?? false)
+        setEnableClientUploads(data.enableClientUploads ?? true)
         setAllowClientUploadFiles(data.allowClientUploadFiles ?? false)
         setAllowAuthenticatedProjectSwitching(data.allowAuthenticatedProjectSwitching ?? true)
         setMaxClientUploadAllocationMB(data.maxClientUploadAllocationMB ?? 1000)
@@ -447,6 +449,7 @@ export default function ProjectSettingsPage() {
         hideFeedback,
         useFullTimecode,
         allowClientDeleteComments,
+        enableClientUploads,
         allowClientUploadFiles,
         allowAuthenticatedProjectSwitching,
         maxClientUploadAllocationMB: typeof maxClientUploadAllocationMB === 'number'
@@ -1251,9 +1254,23 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
+                    <Label htmlFor="enableClientUploads">Enable Share Page Uploads for clients</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients (admins always see it).
+                    </p>
+                  </div>
+                  <Switch
+                    id="enableClientUploads"
+                    checked={enableClientUploads}
+                    onCheckedChange={setEnableClientUploads}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowClientUploadFiles">Allow clients to upload files to Projects</Label>
                     <p className="text-xs text-muted-foreground">
-                      Authenticated clients can upload files to the Share page UPLOADS root and subfolders. Supported: Images, Videos, PDFs, Documents, Fonts, Archives.
+                      Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.
                     </p>
                   </div>
                   <Switch
@@ -1753,8 +1770,16 @@ export default function ProjectSettingsPage() {
 
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
+                        <Label htmlFor="enableClientUploads-d">Enable Share Page Uploads for clients</Label>
+                        <p className="text-xs text-muted-foreground">Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients (admins always see it).</p>
+                      </div>
+                      <Switch id="enableClientUploads-d" checked={enableClientUploads} onCheckedChange={setEnableClientUploads} />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
                         <Label htmlFor="allowClientUploadFiles-d">Allow clients to upload files to Projects</Label>
-                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files to the Share page UPLOADS root and subfolders. Supported: Images, Videos, PDFs, Documents, Fonts, Archives.</p>
+                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.</p>
                       </div>
                       <Switch id="allowClientUploadFiles-d" checked={allowClientUploadFiles} onCheckedChange={setAllowClientUploadFiles} />
                     </div>

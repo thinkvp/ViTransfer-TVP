@@ -310,6 +310,7 @@ export async function GET(
         hideFeedback: project.hideFeedback || project.status === 'SHARE_ONLY',
         useFullTimecode: (project as any).useFullTimecode ?? false,
         allowClientDeleteComments: project.allowClientDeleteComments,
+        enableClientUploads: project.enableClientUploads ?? true,
         allowClientUploadFiles: project.allowClientUploadFiles,
         previewResolutions: project.previewResolutions,
         watermarkEnabled: project.watermarkEnabled,

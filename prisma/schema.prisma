@@ -276,6 +276,7 @@ model Project {
   hideFeedback                    Boolean @default(false)
   useFullTimecode                 Boolean @default(false) // Display comment times as full timecode (HH:MM:SS:FF / DF) instead of M:SS
   allowClientDeleteComments       Boolean @default(false)
+  enableClientUploads             Boolean @default(true)  // Show UPLOADS folder to clients on the Share page FILES mode
   allowClientUploadFiles          Boolean @default(false) // Allow clients to upload files with comments
   maxClientUploadAllocationMB     Int     @default(1000) // Total allowed client comment-attachment uploads per project (0 = unlimited)
 
@@ -976,6 +977,7 @@ model Settings {
 
   // Default project behavior
   defaultAllowClientDeleteComments   Boolean @default(false)
+  defaultEnableClientUploads         Boolean @default(true)  // Default: show UPLOADS folder to clients on the Share page FILES mode
   defaultAllowClientUploadFiles      Boolean @default(false) // Default toggle for client file uploads
   defaultAllowAuthenticatedProjectSwitching Boolean @default(true) // Default toggle for authenticated client project switching
   defaultMaxClientUploadAllocationMB Int     @default(1000) // Default total allowed client comment-attachment uploads per project (0 = unlimited)

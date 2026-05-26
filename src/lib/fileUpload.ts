@@ -71,9 +71,11 @@ export const ALLOWED_FILE_TYPES = {
   "audio/aiff": { ext: "aiff", category: "audio" },
   "audio/x-ms-wma": { ext: "wma", category: "audio" },
 
-  // Project files (Premiere Pro / DaVinci Resolve)
+  // Project files (Premiere Pro / After Effects / DaVinci Resolve)
   "application/vnd.adobe.premiere.project": { ext: "prproj", category: "project" },
   "application/x-premiere-project": { ext: "prproj", category: "project" },
+  "application/vnd.adobe.aftereffects.project": { ext: "aep", category: "project" },
+  "application/x-aftereffects": { ext: "aep", category: "project" },
   "application/x-davinci-resolve-project": { ext: "drp", category: "project" },
   "application/x-davinci-resolve-archive": { ext: "dra", category: "project" },
   "application/x-davinci-resolve-timeline": { ext: "drt", category: "project" },
@@ -187,7 +189,7 @@ export function getAllowedFileTypesDescription(): string {
     image: "Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI)",
     video: "Videos (MP4, MOV, M4V, WEBM, MKV, AVI, MXF)",
     audio: "Audio (MP3, WAV, AAC, FLAC, OGG, M4A, AIFF, WMA)",
-    project: "Project Files (PRPROJ, DRP, DRA, DRT)",
+    project: "Project Files (PRPROJ, AEP, DRP, DRA, DRT)",
     document: "Documents (PDF, Word, Excel, PowerPoint)",
     font: "Fonts (TTF, OTF, WOFF, WOFF2)",
     archive: "Archives (ZIP, RAR, 7Z, GZ, TAR)",

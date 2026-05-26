@@ -2838,7 +2838,7 @@ export default function SharePage() {
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}
-              canUploadToProjects={Boolean(isAdminSession || (isAuthenticated && !isGuest && project?.allowClientUploadFiles))}
+              canUploadToProjects={Boolean(isAdminSession || (isAuthenticated && !isGuest && project?.allowClientUploadFiles && project?.enableClientUploads !== false))}
               canDeleteUploads={false}
               onCreateUploadFolder={handleCreateUploadFolder}
               onUploadFiles={handleUploadFiles}

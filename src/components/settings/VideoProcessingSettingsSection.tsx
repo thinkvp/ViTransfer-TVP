@@ -22,6 +22,8 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultWatermarkText: (value: string) => void
   defaultAllowClientDeleteComments: boolean
   setDefaultAllowClientDeleteComments: (value: boolean) => void
+  defaultEnableClientUploads: boolean
+  setDefaultEnableClientUploads: (value: boolean) => void
   defaultAllowClientUploadFiles: boolean
   setDefaultAllowClientUploadFiles: (value: boolean) => void
   defaultAllowAuthenticatedProjectSwitching: boolean
@@ -57,6 +59,8 @@ export function VideoProcessingSettingsSection({
   setDefaultWatermarkText,
   defaultAllowClientDeleteComments,
   setDefaultAllowClientDeleteComments,
+  defaultEnableClientUploads,
+  setDefaultEnableClientUploads,
   defaultAllowClientUploadFiles,
   setDefaultAllowClientUploadFiles,
   defaultAllowAuthenticatedProjectSwitching,
@@ -194,9 +198,23 @@ export function VideoProcessingSettingsSection({
 
             <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
               <div className="space-y-0.5">
+                <Label htmlFor="defaultEnableClientUploads">Enable Share Page Uploads for clients</Label>
+                <p className="text-xs text-muted-foreground">
+                  Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients (admins always see it).
+                </p>
+              </div>
+              <Switch
+                id="defaultEnableClientUploads"
+                checked={defaultEnableClientUploads}
+                onCheckedChange={setDefaultEnableClientUploads}
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5">
                 <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files to Projects</Label>
                 <p className="text-xs text-muted-foreground">
-                  Authenticated clients can upload files to the Share page UPLOADS root and subfolders. Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR).
+                  Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled). Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Audio (MP3, WAV, AAC, FLAC, OGG, M4A, AIFF, WMA) • Project Files (PRPROJ, AEP, DRP, DRA, DRT) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR).
                 </p>
               </div>
               <Switch

@@ -169,6 +169,7 @@ export default function GlobalSettingsPage() {
   const [defaultTimelinePreviewsEnabled, setDefaultTimelinePreviewsEnabled] = useState(false)
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
   const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
+  const [defaultEnableClientUploads, setDefaultEnableClientUploads] = useState(true)
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
   const [defaultAllowAuthenticatedProjectSwitching, setDefaultAllowAuthenticatedProjectSwitching] = useState(true)
   const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
@@ -382,6 +383,7 @@ export default function GlobalSettingsPage() {
         setDefaultTimelinePreviewsEnabled(data.defaultTimelinePreviewsEnabled ?? false)
         setDefaultWatermarkText(data.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
+        setDefaultEnableClientUploads(data.defaultEnableClientUploads ?? true)
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
         setDefaultAllowAuthenticatedProjectSwitching(data.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
@@ -715,6 +717,7 @@ export default function GlobalSettingsPage() {
         defaultTimelinePreviewsEnabled: defaultTimelinePreviewsEnabled,
         defaultWatermarkText: defaultWatermarkText || null,
         defaultAllowClientDeleteComments,
+        defaultEnableClientUploads,
         defaultAllowClientUploadFiles,
         defaultAllowAuthenticatedProjectSwitching,
         defaultMaxClientUploadAllocationMB: typeof defaultMaxClientUploadAllocationMB === 'number'
@@ -850,6 +853,7 @@ export default function GlobalSettingsPage() {
         setDefaultTimelinePreviewsEnabled(refreshedData.defaultTimelinePreviewsEnabled ?? false)
         setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
+        setDefaultEnableClientUploads(refreshedData.defaultEnableClientUploads ?? true)
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
         setDefaultAllowAuthenticatedProjectSwitching(refreshedData.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(refreshedData.defaultMaxClientUploadAllocationMB ?? 1000)
@@ -1196,6 +1200,8 @@ export default function GlobalSettingsPage() {
             setDefaultWatermarkText={setDefaultWatermarkText}
             defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
             setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
+            defaultEnableClientUploads={defaultEnableClientUploads}
+            setDefaultEnableClientUploads={setDefaultEnableClientUploads}
             defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
             setDefaultAllowClientUploadFiles={setDefaultAllowClientUploadFiles}
             defaultAllowAuthenticatedProjectSwitching={defaultAllowAuthenticatedProjectSwitching}
@@ -1532,6 +1538,8 @@ export default function GlobalSettingsPage() {
                 setDefaultWatermarkText={setDefaultWatermarkText}
                 defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
                 setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
+                defaultEnableClientUploads={defaultEnableClientUploads}
+                setDefaultEnableClientUploads={setDefaultEnableClientUploads}
                 defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
                 setDefaultAllowClientUploadFiles={setDefaultAllowClientUploadFiles}
                 defaultAllowAuthenticatedProjectSwitching={defaultAllowAuthenticatedProjectSwitching}

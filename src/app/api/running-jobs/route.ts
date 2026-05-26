@@ -302,13 +302,22 @@ export async function GET(request: NextRequest) {
       error: true,
     }))
 
+    const [albumThumbnailJobs, folderRenameJobs, videoAssetPreviewJobs, albumSocialJobs] = await Promise.all([
+      buildAlbumThumbnailJobs(),
+      buildFolderRenameJobs(),
+      buildVideoAssetPreviewJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }),
+      buildAlbumSocialJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }),
+    ])
+
     return NextResponse.json({
       jobs,
       completedProcessingJobs,
       erroredProcessingJobs,
       albumZipJobs,
-      albumThumbnailJobs: await buildAlbumThumbnailJobs(),
-      folderRenameJobs: await buildFolderRenameJobs(),
+      albumThumbnailJobs,
+      folderRenameJobs,
+      videoAssetPreviewJobs,
+      albumSocialJobs,
     })
   } catch (err: any) {
     console.error('[running-jobs]', err)
@@ -674,4 +683,146 @@ async function buildFolderRenameJobs() {
   ]
 
   return { active, completed }
+}
+
+// -----------------------------------------------------------------------
+// Video Asset Preview jobs helper
+// -----------------------------------------------------------------------
+
+async function buildVideoAssetPreviewJobs({
+  isSystemAdmin,
+  userId,
+  allowedStatuses,
+}: {
+  isSystemAdmin: boolean
+  userId: string
+  allowedStatuses: string[]
+}) {
+  try {
+    const activeAssets = await prisma.videoAsset.findMany({
+      where: {
+        previewStatus: { in: ['PENDING', 'PROCESSING'] },
+        video: {
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+          },
+        },
+      },
+      select: {
+        previewStatus: true,
+        video: {
+          select: {
+            projectId: true,
+            project: { select: { title: true } },
+          },
+        },
+      },
+    })
+
+    const projectMap = new Map<string, {
+      projectId: string
+      projectName: string
+      pendingCount: number
+      processingCount: number
+    }>()
+
+    for (const asset of activeAssets) {
+      const projectId = asset.video.projectId
+      if (!projectMap.has(projectId)) {
+        projectMap.set(projectId, {
+          projectId,
+          projectName: asset.video.project.title,
+          pendingCount: 0,
+          processingCount: 0,
+        })
+      }
+      const entry = projectMap.get(projectId)!
+      if (asset.previewStatus === 'PENDING') entry.pendingCount++
+      else entry.processingCount++
+    }
+
+    const active = [...projectMap.values()].map((e) => ({
+      ...e,
+      totalCount: e.pendingCount + e.processingCount,
+    }))
+
+    return { active }
+  } catch {
+    return { active: [] }
+  }
+}
+
+// -----------------------------------------------------------------------
+// Album Photo Social Derivative jobs helper
+// -----------------------------------------------------------------------
+
+async function buildAlbumSocialJobs({
+  isSystemAdmin,
+  userId,
+  allowedStatuses,
+}: {
+  isSystemAdmin: boolean
+  userId: string
+  allowedStatuses: string[]
+}) {
+  try {
+    const activePhotos = await prisma.albumPhoto.findMany({
+      where: {
+        socialStatus: { in: ['PENDING', 'PROCESSING'] as any },
+        album: {
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+          },
+        },
+      },
+      select: {
+        albumId: true,
+        socialStatus: true,
+        album: {
+          select: {
+            name: true,
+            projectId: true,
+            project: { select: { title: true } },
+          },
+        },
+      },
+    })
+
+    const albumMap = new Map<string, {
+      albumId: string
+      albumName: string
+      projectId: string
+      projectName: string
+      pendingCount: number
+      processingCount: number
+    }>()
+
+    for (const photo of activePhotos) {
+      const albumId = photo.albumId
+      if (!albumMap.has(albumId)) {
+        albumMap.set(albumId, {
+          albumId,
+          albumName: photo.album.name,
+          projectId: photo.album.projectId,
+          projectName: photo.album.project.title,
+          pendingCount: 0,
+          processingCount: 0,
+        })
+      }
+      const entry = albumMap.get(albumId)!
+      if (String(photo.socialStatus) === 'PENDING') entry.pendingCount++
+      else entry.processingCount++
+    }
+
+    const active = [...albumMap.values()].map((e) => ({
+      ...e,
+      totalCount: e.pendingCount + e.processingCount,
+    }))
+
+    return { active }
+  } catch {
+    return { active: [] }
+  }
 }

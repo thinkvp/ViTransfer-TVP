@@ -86,10 +86,30 @@ export type FolderRenameJob = {
   copiedBytes: string // BigInt serialised as string
 }
 
+/** Video asset preview generation jobs grouped by project (polled from DB). */
+export type VideoAssetPreviewJob = {
+  projectId: string
+  projectName: string
+  pendingCount: number
+  processingCount: number
+  totalCount: number
+}
+
+/** Album photo social derivative jobs grouped by album (polled from DB). */
+export type AlbumSocialJob = {
+  albumId: string
+  albumName: string
+  projectId: string
+  projectName: string
+  pendingCount: number
+  processingCount: number
+  totalCount: number
+}
+
 /** A server-side job that has recently completed (kept for 30 min). */
 export type CompletedServerJob = {
   id: string
-  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename'
+  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename' | 'videoAssetPreview' | 'albumSocial'
   label: string
   sublabel: string
   projectId: string
@@ -159,6 +179,10 @@ export type UploadManagerContextType = {
   albumThumbnailJobs: AlbumThumbnailJob[]
   /** Active folder rename jobs (polled). */
   folderRenameJobs: FolderRenameJob[]
+  /** Video asset preview generation jobs grouped by project (polled from DB). */
+  videoAssetPreviewJobs: VideoAssetPreviewJob[]
+  /** Album photo social derivative jobs grouped by album (polled from DB). */
+  albumSocialJobs: AlbumSocialJob[]
   /** Recently completed server-side jobs (kept for 30 min). */
   completedServerJobs: CompletedServerJob[]
   /** Badge count: queued + uploading + paused + processing + album jobs. */
@@ -248,6 +272,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const [albumZipJobs, setAlbumZipJobs] = useState<AlbumZipJob[]>([])
   const [albumThumbnailJobs, setAlbumThumbnailJobs] = useState<AlbumThumbnailJob[]>([])
   const [folderRenameJobs, setFolderRenameJobs] = useState<FolderRenameJob[]>([])
+  const [videoAssetPreviewJobs, setVideoAssetPreviewJobs] = useState<VideoAssetPreviewJob[]>([])
+  const [albumSocialJobs, setAlbumSocialJobs] = useState<AlbumSocialJob[]>([])
   const [completedServerJobs, setCompletedServerJobs] = useState<CompletedServerJob[]>([])
 
   // Track previously-seen job IDs so we can detect completions.
@@ -255,11 +281,15 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const prevAlbumZipIdsRef = useRef<Set<string>>(new Set())
   const prevAlbumThumbnailIdsRef = useRef<Set<string>>(new Set())
   const prevFolderRenameIdsRef = useRef<Set<string>>(new Set())
+  const prevVideoAssetPreviewIdsRef = useRef<Set<string>>(new Set())
+  const prevAlbumSocialIdsRef = useRef<Set<string>>(new Set())
   // Map id → job metadata for building completion entries.
   const prevProcessingMapRef = useRef<Map<string, ProcessingJob>>(new Map())
   const prevAlbumZipMapRef = useRef<Map<string, AlbumZipJob>>(new Map())
   const prevAlbumThumbnailMapRef = useRef<Map<string, AlbumThumbnailJob>>(new Map())
   const prevFolderRenameMapRef = useRef<Map<string, FolderRenameJob>>(new Map())
+  const prevVideoAssetPreviewMapRef = useRef<Map<string, VideoAssetPreviewJob>>(new Map())
+  const prevAlbumSocialMapRef = useRef<Map<string, AlbumSocialJob>>(new Map())
   // Track IDs that the user has manually dismissed (so re-polls don't re-add them).
   const dismissedServerJobIdsRef = useRef<Set<string>>(new Set())
 
@@ -807,6 +837,58 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             setFolderRenameJobs(incoming)
           }
 
+          // --- Video asset preview jobs ---
+          if (Array.isArray(data.videoAssetPreviewJobs?.active)) {
+            const incoming = data.videoAssetPreviewJobs.active as VideoAssetPreviewJob[]
+            const incomingIds = new Set(incoming.map((j: VideoAssetPreviewJob) => j.projectId))
+
+            for (const prevId of prevVideoAssetPreviewIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('videoAssetPreview', prevId))) {
+                const prev = prevVideoAssetPreviewMapRef.current.get(prevId)
+                if (prev) {
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'videoAssetPreview',
+                    label: 'Asset previews',
+                    sublabel: prev.projectName,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            prevVideoAssetPreviewIdsRef.current = incomingIds
+            prevVideoAssetPreviewMapRef.current = new Map(incoming.map((j: VideoAssetPreviewJob) => [j.projectId, j]))
+            setVideoAssetPreviewJobs(incoming)
+          }
+
+          // --- Album social derivative jobs ---
+          if (Array.isArray(data.albumSocialJobs?.active)) {
+            const incoming = data.albumSocialJobs.active as AlbumSocialJob[]
+            const incomingIds = new Set(incoming.map((j: AlbumSocialJob) => j.albumId))
+
+            for (const prevId of prevAlbumSocialIdsRef.current) {
+              if (!incomingIds.has(prevId) && !dismissedServerJobIdsRef.current.has(getCompletedServerJobKeyByParts('albumSocial', prevId))) {
+                const prev = prevAlbumSocialMapRef.current.get(prevId)
+                if (prev) {
+                  newCompleted.push({
+                    id: prevId,
+                    type: 'albumSocial',
+                    label: prev.albumName,
+                    sublabel: prev.projectName,
+                    projectId: prev.projectId,
+                    completedAt: now,
+                  })
+                }
+              }
+            }
+
+            prevAlbumSocialIdsRef.current = incomingIds
+            prevAlbumSocialMapRef.current = new Map(incoming.map((j: AlbumSocialJob) => [j.albumId, j]))
+            setAlbumSocialJobs(incoming)
+          }
+
           // Merge new completions and purge stale (>30 min, but keep errors)
           if (newCompleted.length > 0) {
             setCompletedServerJobs((prev) => {
@@ -1043,7 +1125,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     processingJobs.length +
     albumZipJobs.length +
     albumThumbnailJobs.length +
-    folderRenameJobs.length
+    folderRenameJobs.length +
+    videoAssetPreviewJobs.length +
+    albumSocialJobs.length
 
   const actionsValue = useMemo<UploadManagerActionsContextType>(() => ({
     addUpload,
@@ -1062,6 +1146,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     albumZipJobs,
     albumThumbnailJobs,
     folderRenameJobs,
+    videoAssetPreviewJobs,
+    albumSocialJobs,
     completedServerJobs,
     totalActiveCount,
     addUpload,
@@ -1078,6 +1164,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     albumZipJobs,
     albumThumbnailJobs,
     folderRenameJobs,
+    videoAssetPreviewJobs,
+    albumSocialJobs,
     completedServerJobs,
     totalActiveCount,
     addUpload,

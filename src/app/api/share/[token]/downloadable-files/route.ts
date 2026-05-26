@@ -55,7 +55,7 @@ export async function GET(
 
   const projectMeta = await prisma.project.findUnique({
     where: { slug: token },
-    select: { id: true, sharePassword: true, authMode: true },
+    select: { id: true, sharePassword: true, authMode: true, enableClientUploads: true },
   })
 
   if (!projectMeta) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -298,8 +298,10 @@ export async function GET(
     )
   }
 
+  // If client uploads are disabled for clients, omit UPLOADS groups for non-admin sessions.
+  const showUploads = accessCheck.isAdmin || (projectMeta.enableClientUploads !== false)
   const result: DownloadableFilesResult = {
-    groups: [...videoGroups, ...albumGroups, ...uploadGroups],
+    groups: [...videoGroups, ...albumGroups, ...(showUploads ? uploadGroups : [])],
     hasApprovableVideos: approvableCount > 0,
   }
 
