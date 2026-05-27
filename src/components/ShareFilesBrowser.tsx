@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import type { TransferItem } from '@/lib/transfer-state'
+import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import {
   ArrowLeft,
   CheckSquare,
@@ -181,6 +182,7 @@ export function ShareFilesBrowser({
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
+  const [bulkFsaUnsupportedFiles, setBulkFsaUnsupportedFiles] = useState<DownloadableFile[] | null>(null)
   const [localDownloadProgress, setLocalDownloadProgress] = useState<DownloadProgressSnapshot | null>(null)
   const [previewUrlByFileKey, setPreviewUrlByFileKey] = useState<Record<string, string | null>>({})
   const [derivedVideoDurationByFileKey, setDerivedVideoDurationByFileKey] = useState<Record<string, number | null>>({})
@@ -203,6 +205,7 @@ export function ShareFilesBrowser({
   const [pendingDeleteFolderPath, setPendingDeleteFolderPath] = useState<string | null>(null)
   const [videoAssetsThumbnailSize, setVideoAssetsThumbnailSize] = useState<'default' | 'large'>('default')
   const [albumPhotosThumbnailSize, setAlbumPhotosThumbnailSize] = useState<'default' | 'large'>('default')
+  const [uploadsThumbnailSize, setUploadsThumbnailSize] = useState<'default' | 'large'>('default')
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
   const [visibleFolderNames, setVisibleFolderNames] = useState<Set<string>>(new Set())
   const [visibleFileKeys, setVisibleFileKeys] = useState<Set<string>>(new Set())
@@ -1051,7 +1054,9 @@ export function ShareFilesBrowser({
     }, 0)
   }, [groups, selectedFileIds])
   const visibleFiles = openFolder
-    ? filesInOpenFolder
+    ? openUploadsRoot
+      ? rootUploadGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+      : filesInOpenFolder
     : [...projectRootGroups, ...rootUploadsSectionGroups].flatMap((group) => [
         ...(group.mainFile ? [group.mainFile] : []),
         ...group.subFiles,
@@ -1110,20 +1115,53 @@ export function ShareFilesBrowser({
   }
 
   const downloadSelected = async () => {
+    // When in the UPLOADS root view, subfolders are separate groups — include files from all
+    // upload groups so selections spanning subfolders are fully represented.
     const scopedFiles = openFolder
-      ? filesInOpenFolder
+      ? openUploadsRoot
+        ? rootUploadGroups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+        : filesInOpenFolder
       : groups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
     const selectedFiles = scopedFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
       .filter((file) => file.type !== 'video' || file.isApproved !== false)
     if (!selectedFiles.length) return
 
+    // Annotate each file with the FSA download folder path so runBulkFsaDownload can
+    // recreate the group/folder structure inside the user-chosen directory.
+    const fileKeyToGroup = new Map<string, (typeof groups)[number]>()
+    for (const group of groups) {
+      for (const file of [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]) {
+        fileKeyToGroup.set(getDownloadableFileKey(file), group)
+      }
+    }
+    const annotatedFiles = selectedFiles.map((file) => {
+      const group = fileKeyToGroup.get(getDownloadableFileKey(file))
+      if (!group) return file
+      if (group.groupType === 'uploads') {
+        // Place uploads under an "UPLOADS" top-level folder, with any subfolder path beneath it.
+        const parts = ['UPLOADS', ...(file.uploadFolderPath?.split('/').filter(Boolean) ?? [])]
+        return { ...file, downloadFolderPath: parts.join('/') }
+      }
+      // Video / album groups → folder named after the group
+      return { ...file, downloadFolderPath: group.name }
+    })
+
+    // If the selection exceeds the bulk-download threshold but the browser doesn't support
+    // the File System Access API (Firefox, Safari), show a "use Chrome or Edge" advisory.
+    const isBulkThreshold = selectedTotalSizeBytes > ZIP_DOWNLOAD_THRESHOLD_BYTES
+    const isFsaAvailable = typeof window !== 'undefined' && 'showDirectoryPicker' in window
+    if (isBulkThreshold && !isFsaAvailable) {
+      setBulkFsaUnsupportedFiles(annotatedFiles)
+      return
+    }
+
     setIsDownloadingSelected(true)
     setLocalDownloadProgress(null)
     try {
       if (onDownloadFiles) {
-        await onDownloadFiles(selectedFiles, (progress) => setLocalDownloadProgress(progress))
+        await onDownloadFiles(annotatedFiles, (progress) => setLocalDownloadProgress(progress))
       } else {
-        await Promise.all(selectedFiles.map((file) => onDownloadFile(file).catch(() => undefined)))
+        await Promise.all(annotatedFiles.map((file) => onDownloadFile(file).catch(() => undefined)))
       }
     } finally {
       setIsDownloadingSelected(false)
@@ -1319,6 +1357,25 @@ export function ShareFilesBrowser({
     () => openUploadsRoot ? rootUploadGroups.filter((group) => group.name !== 'UPLOADS') : [],
     [openUploadsRoot, rootUploadGroups]
   )
+
+  // When the UPLOADS root view is open, ensure all subfolder group names are present in
+  // visibleFolderNames so the preview-tile effect fires for them. The IntersectionObserver
+  // handles this too, but there is a timing gap between card mount and the first observer
+  // callback that can leave the folders invisible to the effect on the first render pass.
+  useEffect(() => {
+    if (!openUploadsRoot || nestedUploadFoldersInRoot.length === 0) return
+    setVisibleFolderNames((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const group of nestedUploadFoldersInRoot) {
+        if (!next.has(group.name)) {
+          next.add(group.name)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [openUploadsRoot, nestedUploadFoldersInRoot])
   const pendingUploadTransferByFileId = useMemo(() => {
     const map = new Map<string, TransferItem>()
     for (const transfer of transferItems) {
@@ -2404,21 +2461,6 @@ export function ShareFilesBrowser({
 
                 <section className="space-y-2 border-t border-border/70 pt-4">
                   <div className="px-1 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={videoAssetsSelection.allChecked}
-                      disabled={openFolderVideoAssets.length === 0}
-                      ref={(el) => {
-                        if (el) el.indeterminate = videoAssetsSelection.someChecked
-                      }}
-                      onChange={(event) => toggleSubset(openFolderVideoAssets, event.target.checked)}
-                      className={cn(
-                        'w-4 h-4',
-                        FILES_CHECKBOX_CLASS,
-                        openFolderVideoAssets.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
-                      )}
-                      aria-label="Select all video assets"
-                    />
                     <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Video Assets</h4>
                     <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
                       <button
@@ -2476,16 +2518,6 @@ export function ShareFilesBrowser({
 
                 <section className="space-y-2 border-t border-border/70 pt-4">
                   <div className="px-1 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={albumPhotosSelection.allChecked}
-                      ref={(el) => {
-                        if (el) el.indeterminate = albumPhotosSelection.someChecked
-                      }}
-                      onChange={(event) => toggleSubset(openFolderAlbumPhotos, event.target.checked)}
-                      className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, 'cursor-pointer')}
-                      aria-label="Select all photos"
-                    />
                     <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Photos</h4>
                     <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
                       <button
@@ -2541,26 +2573,42 @@ export function ShareFilesBrowser({
 
                 <section className={cn('space-y-2', openUploadsRoot && nestedUploadFoldersInRoot.length > 0 ? 'border-t border-border/70 pt-4' : '')}>
                   <div className="px-1 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={uploadFilesSelection.allChecked}
-                      disabled={openFolderUploadFiles.length === 0}
-                      ref={(el) => {
-                        if (el) el.indeterminate = uploadFilesSelection.someChecked
-                      }}
-                      onChange={(event) => toggleSubset(openFolderUploadFiles, event.target.checked)}
-                      className={cn(
-                        'w-4 h-4',
-                        FILES_CHECKBOX_CLASS,
-                        openFolderUploadFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
-                      )}
-                      aria-label="Select all uploads"
-                    />
                     <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
+                    <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors',
+                          uploadsThumbnailSize === 'default'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setUploadsThumbnailSize('default')}
+                      >
+                        Default
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                          uploadsThumbnailSize === 'large'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setUploadsThumbnailSize('large')}
+                      >
+                        Large
+                      </button>
+                    </div>
                   </div>
                   {openFolderUploadFiles.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5">
-                      {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, true, openFolderUploadFiles))}
+                    <div className={cn(
+                      'grid',
+                      uploadsThumbnailSize === 'large'
+                        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
+                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                    )}>
+                      {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, uploadsThumbnailSize !== 'large', openFolderUploadFiles))}
                     </div>
                   ) : (
                     <p className="px-1 text-xs text-muted-foreground italic">No uploaded files available.</p>
@@ -2859,6 +2907,41 @@ export function ShareFilesBrowser({
         confirmLabel="Delete"
         onConfirm={confirmDeleteUploadFile}
         loading={isUploadActionBusy}
+      />
+
+      {/* Bulk download — unsupported browser advisory */}
+      <ConfirmDialog
+        open={bulkFsaUnsupportedFiles !== null}
+        onOpenChange={(v) => { if (!v) setBulkFsaUnsupportedFiles(null) }}
+        title="Use Chrome or Edge for large downloads"
+        description={
+          <span>
+            Downloading {bulkFsaUnsupportedFiles?.length ?? 0} files directly to a folder requires{' '}
+            <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>, which support the File System Access API.
+            Your current browser will download each file individually instead.
+          </span>
+        }
+        confirmLabel="Download anyway"
+        cancelLabel="Cancel"
+        variant="default"
+        onConfirm={async () => {
+          const files = bulkFsaUnsupportedFiles
+          setBulkFsaUnsupportedFiles(null)
+          if (!files?.length) return
+          setIsDownloadingSelected(true)
+          setLocalDownloadProgress(null)
+          try {
+            if (onDownloadFiles) {
+              await onDownloadFiles(files, (progress) => setLocalDownloadProgress(progress))
+            } else {
+              await Promise.all(files.map((file) => onDownloadFile(file).catch(() => undefined)))
+            }
+          } finally {
+            setIsDownloadingSelected(false)
+            setLocalDownloadProgress(null)
+          }
+        }}
+        onCancel={() => setBulkFsaUnsupportedFiles(null)}
       />
 
       {/* Delete folder dialog */}

@@ -23,6 +23,8 @@ export interface DownloadableFile {
   uploadFileId?: string
   /** Set for type 'upload-file' */
   uploadFolderPath?: string
+  /** Target sub-folder path within an FSA bulk download directory (set at download time). */
+  downloadFolderPath?: string
   /** Set for type 'album-zip' */
   variant?: 'full' | 'social'
   /** Optional tokenized preview URL (e.g. album photo thumbnail). */

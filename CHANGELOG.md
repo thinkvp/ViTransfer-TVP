@@ -5,6 +5,14 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.9] - 2026-05-27
+
+### Fixed
+- **ZIP and FSA bulk downloads now recreate the folder structure inside the archive** — selecting multiple video groups, album groups, or upload subfolders and downloading them via the main file browser or the VideoSidebar now places each group's files inside a named sub-folder (e.g. `Campaign Video/clip.mp4`, `UPLOADS/Test Folder/photo.jpg`) rather than dumping everything flat; this applies to both client-side ZIP streaming (via `client-zip`) and direct-to-disk FSA bulk downloads.
+- **VideoSidebar Download All / Download Selected buttons now annotate files with folder paths** — both sidebar download handlers previously flattened files from groups without preserving group context, so `downloadFolderPath` was never set and the ZIP/FSA logic received unannotated files; both handlers now apply the same group-name annotation used by the main file browser.
+- **"Use Chrome or Edge for large downloads" dialog now appears for VideoSidebar downloads** — the FSA-unsupported pre-flight check (size threshold exceeded + `showDirectoryPicker` unavailable) was only wired up in the main file browser; the VideoSidebar now performs the same check in both `handleDownloadAll` and `handleDownloadSelected` and shows the identical `ConfirmDialog` when triggered; the dead `showLocalModeWarning` inline banner has been removed.
+- **Speed and Time left stats removed from above the Select All / Clear Selected buttons in VideoSidebar** — these duplicate metrics are already shown in the TRANSFERS panel below; only the "Downloading… X%" progress line is retained above the action buttons.
+
 ## [1.8.8] - 2026-05-27
 
 ### Added

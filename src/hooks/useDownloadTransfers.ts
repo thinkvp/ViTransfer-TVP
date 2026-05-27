@@ -8,6 +8,7 @@ import {
   calculateTransferSummary,
   createTransferId,
   isTransferActive,
+  BULK_DOWNLOAD_CONCURRENCY,
   MANAGED_DOWNLOAD_CONCURRENCY,
   type TransferItem,
   type TransferSummary,
@@ -293,16 +294,24 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
         return
       }
 
-      const validTargets = targets.filter((item): item is DownloadQueueItem => Boolean(item))
+      const validTargets = targets
+        .map((target, i) => (target ? { target, file: files[i] } : null))
+        .filter((pair): pair is { target: DownloadQueueItem; file: DownloadableFile } => Boolean(pair))
       if (!validTargets.length) {
         throw new Error('Unable to prepare this download.')
       }
 
-      const entries = validTargets.map((target, index) => ({
-        url: target.url,
-        fileName: target.fileName || files[index]?.fileName || 'file',
-        fileSizeBytes: files[index]?.fileSizeBytes != null ? Number(files[index].fileSizeBytes) : undefined,
-      }))
+      const entries = validTargets.map(({ target, file }) => {
+        const baseFileName = target.fileName || file.fileName || 'file'
+        const fileName = file.downloadFolderPath
+          ? `${file.downloadFolderPath}/${baseFileName}`
+          : baseFileName
+        return {
+          url: target.url,
+          fileName,
+          fileSizeBytes: file.fileSizeBytes != null ? Number(file.fileSizeBytes) : undefined,
+        }
+      })
 
       let nextItems = updateTransferItems((items) =>
         items.map((item) =>
@@ -412,6 +421,206 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
     }
   }, [finishBatch, projectTitle, resolveDownloadTarget, startBatch, updateTransferItems])
 
+  const runBulkFsaDownload = useCallback(async (
+    files: DownloadableFile[],
+    onProgress?: (progress: DownloadProgressSnapshot) => void
+  ) => {
+    // showDirectoryPicker must be called before any await to preserve transient user activation.
+    // Cast required: File System Access API is not present in all TypeScript DOM lib distributions.
+    type WindowWithFsa = Window & { showDirectoryPicker(opts?: { mode?: 'read' | 'readwrite' }): Promise<FileSystemDirectoryHandle> }
+    let dirHandle: FileSystemDirectoryHandle
+    try {
+      dirHandle = await (window as unknown as WindowWithFsa).showDirectoryPicker({ mode: 'readwrite' })
+    } catch (error) {
+      // User dismissed the picker (AbortError) or permission was denied (SecurityError) — treat as silent cancel.
+      if (error instanceof DOMException && (error.name === 'AbortError' || error.name === 'SecurityError')) return
+      throw error
+    }
+
+    const initialItems: TransferItem[] = files.map((file) => ({
+      id: createTransferId('download'),
+      direction: 'download',
+      kind: 'file',
+      fileName: file.fileName,
+      uploadFolderPath: file.uploadFolderPath,
+      progressPercent: 0,
+      status: 'queued',
+      fileSizeBytes: file.fileSizeBytes != null ? Number(file.fileSizeBytes) : null,
+      speedBytesPerSecond: null,
+      etaSeconds: null,
+      errorMessage: null,
+    }))
+
+    const { batchId, controller } = startBatch(initialItems)
+    const { signal } = controller
+
+    const notifyProgress = (items: TransferItem[]) => {
+      onProgress?.(toProgressSnapshot(calculateTransferSummary(items)))
+    }
+
+    notifyProgress(initialItems)
+
+    let nextIndex = 0
+
+    const worker = async () => {
+      while (!signal.aborted) {
+        const currentIndex = nextIndex
+        nextIndex += 1
+
+        if (currentIndex >= files.length) return
+
+        const currentFile = files[currentIndex]
+        const currentTransferId = initialItems[currentIndex].id
+
+        let itemsAfterUpdate = updateTransferItems((items) =>
+          items.map((item) =>
+            item.id === currentTransferId
+              ? { ...item, status: 'preparing', progressPercent: 0, errorMessage: null }
+              : item
+          )
+        )
+        notifyProgress(itemsAfterUpdate)
+
+        try {
+          const target = await resolveDownloadTarget(currentFile, signal)
+
+          if (signal.aborted) {
+            itemsAfterUpdate = updateTransferItems((items) =>
+              items.map((item) =>
+                item.id === currentTransferId
+                  ? { ...item, status: 'canceled', speedBytesPerSecond: null, etaSeconds: null }
+                  : item
+              )
+            )
+            notifyProgress(itemsAfterUpdate)
+            return
+          }
+
+          if (!target) throw new Error('Unable to prepare this download.')
+
+          // Resolve the destination directory, creating sub-folders to mirror the group/upload folder structure.
+          const fsaFolderPath = currentFile.downloadFolderPath || currentFile.uploadFolderPath
+          let fileDir: FileSystemDirectoryHandle = dirHandle
+          if (fsaFolderPath) {
+            for (const part of fsaFolderPath.split('/').filter(Boolean)) {
+              fileDir = await fileDir.getDirectoryHandle(part, { create: true })
+            }
+          }
+
+          const fileHandle = await fileDir.getFileHandle(target.fileName || currentFile.fileName, { create: true })
+          const writable = await fileHandle.createWritable()
+
+          let response: Response
+          try {
+            response = await fetch(target.url, { signal })
+            if (!response.ok || !response.body) throw new Error(`Server returned ${response.status}.`)
+          } catch (error) {
+            await writable.abort()
+            throw error
+          }
+
+          const contentLength = response.headers.get('content-length')
+          const totalBytes = contentLength
+            ? parseInt(contentLength, 10)
+            : currentFile.fileSizeBytes != null ? Number(currentFile.fileSizeBytes) : null
+
+          let loadedBytes = 0
+          let smoothedSpeed: number | null = null
+          let lastMetricsTime = Date.now()
+          let lastMetricsBytes = 0
+
+          const reader = response.body.getReader()
+          try {
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done) break
+              if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+              await writable.write(value)
+              loadedBytes += value.byteLength
+
+              const now = Date.now()
+              if (now - lastMetricsTime >= TRANSFER_METRICS_UPDATE_INTERVAL_MS) {
+                const deltaBytes = loadedBytes - lastMetricsBytes
+                const deltaSeconds = (now - lastMetricsTime) / 1000
+                if (deltaBytes > 0 && deltaSeconds > 0) {
+                  const instant = deltaBytes / deltaSeconds
+                  smoothedSpeed = smoothedSpeed == null ? instant : smoothedSpeed * 0.7 + instant * 0.3
+                }
+                lastMetricsTime = now
+                lastMetricsBytes = loadedBytes
+
+                const etaSeconds = totalBytes && smoothedSpeed && smoothedSpeed > 0
+                  ? Math.max(0, (totalBytes - loadedBytes) / smoothedSpeed)
+                  : null
+
+                itemsAfterUpdate = updateTransferItems((items) =>
+                  items.map((item) =>
+                    item.id === currentTransferId
+                      ? {
+                          ...item,
+                          status: 'transferring',
+                          progressPercent: totalBytes ? Math.round((loadedBytes / totalBytes) * 100) : item.progressPercent,
+                          speedBytesPerSecond: smoothedSpeed,
+                          etaSeconds,
+                        }
+                      : item
+                  )
+                )
+                notifyProgress(itemsAfterUpdate)
+              }
+            }
+          } finally {
+            reader.releaseLock()
+          }
+
+          await writable.close()
+
+          itemsAfterUpdate = updateTransferItems((items) =>
+            items.map((item) =>
+              item.id === currentTransferId
+                ? {
+                    ...item,
+                    status: 'completed',
+                    progressPercent: 100,
+                    speedBytesPerSecond: null,
+                    etaSeconds: null,
+                    errorMessage: null,
+                  }
+                : item
+            )
+          )
+          notifyProgress(itemsAfterUpdate)
+        } catch (error) {
+          const wasCanceled = signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+          itemsAfterUpdate = updateTransferItems((items) =>
+            items.map((item) =>
+              item.id === currentTransferId
+                ? {
+                    ...item,
+                    status: wasCanceled ? 'canceled' : 'failed',
+                    speedBytesPerSecond: null,
+                    etaSeconds: null,
+                    errorMessage: wasCanceled
+                      ? 'Canceled'
+                      : error instanceof Error ? error.message : 'Download failed',
+                  }
+                : item
+            )
+          )
+          notifyProgress(itemsAfterUpdate)
+        }
+      }
+    }
+
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(BULK_DOWNLOAD_CONCURRENCY, files.length) }, () => worker())
+      )
+    } finally {
+      finishBatch(batchId)
+    }
+  }, [finishBatch, resolveDownloadTarget, startBatch, updateTransferItems])
+
   const downloadFile = useCallback(async (file: DownloadableFile) => {
     await runQueuedDownloads([file])
   }, [runQueuedDownloads])
@@ -438,8 +647,18 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
       return
     }
 
+    // Policy: when total size exceeds 1GB, use File System Access API for direct folder writes
+    // with real per-file progress. Falls back to queued browser downloads when FSA is unavailable.
+    const isBulkThreshold = totalKnownBytes > ZIP_DOWNLOAD_THRESHOLD_BYTES
+    const isFsaAvailable = typeof window !== 'undefined' && 'showDirectoryPicker' in window
+
+    if (isBulkThreshold && isFsaAvailable) {
+      await runBulkFsaDownload(files, onProgress)
+      return
+    }
+
     await runQueuedDownloads(files, onProgress)
-  }, [runQueuedDownloads, runZipDownload])
+  }, [runBulkFsaDownload, runQueuedDownloads, runZipDownload])
 
   return {
     transferItems,

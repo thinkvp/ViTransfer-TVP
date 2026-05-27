@@ -36,6 +36,8 @@ import Image from 'next/image'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import type { TransferItem, TransferSummary } from '@/lib/transfer-state'
+import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface VideoGroup {
   name: string
@@ -239,7 +241,7 @@ export default function VideoSidebar({
   const [isDraggingDivider, setIsDraggingDivider] = useState(false)
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgressSnapshot | null>(null)
-  const [showLocalModeWarning, setShowLocalModeWarning] = useState(false)
+  const [bulkFsaUnsupportedFiles, setBulkFsaUnsupportedFiles] = useState<DownloadableFile[] | null>(null)
   const [localDesktopActiveTab, setLocalDesktopActiveTab] = useState<'for-review' | 'files'>('for-review')
   const [localSelectedFileIds, setLocalSelectedFileIds] = useState<Set<string>>(new Set())
   const [isTransfersHidden, setIsTransfersHidden] = useState(true)
@@ -435,7 +437,6 @@ export default function VideoSidebar({
     if (!files.length) return
 
     if (onDownloadFiles) {
-      setShowLocalModeWarning(false)
       if (withProgress) {
         await onDownloadFiles(files, (progress) => setDownloadProgress(progress))
       } else {
@@ -446,46 +447,77 @@ export default function VideoSidebar({
 
     if (!onDownloadFile) return
 
-    setShowLocalModeWarning(false)
-
     for (let i = 0; i < files.length; i += 1) {
       await onDownloadFile(files[i])
     }
   }, [onDownloadFile, onDownloadFiles])
 
+  // Build a lookup from file key → group so download handlers can annotate files with
+  // the correct downloadFolderPath (used by ZIP and FSA bulk downloads for folder structure).
+  const annotateFilesWithFolderPath = useCallback((files: DownloadableFile[]): DownloadableFile[] => {
+    if (!downloadableFiles) return files
+    const fileKeyToGroup = new Map<string, DownloadableGroup>()
+    for (const group of downloadableFiles) {
+      for (const file of [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]) {
+        fileKeyToGroup.set(getDownloadableFileKey(file), group)
+      }
+    }
+    return files.map((file) => {
+      const group = fileKeyToGroup.get(getDownloadableFileKey(file))
+      if (!group) return file
+      if (group.groupType === 'uploads') {
+        const parts = ['UPLOADS', ...(file.uploadFolderPath?.split('/').filter(Boolean) ?? [])]
+        return { ...file, downloadFolderPath: parts.join('/') }
+      }
+      return { ...file, downloadFolderPath: group.name }
+    })
+  }, [downloadableFiles])
+
   const handleDownloadAll = useCallback(async () => {
     if (!downloadableFiles || (!onDownloadFile && !onDownloadFiles)) return
     setIsDownloadingAll(true)
     try {
-      const allFiles: DownloadableFile[] = downloadableFiles.flatMap((g) => [
+      const allFiles = annotateFilesWithFolderPath(downloadableFiles.flatMap((g) => [
         ...(g.mainFile ? [g.mainFile] : []),
         ...g.subFiles,
-      ])
+      ]))
+      const totalBytes = allFiles.reduce((s, f) => s + (f.fileSizeBytes != null ? Number(f.fileSizeBytes) : 0), 0)
+      const isFsaAvailable = typeof window !== 'undefined' && 'showDirectoryPicker' in window
+      if (totalBytes > ZIP_DOWNLOAD_THRESHOLD_BYTES && !isFsaAvailable) {
+        setBulkFsaUnsupportedFiles(allFiles)
+        return
+      }
       await queueSidebarDownloads(allFiles)
     } finally {
       setIsDownloadingAll(false)
     }
-  }, [downloadableFiles, onDownloadFile, onDownloadFiles, queueSidebarDownloads])
+  }, [annotateFilesWithFolderPath, downloadableFiles, onDownloadFile, onDownloadFiles, queueSidebarDownloads])
 
   const handleDownloadSelected = useCallback(async () => {
     if (!downloadableFiles || (!onDownloadFile && !onDownloadFiles) || selectedFileIdsValue.size === 0) return
     setIsDownloadingAll(true)
     setDownloadProgress(null)
     try {
-      const allFiles: DownloadableFile[] = downloadableFiles.flatMap((g) => [
+      const allFiles = annotateFilesWithFolderPath(downloadableFiles.flatMap((g) => [
         ...(g.mainFile ? [g.mainFile] : []),
         ...g.subFiles,
-      ])
+      ]))
       const toDownload = allFiles.filter((file) => {
         const key = getDownloadableFileKey(file)
         return selectedFileIdsValue.has(key) && isSelectableDownloadableFile(file)
       })
+      const totalBytes = toDownload.reduce((s, f) => s + (f.fileSizeBytes != null ? Number(f.fileSizeBytes) : 0), 0)
+      const isFsaAvailable = typeof window !== 'undefined' && 'showDirectoryPicker' in window
+      if (totalBytes > ZIP_DOWNLOAD_THRESHOLD_BYTES && !isFsaAvailable) {
+        setBulkFsaUnsupportedFiles(toDownload)
+        return
+      }
       await queueSidebarDownloads(toDownload, true)
     } finally {
       setIsDownloadingAll(false)
       setDownloadProgress(null)
     }
-  }, [downloadableFiles, onDownloadFile, onDownloadFiles, queueSidebarDownloads, selectedFileIdsValue])
+  }, [annotateFilesWithFolderPath, downloadableFiles, onDownloadFile, onDownloadFiles, queueSidebarDownloads, selectedFileIdsValue])
 
   const handleSelectAll = useCallback(() => {
     if (!downloadableFiles) return
@@ -1570,18 +1602,9 @@ export default function VideoSidebar({
                 />
               </div>
               <div className="text-xs text-muted-foreground mt-1 text-center">Downloading… {Math.round(effectiveProgressPercent)}%</div>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center justify-between">
-                <span>{formatTransferSpeed(effectiveSpeed)}</span>
-                <span>{formatEta(effectiveEta)}</span>
-              </div>
             </div>
           )}
-          {/* Local mode warning for large ZIPs */}
-          {showLocalModeWarning && (
-            <div className="mb-2 p-2 rounded bg-yellow-100 text-yellow-900 text-xs border border-yellow-300">
-              Warning: Your browser does not support direct-to-disk ZIP streaming. Large downloads (&gt;1GB) may fail or crash. For best results, use Chrome or Edge.
-            </div>
-          )}
+
           <div className="flex gap-1">
             <button
               type="button"
@@ -2159,6 +2182,41 @@ export default function VideoSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Bulk download — unsupported browser advisory */}
+      <ConfirmDialog
+        open={bulkFsaUnsupportedFiles !== null}
+        onOpenChange={(v) => { if (!v) setBulkFsaUnsupportedFiles(null) }}
+        title="Use Chrome or Edge for large downloads"
+        description={
+          <span>
+            Downloading {bulkFsaUnsupportedFiles?.length ?? 0} files directly to a folder requires{' '}
+            <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>, which support the File System Access API.
+            Your current browser will download each file individually instead.
+          </span>
+        }
+        confirmLabel="Download anyway"
+        cancelLabel="Cancel"
+        variant="default"
+        onConfirm={async () => {
+          const files = bulkFsaUnsupportedFiles
+          setBulkFsaUnsupportedFiles(null)
+          if (!files?.length) return
+          setIsDownloadingAll(true)
+          setDownloadProgress(null)
+          try {
+            if (onDownloadFiles) {
+              await onDownloadFiles(files, (progress) => setDownloadProgress(progress))
+            } else if (onDownloadFile) {
+              await Promise.all(files.map((file) => onDownloadFile(file).catch(() => undefined)))
+            }
+          } finally {
+            setIsDownloadingAll(false)
+            setDownloadProgress(null)
+          }
+        }}
+        onCancel={() => setBulkFsaUnsupportedFiles(null)}
+      />
 
     </>
   )
