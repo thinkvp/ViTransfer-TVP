@@ -7,6 +7,11 @@ export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
+  // Capture whether this caller has admin (user) tokens before the request so
+  // we can still fire the session-expired redirect for admins who happen to be
+  // viewing a share page when their own session expires.
+  const hadAdminTokens = !!(getAccessToken() || getRefreshToken())
+
   const requestInit = withAuthHeader(init)
 
   try {
@@ -22,9 +27,15 @@ export async function apiFetch(
       }
 
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      const isSharePage = typeof window !== 'undefined' && window.location.pathname.startsWith('/share/')
+      // Share visitors (no admin tokens) on share pages should NOT be
+      // redirected to /login — the share page itself shows the re-auth form.
+      // But admins who happen to be on a share page still need the login redirect.
+      const isSharePageWithoutAdminSession =
+        typeof window !== 'undefined' &&
+        window.location.pathname.startsWith('/share/') &&
+        !hadAdminTokens
       const isAuthEndpoint = url.includes('/api/auth')
-      if (!isSharePage && !isAuthEndpoint && !isRedirecting) {
+      if (!isSharePageWithoutAdminSession && !isAuthEndpoint && !isRedirecting) {
         if (!getAccessToken() && !getRefreshToken()) {
           // Don't broadcast a global logout if this window's session was already
           // locally expired by the inactivity monitor — that would log out every

@@ -308,17 +308,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     }
   }, [fetchZipStatus, onProjectDataChanged])
 
-  const handleToggleSocialCopies = useCallback(async (albumId: string, currentlyEnabled: boolean) => {
-    if (togglingSocialCopiesAlbumId) return
-
-    if (currentlyEnabled) {
-      setPendingDisableSocialAlbumId(albumId)
-      return
-    }
-
-    await executeSocialToggle(albumId, false)
-  }, [togglingSocialCopiesAlbumId])
-
   const executeSocialToggle = useCallback(async (albumId: string, enable: boolean) => {
     setTogglingSocialCopiesAlbumId(albumId)
     try {
@@ -331,6 +320,17 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       setTogglingSocialCopiesAlbumId(null)
     }
   }, [fetchZipStatus])
+
+  const handleToggleSocialCopies = useCallback(async (albumId: string, currentlyEnabled: boolean) => {
+    if (togglingSocialCopiesAlbumId) return
+
+    if (currentlyEnabled) {
+      setPendingDisableSocialAlbumId(albumId)
+      return
+    }
+
+    await executeSocialToggle(albumId, false)
+  }, [togglingSocialCopiesAlbumId, executeSocialToggle])
 
   const handleDeleteAlbum = (albumId: string, albumName: string) => {
     if (!canDelete) return

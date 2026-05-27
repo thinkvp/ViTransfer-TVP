@@ -337,26 +337,35 @@ export async function GET(
 
     const responseBody: any = projectData
 
-    // If no share token present, issue a short-lived viewer token (view-only) for this project.
-    // Admin sessions also need this for share-token-gated endpoints (e.g. video token minting).
-    if (!shareContext) {
-      // CRITICAL: For NONE authMode, use deterministic sessionId based on IP
-      // This must match the sessionId used in SharePageAccess tracking
-      let sessionId = accessCheck.shareTokenSessionId || `share:${project.id}:${token}`
-
-      if (projectMeta.authMode === 'NONE') {
+    // Issue or renew a share token.
+    // Non-admin visitors always receive a fresh token so the session rolls forward
+    // during long uploads and downloads (the keepalive calls this endpoint every
+    // 5 min while hasAnyActiveTransfers is true).
+    // Admin sessions receive a share token only on first access; their lifecycle
+    // is managed by the admin JWT, not by this token.
+    if (!shareContext || !isAdmin) {
+      // For renewals preserve the original session claims so revocation still works.
+      // For first-time visitors derive sessionId from the access check or authMode.
+      let sessionId: string
+      if (shareContext?.sessionId) {
+        sessionId = shareContext.sessionId
+      } else if (projectMeta.authMode === 'NONE') {
+        // CRITICAL: For NONE authMode, use deterministic sessionId based on IP
+        // This must match the sessionId used in SharePageAccess tracking
         const ipAddress = getClientIpAddress(request)
         sessionId = `none:${projectMeta.id}:${ipAddress}`
+      } else {
+        sessionId = accessCheck.shareTokenSessionId || `share:${project.id}:${token}`
       }
 
       const shareToken = signShareToken({
         shareId: token,
         projectId: project.id,
         permissions: ['view', 'comment', 'download'],
-        guest: false,
+        guest: shareContext?.guest ?? false,
         sessionId,
-        authMode: projectMeta.authMode,
-        accessMethod: projectMeta.authMode === 'NONE' ? 'NONE' : undefined,
+        authMode: shareContext?.authMode ?? projectMeta.authMode,
+        accessMethod: shareContext?.accessMethod ?? (projectMeta.authMode === 'NONE' ? 'NONE' : undefined),
         ttlSeconds: shareTtlSeconds,
       })
       responseBody.shareToken = shareToken

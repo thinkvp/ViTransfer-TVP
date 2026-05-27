@@ -5,9 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.8.8] - 2026-05-25
+## [1.8.8] - 2026-05-27
+
+### Added
+- **`enableClientUploads` per-project and global-default setting** — admins can now toggle whether authenticated clients see the UPLOADS folder in the FILES mode of the Share page; when disabled the UPLOADS section is hidden from clients while admins continue to see it; the setting is available in both the global defaults and individual project settings pages with an on-by-default value.
+- **Video asset preview and album social-copy jobs now appear in the Running Jobs bell** — the `RunningJobsBell` now shows live progress rows for active video-asset preview generation (grouped by project) and album social-copy derivative generation (grouped by album), both contribute to the badge count, and completion notifications are shown when each batch finishes.
+
+### Changed
+- **Share page password input now has `autoComplete="off"`** — share-page passwords are project-specific access codes, not user credentials; the browser will no longer offer to save or autofill them.
 
 ### Fixed
+- **Share page now boots client to re-authentication when their share token expires** — a proactive JWT expiry timer fires client-side when the share token approaches expiry; the client is returned to the authentication screen rather than left on a broken page; if an active upload or download is in progress the timer waits until the transfer completes before redirecting.
+- **Share sessions are now renewed during long transfers** — keepalive calls made by the share page (every ~5 minutes) now return a fresh share token from the server so clients engaged in lengthy uploads or downloads no longer hit an expired session mid-transfer.
+- **Admin users viewing a share page are now redirected to admin login when their session expires** — previously an expired admin token on a share page silently failed API calls; the API client now detects the case where admin tokens were present and routes the 401 to the admin login page instead of showing a generic error.
+- **Password field is cleared after successful share-page authentication** — the `password` React state is now reset on a successful verification response; if the re-authentication form is shown again (e.g. after session expiry) the field starts empty rather than showing the previously typed password.
 - **Auto-delete-on-close now also clears `VideoAsset` preview files and metadata** — the auto-close worker previously deleted video preview MP4s and timeline sprites but never touched `VideoAsset.previewPath`; video asset preview files were left on storage and their DB metadata remained `READY`, which caused the storage integrity scan to falsely report missing companion JPG paths for those assets on closed projects; the worker now deletes each asset's preview file and nulls `previewPath`, `previewStatus`, `previewError`, `previewGeneratedAt`, and `previewFileSize` for all assets belonging to the newly-closed project, matching the behaviour of the manual "Delete previews for closed projects" action; the worker also now correctly deletes `timelinePreviewVttPath` files (previously only the sprite directory was deleted).
 - **Preview reconciler now detects and re-enqueues video assets missing their companion JPG thumbnail** — `VideoAsset` records with `previewStatus = READY` and a `.mp4` `previewPath` (processed before companion-JPG generation was introduced) were never re-enqueued because the reconciler considered them fully complete; the reconciler now checks whether the companion `.jpg` file actually exists on storage for each such asset and re-enqueues any that are missing it.
 - **Worker generates missing companion JPG without re-encoding the MP4** — when a video asset's MP4 playback preview already exists on storage but the companion JPG thumbnail is absent, the worker previously fell through to a full re-encode of both files; it now detects the `playbackExists && !thumbnailExists` state early and runs only the lightweight frame-extraction step to produce the missing JPG, leaving the existing MP4 untouched.

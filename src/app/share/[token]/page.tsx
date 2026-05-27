@@ -295,7 +295,6 @@ export default function SharePage() {
     }
   }, [storageKey, isAdminSession])
 
-
   // Fetch comments separately for security
   const fetchComments = useCallback(async (tokenOverride?: string | null) => {
     const authToken = tokenOverride || shareToken
@@ -1752,6 +1751,46 @@ export default function SharePage() {
     }
   }, [fetchProjectData, hasAnyActiveTransfers, isAdminSession, isAuthenticated, shareToken, storageKey])
 
+  // Proactively show the re-auth form when the share token is about to expire,
+  // so clients aren't left staring at a broken page that 401s on every request.
+  // If an upload or download is active the reset is deferred: the effect re-runs
+  // once hasAnyActiveTransfers goes false, at which point msUntilExpiry ≤ 0 and
+  // we reset immediately so the auth screen appears as soon as the transfer ends.
+  useEffect(() => {
+    if (!shareToken || !isAuthenticated || isAdminSession) return
+
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    try {
+      const b64 = shareToken.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/')
+      if (b64) {
+        const payload = JSON.parse(atob(b64))
+        if (typeof payload.exp === 'number') {
+          const msUntilExpiry = payload.exp * 1000 - Date.now()
+          const resetToAuthScreen = () => {
+            // Don't interrupt an active upload or download.
+            if (hasAnyActiveTransfers) return
+            saveShareToken(storageKey, null)
+            setShareToken(null)
+            setIsAuthenticated(false)
+            setIsPasswordProtected(true)
+          }
+          if (msUntilExpiry <= 0) {
+            resetToAuthScreen()
+          } else {
+            timer = setTimeout(resetToAuthScreen, msUntilExpiry)
+          }
+        }
+      }
+    } catch {
+      // ignore JWT parse errors — the next API call will handle expiry reactively
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
+  }, [shareToken, isAuthenticated, isAdminSession, storageKey, hasAnyActiveTransfers])
+
   const sidebarVideosByName = useMemo(() => {
     return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
   }, [allVideosByName, project?.videosByName])
@@ -2188,6 +2227,7 @@ export default function SharePage() {
           setShareToken(data.shareToken)
           saveShareToken(storageKey, data.shareToken)
         }
+        setPassword('')
         setIsAuthenticated(true)
         setIsGuest(false)
 
@@ -2326,6 +2366,7 @@ export default function SharePage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     autoFocus={authMode === 'PASSWORD'}
+                    autoComplete="off"
                   />
                   <Button
                     type="submit"
