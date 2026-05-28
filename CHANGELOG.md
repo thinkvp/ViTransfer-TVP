@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-05-29
+
+### Changed
+- **Accounting dashboard trend controls are more flexible and space-aware** — the Profitability Trend chart now includes a Cost of Goods Sold (COGS) series (yellow dashed line), centered checkbox legend toggles for Income/Total Costs/COGS/Net Profit, and responsive COGS legend labeling (`COGS` on mobile, full label on larger screens).
+- **Profitability Trend now supports an explicit All time range option** — the period selector includes an All time option for long-range reporting.
+- **Accounting page heading text is cleaner** — removed the leading "Under Development." copy from the Accounting section header.
+- **Keyboard shortcuts button now follows desktop-only behavior in share views** — both admin and client share feedback screens now hide the shortcuts launcher on non-desktop layouts.
+- **Timeline preview behavior is improved on touch devices** — video timeline hover previews now appear while actively scrubbing on mobile/touch, then hide when scrubbing ends.
+
+### Fixed
+- **All time accounting trend requests now start from the earliest real accounting record** — monthly profit/loss API now resolves `from=all-time` against earliest relevant income/cogs/expense activity instead of using an arbitrary historical start date.
+- **Project rename patch flow now handles in-progress S3 rename jobs safely** — when a matching rename job is already queued/running, non-storage project updates can proceed without triggering duplicate rename workflows.
+
 ## [1.9.0] - 2026-05-28
 
 ### Added

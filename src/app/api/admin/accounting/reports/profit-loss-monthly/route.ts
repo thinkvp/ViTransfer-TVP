@@ -37,6 +37,83 @@ interface MonthBucket {
   expenseCents: number
 }
 
+async function resolveEarliestProfitLossDate(to: string): Promise<string | null> {
+  const [firstInvoice, firstPayment, firstExpense, firstManualBankTxn, firstJournal, firstSplitBankTxn] = await Promise.all([
+    prisma.salesInvoice.findFirst({
+      where: {
+        status: { in: ['OPEN', 'SENT', 'PAID', 'PARTIALLY_PAID', 'OVERDUE'] },
+        issueDate: { lte: to },
+      },
+      orderBy: { issueDate: 'asc' },
+      select: { issueDate: true },
+    }),
+    prisma.salesPayment.findFirst({
+      where: {
+        paymentDate: { lte: to },
+        OR: [
+          { excludeFromInvoiceBalance: false },
+          { source: 'STRIPE' },
+        ],
+      },
+      orderBy: { paymentDate: 'asc' },
+      select: { paymentDate: true },
+    }),
+    prisma.expense.findFirst({
+      where: {
+        date: { lte: to },
+        status: { in: ['APPROVED', 'RECONCILED'] },
+        account: { type: { in: ['COGS', 'EXPENSE'] } },
+      },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    }),
+    prisma.bankTransaction.findFirst({
+      where: {
+        date: { lte: to },
+        status: 'MATCHED',
+        matchType: 'MANUAL',
+        account: { type: { in: ['INCOME', 'COGS', 'EXPENSE'] } },
+      },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    }),
+    prisma.journalEntry.findFirst({
+      where: {
+        date: { lte: to },
+        account: { type: { in: ['INCOME', 'COGS', 'EXPENSE'] } },
+      },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    }),
+    prisma.bankTransaction.findFirst({
+      where: {
+        date: { lte: to },
+        status: 'MATCHED',
+        splitLines: {
+          some: {
+            account: { type: { in: ['INCOME', 'COGS', 'EXPENSE'] } },
+          },
+        },
+      },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    }),
+  ])
+
+  const candidates = [
+    firstInvoice?.issueDate,
+    firstPayment?.paymentDate,
+    firstExpense?.date,
+    firstManualBankTxn?.date,
+    firstJournal?.date,
+    firstSplitBankTxn?.date,
+  ].filter((d): d is string => Boolean(d))
+
+  if (candidates.length === 0) return null
+  candidates.sort()
+  return candidates[0]
+}
+
 // GET /api/admin/accounting/reports/profit-loss-monthly
 // Query params: from=YYYY-MM-DD, to=YYYY-MM-DD, basis=CASH|ACCRUAL
 // Returns monthly income/cogs/expenses/netProfit for rendering trend charts on the Accounting Dashboard.
@@ -53,16 +130,24 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   const { searchParams } = new URL(request.url)
-  const from = searchParams.get('from')
+  const fromRaw = searchParams.get('from')
   const to = searchParams.get('to')
   const requestedBasis = searchParams.get('basis')
 
-  if (!from || !to) {
+  if (!fromRaw || !to) {
     return NextResponse.json({ error: 'from and to query params are required (YYYY-MM-DD)' }, { status: 400 })
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    return NextResponse.json({ error: 'Dates must be in YYYY-MM-DD format' }, { status: 400 })
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return NextResponse.json({ error: 'to date must be in YYYY-MM-DD format' }, { status: 400 })
   }
+  if (fromRaw !== 'all-time' && !/^\d{4}-\d{2}-\d{2}$/.test(fromRaw)) {
+    return NextResponse.json({ error: 'from must be YYYY-MM-DD or all-time' }, { status: 400 })
+  }
+
+  const from = fromRaw === 'all-time'
+    ? (await resolveEarliestProfitLossDate(to)) ?? to
+    : fromRaw
+
   if (from > to) {
     return NextResponse.json({ error: 'from must be before or equal to to' }, { status: 400 })
   }

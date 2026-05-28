@@ -3384,7 +3384,7 @@ function ShareFeedbackGrid({
                 currentVideoRestricted={currentVideoRestricted}
                 restrictionMessage={restrictionMessage}
                 commentsDisabled={commentsDisabled}
-                showShortcutsButton={true}
+                showShortcutsButton={isDesktop}
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-lg"
                 showTopBorder={false}
@@ -3434,7 +3434,7 @@ function ShareFeedbackGrid({
               isPasswordProtected={isPasswordProtected}
               recipients={project.recipients || []}
               shareToken={shareToken}
-              showShortcutsButton={true}
+              showShortcutsButton={isDesktop}
               allowClientDeleteComments={project.allowClientDeleteComments}
               allowClientUploadFiles={project.allowClientUploadFiles}
               allowCommentFileUpload={Boolean(project.allowClientUploadFiles)}
@@ -3483,7 +3483,7 @@ function ShareFeedbackGrid({
                 currentVideoRestricted={currentVideoRestricted}
                 restrictionMessage={restrictionMessage}
                 commentsDisabled={commentsDisabled}
-                showShortcutsButton={true}
+                showShortcutsButton={isDesktop}
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-b-lg rounded-t-none border-t-0"
                 showTopBorder={false}

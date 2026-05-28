@@ -320,9 +320,9 @@ export default function VideoPlayer({
         setCurrentTimeSeconds(time)
       }
 
-      // Only show hover previews on devices that support hover.
-      if (canShowTimelineHover) {
-        updateHoverFromClientX(x)
+      // Desktop: hover preview. Mobile/touch: preview while actively scrubbing.
+      if (canShowTimelineHover || isScrubbingRef.current) {
+        updateHoverFromClientX(x, isScrubbingRef.current)
       }
     })
   }
@@ -1175,7 +1175,12 @@ export default function VideoPlayer({
     return null
   }
 
-  const updateHoverFromTimeSeconds = (timeSeconds: number, minClampWidthPx?: number) => {
+  const updateHoverFromTimeSeconds = (timeSeconds: number, minClampWidthPx?: number, forcePreview = false) => {
+    if (!canShowTimelineHover && !forcePreview) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+      return null as number | null
+    }
+
     const spriteBaseUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
     const duration = (videoRef.current?.duration || durationSeconds || (selectedVideo as any)?.duration || 0) as number
     const el = scrubBarRef.current
@@ -1216,7 +1221,12 @@ export default function VideoPlayer({
     return clampedLeft
   }
 
-  const updateHoverFromClientX = (clientX: number) => {
+  const updateHoverFromClientX = (clientX: number, forcePreview = false) => {
+    if (!canShowTimelineHover && !forcePreview) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+      return
+    }
+
     const spriteBaseUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
     if (!spriteBaseUrl || timelineCues.length === 0) {
       setTimelineHover((prev) => ({ ...prev, visible: false }))
@@ -2094,12 +2104,18 @@ export default function VideoPlayer({
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
                   isScrubbingRef.current = true
                   scheduleScrubToClientX(e.clientX)
+                  if (!canShowTimelineHover) {
+                    updateHoverFromClientX(e.clientX, true)
+                  }
                 }}
                 onPointerUp={(e) => {
                   try {
                     ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
                   } catch {}
                   isScrubbingRef.current = false
+                  if (!canShowTimelineHover) {
+                    setTimelineHover((prev) => ({ ...prev, visible: false }))
+                  }
                 }}
                 onPointerCancel={(e) => {
                   try {

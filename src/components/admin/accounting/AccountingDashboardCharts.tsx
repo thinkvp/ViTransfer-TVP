@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils'
 
 // ── Period utilities ──────────────────────────────────────────────────────────
 
-type PeriodKey = 'fy-to-date' | 'last-fy' | 'fy-quarter' | 'last-fy-quarter' | 'ytd' | 'last-12' | 'last-6' | 'last-3'
+type PeriodKey = 'fy-to-date' | 'last-fy' | 'fy-quarter' | 'last-fy-quarter' | 'ytd' | 'last-12' | 'last-6' | 'last-3' | 'all-time'
 
 interface PeriodRange {
   from: string
@@ -40,6 +40,10 @@ function toIso(d: Date): string {
 }
 
 function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodRange {
+  if (key === 'all-time') {
+    return { from: 'all-time', to: toIso(now), months: [] }
+  }
+
   const fyStartM = Math.max(1, Math.min(12, fyStartMonth)) - 1
   const y = now.getFullYear()
   const fyStartYear = now.getMonth() >= fyStartM ? y : y - 1
@@ -77,8 +81,12 @@ function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodR
   } else if (key === 'last-6') {
     start = new Date(y, now.getMonth() - 5, 1)
     end = now
-  } else {
+  } else if (key === 'last-3') {
     // last-3
+    start = new Date(y, now.getMonth() - 2, 1)
+    end = now
+  } else {
+    // Defensive fallback for exhaustive narrowing.
     start = new Date(y, now.getMonth() - 2, 1)
     end = now
   }
@@ -108,6 +116,21 @@ const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: 'last-12', label: 'Last 12 months' },
   { value: 'last-6', label: 'Last 6 months' },
   { value: 'last-3', label: 'Last 3 months' },
+  { value: 'all-time', label: 'All time' },
+]
+
+type TrendSeriesKey = 'income' | 'totalCosts' | 'cogs' | 'netProfit'
+
+const TREND_SERIES_CONFIG: Array<{
+  key: TrendSeriesKey
+  name: string
+  color: string
+  dashed?: boolean
+}> = [
+  { key: 'income', name: 'Income', color: '#34d399' },
+  { key: 'totalCosts', name: 'Total Costs', color: '#f87171' },
+  { key: 'cogs', name: 'Cost of Goods Sold', color: '#fbbf24', dashed: true },
+  { key: 'netProfit', name: 'Net Profit', color: '#818cf8', dashed: true },
 ]
 
 function PeriodSelect({
@@ -229,6 +252,12 @@ export function AccountingTrendChart({
 
   const [monthlyData, setMonthlyData] = useState<MonthlyPLPoint[]>([])
   const [loading, setLoading] = useState(false)
+  const [visibleSeries, setVisibleSeries] = useState<Record<TrendSeriesKey, boolean>>({
+    income: true,
+    totalCosts: true,
+    cogs: true,
+    netProfit: true,
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -257,9 +286,15 @@ export function AccountingTrendChart({
   const data = useMemo(() => {
     const labelMap = new Map(periodRange.months.map((m) => [m.key, m.label]))
     return monthlyData.map((m) => ({
-      label: labelMap.get(m.yearMonth) ?? m.yearMonth,
+      label: labelMap.get(m.yearMonth)
+        ?? (() => {
+          const [yy, mm] = m.yearMonth.split('-').map(Number)
+          if (!yy || !mm) return m.yearMonth
+          return new Date(yy, mm - 1, 1).toLocaleString('en-AU', { month: 'short', year: '2-digit' })
+        })(),
       income: m.incomeCents / 100,
       totalCosts: (m.cogsCents + m.expenseCents) / 100,
+      cogs: m.cogsCents / 100,
       netProfit: m.netProfitCents / 100,
     }))
   }, [monthlyData, periodRange.months])
@@ -273,7 +308,7 @@ export function AccountingTrendChart({
     [monthlyData],
   )
 
-  const hasData = data.some((d) => d.income > 0 || d.totalCosts > 0)
+  const hasData = data.some((d) => d.income > 0 || d.totalCosts > 0 || d.cogs > 0)
 
   return (
     <Card className="overflow-hidden">
@@ -348,38 +383,53 @@ export function AccountingTrendChart({
                 )}
                 cursor={{ stroke: 'currentColor', strokeOpacity: 0.1, strokeWidth: 1 }}
               />
-              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="circle" iconSize={8} />
-              <Line
-                type="monotone"
-                dataKey="income"
-                name="Income"
-                stroke="#34d399"
-                strokeWidth={2.5}
-                dot={{ r: 3, fill: '#34d399', strokeWidth: 0 }}
-                activeDot={{ r: 5, fill: '#34d399', strokeWidth: 0 }}
-                connectNulls
+              <Legend
+                wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                content={() => (
+                  <div className="flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 px-1 text-center">
+                    {TREND_SERIES_CONFIG.map((series) => (
+                      <label key={series.key} className="inline-flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-border"
+                          checked={visibleSeries[series.key]}
+                          onChange={() => {
+                            setVisibleSeries((prev) => ({
+                              ...prev,
+                              [series.key]: !prev[series.key],
+                            }))
+                          }}
+                          style={{ accentColor: series.color }}
+                          aria-label={`Toggle ${series.name}`}
+                        />
+                        {series.key === 'cogs' ? (
+                          <span>
+                            <span className="sm:hidden">COGS</span>
+                            <span className="hidden sm:inline">{series.name}</span>
+                          </span>
+                        ) : (
+                          <span>{series.name}</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                )}
               />
-              <Line
-                type="monotone"
-                dataKey="totalCosts"
-                name="Total Costs"
-                stroke="#f87171"
-                strokeWidth={2.5}
-                dot={{ r: 3, fill: '#f87171', strokeWidth: 0 }}
-                activeDot={{ r: 5, fill: '#f87171', strokeWidth: 0 }}
-                connectNulls
-              />
-              <Line
-                type="monotone"
-                dataKey="netProfit"
-                name="Net Profit"
-                stroke="#818cf8"
-                strokeWidth={2.5}
-                strokeDasharray="6 3"
-                dot={{ r: 3, fill: '#818cf8', strokeWidth: 0 }}
-                activeDot={{ r: 5, fill: '#818cf8', strokeWidth: 0 }}
-                connectNulls
-              />
+              {TREND_SERIES_CONFIG.map((series) => (
+                <Line
+                  key={series.key}
+                  type="monotone"
+                  dataKey={series.key}
+                  name={series.name}
+                  stroke={series.color}
+                  strokeWidth={2.5}
+                  strokeDasharray={series.dashed ? '6 3' : undefined}
+                  dot={{ r: 3, fill: series.color, strokeWidth: 0 }}
+                  activeDot={{ r: 5, fill: series.color, strokeWidth: 0 }}
+                  connectNulls
+                  hide={!visibleSeries[series.key]}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         )}

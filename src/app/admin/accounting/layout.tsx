@@ -33,7 +33,7 @@ export default function AccountingLayout({ children }: { children: React.ReactNo
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold">Accounting</h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              Under Development. Bank accounts, expenses, chart of accounts, BAS, and financial reports.
+              Bank accounts, expenses, chart of accounts, BAS, and financial reports.
             </p>
           </div>
 

@@ -941,26 +941,41 @@ export async function PATCH(
     // Return 202 to tell the client to show the confirmation modal instead of
     // doing the move inline.
     if (projectStorageRename && isS3Mode()) {
-      // Check for an in-progress rename job first
+      // Check for an in-progress rename job first.
       const activeRenameJob = await prisma.folderRenameJob.findFirst({
         where: { entityType: 'PROJECT', entityId: id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+        select: { oldPrefix: true, newPrefix: true },
       })
+
       if (activeRenameJob) {
-        return NextResponse.json(
-          { error: 'A folder rename is already in progress for this project. Please wait for it to complete.' },
-          { status: 423 },
-        )
+        const sameRenameAlreadyScheduled =
+          activeRenameJob.oldPrefix === projectStorageRename.oldProjectStoragePath
+          && activeRenameJob.newPrefix === projectStorageRename.newProjectStoragePath
+
+        if (!sameRenameAlreadyScheduled) {
+          return NextResponse.json(
+            { error: 'A folder rename is already in progress for this project. Please wait for it to complete.' },
+            { status: 423 },
+          )
+        }
+
+        // A matching rename is already queued/running (e.g. after rename-confirm).
+        // Keep legacy storagePath until worker completion, but allow other settings to save.
+        delete updateData.storagePath
+        projectStorageRename = null
       }
 
-      return NextResponse.json(
-        {
-          requiresJobConfirmation: true,
-          proposedTitle: nextProjectTitle,
-          oldStoragePath: projectStorageRename.oldProjectStoragePath,
-          newStoragePath: projectStorageRename.newProjectStoragePath,
-        },
-        { status: 202 },
-      )
+      if (projectStorageRename) {
+        return NextResponse.json(
+          {
+            requiresJobConfirmation: true,
+            proposedTitle: nextProjectTitle,
+            oldStoragePath: projectStorageRename.oldProjectStoragePath,
+            newStoragePath: projectStorageRename.newProjectStoragePath,
+          },
+          { status: 202 },
+        )
+      }
     }
 
     let movedProjectStorage = false
