@@ -125,6 +125,7 @@ export function CommentSectionView({
     comments,
     newComment,
     selectedTimestamp,
+    selectedEndTimestamp,
     selectedVideoId,
     selectedVideoFps,
     loading,
@@ -1009,7 +1010,10 @@ export function CommentSectionView({
                   clientUploadQuota={clientUploadQuota}
                   onRefreshUploadQuota={refreshClientUploadQuota}
                   selectedTimestamp={selectedTimestamp}
+                  selectedEndTimestamp={selectedEndTimestamp}
                   onClearTimestamp={handleClearTimestamp}
+                  onClearRange={management.handleClearRange}
+                  showTimestampReset={management.shouldShowTimestampReset}
                   selectedVideoFps={selectedVideoFps}
                   useFullTimecode={useFullTimecode}
                   replyingToComment={replyingToComment}
@@ -1328,7 +1332,10 @@ export function CommentSectionView({
             clientUploadQuota={clientUploadQuota}
             onRefreshUploadQuota={refreshClientUploadQuota}
             selectedTimestamp={selectedTimestamp}
+            selectedEndTimestamp={selectedEndTimestamp}
             onClearTimestamp={handleClearTimestamp}
+            onClearRange={management.handleClearRange}
+            showTimestampReset={management.shouldShowTimestampReset}
             selectedVideoFps={selectedVideoFps}
             useFullTimecode={useFullTimecode}
             replyingToComment={replyingToComment}

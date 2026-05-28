@@ -2251,7 +2251,10 @@ export function ShareFilesBrowser({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 px-2"
+              className={cn(
+                'h-8 px-2',
+                allVisibleSelected && 'bg-primary/12 text-primary border-primary/40 hover:bg-primary/18'
+              )}
               disabled={visibleFiles.length === 0}
               onClick={toggleAllVisibleSelection}
               aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
@@ -2324,7 +2327,10 @@ export function ShareFilesBrowser({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 px-2"
+              className={cn(
+                'min-w-0 justify-center gap-1.5',
+                allVisibleSelected && 'bg-primary/12 text-primary border-primary/40 hover:bg-primary/18'
+              )}
               disabled={visibleFiles.length === 0}
               onClick={toggleAllVisibleSelection}
               aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
@@ -2364,8 +2370,8 @@ export function ShareFilesBrowser({
               <Button
                 type="button"
                 variant="destructive"
-                size="icon"
-                className="h-8 w-8"
+                size="sm"
+                className="min-w-0 justify-center"
                 onClick={onCloseFilesView}
                 aria-label="Close files view"
                 title="Close files view"

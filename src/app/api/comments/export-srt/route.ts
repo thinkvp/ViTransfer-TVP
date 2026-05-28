@@ -12,6 +12,7 @@ type CommentRow = {
   id: string
   parentId: string | null
   timecode: string
+  timecodeEnd: string | null
   content: string
   createdAt: Date
   files: Array<{ fileName: string }>
@@ -140,6 +141,7 @@ export async function GET(request: NextRequest) {
       id: true,
       parentId: true,
       timecode: true,
+      timecodeEnd: true,
       content: true,
       createdAt: true,
       files: { select: { fileName: true } },
@@ -164,16 +166,17 @@ export async function GET(request: NextRequest) {
 
   // Flatten comments in a parent->reply order (pre-order traversal).
   // Each descendant is grouped under the top-level parent's timecode cue.
-  const items: Array<{ row: CommentRow; kind: 'comment' | 'reply'; groupTimecode: string }> = []
+  const items: Array<{ row: CommentRow; kind: 'comment' | 'reply'; groupTimecode: string; timecodeEnd?: string | null }> = []
 
   const pushThread = (root: CommentRow) => {
     const rootTimecode = root.timecode || '00:00:00:00'
-    items.push({ row: root, kind: 'comment', groupTimecode: rootTimecode })
+    const rootTimecodeEnd = root.timecodeEnd || null
+    items.push({ row: root, kind: 'comment', groupTimecode: rootTimecode, timecodeEnd: rootTimecodeEnd })
 
     const stack: CommentRow[] = [...(childrenByParentId.get(root.id) || [])].reverse()
     while (stack.length > 0) {
       const node = stack.pop()!
-      items.push({ row: node, kind: 'reply', groupTimecode: rootTimecode })
+      items.push({ row: node, kind: 'reply', groupTimecode: rootTimecode, timecodeEnd: rootTimecodeEnd })
 
       const kids = childrenByParentId.get(node.id)
       if (kids && kids.length > 0) {
@@ -198,11 +201,13 @@ export async function GET(request: NextRequest) {
   }
 
   // Group by exact timecode string.
+  // Also track explicit end time from the root comment when present.
   const grouped = new Map<
     string,
     {
       timecode: string
       startSeconds: number
+      endSeconds: number | null // explicit range end from timecodeEnd
       texts: string[]
     }
   >()
@@ -219,10 +224,27 @@ export async function GET(request: NextRequest) {
     const existing = grouped.get(tc)
     const text = buildCommentText(item.row, item.kind)
 
+    // Resolve explicit end time from timecodeEnd on the root comment
+    let endSeconds: number | null = null
+    if (item.timecodeEnd) {
+      try {
+        const parsedEnd = timecodeToSeconds(item.timecodeEnd, fps)
+        if (Number.isFinite(parsedEnd) && parsedEnd > startSeconds) {
+          endSeconds = parsedEnd
+        }
+      } catch {
+        // ignore — fall through to heuristic
+      }
+    }
+
     if (existing) {
       existing.texts.push(text)
+      // Preserve the most precise end time seen for this cue
+      if (endSeconds !== null && (existing.endSeconds === null || endSeconds > existing.endSeconds)) {
+        existing.endSeconds = endSeconds
+      }
     } else {
-      grouped.set(tc, { timecode: tc, startSeconds, texts: [text] })
+      grouped.set(tc, { timecode: tc, startSeconds, endSeconds, texts: [text] })
     }
   }
 
@@ -244,13 +266,18 @@ export async function GET(request: NextRequest) {
 
     const start = Math.max(0, cue.startSeconds)
 
-    let end = start + defaultDurationSeconds
-    if (next && next.startSeconds > start) {
-      end = Math.min(end, next.startSeconds - 0.001)
-    }
-
-    if (!(end > start)) {
-      end = start + minDurationSeconds
+    let end: number
+    if (cue.endSeconds !== null) {
+      // Use the explicit range end supplied by the commenter
+      end = cue.endSeconds
+    } else {
+      end = start + defaultDurationSeconds
+      if (next && next.startSeconds > start) {
+        end = Math.min(end, next.startSeconds - 0.001)
+      }
+      if (!(end > start)) {
+        end = start + minDurationSeconds
+      }
     }
 
     // Keep within sane bounds.

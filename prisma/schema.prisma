@@ -820,6 +820,7 @@ model Comment {
   video        Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
   videoVersion Int? // track which version this comment was for
   timecode     String // HH:MM:SS:FF format (e.g., "00:00:32:15" for 32 seconds 15 frames at given FPS)
+  timecodeEnd  String? // Optional range end — HH:MM:SS:FF format; when set, comment spans timecode → timecodeEnd
   content      String
   authorName   String? // made optional to allow anonymous comments
   authorEmail  String?

@@ -1788,7 +1788,7 @@ export default function AdminSharePage() {
   return (
     <div className="flex-1 min-h-0 bg-background flex flex-col overflow-y-auto lg:overflow-hidden">
       {/* Compact breadcrumb header */}
-      <div className="flex-shrink-0 h-12 my-[2px] border border-border bg-card rounded-lg flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="flex-shrink-0 h-12 my-[2px] border border-border bg-card rounded-lg flex items-center pl-4 pr-3 lg:pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Back to Project */}
         <Link href={projectUrl} className="flex-shrink-0">
@@ -1901,6 +1901,8 @@ export default function AdminSharePage() {
           </>
         )}
 
+        <span className="w-2 flex-shrink-0 lg:hidden" aria-hidden="true" />
+
         {downloadableFiles !== null && (
           <div className="ml-auto hidden lg:flex items-stretch self-stretch gap-0 flex-shrink-0">
             <span className="text-muted-foreground whitespace-nowrap hidden lg:inline flex-shrink-0 self-center px-2">Mode:</span>
@@ -1911,7 +1913,7 @@ export default function AdminSharePage() {
               disabled={!hasViewContent}
               className={cn(
                 'h-full rounded-none border-y-0 border-l border-r-0 px-4',
-                desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                desktopContentTab !== 'view' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('view')}
             >
@@ -1923,7 +1925,7 @@ export default function AdminSharePage() {
               size="default"
               className={cn(
                 'h-full rounded-none border-y-0 border-l px-4',
-                desktopContentTab !== 'files' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                desktopContentTab !== 'files' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('files')}
             >
@@ -1943,7 +1945,7 @@ export default function AdminSharePage() {
               disabled={!hasViewContent}
               className={cn(
                 'w-full',
-                desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                desktopContentTab !== 'view' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('view')}
             >
@@ -1955,7 +1957,7 @@ export default function AdminSharePage() {
               size="sm"
               className={cn(
                 'w-full',
-                desktopContentTab !== 'files' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                desktopContentTab !== 'files' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('files')}
             >
@@ -2414,7 +2416,10 @@ function AdminShareFeedbackGrid({
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
                 selectedTimestamp={management.selectedTimestamp}
+                selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
+                onClearRange={management.handleClearRange}
+                showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={Boolean(project?.useFullTimecode)}
                 replyingToComment={management.replyingToComment}
@@ -2508,7 +2513,10 @@ function AdminShareFeedbackGrid({
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
                 selectedTimestamp={management.selectedTimestamp}
+                selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
+                onClearRange={management.handleClearRange}
+                showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={Boolean(project?.useFullTimecode)}
                 replyingToComment={management.replyingToComment}

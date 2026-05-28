@@ -66,6 +66,9 @@ export function sanitizeComment(
     videoId: comment.videoId,
     videoVersion: comment.videoVersion,
     timecode: normalizedTimecode,
+    timecodeEnd: (comment.timecodeEnd && typeof comment.timecodeEnd === 'string' && isValidTimecode(comment.timecodeEnd.trim()))
+      ? comment.timecodeEnd.trim()
+      : null,
     content: comment.content,
     isInternal: comment.isInternal,
     authorType,

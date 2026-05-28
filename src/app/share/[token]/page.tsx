@@ -124,6 +124,7 @@ export default function SharePage() {
   const tokenRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
   const sidebarThumbnailRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
+  const lastVideoTokenRefreshAtRef = useRef(0)
   const uploadAccessUrlCacheRef = useRef<Map<string, UploadAccessUrlCacheEntry>>(new Map())
   const uploadAccessUrlRequestCacheRef = useRef<Map<string, Promise<UploadAccessUrlCacheEntry | null>>>(new Map())
   const logoSrc = '/api/branding/logo'
@@ -2001,6 +2002,50 @@ export default function SharePage() {
     )
   }, [shareToken, project, fetchVideoToken])
 
+  const refreshViewVideoTokens = useCallback(async (force = false) => {
+    if (project?.enableVideos === false) return
+    if (!project?.videosByName) return
+    if (!shareToken) return
+
+    const now = Date.now()
+    // Prevent rapid duplicate refreshes from focus + visibilitychange firing together.
+    if (!force && now - lastVideoTokenRefreshAtRef.current < 30_000) {
+      return
+    }
+    lastVideoTokenRefreshAtRef.current = now
+
+    const allVideos = Object.values(project.videosByName).flat() as any[]
+    if (allVideos.length === 0) return
+
+    tokenCacheRef.current.clear()
+    tokenRequestCacheRef.current.clear()
+    sidebarVideoCacheRef.current.clear()
+    sidebarThumbnailRequestCacheRef.current.clear()
+
+    const tokenized = await fetchTokensForVideos(allVideos)
+    const tokenizedById = new Map<string, any>()
+    tokenized.forEach((video: any) => {
+      if (video?.id) tokenizedById.set(String(video.id), video)
+    })
+
+    const refreshedVideosByName = Object.fromEntries(
+      Object.entries(project.videosByName).map(([name, versions]: [string, any]) => {
+        const refreshed = (Array.isArray(versions) ? versions : []).map((video: any) => {
+          const cached = tokenizedById.get(String(video.id))
+          return cached || video
+        })
+        return [name, refreshed]
+      })
+    )
+
+    setAllVideosByName(refreshedVideosByName)
+
+    if (activeVideoName && refreshedVideosByName[activeVideoName]) {
+      setActiveVideosRaw(refreshedVideosByName[activeVideoName])
+      setActiveVideos(refreshedVideosByName[activeVideoName])
+    }
+  }, [activeVideoName, fetchTokensForVideos, project?.enableVideos, project?.videosByName, shareToken])
+
   useEffect(() => {
     let isMounted = true
 
@@ -2070,6 +2115,29 @@ export default function SharePage() {
       // Silently fail - this is just a performance optimization
     })
   }, [project?.videosByName, shareToken, fetchTokensForVideos])
+
+  // Refresh short-lived content tokens after idle/AFK when the tab becomes active again.
+  // This mirrors the FILES area strategy of re-resolving expiring access URLs.
+  useEffect(() => {
+    if (!isAuthenticated || isAdminSession) return
+    if (!shareToken) return
+
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshViewVideoTokens()
+      }
+    }
+    const handleFocus = () => {
+      void refreshViewVideoTokens()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisible)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisible)
+    }
+  }, [isAdminSession, isAuthenticated, refreshViewVideoTokens, shareToken])
 
   // Handle video selection
   const handleVideoSelect = (videoName: string) => {
@@ -2608,7 +2676,7 @@ export default function SharePage() {
       style={{ '--admin-header-height': '56px' } as React.CSSProperties}
     >
       {/* Sticky breadcrumb header — spans full width above sidebar + content */}
-      <div className="flex-shrink-0 h-12 my-[4px] border border-border bg-card rounded-lg flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="flex-shrink-0 h-12 my-[4px] border border-border bg-card rounded-lg flex items-center pl-4 pr-3 lg:pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Project section */}
         <span className="text-muted-foreground whitespace-nowrap hidden sm:inline flex-shrink-0">Project:</span>
@@ -2731,7 +2799,7 @@ export default function SharePage() {
               className={cn(
                 'h-full rounded-none border-y-0 border-l border-r-0 px-4',
                 desktopContentTab !== 'view' &&
-                  'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                  'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('view')}
             >
@@ -2744,7 +2812,7 @@ export default function SharePage() {
               className={cn(
                 'h-full rounded-none border-y-0 border-l px-4',
                 desktopContentTab !== 'files' &&
-                  'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                  'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('files')}
             >
@@ -2764,7 +2832,7 @@ export default function SharePage() {
               disabled={!hasViewContent}
               className={cn(
                 'w-full',
-                desktopContentTab !== 'view' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                desktopContentTab !== 'view' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('view')}
             >
@@ -2776,7 +2844,7 @@ export default function SharePage() {
               size="sm"
               className={cn(
                 'w-full',
-                desktopContentTab !== 'files' && 'bg-primary/18 text-white border-primary/30 hover:bg-primary/24 hover:text-white'
+                desktopContentTab !== 'files' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
               )}
               onClick={() => setDesktopContentTab('files')}
             >
@@ -3299,7 +3367,10 @@ function ShareFeedbackGrid({
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
                 selectedTimestamp={management.selectedTimestamp}
+                selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
+                onClearRange={management.handleClearRange}
+                showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={Boolean(project?.useFullTimecode)}
                 replyingToComment={management.replyingToComment}
@@ -3395,7 +3466,10 @@ function ShareFeedbackGrid({
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
                 selectedTimestamp={management.selectedTimestamp}
+                selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
+                onClearRange={management.handleClearRange}
+                showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={Boolean(project?.useFullTimecode)}
                 replyingToComment={management.replyingToComment}

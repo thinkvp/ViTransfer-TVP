@@ -14,6 +14,7 @@ interface NotificationData {
   authorEmail?: string
   content?: string
   timecode?: string | null
+  timecodeEnd?: string | null
   isReply?: boolean
   approved?: boolean
   approvedVideos?: Array<{ id: string; name: string }>
@@ -64,15 +65,23 @@ interface AdminSummaryData {
   }>
 }
 
-function formatTimecodeForEmail(timecode: string | null | undefined, useFullTimecode: boolean): string {
+function formatTimecodeForEmail(
+  timecode: string | null | undefined,
+  useFullTimecode: boolean,
+  timecodeEnd?: string | null
+): string {
   if (!timecode) return ''
 
-  if (useFullTimecode) {
-    return formatTimecodeDisplay(timecode)
+  const formatOne = (tc: string) => {
+    if (useFullTimecode) return formatTimecodeDisplay(tc)
+    return formatTimecodeDisplay(tc, { showFrames: false, durationSeconds: 0 })
   }
 
-  // Force M:SS (total minutes) display, even for > 1 hour timestamps.
-  return formatTimecodeDisplay(timecode, { showFrames: false, durationSeconds: 0 })
+  const start = formatOne(timecode)
+  if (timecodeEnd) {
+    return `${start} – ${formatOne(timecodeEnd)}`
+  }
+  return start
 }
 
 /**
@@ -119,7 +128,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
     return `
       <div style="padding:10px 0;">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode)}` : ''}
+          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode, n.timecodeEnd)}` : ''}
         </div>
         <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:2px;">${escapeHtml(n.authorName)}</div>
         ${isReply ? `<div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Replying to ${escapeHtml(n.parentComment!.authorName)} — "${escapeHtml(n.parentComment!.content.substring(0, 60))}${n.parentComment!.content.length > 60 ? '...' : ''}"</div>` : ''}
@@ -182,7 +191,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
     const items = project.notifications.map((n, index) => `
       <div style="padding:10px 0;${index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''}">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode)}` : ''}
+          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode, n.timecodeEnd)}` : ''}
         </div>
         <div style="margin-bottom:4px;">
           <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(n.authorName)}</span>

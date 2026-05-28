@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
-import { Send, Paperclip, X, Clock, ChevronDown, Check, Trash2, Keyboard, Mic, Square } from 'lucide-react'
+import { Send, Paperclip, Clock, ChevronDown, Check, Trash2, Keyboard, Mic, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
@@ -37,7 +37,10 @@ interface CommentInputProps {
 
   // Timestamp
   selectedTimestamp: number | null
+  selectedEndTimestamp?: number | null
   onClearTimestamp: () => void
+  onClearRange?: () => void
+  showTimestampReset?: boolean
   selectedVideoFps: number // FPS of the currently selected video
 
   // Display
@@ -100,7 +103,10 @@ export default function CommentInput({
   onVoiceNoteSelect,
   onVoiceNoteClear,
   selectedTimestamp,
+  selectedEndTimestamp = null,
   onClearTimestamp,
+  onClearRange,
+  showTimestampReset = false,
   selectedVideoFps,
   useFullTimecode = false,
   replyingToComment,
@@ -509,6 +515,17 @@ export default function CommentInput({
     }
   }
 
+  const displayedStartTimestamp = selectedTimestamp ?? 0
+  const displayedEndTimestamp = selectedEndTimestamp
+  const displayTime = useFullTimecode
+    ? secondsToTimecode(displayedStartTimestamp, selectedVideoFps || 24)
+    : formatTimestamp(displayedStartTimestamp)
+  const displayRangeTime = displayedEndTimestamp !== null
+    ? `${displayTime} - ${useFullTimecode
+      ? secondsToTimecode(displayedEndTimestamp, selectedVideoFps || 24)
+      : formatTimestamp(displayedEndTimestamp)}`
+    : displayTime
+
   return (
     <div
       style={containerStyle}
@@ -550,18 +567,9 @@ export default function CommentInput({
         </div>
       )}
 
-      {/* Time + Name row */}
+      {/* Name row */}
       {!currentVideoRestricted && (
         <div className="mb-3 flex items-center gap-3 min-w-0">
-          <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 bg-warning-visible text-warning border-2 border-warning-visible flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            <span className="tabular-nums">
-              {useFullTimecode
-                ? secondsToTimecode(selectedTimestamp ?? 0, selectedVideoFps || 24)
-                : formatTimestamp(selectedTimestamp ?? 0)}
-            </span>
-          </span>
-
           {showAuthorInput ? (
             <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Name:</span>
@@ -735,13 +743,53 @@ export default function CommentInput({
           </Dialog>
 
           <div>
+            {!currentVideoRestricted && (
+              <div className="w-full rounded-t-lg border border-input border-b-0 bg-muted/35 px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs">
+                <div className="min-w-0 inline-flex items-center gap-1 rounded-full border border-amber-300/80 bg-amber-100/80 px-2 py-0.5 text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-300 font-medium tabular-nums">
+                  <Clock className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{displayRangeTime}</span>
+                </div>
+
+                <div className="flex items-center gap-2 min-w-0">
+                  {showTimestampReset && (
+                    <button
+                      type="button"
+                      onClick={onClearTimestamp}
+                      className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                      title="Reset to original timestamp"
+                    >
+                      Reset
+                    </button>
+                  )}
+
+                  {selectedEndTimestamp !== null && (
+                  <button
+                    type="button"
+                    onClick={() => onClearRange?.()}
+                    className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    title="Reset out time"
+                    aria-label="Reset out time"
+                  >
+                    Reset
+                  </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <Textarea
               id="feedback-input"
               placeholder="Type your message..."
               value={newComment}
               onChange={(e) => onCommentChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="resize-none"
+              onFocus={() => {
+                window.dispatchEvent(new CustomEvent('activateCommentRange'))
+              }}
+              className={cn(
+                'resize-none',
+                !currentVideoRestricted && 'rounded-t-none border-t-0'
+              )}
               rows={2}
               disabled={loading}
             />

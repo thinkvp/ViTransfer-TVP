@@ -7,7 +7,7 @@ import Image from 'next/image'
 type Video = any
 type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2 } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -143,6 +143,7 @@ export default function VideoPlayer({
   const [canShowTimelineHover, setCanShowTimelineHover] = useState(true)
   const [isMobileViewport, setIsMobileViewport] = useState(false)
   const [isLgViewport, setIsLgViewport] = useState(false)
+  const [isDesktopControlsNarrow, setIsDesktopControlsNarrow] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -207,6 +208,24 @@ export default function VideoPlayer({
   })
   const isScrubbingRef = useRef(false)
 
+  // Comment range selection state (two-handle timeline overlay)
+  const [commentRangeActive, setCommentRangeActive] = useState(false)
+  const [commentRangeStart, setCommentRangeStart] = useState(0)
+  const [commentRangeEnd, setCommentRangeEnd] = useState(0)
+  const commentRangeActiveRef = useRef(false)
+  const commentRangeStartRef = useRef(0)
+  const commentRangeEndRef = useRef(0)
+  const commentRangeHasExplicitSelectionRef = useRef(false)
+  const keepTimelineHoverPinnedRef = useRef(false)
+  const isRangeFramePreviewActiveRef = useRef(false)
+  const rangeFramePreviewOriginalPlayheadRef = useRef<number | null>(null)
+  const suppressTimelineSeekUntilRef = useRef(0)
+  const draggingRangeHandle = useRef<'start' | 'end' | null>(null)
+  // Sync ref so event handlers have a non-stale view of active state
+  useEffect(() => { commentRangeActiveRef.current = commentRangeActive }, [commentRangeActive])
+  useEffect(() => { commentRangeStartRef.current = commentRangeStart }, [commentRangeStart])
+  useEffect(() => { commentRangeEndRef.current = commentRangeEnd }, [commentRangeEnd])
+
   useEffect(() => {
     if (typeof window === 'undefined') return
 
@@ -223,6 +242,31 @@ export default function VideoPlayer({
     mql.addListener(update)
     return () => mql.removeListener(update)
   }, [])
+
+  useEffect(() => {
+    const container = playerContainerRef.current
+    if (!container) {
+      setIsDesktopControlsNarrow(false)
+      return
+    }
+
+    const DESKTOP_FRAME_STEP_MIN_WIDTH = 1000
+    const update = () => {
+      const width = container.clientWidth
+      setIsDesktopControlsNarrow(isLgViewport && width > 0 && width < DESKTOP_FRAME_STEP_MIN_WIDTH)
+    }
+
+    update()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update)
+      return () => window.removeEventListener('resize', update)
+    }
+
+    const observer = new ResizeObserver(() => update())
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [isLgViewport])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -414,17 +458,17 @@ export default function VideoPlayer({
 
   const timelineCommentMarkers = useMemo(() => {
     if (disableCommentsUI) {
-      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
+      return [] as Array<{ id: string; seconds: number; timecodeEndSeconds: number | null; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
     }
 
     const duration = effectiveDurationSeconds
     if (!selectedVideo?.id || !duration || duration <= 0) {
-      return [] as Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
+      return [] as Array<{ id: string; seconds: number; timecodeEndSeconds: number | null; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
     }
 
     const fps = (selectedVideo as any)?.fps || 24
 
-    const markers: Array<{ id: string; seconds: number; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }> = []
+    const markers: Array<{ id: string; seconds: number; timecodeEndSeconds: number | null; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }> = []
     // Only show markers for top-level comments.
     // Replies are nested and should not create their own timeline markers.
     for (const comment of commentsForTimeline || []) {
@@ -437,9 +481,18 @@ export default function VideoPlayer({
         const seconds = timecodeToSeconds(String(comment.timecode), fps)
         if (!Number.isFinite(seconds)) continue
         const clamped = Math.min(duration, Math.max(0, seconds))
+        const timecodeEndSeconds = (() => {
+          const rawEnd = (comment as any).timecodeEnd
+          if (!rawEnd) return null
+          try {
+            const s = timecodeToSeconds(String(rawEnd), fps)
+            return Number.isFinite(s) ? Math.min(duration, Math.max(0, s)) : null
+          } catch { return null }
+        })()
         markers.push({
           id: String(comment.id),
           seconds: clamped,
+          timecodeEndSeconds,
           isInternal: Boolean((comment as any).isInternal),
           replyCount: Array.isArray((comment as any).replies) ? (comment as any).replies.length : 0,
           displayColor: (comment as any).displayColor || null,
@@ -518,6 +571,10 @@ export default function VideoPlayer({
       window.dispatchEvent(new CustomEvent('videoChanged', {
         detail: { videoId: selectedVideo.id }
       }))
+
+      // Deactivate any active comment range when switching videos
+      setCommentRangeActive(false)
+      draggingRangeHandle.current = null
     }
   }, [selectedVideo?.id])
 
@@ -534,6 +591,122 @@ export default function VideoPlayer({
     }
     previousVideoNameRef.current = activeVideoName
   }, [activeVideoName])
+
+  // Comment range activation/deactivation driven by CommentInput focus
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (disableCommentsUI) return
+
+    const emitRangeChanged = (start: number, end: number) => {
+      const separation = end - start
+      const hasRange = commentRangeHasExplicitSelectionRef.current && separation >= 0.5
+      window.dispatchEvent(new CustomEvent('commentRangeChanged', {
+        detail: { start, ...(hasRange ? { end } : {}) }
+      }))
+    }
+
+    const handleActivate = () => {
+      // If already active, don't reset — let the user keep their current range.
+      if (commentRangeActiveRef.current) return
+      const current = currentTimeRef.current
+      const duration = effectiveDurationSeconds
+      const initialVisualGap = Math.min(0.8, Math.max(0.25, duration * 0.02))
+      const start = duration > initialVisualGap
+        ? Math.min(current, duration - initialVisualGap)
+        : Math.max(0, current)
+      const end = duration > 0
+        ? Math.min(duration, start + initialVisualGap)
+        : start + initialVisualGap
+      setCommentRangeActive(true)
+      commentRangeHasExplicitSelectionRef.current = false
+      keepTimelineHoverPinnedRef.current = false
+      // Start with a visible gap; still treated as a point until the user explicitly drags a handle.
+      setCommentRangeStart(start)
+      setCommentRangeEnd(end)
+      commentRangeStartRef.current = start
+      commentRangeEndRef.current = end
+      // Dispatch start only; end is omitted because handles are together.
+      emitRangeChanged(start, end)
+    }
+
+    const handleDeactivate = () => {
+      setCommentRangeActive(false)
+      commentRangeHasExplicitSelectionRef.current = false
+      keepTimelineHoverPinnedRef.current = false
+      isRangeFramePreviewActiveRef.current = false
+      rangeFramePreviewOriginalPlayheadRef.current = null
+      draggingRangeHandle.current = null
+    }
+
+    const handleResetOut = () => {
+      if (!commentRangeActiveRef.current) return
+      const start = commentRangeStartRef.current
+      const duration = effectiveDurationSeconds
+      const initialVisualGap = Math.min(0.8, Math.max(0.25, duration * 0.02))
+      const end = duration > 0
+        ? Math.min(duration, start + initialVisualGap)
+        : start + initialVisualGap
+      setCommentRangeEnd(end)
+      commentRangeEndRef.current = end
+      commentRangeHasExplicitSelectionRef.current = false
+      emitRangeChanged(start, end)
+    }
+
+    const handleAdjustFromInput = (event: Event) => {
+      const e = event as CustomEvent<{ handle?: 'start' | 'end'; deltaSeconds?: number }>
+      const handle = e.detail?.handle
+      const delta = typeof e.detail?.deltaSeconds === 'number' ? e.detail.deltaSeconds : 0
+      if (!handle || !Number.isFinite(delta) || delta === 0) return
+
+      const duration = effectiveDurationSeconds
+      const tinyGap = 0.1
+      if (!commentRangeActiveRef.current) {
+        const current = currentTimeRef.current
+        const baseStart = duration > tinyGap
+          ? Math.min(current, duration - tinyGap)
+          : Math.max(0, current)
+        const baseEnd = duration > 0
+          ? Math.min(duration, baseStart + tinyGap)
+          : baseStart + tinyGap
+        setCommentRangeActive(true)
+        setCommentRangeStart(baseStart)
+        setCommentRangeEnd(baseEnd)
+        commentRangeStartRef.current = baseStart
+        commentRangeEndRef.current = baseEnd
+        commentRangeHasExplicitSelectionRef.current = false
+      }
+
+      const start = commentRangeStartRef.current
+      const end = commentRangeEndRef.current
+
+      if (handle === 'start') {
+        const nextStart = Math.max(0, Math.min(start + delta, end - tinyGap))
+        setCommentRangeStart(nextStart)
+        commentRangeStartRef.current = nextStart
+        commentRangeHasExplicitSelectionRef.current = (end - nextStart) >= 0.5
+        emitRangeChanged(nextStart, end)
+        return
+      }
+
+      const maxEnd = duration > 0 ? duration : end + Math.abs(delta)
+      const nextEnd = Math.min(maxEnd, Math.max(end + delta, start + tinyGap))
+      setCommentRangeEnd(nextEnd)
+      commentRangeEndRef.current = nextEnd
+      commentRangeHasExplicitSelectionRef.current = (nextEnd - start) >= 0.5
+      emitRangeChanged(start, nextEnd)
+    }
+
+    window.addEventListener('activateCommentRange', handleActivate)
+    window.addEventListener('deactivateCommentRange', handleDeactivate)
+    window.addEventListener('resetCommentRangeOut', handleResetOut)
+    window.addEventListener('adjustCommentRangeHandle', handleAdjustFromInput)
+    return () => {
+      window.removeEventListener('activateCommentRange', handleActivate)
+      window.removeEventListener('deactivateCommentRange', handleDeactivate)
+      window.removeEventListener('resetCommentRangeOut', handleResetOut)
+      window.removeEventListener('adjustCommentRangeHandle', handleAdjustFromInput)
+    }
+  }, [disableCommentsUI, effectiveDurationSeconds])
 
   const isInFullscreen = isFullscreen || isPseudoFullscreen
   const prevIsInFullscreenRef = useRef(false)
@@ -1074,6 +1247,49 @@ export default function VideoPlayer({
     })
   }
 
+  const beginRangeFramePreview = () => {
+    if (!isRangeFramePreviewActiveRef.current) {
+      isRangeFramePreviewActiveRef.current = true
+      rangeFramePreviewOriginalPlayheadRef.current = currentTimeRef.current
+    }
+  }
+
+  const previewVideoFrameAt = (timeSeconds: number) => {
+    const video = videoRef.current
+    if (!video) return
+    try {
+      setShowPosterOverlay(false)
+      video.currentTime = timeSeconds
+    } catch {
+      // ignore seek failures during drag preview
+    }
+  }
+
+  const restorePlayheadAfterRangePreview = () => {
+    const resumeTime = rangeFramePreviewOriginalPlayheadRef.current
+    if (!isRangeFramePreviewActiveRef.current || resumeTime === null) return
+
+    const video = videoRef.current
+    if (video) {
+      try {
+        video.currentTime = resumeTime
+      } catch {
+        // ignore
+      }
+    }
+
+    currentTimeRef.current = resumeTime
+    setCurrentTimeSeconds(resumeTime)
+    window.dispatchEvent(
+      new CustomEvent('videoTimeUpdated', {
+        detail: { time: resumeTime, videoId: selectedVideoIdRef.current },
+      })
+    )
+
+    isRangeFramePreviewActiveRef.current = false
+    rangeFramePreviewOriginalPlayheadRef.current = null
+  }
+
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
     if (initialSeekTime !== null && videoRef.current && videoUrl && !hasInitiallySeenRef.current) {
@@ -1241,6 +1457,7 @@ export default function VideoPlayer({
         e.preventDefault()
         e.stopPropagation()
         if (video.paused) {
+          restorePlayheadAfterRangePreview()
           video.play()
         } else {
           video.pause()
@@ -1276,18 +1493,7 @@ export default function VideoPlayer({
       if (e.ctrlKey && e.code === 'KeyJ') {
         e.preventDefault()
         e.stopPropagation()
-        if (!selectedVideo?.fps) return
-
-        if (!video.paused) {
-          video.pause()
-        }
-
-        const frameDuration = 1 / selectedVideo.fps
-        video.currentTime = Math.max(0, video.currentTime - frameDuration)
-        currentTimeRef.current = video.currentTime // Update ref for comment timecode
-        window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
-          detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current }
-        }))
+        handleStepFrameBackward()
         return
       }
 
@@ -1295,21 +1501,7 @@ export default function VideoPlayer({
       if (e.ctrlKey && e.code === 'KeyL') {
         e.preventDefault()
         e.stopPropagation()
-        if (!selectedVideo?.fps) return
-
-        if (!video.paused) {
-          video.pause()
-        }
-
-        const frameDuration = 1 / selectedVideo.fps
-        const duration = Number.isFinite(video.duration) ? video.duration : undefined
-        video.currentTime = duration
-          ? Math.min(duration, video.currentTime + frameDuration)
-          : video.currentTime + frameDuration
-        currentTimeRef.current = video.currentTime // Update ref for comment timecode
-        window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
-          detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current }
-        }))
+        handleStepFrameForward()
         return
       }
     }
@@ -1326,6 +1518,10 @@ export default function VideoPlayer({
       const now = Date.now()
       // Throttle to update max every 200ms instead of 60 times per second
       if (now - lastTimeUpdateRef.current > 200) {
+        if (isRangeFramePreviewActiveRef.current) {
+          lastTimeUpdateRef.current = now
+          return
+        }
         currentTimeRef.current = videoRef.current.currentTime
         setCurrentTimeSeconds(videoRef.current.currentTime)
         if (Number.isFinite(videoRef.current.duration)) {
@@ -1353,6 +1549,7 @@ export default function VideoPlayer({
     if (!video) return
     try {
       if (video.paused) {
+        restorePlayheadAfterRangePreview()
         setShowPosterOverlay(false)
         await video.play()
       } else {
@@ -1507,6 +1704,37 @@ export default function VideoPlayer({
     setPlaybackSpeed((prev) => Math.min(2.0, prev + 0.25))
   }
 
+  const stepVideoFrame = (direction: -1 | 1) => {
+    const video = videoRef.current
+    const fps = selectedVideo?.fps
+    if (!video || !fps) return
+
+    if (!video.paused) {
+      video.pause()
+    }
+
+    const frameDuration = 1 / fps
+    const duration = Number.isFinite(video.duration) ? video.duration : undefined
+    const nextTime = direction < 0
+      ? Math.max(0, video.currentTime - frameDuration)
+      : (duration ? Math.min(duration, video.currentTime + frameDuration) : video.currentTime + frameDuration)
+
+    video.currentTime = nextTime
+    currentTimeRef.current = nextTime
+    setCurrentTimeSeconds(nextTime)
+    window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
+      detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current },
+    }))
+  }
+
+  const handleStepFrameBackward = () => {
+    stepVideoFrame(-1)
+  }
+
+  const handleStepFrameForward = () => {
+    stepVideoFrame(1)
+  }
+
   // Safety check: if no videos available, show message
   if (!selectedVideo || displayVideos.length === 0) {
     return (
@@ -1645,6 +1873,7 @@ export default function VideoPlayer({
                 }}
                 onPlay={() => {
                   setIsPlaying(true)
+                  window.dispatchEvent(new CustomEvent('videoPlaybackStarted'))
 
                   // Track a video view (play) for share-token sessions only.
                   // Guest-video-link views are tracked server-side (with IP dedupe).
@@ -1839,11 +2068,19 @@ export default function VideoPlayer({
                 }}
                 onPointerLeave={() => {
                   isScrubbingRef.current = false
+                  if (keepTimelineHoverPinnedRef.current) return
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onPointerDown={(e) => {
+                  if (Date.now() < suppressTimelineSeekUntilRef.current) {
+                    e.preventDefault()
+                    return
+                  }
                   e.preventDefault()
+                  isRangeFramePreviewActiveRef.current = false
+                  rangeFramePreviewOriginalPlayheadRef.current = null
+                  keepTimelineHoverPinnedRef.current = false
                   // If the user is seeking, show actual video frames (not the poster overlay).
                   setShowPosterOverlay(false)
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
@@ -1865,8 +2102,15 @@ export default function VideoPlayer({
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onClick={(e) => {
+                  if (Date.now() < suppressTimelineSeekUntilRef.current) {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    return
+                  }
                   // If the user is seeking, show actual video frames (not the poster overlay).
                   setShowPosterOverlay(false)
+                  isRangeFramePreviewActiveRef.current = false
+                  rangeFramePreviewOriginalPlayheadRef.current = null
                   if (videoRef.current) {
                     const { time } = getTimeFromScrubEvent(e.clientX)
                     videoRef.current.currentTime = time
@@ -1883,6 +2127,177 @@ export default function VideoPlayer({
                       : '0%'
                   }}
                 />
+
+                {/* Comment range overlay — shown when user starts typing a comment */}
+                {commentRangeActive && effectiveDurationSeconds > 0 && (
+                  <>
+                    {/* Amber fill between handles */}
+                    {(commentRangeEnd - commentRangeStart) >= 0.5 && (
+                      <div
+                        className="absolute top-0 h-full bg-amber-400/30 pointer-events-none z-5"
+                        style={{
+                          left: `${Math.min(100, Math.max(0, (commentRangeStart / effectiveDurationSeconds) * 100))}%`,
+                          width: `${Math.min(100, Math.max(0, ((commentRangeEnd - commentRangeStart) / effectiveDurationSeconds) * 100))}%`,
+                        }}
+                      />
+                    )}
+
+                    {/* IN handle (left) */}
+                    <div
+                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-l"
+                      style={{ left: `${Math.min(100, Math.max(0, (commentRangeStart / effectiveDurationSeconds) * 100))}%`, transform: 'translateX(-50%)' }}
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        e.currentTarget.setPointerCapture(e.pointerId)
+                        keepTimelineHoverPinnedRef.current = true
+                        beginRangeFramePreview()
+                        draggingRangeHandle.current = 'start'
+                        videoRef.current?.pause()
+                      }}
+                      onPointerMove={(e) => {
+                        if (draggingRangeHandle.current !== 'start') return
+                        const { time } = getTimeFromScrubEvent(e.clientX)
+                        const newStart = Math.max(0, Math.min(time, commentRangeEnd - 0.1))
+                        setCommentRangeStart(newStart)
+                        commentRangeStartRef.current = newStart
+                        const separation = commentRangeEnd - newStart
+                        commentRangeHasExplicitSelectionRef.current = separation >= 0.5
+                        // Only propagate an 'end' once the handles are meaningfully apart.
+                        window.dispatchEvent(new CustomEvent('commentRangeChanged', {
+                          detail: { start: newStart, ...(commentRangeHasExplicitSelectionRef.current ? { end: commentRangeEnd } : {}) }
+                        }))
+                        previewVideoFrameAt(newStart)
+                        updateHoverFromClientX(e.clientX)
+                      }}
+                      onPointerUp={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+                        draggingRangeHandle.current = null
+                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
+                      }}
+                      onPointerCancel={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+                        draggingRangeHandle.current = null
+                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                      }}
+                    />
+
+                    {/* OUT handle (right) */}
+                    <div
+                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-r"
+                      style={{ left: `${Math.min(100, Math.max(0, (commentRangeEnd / effectiveDurationSeconds) * 100))}%`, transform: 'translateX(-50%)' }}
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        e.currentTarget.setPointerCapture(e.pointerId)
+                        keepTimelineHoverPinnedRef.current = true
+                        beginRangeFramePreview()
+                        draggingRangeHandle.current = 'end'
+                        videoRef.current?.pause()
+                      }}
+                      onPointerMove={(e) => {
+                        if (draggingRangeHandle.current !== 'end') return
+                        const { time } = getTimeFromScrubEvent(e.clientX)
+                        const duration = effectiveDurationSeconds
+                        const newEnd = Math.min(
+                          duration > 0 ? duration : time,
+                          Math.max(time, commentRangeStart + 0.1)
+                        )
+                        setCommentRangeEnd(newEnd)
+                        commentRangeEndRef.current = newEnd
+                        const separation = newEnd - commentRangeStart
+                        commentRangeHasExplicitSelectionRef.current = separation >= 0.5
+                        window.dispatchEvent(new CustomEvent('commentRangeChanged', {
+                          detail: { start: commentRangeStart, ...(commentRangeHasExplicitSelectionRef.current ? { end: newEnd } : {}) }
+                        }))
+                        previewVideoFrameAt(newEnd)
+                        updateHoverFromClientX(e.clientX)
+                      }}
+                      onPointerUp={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+                        draggingRangeHandle.current = null
+                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
+                      }}
+                      onPointerCancel={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+                        draggingRangeHandle.current = null
+                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                      }}
+                    />
+
+                    {/* Dismiss ✕ — floats above the right (OUT) handle */}
+                    <button
+                      type="button"
+                      className="absolute z-30 flex items-center justify-center rounded-sm bg-amber-400 text-amber-900 hover:bg-amber-300 leading-none"
+                      style={{
+                        top: '-16px',
+                        left: `${Math.min(100, Math.max(0, (commentRangeEnd / effectiveDurationSeconds) * 100))}%`,
+                        transform: 'translateX(-50%)',
+                        width: '14px',
+                        height: '14px',
+                        fontSize: '10px',
+                        lineHeight: 1,
+                      }}
+                      title="Clear time range"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
+                      }}
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+
+                {/* Range spans for comments that have a timecodeEnd — rendered below avatar dots */}
+                {timelineCommentMarkers.some(m => m.timecodeEndSeconds !== null) && effectiveDurationSeconds > 0 && (
+                  <div className="absolute inset-0 z-8 pointer-events-none">
+                    {timelineCommentMarkers.filter(m => m.timecodeEndSeconds !== null).map((m) => {
+                      const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
+                      const widthPct = Math.min(100 - leftPct, Math.max(0, ((m.timecodeEndSeconds! - m.seconds) / effectiveDurationSeconds) * 100))
+                      return (
+                        <div
+                          key={`range-bar-${m.id}`}
+                          className="absolute top-1/4 h-1/2 rounded-sm"
+                          style={{
+                            left: `${leftPct}%`,
+                            width: `${widthPct}%`,
+                            background: m.isInternal
+                              ? 'rgba(100,116,139,0.45)'
+                              : 'rgba(251,191,36,0.45)',
+                            borderLeft: m.isInternal
+                              ? '2px solid rgba(100,116,139,0.9)'
+                              : '2px solid rgba(251,191,36,0.9)',
+                            borderRight: m.isInternal
+                              ? '2px solid rgba(100,116,139,0.9)'
+                              : '2px solid rgba(251,191,36,0.9)',
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                )}
 
                 {/* Comment markers */}
                 {timelineCommentMarkers.length > 0 && effectiveDurationSeconds > 0 && (
@@ -2114,6 +2529,19 @@ export default function VideoPlayer({
 
                 {!shouldHideSpeedControls && (
                   <>
+                    {!isDesktopControlsNarrow && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleStepFrameBackward}
+                        aria-label="Previous frame"
+                        title="Previous frame"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </Button>
+                    )}
+
                     <Button
                       type="button"
                       variant="outline"
@@ -2135,6 +2563,19 @@ export default function VideoPlayer({
                     >
                       <FastForward className="w-4 h-4" />
                     </Button>
+
+                    {!isDesktopControlsNarrow && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleStepFrameForward}
+                        aria-label="Next frame"
+                        title="Next frame"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                    )}
                   </>
                 )}
               </div>

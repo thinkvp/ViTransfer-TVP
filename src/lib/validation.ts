@@ -240,6 +240,9 @@ export const createCommentSchema = z.object({
   timecode: z.string().refine(isValidTimecode, {
     message: 'Invalid timecode format. Expected HH:MM:SS:FF'
   }),
+  timecodeEnd: z.string().refine(isValidTimecode, {
+    message: 'Invalid timecodeEnd format. Expected HH:MM:SS:FF'
+  }).optional(),
   content: contentSchema,
   authorName: safeStringSchema(1, 255).optional().nullable(),
   authorEmail: emailSchema.optional().nullable(),

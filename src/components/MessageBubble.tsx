@@ -282,15 +282,21 @@ export default function MessageBubble({
             {!isReply && comment.timecode ? (
               <button
                 onClick={handleTimestampClick}
-                className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap mr-2 align-baseline"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap mr-2 align-baseline bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-400/50 hover:bg-amber-500/25 transition-colors"
                 title="Seek to this timecode"
               >
-                <Clock className="w-3.5 h-3.5" />
-                <span className="underline decoration-dotted">
+                <Clock className="w-3 h-3 flex-shrink-0" />
+                <span className="tabular-nums">
                   {formatTimecodeDisplay(comment.timecode, {
                     showFrames,
                     durationSeconds: timecodeDurationSeconds,
                   })}
+                  {comment.timecodeEnd ? (
+                    <> &ndash; {formatTimecodeDisplay(comment.timecodeEnd, {
+                      showFrames,
+                      durationSeconds: timecodeDurationSeconds,
+                    })}</>
+                  ) : null}
                 </span>
               </button>
             ) : null}

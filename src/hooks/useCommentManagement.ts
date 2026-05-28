@@ -69,6 +69,8 @@ export function useCommentManagement({
   const [optimisticComments, setOptimisticComments] = useState<CommentWithReplies[]>([])
   const [newComment, setNewComment] = useState('')
   const [selectedTimestamp, setSelectedTimestamp] = useState<number | null>(0) // Always show; kept in sync with playback
+  const [selectedEndTimestamp, setSelectedEndTimestamp] = useState<number | null>(null) // Range end; null = point comment
+  const [commentDraftAnchorTimestamp, setCommentDraftAnchorTimestamp] = useState<number | null>(null)
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [hasAutoFilledTimestamp, setHasAutoFilledTimestamp] = useState(false)
@@ -80,6 +82,7 @@ export function useCommentManagement({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStatusText, setUploadStatusText] = useState<string>('')
   const previousSelectedVideoIdRef = useRef<string | null>(null)
+  const commentDraftAnchorTimestampRef = useRef<number | null>(null)
 
   const [clientUploadQuota, setClientUploadQuota] = useState<{ usedBytes: number; limitMB: number } | null>(null)
 
@@ -391,6 +394,8 @@ export function useCommentManagement({
         // When switching between different videos, the new video's playhead starts at 0:00.
         // Ensure the comment timecode resets too (VideoPlayer may not emit a time update until playback/seek).
         setSelectedTimestamp(0)
+        setCommentDraftAnchorTimestamp(null)
+        commentDraftAnchorTimestampRef.current = null
         setHasAutoFilledTimestamp(false)
       }
     }
@@ -421,12 +426,41 @@ export function useCommentManagement({
     const handleAddComment = (e: CustomEvent) => {
       setSelectedVideoId(e.detail.videoId)
       setSelectedTimestamp(e.detail.timestamp)
+      const anchor = typeof e.detail.timestamp === 'number' ? e.detail.timestamp : 0
+      setCommentDraftAnchorTimestamp(anchor)
+      commentDraftAnchorTimestampRef.current = anchor
       setHasAutoFilledTimestamp(true)
     }
 
     window.addEventListener('addComment', handleAddComment as EventListener)
     return () => {
       window.removeEventListener('addComment', handleAddComment as EventListener)
+    }
+  }, [])
+
+  // Listen for range updates from VideoPlayer timeline handles
+  useEffect(() => {
+    const handleRangeChanged = (e: CustomEvent) => {
+      const { start, end } = e.detail || {}
+      if (typeof start === 'number') {
+        setSelectedTimestamp(start)
+        if (commentDraftAnchorTimestampRef.current === null) {
+          commentDraftAnchorTimestampRef.current = start
+          setCommentDraftAnchorTimestamp(start)
+        }
+      }
+      // Only show a range when handles are far enough apart (end is only sent when >= 0.5s separation).
+      setSelectedEndTimestamp(typeof end === 'number' ? end : null)
+    }
+    const handleRangeDeactivated = () => {
+      setSelectedEndTimestamp(null)
+    }
+
+    window.addEventListener('commentRangeChanged', handleRangeChanged as EventListener)
+    window.addEventListener('deactivateCommentRange', handleRangeDeactivated)
+    return () => {
+      window.removeEventListener('commentRangeChanged', handleRangeChanged as EventListener)
+      window.removeEventListener('deactivateCommentRange', handleRangeDeactivated)
     }
   }, [])
 
@@ -438,6 +472,8 @@ export function useCommentManagement({
 
       if (typeof time !== 'number') return
       if (!videoId || videoId !== selectedVideoId) return
+      // Keep the unsaved range display stable while a range is active.
+      if (selectedEndTimestamp !== null) return
       setSelectedTimestamp(time)
     }
 
@@ -445,7 +481,7 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('videoTimeUpdated', handleVideoTimeUpdated as EventListener)
     }
-  }, [selectedVideoId])
+  }, [selectedEndTimestamp, selectedVideoId])
 
   useEffect(() => {
     const previousSelectedVideoId = previousSelectedVideoIdRef.current
@@ -470,9 +506,28 @@ export function useCommentManagement({
     setPendingCommentId(null)
     setUploadStatusText('')
     setUploadProgress(null)
+    setSelectedEndTimestamp(null)
+    setCommentDraftAnchorTimestamp(null)
+    commentDraftAnchorTimestampRef.current = null
+    window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
   }, [])
 
   const hasUnsentComment = Boolean(newComment.trim() || attachedFiles.length > 0 || voiceNoteDraft)
+
+  useEffect(() => {
+    const handlePlaybackStarted = () => {
+      // If they resumed playback without drafting anything, clear the temporary range overlay.
+      if (!hasUnsentComment) {
+        setSelectedEndTimestamp(null)
+        window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
+      }
+    }
+
+    window.addEventListener('videoPlaybackStarted', handlePlaybackStarted)
+    return () => {
+      window.removeEventListener('videoPlaybackStarted', handlePlaybackStarted)
+    }
+  }, [hasUnsentComment])
 
   // Submit comment
   const handleSubmitComment = async () => {
@@ -565,6 +620,7 @@ export function useCommentManagement({
       updatedAt: new Date(),
       parentId: replyingToCommentId,
       userId: null,
+      timecodeEnd: null,
       replies: [],
     }
 
@@ -594,10 +650,15 @@ export function useCommentManagement({
       const commentTimecode = commentTimestamp !== null ? secondsToTimecode(commentTimestamp, fps) : '00:00:00:00'
 
       // Build request body - only include fields with values
+      const commentEndTimecode = selectedEndTimestamp !== null && !commentParentId
+        ? secondsToTimecode(selectedEndTimestamp, fps)
+        : undefined
+
       const requestBody: any = {
         projectId,
         videoId: commentVideoId,
         timecode: commentTimecode,
+        ...(commentEndTimecode ? { timecodeEnd: commentEndTimecode } : {}),
         content: commentContent,
         isInternal: isInternalComment,
       }
@@ -737,10 +798,28 @@ export function useCommentManagement({
     setReplyingToCommentId(null)
   }
 
+  const syncTimestampToCurrentPlayhead = () => {
+    window.dispatchEvent(
+      new CustomEvent('getCurrentTime', {
+        detail: {
+          callback: (time: number, videoId: string | null) => {
+            if (typeof time === 'number' && Number.isFinite(time)) {
+              setSelectedTimestamp(time)
+            }
+            if (videoId) {
+              setSelectedVideoId(videoId)
+            }
+          },
+        },
+      })
+    )
+  }
+
   const handleClearTimestamp = () => {
-    setSelectedTimestamp(null)
-    setSelectedVideoId(null)
-    setHasAutoFilledTimestamp(false)
+    setSelectedEndTimestamp(null)
+    // Reset should clear the draft timeline marker and follow the current playhead.
+    window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
+    syncTimestampToCurrentPlayhead()
   }
 
   const findCommentById = (commentId: string): CommentWithReplies | null => {
@@ -884,11 +963,26 @@ export function useCommentManagement({
 
   const replyingToComment = comments.find((c) => c.id === replyingToCommentId) || null
 
+  const handleClearRange = () => {
+    setSelectedEndTimestamp(null)
+    // Reset should clear the draft timeline marker and follow the current playhead.
+    window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
+    syncTimestampToCurrentPlayhead()
+  }
+
+  const shouldShowTimestampReset =
+    commentDraftAnchorTimestamp !== null &&
+    selectedTimestamp !== null &&
+    selectedEndTimestamp === null &&
+    Math.abs(selectedTimestamp - commentDraftAnchorTimestamp) > 0.05
+
   return {
     comments,
     newComment,
     hasUnsentComment,
     selectedTimestamp,
+    selectedEndTimestamp,
+    shouldShowTimestampReset,
     selectedVideoId,
     selectedVideoFps,
     loading,
@@ -903,6 +997,7 @@ export function useCommentManagement({
     handleReply,
     handleCancelReply,
     handleClearTimestamp,
+    handleClearRange,
     handleDeleteComment,
     pendingDeleteCommentId,
     setPendingDeleteCommentId,
