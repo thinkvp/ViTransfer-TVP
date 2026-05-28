@@ -23,7 +23,6 @@ function isExpired(expiresAt: Date): boolean {
  * - token is unknown
  * - token expired
  * - project is CLOSED
- * - project guestMode disabled
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const rateLimitResult = await rateLimit(
@@ -45,7 +44,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           id: true,
           title: true,
           status: true,
-          guestMode: true,
           enableVideos: true,
           watermarkEnabled: true,
           timelinePreviewsEnabled: true,
@@ -81,7 +79,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Expired' }, { status: 410 })
   }
 
-  if (!link.project?.guestMode || link.project.status === 'CLOSED') {
+  if (link.project.status === 'CLOSED') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 

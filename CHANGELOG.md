@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-05-28
+
+### Added
+- **Timeline range comments (in/out) are now supported** — comments can now include an optional `timecodeEnd` alongside `timecode`, backed by a new Prisma migration and schema field; the video timeline includes draggable IN/OUT handles while drafting so a comment can span a precise segment instead of a single frame.
+- **Timeline now visualizes comment ranges** — top-level comments with a range render an amber span on the scrub bar, while point comments continue to render as markers.
+
+### Changed
+- **Comment composer time badge now shows range-aware timestamps with reset controls** — the composer displays either a point timestamp or `start - end` range, supports resetting the active range, and keeps comment draft timing synchronized with timeline range interactions.
+- **Comment timestamps now display ranges across UI and notifications** — message bubbles and email notification templates now render `timecode -> timecodeEnd` when a range exists.
+- **SRT export now honors explicit comment end times** — subtitle cue generation uses stored `timecodeEnd` for root comments when present, falling back to duration heuristics only when no explicit end exists.
+- **Share and admin review header controls were refined for mobile and desktop** — spacing and inactive-tab styling for View/Files toggles were adjusted, and FILES multi-select controls now provide clearer selected-state highlighting.
+
+### Fixed
+- **Share-page video tokens now refresh after tab focus/visibility return** — client share view now re-resolves short-lived video tokens after idle/AFK return to reduce expired-token playback failures.
+- **Guest video links are no longer blocked when project guest mode is disabled** — guest video-link routes now allow token generation/refresh/lookup independent of `guestMode`, while still enforcing closed-project and expiry restrictions; the Guest Links dialog remains available from video actions, and full project guest links are still shown only when guest mode is enabled.
+
 ## [1.8.9] - 2026-05-27
 
 ### Fixed

@@ -61,10 +61,6 @@ async function requireGuestVideoLinkContext(
     return { ok: false, response: NextResponse.json({ error: 'Not found' }, { status: 404 }) }
   }
 
-  if (!project.guestMode) {
-    return { ok: false, response: NextResponse.json({ error: 'Guest access is not enabled for this project' }, { status: 403 }) }
-  }
-
   if (project.status === 'CLOSED') {
     return { ok: false, response: NextResponse.json({ error: 'Project is closed' }, { status: 403 }) }
   }

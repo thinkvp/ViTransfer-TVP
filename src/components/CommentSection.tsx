@@ -310,7 +310,6 @@ export function CommentSectionView({
   }
 
   const generateGuestVideoLink = async () => {
-    if (!guestModeEnabled) return
     if (!projectId || !selectedVideoId) return
 
     setGuestLinkGenerating(true)
@@ -327,7 +326,6 @@ export function CommentSectionView({
   }
 
   const refreshGuestVideoLinkExpiry = async () => {
-    if (!guestModeEnabled) return
     if (!projectId || !selectedVideoId) return
     if (!guestLinkUrl) return
 
@@ -345,7 +343,6 @@ export function CommentSectionView({
   }
 
   const loadExistingGuestVideoLink = useCallback(async () => {
-    if (!guestModeEnabled) return
     if (!guestLinkDialogOpen) return
     if (!projectId || !selectedVideoId) return
 
@@ -392,7 +389,7 @@ export function CommentSectionView({
     } finally {
       setGuestLinkLoadingExisting(false)
     }
-  }, [guestModeEnabled, guestLinkDialogOpen, projectId, selectedVideoId, isAdminView, shareToken])
+  }, [guestLinkDialogOpen, projectId, selectedVideoId, isAdminView, shareToken])
 
   useEffect(() => {
     if (!guestLinkDialogOpen) return
@@ -1069,11 +1066,11 @@ export function CommentSectionView({
                   <Info className="w-3.5 h-3.5" />
                 </Button>
               ) : null}
-              {showVideoActions && guestModeEnabled ? (
+              {showVideoActions ? (
                 <>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="default"
                     size="icon"
                     className="h-7 w-7 flex-shrink-0 sm:hidden"
                     onClick={openGuestLinkDialog}
@@ -1084,7 +1081,7 @@ export function CommentSectionView({
                   </Button>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="default"
                     size="sm"
                     className="h-7 flex-shrink-0 hidden sm:inline-flex"
                     onClick={openGuestLinkDialog}
@@ -1099,100 +1096,96 @@ export function CommentSectionView({
             </div>
           </div>
           )}
-          {showVideoActions || guestModeEnabled ? (
+          {showVideoActions ? (
             <div className={cn("flex items-center gap-2 flex-shrink-0", hideVideoTitle && "ml-auto")}>
-                  {guestModeEnabled ? (
-                      <Dialog open={guestLinkDialogOpen} onOpenChange={setGuestLinkDialogOpen}>
-                        <DialogContent className="max-h-[85dvh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle>Guest Links</DialogTitle>
-                            <DialogDescription>
-                              Guests will not be able to see or leave comments, see version notes or approve videos.
-                            </DialogDescription>
-                          </DialogHeader>
+              <Dialog open={guestLinkDialogOpen} onOpenChange={setGuestLinkDialogOpen}>
+                <DialogContent className="max-h-[85dvh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Guest Links</DialogTitle>
+                    <DialogDescription>
+                      Share a video-only guest link, or a full project guest link when guest mode is enabled.
+                    </DialogDescription>
+                  </DialogHeader>
 
-                          <div className="mt-2 space-y-4">
-                            <div className="rounded-md border border-border bg-muted/30 p-3">
-                              <div className="text-sm font-medium text-foreground">Video-only link (expires in 14 days)</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                View-only link for the currently selected video version. The viewer cannot access other videos.
-                              </div>
+                  <div className="mt-2 space-y-4">
+                    <div className="rounded-md border border-border bg-muted/30 p-3">
+                      <div className="text-sm font-medium text-foreground">Video-only link (expires in 14 days)</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        View-only link for the currently selected video version. The viewer cannot access other videos.
+                      </div>
 
-                              <div className="mt-3 flex items-center gap-2">
-                                {!guestLinkUrl && guestLinkCheckedExisting && guestLinkMissing ? (
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    onClick={generateGuestVideoLink}
-                                    disabled={guestLinkGenerating || !selectedVideoId}
-                                  >
-                                    {guestLinkGenerating ? 'Generating…' : 'Generate Video Link'}
-                                  </Button>
-                                ) : null}
+                      <div className="mt-3 flex items-center gap-2">
+                        {!guestLinkUrl && guestLinkCheckedExisting && guestLinkMissing ? (
+                          <Button
+                            type="button"
+                            variant="default"
+                            onClick={generateGuestVideoLink}
+                            disabled={guestLinkGenerating || !selectedVideoId}
+                          >
+                            {guestLinkGenerating ? 'Generating…' : 'Generate Video Link'}
+                          </Button>
+                        ) : null}
 
-                                {guestLinkUrl ? (
-                                  <>
-                                    <Button type="button" variant="outline" onClick={copyGuestLink}>
-                                      {guestLinkCopied ? 'Copied Video Link' : 'Copy Video Link'}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      onClick={refreshGuestVideoLinkExpiry}
-                                      disabled={guestLinkRefreshing}
-                                    >
-                                      {guestLinkRefreshing ? 'Refreshing…' : 'Refresh Expiry'}
-                                    </Button>
-                                  </>
-                                ) : null}
-                              </div>
+                        {guestLinkUrl ? (
+                          <>
+                            <Button type="button" variant="outline" onClick={copyGuestLink}>
+                              {guestLinkCopied ? 'Copied Video Link' : 'Copy Video Link'}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={refreshGuestVideoLinkExpiry}
+                              disabled={guestLinkRefreshing}
+                            >
+                              {guestLinkRefreshing ? 'Refreshing…' : 'Refresh Expiry'}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
 
-                              {guestLinkError ? (
-                                <div className="mt-2 text-sm text-destructive">{guestLinkError}</div>
-                              ) : null}
+                      {guestLinkError ? (
+                        <div className="mt-2 text-sm text-destructive">{guestLinkError}</div>
+                      ) : null}
 
-                              {guestLinkUrl ? (
-                                <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
-                                  <div className="text-xs text-muted-foreground mb-1">Share URL</div>
-                                  <div className="text-sm break-all font-mono">{guestLinkUrl}</div>
-                                  {guestLinkExpiresAt ? (
-                                    <div className="mt-2 text-xs text-muted-foreground">
-                                      Expires: {formatDateTime(guestLinkExpiresAt)}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-
-                              {!guestLinkUrl && guestLinkLoadingExisting ? (
-                                <div className="mt-3 text-xs text-muted-foreground">Loading existing link…</div>
-                              ) : null}
+                      {guestLinkUrl ? (
+                        <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
+                          <div className="text-xs text-muted-foreground mb-1">Share URL</div>
+                          <div className="text-sm break-all font-mono">{guestLinkUrl}</div>
+                          {guestLinkExpiresAt ? (
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              Expires: {formatDateTime(guestLinkExpiresAt)}
                             </div>
+                          ) : null}
+                        </div>
+                      ) : null}
 
-                            <div className="rounded-md border border-border bg-muted/30 p-3">
-                              <div className="text-sm font-medium text-foreground">Project guest link (expires at project completion)</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                Opens the full project in guest mode (videos only, no comments/approvals).
-                              </div>
+                      {!guestLinkUrl && guestLinkLoadingExisting ? (
+                        <div className="mt-3 text-xs text-muted-foreground">Loading existing link…</div>
+                      ) : null}
+                    </div>
 
-                              {projectGuestUrl ? (
-                                <>
-                                  <div className="mt-3 flex items-center gap-2">
-                                    <Button type="button" variant="outline" onClick={copyProjectGuestLink}>
-                                      {projectGuestLinkCopied ? 'Copied' : 'Copy Project Guest Link'}
-                                    </Button>
-                                  </div>
+                    {guestModeEnabled && projectGuestUrl ? (
+                      <div className="rounded-md border border-border bg-muted/30 p-3">
+                        <div className="text-sm font-medium text-foreground">Project guest link (expires at project completion)</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Opens the full project in guest mode (videos only, no comments/approvals).
+                        </div>
 
-                                  <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
-                                    <div className="text-xs text-muted-foreground mb-1">Share URL</div>
-                                    <div className="text-sm break-all font-mono">{projectGuestUrl}</div>
-                                  </div>
-                                </>
-                              ) : null}
-                            </div>
-                          </div>
-                        </DialogContent>
-                      </Dialog>
-                  ) : null}
+                        <div className="mt-3 flex items-center gap-2">
+                          <Button type="button" variant="outline" onClick={copyProjectGuestLink}>
+                            {projectGuestLinkCopied ? 'Copied' : 'Copy Project Guest Link'}
+                          </Button>
+                        </div>
+
+                        <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
+                          <div className="text-xs text-muted-foreground mb-1">Share URL</div>
+                          <div className="text-sm break-all font-mono">{projectGuestUrl}</div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </DialogContent>
+              </Dialog>
 
                   {showVideoActions ? (
                     <>

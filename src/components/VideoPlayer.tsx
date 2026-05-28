@@ -1445,6 +1445,37 @@ export default function VideoPlayer({
     }
   }, [])
 
+  const stepVideoFrame = useCallback((direction: -1 | 1) => {
+    const video = videoRef.current
+    const fps = selectedVideo?.fps
+    if (!video || !fps) return
+
+    if (!video.paused) {
+      video.pause()
+    }
+
+    const frameDuration = 1 / fps
+    const duration = Number.isFinite(video.duration) ? video.duration : undefined
+    const nextTime = direction < 0
+      ? Math.max(0, video.currentTime - frameDuration)
+      : (duration ? Math.min(duration, video.currentTime + frameDuration) : video.currentTime + frameDuration)
+
+    video.currentTime = nextTime
+    currentTimeRef.current = nextTime
+    setCurrentTimeSeconds(nextTime)
+    window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
+      detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current },
+    }))
+  }, [selectedVideo?.fps])
+
+  const handleStepFrameBackward = useCallback(() => {
+    stepVideoFrame(-1)
+  }, [stepVideoFrame])
+
+  const handleStepFrameForward = useCallback(() => {
+    stepVideoFrame(1)
+  }, [stepVideoFrame])
+
   // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step)
   useEffect(() => {
     const handleKeyboard = (e: KeyboardEvent) => {
@@ -1511,7 +1542,7 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener('keydown', handleKeyboard, { capture: true })
     }
-  }, [selectedVideo])
+  }, [selectedVideo, handleStepFrameBackward, handleStepFrameForward])
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -1704,36 +1735,13 @@ export default function VideoPlayer({
     setPlaybackSpeed((prev) => Math.min(2.0, prev + 0.25))
   }
 
-  const stepVideoFrame = (direction: -1 | 1) => {
-    const video = videoRef.current
-    const fps = selectedVideo?.fps
-    if (!video || !fps) return
+  const isTimelineSeekSuppressed = useCallback(() => {
+    return Date.now() < suppressTimelineSeekUntilRef.current
+  }, [])
 
-    if (!video.paused) {
-      video.pause()
-    }
-
-    const frameDuration = 1 / fps
-    const duration = Number.isFinite(video.duration) ? video.duration : undefined
-    const nextTime = direction < 0
-      ? Math.max(0, video.currentTime - frameDuration)
-      : (duration ? Math.min(duration, video.currentTime + frameDuration) : video.currentTime + frameDuration)
-
-    video.currentTime = nextTime
-    currentTimeRef.current = nextTime
-    setCurrentTimeSeconds(nextTime)
-    window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
-      detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current },
-    }))
-  }
-
-  const handleStepFrameBackward = () => {
-    stepVideoFrame(-1)
-  }
-
-  const handleStepFrameForward = () => {
-    stepVideoFrame(1)
-  }
+  const suppressTimelineSeekForHandleDrag = useCallback(() => {
+    suppressTimelineSeekUntilRef.current = Date.now() + 250
+  }, [])
 
   // Safety check: if no videos available, show message
   if (!selectedVideo || displayVideos.length === 0) {
@@ -2073,7 +2081,7 @@ export default function VideoPlayer({
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onPointerDown={(e) => {
-                  if (Date.now() < suppressTimelineSeekUntilRef.current) {
+                  if (isTimelineSeekSuppressed()) {
                     e.preventDefault()
                     return
                   }
@@ -2102,7 +2110,7 @@ export default function VideoPlayer({
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
                 onClick={(e) => {
-                  if (Date.now() < suppressTimelineSeekUntilRef.current) {
+                  if (isTimelineSeekSuppressed()) {
                     e.preventDefault()
                     e.stopPropagation()
                     return
@@ -2175,7 +2183,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
-                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
                       onPointerCancel={(e) => {
@@ -2183,7 +2191,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
-                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
                       onClick={(e) => {
@@ -2228,7 +2236,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
-                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
                       onPointerCancel={(e) => {
@@ -2236,7 +2244,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
-                        suppressTimelineSeekUntilRef.current = Date.now() + 250
+                        suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
                       onClick={(e) => {
