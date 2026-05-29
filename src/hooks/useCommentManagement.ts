@@ -517,7 +517,9 @@ export function useCommentManagement({
   useEffect(() => {
     const handlePlaybackStarted = () => {
       // If they resumed playback without drafting anything, clear the temporary range overlay.
-      if (!hasUnsentComment) {
+      // Exception: if the user has explicitly selected an in/out range, preserve it so they
+      // can play through the segment and still post a range-scoped comment.
+      if (!hasUnsentComment && selectedEndTimestamp === null) {
         setSelectedEndTimestamp(null)
         window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
       }
@@ -527,7 +529,7 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('videoPlaybackStarted', handlePlaybackStarted)
     }
-  }, [hasUnsentComment])
+  }, [hasUnsentComment, selectedEndTimestamp])
 
   // Submit comment
   const handleSubmitComment = async () => {

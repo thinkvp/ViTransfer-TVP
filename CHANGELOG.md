@@ -13,10 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Accounting page heading text is cleaner** — removed the leading "Under Development." copy from the Accounting section header.
 - **Keyboard shortcuts button now follows desktop-only behavior in share views** — both admin and client share feedback screens now hide the shortcuts launcher on non-desktop layouts.
 - **Timeline preview behavior is improved on touch devices** — video timeline hover previews now appear while actively scrubbing on mobile/touch, then hide when scrubbing ends.
+- **Draft timeline handles now include a first-appearance separation cue animation** — when the comment range handles appear, the IN and OUT bars briefly move apart and return twice to better communicate that they are independently draggable.
 
 ### Fixed
 - **All time accounting trend requests now start from the earliest real accounting record** — monthly profit/loss API now resolves `from=all-time` against earliest relevant income/cogs/expense activity instead of using an arbitrary historical start date.
 - **Project rename patch flow now handles in-progress S3 rename jobs safely** — when a matching rename job is already queued/running, non-storage project updates can proceed without triggering duplicate rename workflows.
+- **Draft range selection is no longer cleared on playback when a range is already selected** — starting video playback now preserves active IN/OUT comment range selections unless no draft content or range has been set.
 
 ## [1.9.0] - 2026-05-28
 

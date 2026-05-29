@@ -2168,7 +2168,7 @@ export default function VideoPlayer({
 
                     {/* IN handle (left) */}
                     <div
-                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-l"
+                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-l animate-comment-range-handle-left-nudge motion-reduce:animate-none"
                       style={{ left: `${Math.min(100, Math.max(0, (commentRangeStart / effectiveDurationSeconds) * 100))}%`, transform: 'translateX(-50%)' }}
                       onPointerDown={(e) => {
                         e.stopPropagation()
@@ -2218,7 +2218,7 @@ export default function VideoPlayer({
 
                     {/* OUT handle (right) */}
                     <div
-                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-r"
+                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-r animate-comment-range-handle-right-nudge motion-reduce:animate-none"
                       style={{ left: `${Math.min(100, Math.max(0, (commentRangeEnd / effectiveDurationSeconds) * 100))}%`, transform: 'translateX(-50%)' }}
                       onPointerDown={(e) => {
                         e.stopPropagation()
@@ -2310,10 +2310,7 @@ export default function VideoPlayer({
                             background: m.isInternal
                               ? 'rgba(100,116,139,0.45)'
                               : 'rgba(251,191,36,0.45)',
-                            borderLeft: m.isInternal
-                              ? '2px solid rgba(100,116,139,0.9)'
-                              : '2px solid rgba(251,191,36,0.9)',
-                            borderRight: m.isInternal
+                            border: m.isInternal
                               ? '2px solid rgba(100,116,139,0.9)'
                               : '2px solid rgba(251,191,36,0.9)',
                           }}
