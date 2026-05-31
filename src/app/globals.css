@@ -302,7 +302,7 @@ input.no-picker-icon::-webkit-inner-spin-button {
   @keyframes comment-range-handle-left-nudge {
     0%,
     100% {
-      margin-left: 0;
+      margin-left: -1px;
       opacity: 1;
     }
     35% {
@@ -310,7 +310,7 @@ input.no-picker-icon::-webkit-inner-spin-button {
       opacity: 1;
     }
     70% {
-      margin-left: 0;
+      margin-left: -1px;
       opacity: 1;
     }
   }
@@ -318,7 +318,7 @@ input.no-picker-icon::-webkit-inner-spin-button {
   @keyframes comment-range-handle-right-nudge {
     0%,
     100% {
-      margin-left: 0;
+      margin-left: 1px;
       opacity: 1;
     }
     35% {
@@ -326,17 +326,19 @@ input.no-picker-icon::-webkit-inner-spin-button {
       opacity: 1;
     }
     70% {
-      margin-left: 0;
+      margin-left: 1px;
       opacity: 1;
     }
   }
 
   .animate-comment-range-handle-left-nudge {
+    margin-left: -1px;
     animation: comment-range-handle-left-nudge 480ms ease-in-out 2;
     will-change: margin-left;
   }
 
   .animate-comment-range-handle-right-nudge {
+    margin-left: 1px;
     animation: comment-range-handle-right-nudge 480ms ease-in-out 2;
     will-change: margin-left;
   }

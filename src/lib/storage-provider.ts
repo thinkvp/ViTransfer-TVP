@@ -11,7 +11,7 @@ import {
 } from '@/lib/s3-storage'
 
 function sanitizeTempFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9 ._-]/g, '_') || 'file.bin'
+  return name.replace(/[^a-zA-Z0-9 ._&-]/g, '_') || 'file.bin'
 }
 
 /**

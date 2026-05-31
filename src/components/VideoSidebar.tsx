@@ -343,6 +343,41 @@ export default function VideoSidebar({
     }))
   }, [])
 
+  // In FILES mode, default-collapse all folders except the top PROJECT folder.
+  // Only initialize missing keys so user toggles are preserved.
+  useEffect(() => {
+    if (desktopActiveTabValue !== 'files') return
+
+    const uploadGroupNames = (downloadableFiles ?? [])
+      .filter((group) => group.groupType === 'uploads' && group.name !== 'UPLOADS')
+      .map((group) => group.name)
+
+    setCollapsedFoldersByKey((prev) => {
+      const next = { ...prev }
+      let changed = false
+
+      if (next['files:project-root'] === undefined) {
+        next['files:project-root'] = false
+        changed = true
+      }
+
+      const defaultCollapsedKeys = [
+        'files:uploads-root',
+        ...videoGroups.map((group) => `files:video:${group.name}`),
+        ...albumsList.map((album) => `files:album:${album.id}`),
+        ...uploadGroupNames.map((groupName) => `files:uploads:${groupName}`),
+      ]
+
+      for (const key of defaultCollapsedKeys) {
+        if (next[key] !== undefined) continue
+        next[key] = true
+        changed = true
+      }
+
+      return changed ? next : prev
+    })
+  }, [albumsList, desktopActiveTabValue, downloadableFiles, videoGroups])
+
   // Load saved width from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('share_sidebar_width')
@@ -1122,7 +1157,7 @@ export default function VideoSidebar({
               <button
                 type="button"
                 className={cn(
-                  'text-[11px] font-bold tracking-widest truncate text-left hover:underline',
+                  'text-xs font-bold tracking-widest truncate text-left hover:underline',
                   isRootFilesFolderActive ? 'text-primary' : 'text-foreground'
                 )}
                 title={`Open ${projectLabel} root folder`}
@@ -1204,7 +1239,7 @@ export default function VideoSidebar({
                     <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
                     <button
                       type="button"
-                      className="text-xs font-semibold text-foreground truncate text-left hover:underline"
+                      className="text-sm font-semibold text-foreground truncate text-left hover:underline"
                       onClick={openMainFilesFolder}
                       title={`Open ${vg.name} in Files`}
                     >
@@ -1267,7 +1302,7 @@ export default function VideoSidebar({
                           <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <span
                             className={cn(
-                              'flex-1 text-xs text-muted-foreground truncate py-0.5',
+                              'flex-1 text-[13px] text-muted-foreground truncate py-0.5',
                               file.type === 'video' || isImageAsset ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
                             )}
                             title={fileDisplayName}
@@ -1335,7 +1370,7 @@ export default function VideoSidebar({
                     <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
                     <button
                       type="button"
-                      className="text-xs font-semibold text-foreground truncate text-left hover:underline"
+                      className="text-sm font-semibold text-foreground truncate text-left hover:underline"
                       onClick={openMainFilesFolder}
                       title={`Open ${a.name} in Files`}
                     >
@@ -1382,7 +1417,7 @@ export default function VideoSidebar({
                           />
                           <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <span
-                            className={cn('flex-1 text-xs text-muted-foreground truncate py-0.5', isAlbumPhoto ? 'cursor-pointer hover:text-foreground' : 'cursor-default')}
+                            className={cn('flex-1 text-[13px] text-muted-foreground truncate py-0.5', isAlbumPhoto ? 'cursor-pointer hover:text-foreground' : 'cursor-default')}
                             title={file.fileName}
                           >
                             {file.fileName}
@@ -1432,7 +1467,7 @@ export default function VideoSidebar({
                   <button
                     type="button"
                     className={cn(
-                      'text-xs font-semibold truncate text-left hover:underline',
+                      'text-sm font-semibold truncate text-left hover:underline',
                       isUploadsRootActive ? 'text-primary' : 'text-foreground'
                     )}
                     onClick={() => {
@@ -1476,7 +1511,7 @@ export default function VideoSidebar({
                         className={cn(SIDEBAR_CHECKBOX_CLASS, 'cursor-pointer')}
                       />
                       <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      <span className="flex-1 text-xs text-muted-foreground truncate py-0.5" title={file.fileName}>
+                      <span className="flex-1 text-[13px] text-muted-foreground truncate py-0.5" title={file.fileName}>
                         {file.fileName}
                       </span>
                     </div>
@@ -1535,7 +1570,7 @@ export default function VideoSidebar({
                         <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
                         <button
                           type="button"
-                          className="text-xs font-semibold text-foreground truncate text-left hover:underline"
+                          className="text-sm font-semibold text-foreground truncate text-left hover:underline"
                           onClick={openMainFilesFolder}
                           title={`Open ${folderLabel} in Files`}
                         >
@@ -1570,7 +1605,7 @@ export default function VideoSidebar({
                                 className={cn(SIDEBAR_CHECKBOX_CLASS, 'cursor-pointer')}
                               />
                               <FileIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                              <span className="flex-1 text-xs text-muted-foreground truncate py-0.5" title={file.fileName}>
+                              <span className="flex-1 text-[13px] text-muted-foreground truncate py-0.5" title={file.fileName}>
                                 {file.fileName}
                               </span>
                             </div>

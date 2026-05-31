@@ -86,7 +86,7 @@ export async function POST(
   }
 
   const sanitizedFileName =
-    fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._-]/g, '_').substring(0, 255)
+    fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._&-]/g, '_').substring(0, 255)
   const timestamp = Date.now()
   const s3Key = buildClientFilesStoragePath(client.name, sanitizedFileName, timestamp)
   const category = fileValidation.detectedCategory || 'other'

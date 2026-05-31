@@ -10,16 +10,6 @@ import { useEffect, useRef } from 'react'
 function registerAdminPwa() {
   if (typeof window === 'undefined') return
 
-  // Add manifest link only while in /admin so Share pages are unaffected.
-  const manifestHref = '/admin/manifest.webmanifest'
-  const existingManifest = document.querySelector(`link[rel="manifest"][href="${manifestHref}"]`)
-  if (!existingManifest) {
-    const link = document.createElement('link')
-    link.rel = 'manifest'
-    link.href = manifestHref
-    document.head.appendChild(link)
-  }
-
   // Register admin-scoped service worker (push only; no caching).
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker

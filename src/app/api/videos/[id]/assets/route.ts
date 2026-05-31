@@ -211,7 +211,7 @@ export async function POST(
 
     // Create storage path (use sanitized filename from validation)
     const timestamp = Date.now()
-    const sanitizedFileName = assetValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._-]/g, '_').substring(0, 255)
+    const sanitizedFileName = assetValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._&-]/g, '_').substring(0, 255)
     const projectStoragePath = video.project.storagePath
       || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
     const videoFolderName = video.storageFolderName || video.name

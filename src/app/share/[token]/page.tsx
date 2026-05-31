@@ -245,6 +245,23 @@ export default function SharePage() {
     }
   }, [])
 
+  // Mobile browsers may animate focus auto-scroll when global smooth-scroll is enabled.
+  // Keep share-page comment focus stable by disabling smooth scroll while this page is mounted.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const isMobileViewport = window.matchMedia('(max-width: 1023px)').matches
+    const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches
+    if (!isMobileViewport && !isCoarsePointer) return
+
+    const root = document.documentElement
+    const previous = root.style.scrollBehavior
+    root.style.scrollBehavior = 'auto'
+
+    return () => {
+      root.style.scrollBehavior = previous
+    }
+  }, [])
+
   // Detect admin session (JWT) so we don't accidentally use a cached guest share token.
   useEffect(() => {
     let isMounted = true
@@ -1854,7 +1871,12 @@ export default function SharePage() {
           ? await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${shareToken}` } })
           : await fetch(url, { method: 'POST' })
 
-      if (!response.ok) return null
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || response.status === 404) {
+          requestFilesRefresh(true)
+        }
+        return null
+      }
       const data = await response.json().catch(() => ({}))
       if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
         return String((data as any).previewUrl)
@@ -2944,6 +2966,7 @@ export default function SharePage() {
               folderPreviewByName={folderPreviewByName}
               resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
               resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
+              onPreviewTokenExpired={() => requestFilesRefresh(true)}
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}

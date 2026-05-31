@@ -198,6 +198,23 @@ export default function AdminSharePage() {
     }
   }, [])
 
+  // Mobile browsers may animate focus auto-scroll when global smooth-scroll is enabled.
+  // Keep share-page comment focus stable by disabling smooth scroll while this page is mounted.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const isMobileViewport = window.matchMedia('(max-width: 1023px)').matches
+    const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches
+    if (!isMobileViewport && !isCoarsePointer) return
+
+    const root = document.documentElement
+    const previous = root.style.scrollBehavior
+    root.style.scrollBehavior = 'auto'
+
+    return () => {
+      root.style.scrollBehavior = previous
+    }
+  }, [])
+
   // Fetch comments separately for security (same pattern as public share)
   const fetchComments = useCallback(async () => {
     if (!id) return
@@ -1638,7 +1655,12 @@ export default function AdminSharePage() {
       const response = await apiFetch(`/api/videos/${file.videoId}/assets/${file.assetId}/download-token`, {
         method: 'POST',
       })
-      if (!response.ok) return null
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || response.status === 404) {
+          requestFilesRefresh(true)
+        }
+        return null
+      }
       const data = await response.json().catch(() => ({}))
       if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
         return String((data as any).previewUrl)
@@ -2054,6 +2076,7 @@ export default function AdminSharePage() {
                 folderPreviewByName={folderPreviewByName}
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
                 resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
+                onPreviewTokenExpired={() => requestFilesRefresh(true)}
                 shareSlug={String(project.slug)}
                 shareToken={null}
                 transferItems={transferItemsCombined}

@@ -81,6 +81,7 @@ type ShareFilesBrowserProps = {
   onDeleteUploadFile?: (fileId: string) => Promise<void>
   onDeleteUploadFolder?: (folderPath: string) => Promise<void>
   onRenameUploadFolder?: (folderPath: string, folderName: string) => Promise<void>
+  onPreviewTokenExpired?: () => void
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -179,6 +180,7 @@ export function ShareFilesBrowser({
   onDeleteUploadFile,
   onDeleteUploadFolder,
   onRenameUploadFolder,
+  onPreviewTokenExpired,
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
@@ -214,12 +216,21 @@ export function ShareFilesBrowser({
   const videoPlaybackRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
   const previewRetryTimerRef = useRef<Map<string, number>>(new Map())
   const previewRetryAttemptRef = useRef<Map<string, number>>(new Map())
+  const lastPreviewTokenRefreshAtRef = useRef(0)
   const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const folderCardObserverRef = useRef<IntersectionObserver | null>(null)
   const fileCardObserverRef = useRef<IntersectionObserver | null>(null)
   const folderCardNodesRef = useRef<Map<string, Element>>(new Map())
   const fileCardNodesRef = useRef<Map<string, Element>>(new Map())
+
+  const requestPreviewTokenRefresh = useCallback(() => {
+    if (!onPreviewTokenExpired) return
+    const now = Date.now()
+    if (now - lastPreviewTokenRefreshAtRef.current < 5000) return
+    lastPreviewTokenRefreshAtRef.current = now
+    onPreviewTokenExpired()
+  }, [onPreviewTokenExpired])
 
   useEffect(() => {
     const availableFileKeys = new Set<string>()
@@ -1339,6 +1350,56 @@ export function ShareFilesBrowser({
     return [...filesInOpenFolder.filter((file) => file.type === 'asset')].sort(compareFileNameAsc)
   }, [openFolder?.groupType, filesInOpenFolder, compareFileNameAsc])
 
+  const openFolderApprovedVideoVersion = useMemo(() => {
+    if (openFolder?.groupType !== 'video') return null
+    return openFolderVideoVersions.find((file) => file.isApproved === true) ?? null
+  }, [openFolder?.groupType, openFolderVideoVersions])
+
+  const openFolderVideoApprovalBannerMessage = useMemo(() => {
+    if (openFolder?.groupType !== 'video') return null
+    if (openFolderVideoVersions.length === 0) return null
+
+    const approvedVersion = openFolderApprovedVideoVersion
+    if (approvedVersion) {
+      const versionLabel = String(approvedVersion.versionLabel || '').trim() || 'Approved version'
+      return openFolderVideoAssets.length > 0
+        ? `${versionLabel} and associated Video Assets are available for download.`
+        : `${versionLabel} is available for download.`
+    }
+
+    const hasApprovableVersion = openFolderVideoVersions.some((file) => file.allowApproval === true)
+
+    if (openFolderVideoVersions.length === 1) {
+      return hasApprovableVersion
+        ? 'Approve this video to download.'
+        : 'Download is not enabled for this video.'
+    }
+
+    return hasApprovableVersion
+      ? 'Approve a version to enable downloads.'
+      : 'Download is not currently enabled for any versions of this video.'
+  }, [openFolder?.groupType, openFolderApprovedVideoVersion, openFolderVideoAssets.length, openFolderVideoVersions])
+
+  const openFolderBannerMessage = useMemo(() => {
+    if (openFolder?.groupType === 'video') {
+      return openFolderVideoApprovalBannerMessage
+    }
+    if (openFolder?.groupType === 'album') {
+      return 'Download full album ZIPs or individual photos.'
+    }
+    return null
+  }, [openFolder?.groupType, openFolderVideoApprovalBannerMessage])
+
+  const openFolderBannerClassName = useMemo(() => {
+    if (openFolder?.groupType === 'video' && openFolderApprovedVideoVersion) {
+      return 'mx-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white'
+    }
+    if (openFolder?.groupType === 'album') {
+      return 'mx-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white'
+    }
+    return 'mx-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white'
+  }, [openFolder?.groupType, openFolderApprovedVideoVersion])
+
   const openFolderAlbumZips = useMemo(() => {
     if (openFolder?.groupType !== 'album') return [] as DownloadableFile[]
     return [...filesInOpenFolder.filter((file) => file.type === 'album-zip')].sort(compareFileNameAsc)
@@ -1746,7 +1807,7 @@ export function ShareFilesBrowser({
         {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (
           <Button
             type="button"
-            variant="outline"
+            variant="destructive"
             size="icon"
             className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
             disabled={isUploadActionBusy}
@@ -1761,9 +1822,9 @@ export function ShareFilesBrowser({
         ) : null}
         <Button
           type="button"
-          variant="outline"
+          variant="default"
           size="icon"
-          className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
+          className={cn('shrink-0 bg-primary text-primary-foreground hover:bg-primary/90', compact ? 'h-6 w-6' : 'h-7 w-7')}
           disabled={muteInactiveVideoVersion}
           onClick={(event) => { event.stopPropagation(); void onDownloadFile(file) }}
           onMouseDown={(event) => event.stopPropagation()}
@@ -1791,6 +1852,7 @@ export function ShareFilesBrowser({
         )}
         onClick={() => {
           if (muteInactiveVideoVersion) return
+          if (file.type === 'upload-file') return
           if (isImageFile) {
             openImageLightbox(file, imageList)
             return
@@ -1801,6 +1863,11 @@ export function ShareFilesBrowser({
         }}
         onDoubleClick={() => {
           if (muteInactiveVideoVersion) return
+          if (file.type === 'upload-file') {
+            if (!canDownloadFile) return
+            void onDownloadFile(file)
+            return
+          }
           if (file.type === 'video' && file.videoId && onOpenVideoVersion) {
             onOpenVideoVersion(file, openFolder?.name || null)
             return
@@ -2022,7 +2089,10 @@ export function ShareFilesBrowser({
                       alt={group.name}
                       className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
                       loading="lazy"
-                      onError={() => invalidateFolderPreviewTiles(group.name)}
+                      onError={() => {
+                        invalidateFolderPreviewTiles(group.name)
+                        requestPreviewTokenRefresh()
+                      }}
                     />
 
                     {sidePreviewTop ? (
@@ -2033,7 +2103,10 @@ export function ShareFilesBrowser({
                         aria-hidden="true"
                         className="h-full w-full object-contain bg-black"
                         loading="lazy"
-                        onError={() => invalidateFolderPreviewTiles(group.name)}
+                        onError={() => {
+                          invalidateFolderPreviewTiles(group.name)
+                          requestPreviewTokenRefresh()
+                        }}
                       />
                     ) : (
                       <div className="h-full w-full bg-primary/35" aria-hidden="true" />
@@ -2047,7 +2120,10 @@ export function ShareFilesBrowser({
                         aria-hidden="true"
                         className="h-full w-full object-contain bg-black"
                         loading="lazy"
-                        onError={() => invalidateFolderPreviewTiles(group.name)}
+                        onError={() => {
+                          invalidateFolderPreviewTiles(group.name)
+                          requestPreviewTokenRefresh()
+                        }}
                       />
                     ) : (
                       <div className="h-full w-full bg-primary/30" aria-hidden="true" />
@@ -2061,6 +2137,10 @@ export function ShareFilesBrowser({
                       alt={group.name}
                       className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
                       loading="lazy"
+                      onError={() => {
+                        invalidateFolderPreviewTiles(group.name)
+                        requestPreviewTokenRefresh()
+                      }}
                     />
                     <div className="h-full w-full bg-primary/35" aria-hidden="true" />
                     <div className="h-full w-full bg-primary/30" aria-hidden="true" />
@@ -2072,7 +2152,10 @@ export function ShareFilesBrowser({
                     alt={group.name}
                     className="col-span-3 row-span-2 h-full w-full object-contain bg-black"
                     loading="lazy"
-                    onError={() => invalidateFolderPreviewTiles(group.name)}
+                    onError={() => {
+                      invalidateFolderPreviewTiles(group.name)
+                      requestPreviewTokenRefresh()
+                    }}
                   />
                 ) : (
                   <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
@@ -2452,6 +2535,11 @@ export function ShareFilesBrowser({
           </div>
         ) : (
           <div className="space-y-5">
+            {openFolderBannerMessage ? (
+              <div className={openFolderBannerClassName}>
+                {openFolderBannerMessage}
+              </div>
+            ) : null}
             {openFolder?.groupType === 'video' ? (
               <>
                 <section className="space-y-2">
@@ -2465,49 +2553,51 @@ export function ShareFilesBrowser({
                   )}
                 </section>
 
-                <section className="space-y-2 border-t border-border/70 pt-4">
-                  <div className="px-1 flex items-center gap-2">
-                    <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Video Assets</h4>
-                    <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors',
-                          videoAssetsThumbnailSize === 'default'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setVideoAssetsThumbnailSize('default')}
-                      >
-                        Default
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                          videoAssetsThumbnailSize === 'large'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setVideoAssetsThumbnailSize('large')}
-                      >
-                        Large
-                      </button>
+                {openFolderApprovedVideoVersion ? (
+                  <section className="space-y-2 border-t border-border/70 pt-4">
+                    <div className="px-1 flex items-center gap-2">
+                      <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Video Assets</h4>
+                      <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
+                        <button
+                          type="button"
+                          className={cn(
+                            'px-2 py-1 text-[11px] font-semibold transition-colors',
+                            videoAssetsThumbnailSize === 'default'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-card text-muted-foreground hover:text-foreground'
+                          )}
+                          onClick={() => setVideoAssetsThumbnailSize('default')}
+                        >
+                          Default
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                            videoAssetsThumbnailSize === 'large'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-card text-muted-foreground hover:text-foreground'
+                          )}
+                          onClick={() => setVideoAssetsThumbnailSize('large')}
+                        >
+                          Large
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  {openFolderVideoAssets.length > 0 ? (
-                    <div className={cn(
-                      'grid',
-                      videoAssetsThumbnailSize === 'large'
-                        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
-                    )}>
-                      {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize !== 'large', openFolderVideoAssets))}
-                    </div>
-                  ) : (
-                    <p className="px-1 text-xs text-muted-foreground italic">There are currently no Video Assets for this video.</p>
-                  )}
-                </section>
+                    {openFolderVideoAssets.length > 0 ? (
+                      <div className={cn(
+                        'grid',
+                        videoAssetsThumbnailSize === 'large'
+                          ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
+                          : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                      )}>
+                        {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize !== 'large', openFolderVideoAssets))}
+                      </div>
+                    ) : (
+                      <p className="px-1 text-xs text-muted-foreground italic">There are currently no Video Assets for this video.</p>
+                    )}
+                  </section>
+                ) : null}
               </>
             ) : openFolder?.groupType === 'album' ? (
               <>

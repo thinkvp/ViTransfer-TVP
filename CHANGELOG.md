@@ -5,6 +5,26 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-05-31
+
+### Added
+- **Downloadable files API now exposes per-version approval capability metadata** — share downloadable-file payloads now include `allowApproval` for video versions so the FILES UI can distinguish between "approval required" and "downloads disabled" states.
+- **Admin pages now include a dedicated head definition for PWA metadata** — added `src/app/admin/head.tsx` with the admin manifest and mobile web-app meta tags to keep admin PWA configuration explicit and route-scoped.
+
+### Changed
+- **Share FILES folder details now provide clearer availability messaging** — opening a video folder now shows an approval-aware status banner, and the Video Assets section is shown only when an approved version exists; album folders show a dedicated ZIP/photo download hint.
+- **FILES sidebar folder tree now opens in a cleaner default state** — in desktop FILES mode, the top project folder starts expanded while video/album/uploads subfolders default collapsed (without overriding user toggles), reducing initial visual noise.
+- **FILES sidebar text sizing was refined for readability** — folder/file labels in the sidebar were slightly increased for better legibility while preserving density.
+- **Primary accent foreground tokens now follow computed contrast text** — global theme CSS now sets `--accent-foreground` to the generated foreground color for better contrast consistency with custom branding accents.
+- **Timeline range-handle first-appearance cue now rests on a subtle separated baseline** — the handle nudge keyframes and animation classes now use +/-1px baseline offsets to make the separation affordance more apparent.
+- **Filename sanitization now preserves ampersands (`&`) across upload/storage paths** — filename-safe character sets were expanded in shared sanitizers and route fallbacks (project/client/user files, album photos, video assets, comment file paths, temp storage names, and asset ZIP name generation).
+
+### Fixed
+- **Mobile share-page comment focus no longer causes smooth-scroll jumpiness** — while admin/client share pages are mounted on mobile/coarse-pointer devices, global smooth scroll is temporarily disabled to prevent browser auto-scroll animation conflicts during focus.
+- **Expired preview/download tokens in FILES mode now trigger automatic list refresh** — when preview token requests fail with auth/not-found statuses (401/403/404), share pages request a downloadable-files refresh to recover from stale token state.
+- **Folder preview tile image failures now request token refresh with throttling** — ShareFilesBrowser now calls a debounced preview-token refresh callback when preview tiles error, reducing repeated broken previews from expiring short-lived URLs.
+- **Upload-file card interactions in FILES mode are now safer and more consistent** — single-click no longer attempts preview/lightbox for upload files, while double-click performs download when permitted.
+
 ## [1.9.1] - 2026-05-29
 
 ### Changed

@@ -204,6 +204,7 @@ export async function GET(
       durationSeconds: Number(video.duration),
       versionLabel: (video as any).versionLabel ? String((video as any).versionLabel) : undefined,
       isApproved: video.approved === true,
+      allowApproval: video.allowApproval === true,
     }))
 
     const approvedVideo = sortedVersions.find((video) => video.approved === true)

@@ -54,14 +54,14 @@ function buildAccentOverrideCss(hex: string, textMode?: string | null): string |
       --primary: ${h} ${s}% ${l}%;
       --primary-foreground: ${foreground};
       --primary-visible: ${h} ${s}% ${lightVisibleL}%;
-      --accent-foreground: ${h} ${s}% ${l}%;
+      --accent-foreground: ${foreground};
       --ring: ${h} ${s}% ${l}%;
     }
     .dark {
       --primary: ${h} ${s}% ${l}%;
       --primary-foreground: ${foreground};
       --primary-visible: ${h} ${s}% ${darkVisibleL}%;
-      --accent-foreground: ${h} ${s}% ${l}%;
+      --accent-foreground: ${foreground};
       --ring: ${h} ${s}% ${l}%;
     }
   `

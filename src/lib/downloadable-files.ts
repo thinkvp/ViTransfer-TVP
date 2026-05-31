@@ -11,6 +11,8 @@ export interface DownloadableFile {
   versionLabel?: string
   /** Approval status for video versions. */
   isApproved?: boolean
+  /** Whether approval is enabled for this video version. */
+  allowApproval?: boolean
   /** Set for type 'video' and 'asset' */
   videoId?: string
   /** Set for type 'asset' */
