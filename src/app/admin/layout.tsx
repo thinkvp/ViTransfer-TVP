@@ -10,6 +10,17 @@ import { useEffect, useRef } from 'react'
 function registerAdminPwa() {
   if (typeof window === 'undefined') return
 
+  // Keep a runtime fallback for browsers that miss server-rendered head tags
+  // after client-side transitions or cache restores.
+  const manifestHref = '/admin/manifest.webmanifest'
+  const existingManifest = document.querySelector(`link[rel="manifest"][href="${manifestHref}"]`)
+  if (!existingManifest) {
+    const link = document.createElement('link')
+    link.rel = 'manifest'
+    link.href = manifestHref
+    document.head.appendChild(link)
+  }
+
   // Register admin-scoped service worker (push only; no caching).
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker

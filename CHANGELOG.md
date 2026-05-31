@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.3] - 2026-05-31
+
+### Added
+- **Global PWA metadata is now emitted from app-level metadata generation** — root metadata now declares `manifest`, mobile web-app capability hints, Apple web-app capability, and a global theme color so installability signals are present across auth redirects and non-admin entry points.
+
+### Changed
+- **Admin PWA wiring now uses a belt-and-suspenders manifest strategy** — admin route head output keeps explicit manifest/mobile-app tags, and admin client layout re-adds a runtime manifest-link fallback for browsers that miss head tags after client transitions.
+- **Manifest identity and display preferences were hardened** — admin manifest now includes a stable `id` (`/admin/`) and `display_override` fallback chain while keeping `display: standalone`.
+
+### Fixed
+- **Install option reliability on Android Chrome has been improved** — installability regressions caused by inconsistent manifest discovery were addressed by ensuring PWA metadata is available at first render and after route hydration.
+- **Top browser chrome can now be avoided more consistently when launched as an installed PWA** — standalone launch behavior is now more dependable once users install from the updated build.
+
 ## [1.9.2] - 2026-05-31
 
 ### Added

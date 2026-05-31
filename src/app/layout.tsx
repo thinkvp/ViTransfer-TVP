@@ -88,7 +88,17 @@ export async function generateMetadata(): Promise<Metadata> {
       default: siteName,
       template: `%s | ${siteName}`,
     },
+    applicationName: siteName,
     description: 'Secure portal',
+    manifest: '/admin/manifest.webmanifest',
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: 'black-translucent',
+      title: siteName,
+    },
+    other: {
+      'mobile-web-app-capable': 'yes',
+    },
     icons: {
       icon: [{ url: faviconUrl }],
     },
@@ -99,6 +109,7 @@ export const viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  themeColor: '#0b0b0f',
 }
 
 export default async function RootLayout({
