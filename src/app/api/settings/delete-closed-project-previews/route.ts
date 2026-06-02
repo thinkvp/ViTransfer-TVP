@@ -11,7 +11,7 @@ export const runtime = 'nodejs'
  * POST /api/settings/delete-closed-project-previews
  *
  * Deletes project video previews (480p, 720p, 1080p), timeline sprite directories,
- * and video-asset generated previews for all CLOSED projects.
+ * and video-asset playback previews for all CLOSED projects.
  *
  * Body: { dryRun?: boolean }   (default true)
  */
@@ -71,6 +71,8 @@ export async function POST(request: NextRequest) {
           select: {
             id: true,
             previewPath: true,
+            fileType: true,
+            previewStatus: true,
             video: {
               select: {
                 projectId: true,
@@ -80,13 +82,15 @@ export async function POST(request: NextRequest) {
         })
       : []
 
-    const assetPreviewsByProjectId = new Map<string, Array<{ id: string; previewPath: string }>>()
+    const assetPreviewsByProjectId = new Map<string, Array<{ id: string; previewPath: string; previewStatus: string | null }>>()
     for (const asset of closedProjectAssetPreviews) {
       const previewPath = String(asset.previewPath || '').trim()
-      if (!previewPath) continue
+      const isVideoAsset = String(asset.fileType || '').toLowerCase().startsWith('video/')
+      const hasPlaybackPreview = previewPath.toLowerCase().endsWith('.mp4')
+      if (!previewPath || !isVideoAsset || !hasPlaybackPreview) continue
       const projectId = asset.video.projectId
       const current = assetPreviewsByProjectId.get(projectId) || []
-      current.push({ id: asset.id, previewPath })
+      current.push({ id: asset.id, previewPath, previewStatus: asset.previewStatus })
       assetPreviewsByProjectId.set(projectId, current)
     }
 
@@ -204,9 +208,8 @@ export async function POST(request: NextRequest) {
             where: { id: asset.id },
             data: {
               previewPath: null,
-              previewStatus: null,
+              previewStatus: asset.previewStatus === 'READY' ? 'READY' : null,
               previewError: null,
-              previewGeneratedAt: null,
               previewFileSize: null,
             },
           }).catch((err: any) => {

@@ -1349,6 +1349,8 @@ export async function PATCH(
               select: {
                 id: true,
                 previewPath: true,
+                fileType: true,
+                previewStatus: true,
               },
             }),
           ])
@@ -1367,7 +1369,9 @@ export async function PATCH(
               }),
               ...videoAssets.flatMap((asset) => {
                 const previewPath = String(asset.previewPath || '').trim()
-                if (!previewPath) return [] as Promise<unknown>[]
+                const isVideoAsset = String(asset.fileType || '').toLowerCase().startsWith('video/')
+                const hasPlaybackPreview = previewPath.toLowerCase().endsWith('.mp4')
+                if (!previewPath || !isVideoAsset || !hasPlaybackPreview) return [] as Promise<unknown>[]
                 return [deleteFile(previewPath)]
               }),
             ]
@@ -1405,15 +1409,17 @@ export async function PATCH(
             `
           }
 
-          const videoAssetIdsWithPreviews = videoAssets.map((asset) => asset.id)
-          if (videoAssetIdsWithPreviews.length > 0) {
-            await prisma.videoAsset.updateMany({
-              where: { id: { in: videoAssetIdsWithPreviews } },
+          const videoAssetsWithPlaybackPreviews = videoAssets.filter((asset) => {
+            const previewPath = String(asset.previewPath || '').trim().toLowerCase()
+            return String(asset.fileType || '').toLowerCase().startsWith('video/') && previewPath.endsWith('.mp4')
+          })
+          for (const asset of videoAssetsWithPlaybackPreviews) {
+            await prisma.videoAsset.update({
+              where: { id: asset.id },
               data: {
                 previewPath: null,
-                previewStatus: null,
+                previewStatus: asset.previewStatus === 'READY' ? 'READY' : null,
                 previewError: null,
-                previewGeneratedAt: null,
                 previewFileSize: null,
               },
             })

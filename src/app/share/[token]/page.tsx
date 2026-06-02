@@ -1888,7 +1888,7 @@ export default function SharePage() {
     } catch {
       return null
     }
-  }, [filePreviewByVideoId, getUploadAccessUrl, isAdminSession, shareToken])
+  }, [filePreviewByVideoId, getUploadAccessUrl, isAdminSession, requestFilesRefresh, shareToken])
 
   const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
     if (file.type === 'upload-file' && file.uploadFileId) {

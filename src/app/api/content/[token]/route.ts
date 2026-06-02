@@ -265,6 +265,7 @@ export async function GET(
       contentType = isValidMimeType(asset.fileType)
         ? asset.fileType
         : 'application/octet-stream'
+      const normalizedAssetType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
 
       filePath = asset.storagePath
       filename = asset.fileName
@@ -288,14 +289,15 @@ export async function GET(
       } else if (wantsAssetGeneratedPreview) {
         const hasReadyGeneratedPreview =
           asset.previewStatus === 'READY'
-          && typeof asset.previewPath === 'string'
-          && asset.previewPath.length > 0
+          && (
+            normalizedAssetType.startsWith('video/')
+            || (typeof asset.previewPath === 'string' && asset.previewPath.length > 0)
+          )
 
         if (!hasReadyGeneratedPreview) {
           return NextResponse.json({ error: 'Preview not ready' }, { status: 404 })
         }
 
-        const normalizedAssetType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
         if (normalizedAssetType.startsWith('video/')) {
           const projectStoragePath = video.project.storagePath || buildProjectStorageRoot(
             (video.project as any).companyName || 'Client',

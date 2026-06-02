@@ -349,6 +349,7 @@ export async function computeProjectPreviewBytes(
       storagePath: true,
       fileType: true,
       previewPath: true,
+      previewStatus: true,
       video: {
         select: {
           storageFolderName: true,
@@ -384,11 +385,17 @@ export async function computeProjectPreviewBytes(
   }
 
   for (const asset of videoAssets) {
-    if (asset.previewPath && asset.previewPath.toLowerCase().endsWith('.mp4')) {
-      previewFilePaths.add(asset.previewPath)
+    const normalizedFileType = String(asset.fileType || '').toLowerCase()
+    const hasPlaybackPreview = Boolean(asset.previewPath && asset.previewPath.toLowerCase().endsWith('.mp4'))
+    const hasReadyGeneratedThumbnail = normalizedFileType.startsWith('video/') && asset.previewStatus === 'READY'
 
-      // Video assets store playback preview path in DB as .mp4.
-      // Include the companion JPEG thumbnail at the canonical preview location.
+    if (hasPlaybackPreview && asset.previewPath) {
+      previewFilePaths.add(asset.previewPath)
+    }
+
+    if (hasReadyGeneratedThumbnail) {
+      // Closed-project cleanup can retain the companion JPEG while removing the
+      // playback MP4, so READY video assets still contribute their card thumbnail.
       const projectStoragePath = asset.video.project.storagePath
         || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
       const assetPreviewJpgPath = buildVideoAssetPreviewStoragePath(

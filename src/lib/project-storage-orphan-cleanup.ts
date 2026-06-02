@@ -267,6 +267,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         storagePath: true,
         previewPath: true,
         fileType: true,
+        previewStatus: true,
         video: {
           select: {
             storageFolderName: true,
@@ -376,7 +377,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
 
     const previewPath = String(videoAsset.previewPath || '').toLowerCase()
     const fileType = String(videoAsset.fileType || '').toLowerCase()
-    if (fileType.startsWith('video/') && previewPath.endsWith('.mp4')) {
+    if (fileType.startsWith('video/') && (previewPath.endsWith('.mp4') || videoAsset.previewStatus === 'READY')) {
       const projectStoragePath = videoAsset.video.project.storagePath
         || buildProjectStorageRoot(
           videoAsset.video.project.client?.name || videoAsset.video.project.companyName || 'Client',
@@ -646,6 +647,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
         storagePath: true,
         previewPath: true,
         fileType: true,
+        previewStatus: true,
         video: {
           select: {
             storageFolderName: true,
@@ -729,7 +731,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
 
     const previewPath = String(a.previewPath || '').toLowerCase()
     const fileType = String(a.fileType || '').toLowerCase()
-    if (fileType.startsWith('video/') && previewPath.endsWith('.mp4')) {
+    if (fileType.startsWith('video/') && (previewPath.endsWith('.mp4') || a.previewStatus === 'READY')) {
       const projectStoragePath = a.video.project.storagePath
         || buildProjectStorageRoot(
           a.video.project.client?.name || a.video.project.companyName || 'Client',

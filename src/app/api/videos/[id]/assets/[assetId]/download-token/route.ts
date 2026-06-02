@@ -50,8 +50,10 @@ export async function POST(
       && asset.previewPath.toLowerCase().endsWith('.mp4')
     const hasReadyGeneratedPreview =
       asset.previewStatus === 'READY'
-      && typeof asset.previewPath === 'string'
-      && asset.previewPath.length > 0
+      && (
+        isPreviewableVideo
+        || (typeof asset.previewPath === 'string' && asset.previewPath.length > 0)
+      )
 
     // Verify user has access to this project
     const accessCheck = await verifyProjectAccess(

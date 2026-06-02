@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.9.3] - 2026-05-31
 
+### Fixed
+
+- **Storage integrity scan now respects closed-project video assets with thumbnail only** — The close-project cleanup was clearing VideoAsset preview metadata too aggressively, even when the surviving file that matters is the companion JPG thumbnail used for asset cards. That left the integrity scan with no database-backed way to recognize those JPGs, so they showed up as orphan paths. It also meant the asset preview APIs could no longer treat those thumbnails as valid after close. Changed the closed-project cleanup paths so they only delete video-asset playback preview MP4s, keep the JPG thumbnail state intact, and leave image/non-video asset previews alone. Also updated the storage integrity reference builder, preview-bytes accounting, and asset preview token/content logic so a closed-project video asset in “thumbnail only” state is treated as valid instead of orphaned. The admin copy for “Delete previews for closed projects” now matches that behavior.
+
+## [1.9.3] - 2026-05-31
+
 ### Added
 - **Global PWA metadata is now emitted from app-level metadata generation** — root metadata now declares `manifest`, mobile web-app capability hints, Apple web-app capability, and a global theme color so installability signals are present across auth redirects and non-admin entry points.
 

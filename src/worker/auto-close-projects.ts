@@ -126,10 +126,16 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
             video: { projectId },
             previewPath: { not: null },
           },
-          select: { id: true, previewPath: true },
+          select: { id: true, previewPath: true, fileType: true, previewStatus: true },
         })
 
         for (const asset of videoAssets) {
+          const isVideoAsset = String(asset.fileType || '').toLowerCase().startsWith('video/')
+          const hasPlaybackPreview = String(asset.previewPath || '').toLowerCase().endsWith('.mp4')
+          if (!isVideoAsset || !hasPlaybackPreview) {
+            continue
+          }
+
           if (asset.previewPath) {
             await deleteFile(asset.previewPath).catch(() => {})
           }
@@ -137,9 +143,8 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
             where: { id: asset.id },
             data: {
               previewPath: null,
-              previewStatus: null,
+              previewStatus: asset.previewStatus === 'READY' ? 'READY' : null,
               previewError: null,
-              previewGeneratedAt: null,
               previewFileSize: null,
             },
           }).catch(() => {})
