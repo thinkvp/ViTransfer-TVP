@@ -5,11 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.9.3] - 2026-05-31
+## [1.9.4] - 2026-06-02
+
+### Added
+
+- **Smart Version Label logic** - When adding a new video or video version, the system automatically identifies "v*" from the filename, enters it into the Version Label and removes it from the Video Name field.
+
+### Removed
+
+- **Removed the Approve Project / Unapprove Project button from Project page** - Project Status is changed by clicking the Status pill, which supports all statuses, including the final possible status "Closed".
 
 ### Fixed
 
 - **Storage integrity scan now respects closed-project video assets with thumbnail only** — The close-project cleanup was clearing VideoAsset preview metadata too aggressively, even when the surviving file that matters is the companion JPG thumbnail used for asset cards. That left the integrity scan with no database-backed way to recognize those JPGs, so they showed up as orphan paths. It also meant the asset preview APIs could no longer treat those thumbnails as valid after close. Changed the closed-project cleanup paths so they only delete video-asset playback preview MP4s, keep the JPG thumbnail state intact, and leave image/non-video asset previews alone. Also updated the storage integrity reference builder, preview-bytes accounting, and asset preview token/content logic so a closed-project video asset in “thumbnail only” state is treated as valid instead of orphaned. The admin copy for “Delete previews for closed projects” now matches that behavior.
+- **Rewired Video Asset's "Copy to Version" to account for S3 storage and new previews folder** - Copy to version had not been updated to account for new storage provider mode and Video Asset previews for the FILES view of Share pages.
+- **Album ZIP files now renamed on album name change** - Album ZIP files now rename when renaming an existing album.
+- **Video Asset video previews for previously closed projects** - Re-opening a previously closed project now properly regenerates missing Video Asset video previews if they were deleted when the project was closed.
+- **Reprocess Previews no longer deletes custom set playback thumbnails video asset** - The "Set as video thumbnail" function still referenced old preview paths and was allowing the original file to be deleted when running Reprocess Previews.
 
 ## [1.9.3] - 2026-05-31
 

@@ -392,3 +392,40 @@ export function getUserColor(name: string | null | undefined, isSender: boolean 
   const colorIndex = Math.abs(hash) % colors.length
   return colors[colorIndex]
 }
+
+/**
+ * Parses a video filename and extracts a version label (e.g. "V1", "v2") if present.
+ * The version token must be preceded by a separator (spaces and/or dashes).
+ * Returns the cleaned video name (extension stripped) and the extracted version label.
+ *
+ * Examples:
+ *   "LLH - Cameron Rd - V1.mp4"        → { videoName: "LLH - Cameron Rd",          versionLabel: "V1" }
+ *   "Project - V2 - Final.mp4"         → { videoName: "Project - Final",            versionLabel: "V2" }
+ *   "Widex Launch - V1 - Subbed.mp4"   → { videoName: "Widex Launch - Subbed",      versionLabel: "V1" }
+ */
+export function parseVersionFromFilename(fileName: string): { videoName: string; versionLabel: string } {
+  const lastDot = fileName.lastIndexOf('.')
+  const baseName = lastDot > 0 ? fileName.slice(0, lastDot) : fileName
+
+  // Match a version token preceded by separators (spaces/dashes).
+  // Lookahead ensures it's followed by a separator or end of string,
+  // so "V12" inside a word like "Version12" won't trigger a match.
+  const versionRegex = /[\s-]+([Vv]\d+)(?=[\s-]|$)/
+  const match = versionRegex.exec(baseName)
+
+  if (!match) {
+    return { videoName: baseName, versionLabel: '' }
+  }
+
+  const versionLabel = match[1] // e.g. "V1"
+
+  // Remove the matched separator+version token; join the remaining pieces
+  const before = baseName.slice(0, match.index)
+  const after = baseName.slice(match.index + match[0].length)
+  const combined = (before + after)
+    .replace(/\s*-\s*$/, '') // trailing " -" or "- "
+    .replace(/^\s*-\s*/, '') // leading "- " or " -"
+    .trim()
+
+  return { videoName: combined, versionLabel }
+}

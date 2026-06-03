@@ -46,6 +46,7 @@ export function ConfirmDialog({
     setBusy(true)
     try {
       await onConfirm()
+      onOpenChange?.(false)
     } finally {
       setBusy(false)
     }

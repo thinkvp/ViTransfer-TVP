@@ -1548,6 +1548,12 @@ export async function PATCH(
           if (!isPreviewableMediaFileType(file.fileType)) continue
           const needsPreview = !file.previewPath || file.previewStatus !== 'READY'
           if (!needsPreview) continue
+          // Reset attempts so a project re-open always gets a fresh attempt,
+          // regardless of how many failures occurred before the project was closed.
+          await prisma.shareUploadFile.update({
+            where: { id: file.id },
+            data: { previewAttempts: 0 },
+          }).catch(() => {})
           await enqueueShareUploadPreview({
             type: 'shareUploadFile',
             recordId: file.id,
@@ -1555,7 +1561,7 @@ export async function PATCH(
             fileType: file.fileType,
             fileName: file.fileName,
             durationSeconds: file.mediaDurationSeconds,
-          }).catch(() => {})
+          }, { forceRequeue: true }).catch(() => {})
           queuedShareUploadPreviewJobs += 1
         }
 
@@ -1586,13 +1592,19 @@ export async function PATCH(
           const needsPreview = !hasPlaybackPreview || asset.previewStatus !== 'READY'
           if (!needsPreview) continue
 
+          // Reset attempts so a project re-open always gets a fresh attempt,
+          // regardless of how many failures occurred before the project was closed.
+          await prisma.videoAsset.update({
+            where: { id: asset.id },
+            data: { previewAttempts: 0 },
+          }).catch(() => {})
           await enqueueShareUploadPreview({
             type: 'videoAsset',
             recordId: asset.id,
             storagePath: asset.storagePath,
             fileType: asset.fileType,
             fileName: asset.fileName,
-          }).catch(() => {})
+          }, { forceRequeue: true }).catch(() => {})
           queuedVideoAssetPreviewJobs += 1
         }
 

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
-import { Trash2, ExternalLink, Archive, RotateCcw, Send, Loader2 } from 'lucide-react'
+import { Trash2, ExternalLink, RotateCcw, Send, Loader2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import {
@@ -23,8 +23,7 @@ import {
   SelectValue,
 } from './ui/select'
 import { Textarea } from './ui/textarea'
-import { UnapproveModal } from './UnapproveModal'
-import { apiFetch, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
+import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
@@ -53,14 +52,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const router = useRouter()
   const { user } = useAuth()
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isTogglingApproval, setIsTogglingApproval] = useState(false)
   const [isReprocessingPreviews, setIsReprocessingPreviews] = useState(false)
   const [isMonitoringReprocessPreviews, setIsMonitoringReprocessPreviews] = useState(false)
 
-  // Unapprove modal state
-  const [showUnapproveModal, setShowUnapproveModal] = useState(false)
   const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
-  const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showDeleteConfirm2, setShowDeleteConfirm2] = useState(false)
 
@@ -127,7 +122,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const canSendNotifications = canDoAction(permissions, 'sendNotificationsToRecipients')
   const canViewAnalytics = canDoAction(permissions, 'viewAnalytics')
   const canDeleteProjects = canDoAction(permissions, 'deleteProjects')
-  const canChangeStatuses = canDoAction(permissions, 'changeProjectStatuses')
   const canViewSharePage = canDoAction(permissions, 'accessSharePage')
   const canReprocessPreviews = canDoAction(permissions, 'changeProjectSettings')
 
@@ -474,80 +468,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       })
   }
 
-  const handleToggleApproval = async () => {
-    if (!canChangeStatuses) return
-    // Prevent double-clicks during approval toggle
-    if (isTogglingApproval) return
-
-    const isCurrentlyApproved = project.status === 'APPROVED'
-
-    if (isCurrentlyApproved) {
-      // Show the unapprove modal to let user choose
-      setShowUnapproveModal(true)
-    } else {
-      setShowApproveConfirm(true)
-    }
-  }
-
-  const confirmApprove = () => {
-    setIsTogglingApproval(true)
-    apiPatch(`/api/projects/${project.id}`, { status: 'APPROVED' })
-      .then(() => {
-        toast.success('Project approved successfully')
-        onRefresh?.()
-        router.refresh()
-      })
-      .catch(() => {
-        toast.error('Failed to approve project')
-      })
-      .finally(() => {
-        setIsTogglingApproval(false)
-      })
-  }
-
-  const handleUnapprove = async (unapproveVideos: boolean) => {
-    if (!canChangeStatuses) return
-    // Prevent double-clicks during unapproval
-    if (isTogglingApproval) return
-
-    setIsTogglingApproval(true)
-    setShowUnapproveModal(false)
-
-    // Unapprove project in background without blocking UI
-    apiPost(`/api/projects/${project.id}/unapprove`, { unapproveVideos })
-      .then((data) => {
-        // Show appropriate success message
-        if (data.unapprovedVideos && data.unapprovedCount > 0) {
-          toast.success(`Project unapproved. ${data.unapprovedCount} video(s) were also unapproved.`)
-        } else if (data.unapprovedVideos && data.unapprovedCount === 0) {
-          toast.success('Project unapproved. No videos were approved.')
-        } else {
-          toast.success('Project unapproved. Videos remain approved.')
-        }
-        // Refresh in background
-        onRefresh?.()
-        router.refresh()
-      })
-      .catch((error) => {
-        toast.error('Failed to unapprove project')
-      })
-      .finally(() => {
-        setIsTogglingApproval(false)
-      })
-  }
-
-  const handleUnapproveProjectOnly = () => {
-    handleUnapprove(false)
-  }
-
-  const handleUnapproveAll = () => {
-    handleUnapprove(true)
-  }
-
-  const handleCancelUnapprove = () => {
-    setShowUnapproveModal(false)
-  }
-
   const handleDelete = () => {
     if (!canDeleteProjects || isDeleting) return
     setShowDeleteConfirm(true)
@@ -580,7 +500,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           canViewSharePage ||
           canViewAnalytics ||
           canReprocessPreviews ||
-          canChangeStatuses ||
           canDeleteProjects
 
         if (!hasAnyActions) return null
@@ -646,31 +565,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               <ExternalLink className="w-4 h-4 mr-2" />
               View Analytics Page
             </Button>
-          )}
-
-          {/* Approve/Unapprove Toggle Button */}
-          {canChangeStatuses && (
-            <div>
-              <Button
-                variant="outline"
-                size="default"
-                className="w-full"
-                onClick={handleToggleApproval}
-                disabled={isTogglingApproval}
-              >
-                {project.status === 'APPROVED' ? (
-                  <>
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    {isTogglingApproval ? 'Unapproving...' : 'Unapprove Project'}
-                  </>
-                ) : (
-                  <>
-                    <Archive className="w-4 h-4 mr-2" />
-                    {isTogglingApproval ? 'Approving...' : 'Approve Project'}
-                  </>
-                )}
-              </Button>
-            </div>
           )}
 
           {canViewSharePage && (
@@ -1078,14 +972,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       </Dialog>
       )}
 
-      {/* Unapprove Modal */}
-      <UnapproveModal
-        show={showUnapproveModal}
-        onCancel={handleCancelUnapprove}
-        onUnapproveProjectOnly={handleUnapproveProjectOnly}
-        onUnapproveAll={handleUnapproveAll}
-        processing={isTogglingApproval}
-      />
       <ConfirmDialog
         open={showReprocessConfirm}
         onOpenChange={setShowReprocessConfirm}
@@ -1093,14 +979,6 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         description="This will delete stored preview files, clear preview references in the database, and queue regeneration for videos, video assets, uploads, album thumbnails, and album photo preview derivatives."
         confirmLabel="Reprocess"
         onConfirm={confirmReprocessPreviews}
-      />
-      <ConfirmDialog
-        open={showApproveConfirm}
-        onOpenChange={setShowApproveConfirm}
-        title="Approve This Project?"
-        confirmLabel="Approve"
-        variant="default"
-        onConfirm={confirmApprove}
       />
       <ConfirmDialog
         open={showDeleteConfirm}

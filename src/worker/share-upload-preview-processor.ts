@@ -227,7 +227,8 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   }
 
   if (currentAttempts > MAX_PREVIEW_ATTEMPTS) {
-    console.warn(`[PREVIEW] ${type}:${recordId} exceeded max attempts (${currentAttempts}); skipping`)
+    console.warn(`[PREVIEW] ${type}:${recordId} exceeded max attempts (${currentAttempts}); marking failed`)
+    await updateRecordFailed(type, recordId, `Exceeded max preview attempts (${currentAttempts})`)
     return
   }
 
@@ -618,7 +619,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       fileType: f.fileType,
       fileName: f.fileName,
       durationSeconds: f.mediaDurationSeconds,
-    }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for ShareUploadFile ${f.id}:`, e))
+    }, { forceRequeue: true }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for ShareUploadFile ${f.id}:`, e))
     queued++
   }
 
@@ -630,7 +631,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       fileType: f.fileType,
       fileName: f.fileName,
       durationSeconds: f.mediaDurationSeconds,
-    }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for ShareUploadFile ${f.id}:`, e))
+    }, { forceRequeue: true }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for ShareUploadFile ${f.id}:`, e))
     queued++
   }
 
@@ -641,7 +642,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       storagePath: a.storagePath,
       fileType: a.fileType,
       fileName: a.fileName,
-    }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for VideoAsset ${a.id}:`, e))
+    }, { forceRequeue: true }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for VideoAsset ${a.id}:`, e))
     queued++
   }
 
@@ -652,7 +653,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       storagePath: a.storagePath,
       fileType: a.fileType,
       fileName: a.fileName,
-    }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for VideoAsset ${a.id}:`, e))
+    }, { forceRequeue: true }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for VideoAsset ${a.id}:`, e))
     queued++
   }
 

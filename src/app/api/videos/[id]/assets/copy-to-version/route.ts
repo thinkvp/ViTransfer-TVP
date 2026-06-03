@@ -5,8 +5,9 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { getFilePath } from '@/lib/storage'
+import { downloadFile, getFilePath, uploadFile } from '@/lib/storage'
 import {
+  buildVideoAssetPreviewStoragePath,
   isDropboxStoragePath,
   stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
@@ -15,9 +16,34 @@ import {
   buildVideoAssetStoragePath,
   buildProjectStorageRoot,
 } from '@/lib/project-storage-paths'
-import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { isS3Mode, s3GetFileSize } from '@/lib/s3-storage'
 import { z } from 'zod'
 export const runtime = 'nodejs'
+
+async function getLogicalFileSize(filePath: string): Promise<number> {
+  if (isS3Mode()) {
+    const size = await s3GetFileSize(filePath)
+    if (typeof size === 'number' && size >= 0) return size
+    throw new Error(`Failed to determine file size for ${filePath}`)
+  }
+
+  const resolvedPath = isDropboxStoragePath(filePath)
+    ? stripDropboxStoragePrefix(filePath)
+    : filePath
+  const stats = await fs.promises.stat(getFilePath(resolvedPath))
+  return stats.size
+}
+
+async function copyLogicalFile(
+  sourcePath: string,
+  destinationPath: string,
+  size: number,
+  contentType: string,
+): Promise<void> {
+  const sourceStream = await downloadFile(sourcePath)
+  await uploadFile(destinationPath, sourceStream, size, contentType)
+}
 
 const copyAssetsSchema = z.object({
   assetIds: z.array(z.string().min(1)).min(1, 'No assets selected for copying').max(50, 'Too many assets selected'),
@@ -72,6 +98,10 @@ export async function POST(
       select: {
         id: true,
         projectId: true,
+        name: true,
+        storageFolderName: true,
+        version: true,
+        versionLabel: true,
         project: {
           select: {
             status: true,
@@ -157,12 +187,6 @@ export async function POST(
     // Physically copy each asset file to the target version's assets folder
     const copiedAssets = [] as Array<unknown>
     for (const asset of assets) {
-      // Resolve source local path (strip dropbox: prefix if present)
-      const sourceLocalRelPath = isDropboxStoragePath(asset.storagePath)
-        ? stripDropboxStoragePrefix(asset.storagePath)
-        : asset.storagePath
-      const sourceAbsPath = getFilePath(sourceLocalRelPath)
-
       const uniqueStorageFileName = allocateUniqueStorageName(asset.fileName, reservedStorageNames)
       reservedStorageNames.add(uniqueStorageFileName)
 
@@ -173,14 +197,92 @@ export async function POST(
         targetVersionLabel,
         uniqueStorageFileName,
       )
-      const targetAbsPath = getFilePath(targetLocalRelPath)
-
-      // Ensure target directory exists and copy the file
-      await fs.promises.mkdir(path.dirname(targetAbsPath), { recursive: true })
-      await fs.promises.copyFile(sourceAbsPath, targetAbsPath)
 
       // Determine the storage path for the new DB record
       const newStoragePath = targetLocalRelPath
+
+      await copyLogicalFile(
+        asset.storagePath,
+        newStoragePath,
+        Number(asset.fileSize),
+        asset.fileType || 'application/octet-stream',
+      )
+
+      const normalizedType = String(asset.fileType || '').toLowerCase()
+      const hasReadyPreview = asset.previewStatus === 'READY'
+      const isVideoAsset = normalizedType.startsWith('video/')
+      const isImageAsset = normalizedType.startsWith('image/')
+      let newPreviewPath: string | null = null
+      let newPreviewStatus: string | null = null
+      let newPreviewError: string | null = null
+      let newPreviewGeneratedAt = null
+      let newPreviewFileSize = null
+
+      if (hasReadyPreview && asset.previewPath) {
+        if (isVideoAsset && asset.previewPath.toLowerCase().endsWith('.mp4')) {
+          const sourceCompanionPreviewPath = buildVideoAssetPreviewStoragePath(
+            projectStoragePath,
+            sourceVideo.storageFolderName || sourceVideo.name,
+            sourceVideo.versionLabel || `v${sourceVideo.version}`,
+            asset.storagePath,
+            '.jpg',
+          )
+          const targetCompanionPreviewPath = buildVideoAssetPreviewStoragePath(
+            projectStoragePath,
+            targetVideoFolderName,
+            targetVersionLabel,
+            newStoragePath,
+            '.jpg',
+          )
+          const targetPlaybackPreviewPath = buildVideoAssetPreviewStoragePath(
+            projectStoragePath,
+            targetVideoFolderName,
+            targetVersionLabel,
+            newStoragePath,
+            '.mp4',
+          )
+
+          await copyLogicalFile(
+            asset.previewPath,
+            targetPlaybackPreviewPath,
+            asset.previewFileSize != null ? Number(asset.previewFileSize) : await getLogicalFileSize(asset.previewPath),
+            'video/mp4',
+          )
+          await copyLogicalFile(
+            sourceCompanionPreviewPath,
+            targetCompanionPreviewPath,
+            await getLogicalFileSize(sourceCompanionPreviewPath),
+            'image/jpeg',
+          )
+
+          newPreviewPath = targetPlaybackPreviewPath
+          newPreviewStatus = 'READY'
+          newPreviewGeneratedAt = asset.previewGeneratedAt
+          newPreviewFileSize = asset.previewFileSize
+        } else if (isImageAsset || asset.previewPath) {
+          const targetImagePreviewPath = buildVideoAssetPreviewStoragePath(
+            projectStoragePath,
+            targetVideoFolderName,
+            targetVersionLabel,
+            newStoragePath,
+            '.jpg',
+          )
+
+          await copyLogicalFile(
+            asset.previewPath,
+            targetImagePreviewPath,
+            asset.previewFileSize != null ? Number(asset.previewFileSize) : await getLogicalFileSize(asset.previewPath),
+            'image/jpeg',
+          )
+
+          newPreviewPath = targetImagePreviewPath
+          newPreviewStatus = 'READY'
+          newPreviewGeneratedAt = asset.previewGeneratedAt
+          newPreviewFileSize = asset.previewFileSize != null
+            ? asset.previewFileSize
+            : BigInt(await getLogicalFileSize(asset.previewPath))
+        }
+      }
 
       // Create the new asset DB record pointing to the copied file
       copiedAssets.push(await prisma.videoAsset.create({
@@ -192,11 +294,19 @@ export async function POST(
           storagePath: newStoragePath,
           category: asset.category,
           uploadedByName: asset.uploadedByName,
+          previewPath: newPreviewPath,
+          previewStatus: newPreviewStatus,
+          previewError: newPreviewError,
+          previewGeneratedAt: newPreviewGeneratedAt,
+          previewFileSize: newPreviewFileSize,
         },
       }))
     }
 
-    await recalculateAndStoreProjectTotalBytes(sourceVideo.projectId)
+    await Promise.allSettled([
+      recalculateAndStoreProjectTotalBytes(sourceVideo.projectId),
+      recalculateAndStoreProjectPreviewBytes(sourceVideo.projectId),
+    ])
 
     return NextResponse.json({
       success: true,

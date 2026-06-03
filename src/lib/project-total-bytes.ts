@@ -372,12 +372,13 @@ export async function computeProjectPreviewBytes(
 
   const previewFilePaths = new Set<string>()
   const spritePrefixes = new Set<string>()
+  const videoAssetStoragePaths = new Set(videoAssets.map((a) => a.storagePath))
 
   for (const video of videos) {
     if (video.preview480Path) previewFilePaths.add(video.preview480Path)
     if (video.preview720Path) previewFilePaths.add(video.preview720Path)
     if (video.preview1080Path) previewFilePaths.add(video.preview1080Path)
-    if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
+    if (video.thumbnailPath && !videoAssetStoragePaths.has(video.thumbnailPath)) {
       previewFilePaths.add(video.thumbnailPath)
     }
     if (video.timelinePreviewVttPath) previewFilePaths.add(video.timelinePreviewVttPath)

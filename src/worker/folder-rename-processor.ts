@@ -2,7 +2,8 @@ import { Job } from 'bullmq'
 import path from 'path'
 import { FolderRenameJobPayload } from '../lib/queue'
 import { prisma } from '../lib/db'
-import { isS3Mode, s3MoveDirectoryWithProgress } from '../lib/s3-storage'
+import { isS3Mode, s3MoveDirectoryWithProgress, s3MoveFile } from '../lib/s3-storage'
+import { getAlbumZipFileName } from '../lib/album-photo-zip'
 
 // ---------------------------------------------------------------------------
 // Progress throttle: update DB at most every N ms to avoid hammering the DB
@@ -290,6 +291,29 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
           WHERE "albumId" = ${renameJob.entityId}
         `
       })
+
+      // Rename the zip files inside the (now-moved) zips/ subdirectory.
+      // The zip filename encodes the album display name, so a prefix copy alone is not enough.
+      if (renameJob.oldEntityName) {
+        const album = await prisma.album.findUnique({
+          where: { id: renameJob.entityId },
+          select: { name: true },
+        })
+        if (album) {
+          const zipsDir = `${renameJob.newPrefix}/zips`
+          for (const variant of ['full', 'social'] as const) {
+            const oldZipPath = `${zipsDir}/${getAlbumZipFileName({ albumName: renameJob.oldEntityName, variant })}`
+            const newZipPath = `${zipsDir}/${getAlbumZipFileName({ albumName: album.name, variant })}`
+            if (oldZipPath !== newZipPath) {
+              try {
+                await s3MoveFile(oldZipPath, newZipPath)
+              } catch (zipMoveError) {
+                console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: ${variant} zip rename failed (non-fatal):`, zipMoveError)
+              }
+            }
+          }
+        }
+      }
     } else if (renameJob.entityType === 'VIDEO_VERSION') {
       // entityId = videoId; entityName = new version label
       // Derive the previews-root prefix from the main prefix:

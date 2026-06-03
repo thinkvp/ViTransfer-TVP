@@ -7,7 +7,7 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Textarea } from './ui/textarea'
 import { Upload } from 'lucide-react'
-import { formatFileSize } from '@/lib/utils'
+import { formatFileSize, parseVersionFromFilename } from '@/lib/utils'
 import { apiFetch, apiPost } from '@/lib/api-client'
 import {
   ensureFreshUploadOnContextChange,
@@ -227,6 +227,8 @@ export default function VideoUpload({
       const droppedFile = e.dataTransfer.files[0]
       if (droppedFile.type.startsWith('video/')) {
         setFile(droppedFile)
+        const { versionLabel: detected } = parseVersionFromFilename(droppedFile.name)
+        if (detected) setVersionLabel(detected)
       } else {
         setError('Please drop a video file')
       }
@@ -312,7 +314,14 @@ export default function VideoUpload({
             id="file"
             type="file"
             accept="video/*"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={(e) => {
+              const selected = e.target.files?.[0] || null
+              setFile(selected)
+              if (selected) {
+                const { versionLabel: detected } = parseVersionFromFilename(selected.name)
+                if (detected) setVersionLabel(detected)
+              }
+            }}
             disabled={submitting}
             className="hidden"
           />

@@ -93,8 +93,11 @@ function isPreviewableFileType(fileType: string | null | undefined): boolean {
   return normalized.startsWith('image/') || normalized.startsWith('video/')
 }
 
-function hasCustomVideoThumbnail(thumbnailPath: string | null | undefined): boolean {
-  return Boolean(thumbnailPath && thumbnailPath.includes('/videos/assets/'))
+function hasCustomVideoThumbnail(thumbnailPath: string | null | undefined, videoAssetStoragePaths: Set<string>): boolean {
+  if (!thumbnailPath) return false
+  // The old '/videos/assets/' check never matched — actual path is '/videos/{folder}/{version}/assets/'.
+  // Use an exact storagePath lookup, mirroring what video-processor-helpers.ts does.
+  return videoAssetStoragePaths.has(thumbnailPath)
 }
 
 function addPathCandidate(target: Set<string>, candidate: string | null | undefined) {
@@ -225,6 +228,12 @@ export async function POST(
     const filePathsToDelete = new Set<string>()
     const directoryPathsToDelete = new Set<string>()
 
+    // Build a set of all video asset storage paths so we can detect when a video's thumbnailPath
+    // points to one of them (custom thumbnail set via "Set as video thumbnail").
+    const videoAssetStoragePathSet = new Set<string>(
+      videoAssets.map(a => a.storagePath).filter(Boolean) as string[]
+    )
+
     for (const video of videos) {
       const videoFolderName = video.storageFolderName || video.name
       addPathCandidate(filePathsToDelete, video.preview480Path)
@@ -234,7 +243,7 @@ export async function POST(
       addPathCandidate(filePathsToDelete, buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, video.versionLabel, '720p'))
       addPathCandidate(filePathsToDelete, buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, video.versionLabel, '1080p'))
 
-      if (!hasCustomVideoThumbnail(video.thumbnailPath)) {
+      if (!hasCustomVideoThumbnail(video.thumbnailPath, videoAssetStoragePathSet)) {
         addPathCandidate(filePathsToDelete, video.thumbnailPath)
         addPathCandidate(filePathsToDelete, buildVideoThumbnailStoragePath(projectStoragePath, videoFolderName, video.versionLabel))
       }
@@ -274,7 +283,7 @@ export async function POST(
     const videoQueue = getVideoQueue()
     let queuedVideoJobs = 0
     for (const video of videos) {
-      const preserveCustomThumbnail = hasCustomVideoThumbnail(video.thumbnailPath)
+      const preserveCustomThumbnail = hasCustomVideoThumbnail(video.thumbnailPath, videoAssetStoragePathSet)
       await prisma.video.update({
         where: { id: video.id },
         data: {

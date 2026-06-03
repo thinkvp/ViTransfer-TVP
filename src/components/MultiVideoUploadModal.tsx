@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { cn, formatFileSize } from '@/lib/utils'
+import { cn, formatFileSize, parseVersionFromFilename } from '@/lib/utils'
 import { apiFetch, apiPost } from '@/lib/api-client'
 import {
   clearTUSFingerprint,
@@ -150,11 +150,12 @@ export default function MultiVideoUploadModal({
         const key = `${file.name}:${file.size}:${file.lastModified}`
         if (existingKeys.has(key)) continue
 
+        const parsed = parseVersionFromFilename(file.name)
         next.push({
           id: `${Date.now()}-${crypto.randomUUID()}`,
           file,
-          videoName: stripExtension(file.name),
-          versionLabel: '',
+          videoName: parsed.videoName,
+          versionLabel: parsed.versionLabel,
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
           status: 'pending',

@@ -390,7 +390,10 @@ export function getShareUploadPreviewQueue(): Queue<ShareUploadPreviewJob> {
  * (a second call for the same record is a no-op if the job is already waiting/active).
  * Also stamps previewStatus=PENDING + previewQueuedAt on the DB record.
  */
-export async function enqueueShareUploadPreview(payload: ShareUploadPreviewJob): Promise<void> {
+export async function enqueueShareUploadPreview(
+  payload: ShareUploadPreviewJob,
+  options?: { forceRequeue?: boolean },
+): Promise<void> {
   if (process.env.NEXT_PHASE === 'phase-production-build') return
 
   const jobId = `share-preview:${payload.type}:${payload.recordId}`
@@ -418,7 +421,30 @@ export async function enqueueShareUploadPreview(payload: ShareUploadPreviewJob):
     }).catch(() => {})
   }
 
-  await getShareUploadPreviewQueue().add('generate-preview', payload, {
+  const queue = getShareUploadPreviewQueue()
+
+  // BullMQ deduplicates by jobId: if a job with the same ID already exists in ANY
+  // state (waiting, active, delayed, completed, or failed), add() is a no-op and
+  // the new payload is never processed.  When forceRequeue is true (re-open,
+  // reconciliation) we evict any stale completed/failed entry first so the fresh
+  // job is actually enqueued.  We leave active jobs untouched to avoid
+  // interrupting a worker that is already processing the record.
+  if (options?.forceRequeue) {
+    try {
+      const existing = await queue.getJob(jobId)
+      if (existing) {
+        const state = await existing.getState()
+        if (state === 'failed' || state === 'completed' || state === 'unknown') {
+          await existing.remove().catch(() => {})
+        }
+      }
+    } catch {
+      // Non-fatal — if removal fails the add() below will just be a no-op,
+      // which is no worse than the previous behaviour.
+    }
+  }
+
+  await queue.add('generate-preview', payload, {
     jobId,
     // BullMQ ignores this add() if a job with the same jobId already exists in
     // waiting/active/delayed state, giving us safe idempotent enqueue.

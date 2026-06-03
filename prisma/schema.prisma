@@ -79,8 +79,10 @@ model FolderRenameJob {
   entityType    String
   /// The project or client id
   entityId      String
-  /// Display name (project title or client name) at the time of rename
+  /// Display name (new name) at the time of rename
   entityName    String
+  /// Display name before the rename (used by the worker to locate old-named files such as album ZIP files)
+  oldEntityName String?
   oldPrefix     String
   newPrefix     String
   /// PENDING | IN_PROGRESS | COMPLETED | FAILED

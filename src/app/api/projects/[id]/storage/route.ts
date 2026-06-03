@@ -283,6 +283,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         computeDirectorySizeBytes(uploadsAbs),
       ])
 
+      const videoAssetStoragePaths = new Set(videoAssetEntries.map((a) => a.storagePath))
       const [originalVideosBytesDisk, videoPreviewsBytesDisk, videoAssetsBytesDisk, originalPhotosBytesDisk, photoZipBytesDisk] = await Promise.all([
         sumStorageEntrySizes(videoEntries.map((video) => video.originalStoragePath)),
         sumStorageEntrySizes(
@@ -292,7 +293,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             if (video.preview480Path) previewPaths.push(video.preview480Path)
             if (video.preview720Path) previewPaths.push(video.preview720Path)
             if (video.preview1080Path) previewPaths.push(video.preview1080Path)
-            if (video.thumbnailPath && !video.thumbnailPath.includes('/videos/assets/')) {
+            if (video.thumbnailPath && !videoAssetStoragePaths.has(video.thumbnailPath)) {
               previewPaths.push(video.thumbnailPath)
             }
             if (video.timelinePreviewSpritesPath) {

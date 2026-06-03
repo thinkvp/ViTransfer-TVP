@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { deleteDirectory, deleteFile, moveDirectory } from '@/lib/storage'
+import { deleteDirectory, deleteFile, moveDirectory, moveFile } from '@/lib/storage'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -10,6 +10,7 @@ import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import {
   allocateUniqueStorageName,
   buildAlbumStorageRoot,
+  buildAlbumZipStoragePath,
   buildProjectPreviewsRoot,
   buildProjectStorageRoot,
   replaceStoredStoragePathPrefix,
@@ -157,6 +158,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           entityType: 'ALBUM',
           entityId: albumId,
           entityName: albumRenamePlan.newAlbumFolderName,
+          // Store the current album display name so the worker can rename zip files
+          // (e.g. "Old Name Full Res.zip" → "New Name Full Res.zip") after the folder move.
+          oldEntityName: album.name,
           oldPrefix: albumRenamePlan.oldAlbumStorageRoot,
           newPrefix: albumRenamePlan.newAlbumStorageRoot,
           status: 'PENDING',
@@ -167,6 +171,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // Local mode: move both the main album folder and its .previews mirror.
       await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
       await moveDirectory(albumRenamePlan.oldAlbumPreviewsRoot, albumRenamePlan.newAlbumPreviewsRoot)
+
+      // Rename the zip files inside the (now-moved) zips/ subdirectory.
+      // The zip filename encodes the album display name, so a folder move alone is not enough.
+      const projectStoragePath = album.project.storagePath
+        || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+      for (const variant of ['full', 'social'] as const) {
+        const oldZipPath = buildAlbumZipStoragePath(projectStoragePath, albumRenamePlan.newAlbumFolderName, album.name, variant)
+        const newZipPath = buildAlbumZipStoragePath(projectStoragePath, albumRenamePlan.newAlbumFolderName, data.name, variant)
+        if (oldZipPath !== newZipPath) {
+          await moveFile(oldZipPath, newZipPath).catch((err) => {
+            console.warn(`[album-rename] Failed to rename ${variant} zip (non-fatal):`, err)
+          })
+        }
+      }
     }
   }
 

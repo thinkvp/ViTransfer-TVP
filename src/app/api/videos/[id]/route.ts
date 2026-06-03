@@ -1,7 +1,7 @@
 import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteDirectory, deleteFile, moveDirectory, pruneEmptyParentDirectories, getFilePath } from '@/lib/storage'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
@@ -791,6 +791,11 @@ export async function DELETE(
     }
 
     const projectId = video.projectId
+    const projectStoragePath = video.project.storagePath
+      || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
+    const videoFolderName = video.storageFolderName || video.name || id
+    const versionLabel = video.versionLabel || `v${video.version}`
+    const previewRoot = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, versionLabel)
 
     // Delete all associated files from storage
     try {
@@ -849,25 +854,14 @@ export async function DELETE(
         await deleteFile(video.originalStoragePath)
       }
 
-      // Delete preview files
-      if (video.preview480Path) {
-        await deleteFile(video.preview480Path)
-      }
-      if (video.preview1080Path) {
-        await deleteFile(video.preview1080Path)
-      }
-      if (video.preview720Path) {
-        await deleteFile(video.preview720Path)
-      }
+      // Delete the entire preview tree for this video version. That covers preview mp4s,
+      // timeline assets, the canonical thumbnail.jpg, and all video-asset preview derivatives.
+      await deleteDirectory(previewRoot).catch(() => {})
 
-      if (video.timelinePreviewSpritesPath) {
-        await deleteDirectory(video.timelinePreviewSpritesPath).catch(() => {})
-      } else if (video.timelinePreviewVttPath) {
-        await deleteFile(video.timelinePreviewVttPath).catch(() => {})
-      }
-
-      // Delete thumbnail
-      if (video.thumbnailPath) {
+      // If the selected thumbnail points outside the generated preview tree (for example,
+      // a custom thumbnail set from an asset), delete that physical file only when it is
+      // not referenced by any other video or asset.
+      if (video.thumbnailPath && !video.thumbnailPath.startsWith(`${previewRoot}/`)) {
         const thumbnailSharedAssets = await prisma.videoAsset.count({
           where: {
             storagePath: video.thumbnailPath,
@@ -896,14 +890,14 @@ export async function DELETE(
       where: { id },
     })
 
-    // Update the stored project data total
-    await recalculateAndStoreProjectTotalBytes(projectId)
+    // Update the stored project data totals
+    await Promise.allSettled([
+      recalculateAndStoreProjectTotalBytes(projectId),
+      recalculateAndStoreProjectPreviewBytes(projectId),
+    ])
 
-    const projectStoragePath = video.project.storagePath
-      || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
-    const videoFolderName = video.storageFolderName || video.name || id
-    const versionLabel = video.versionLabel || `v${video.version}`
     const pruneStopAt = path.posix.join(projectStoragePath, 'videos')
+    const previewPruneStopAt = path.posix.join(projectStoragePath, '.previews', 'videos')
 
     try {
       await pruneEmptyParentDirectories(
@@ -913,6 +907,10 @@ export async function DELETE(
       await pruneEmptyParentDirectories(
         buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel),
         pruneStopAt,
+      )
+      await pruneEmptyParentDirectories(
+        previewRoot,
+        previewPruneStopAt,
       )
     } catch (error) {
       console.error(`Failed to prune empty folders for video ${video.id}:`, error)
