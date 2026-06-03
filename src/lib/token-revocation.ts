@@ -12,7 +12,7 @@
  * 5. NO FALLBACKS - fails securely if Redis is unavailable
  */
 
-import { getRedis } from './redis'
+import { getRedis, ensureRedisReady } from './redis'
 import { createHash } from 'crypto'
 
 const REFRESH_TOKEN_TTL_SECONDS = Number(process.env.ADMIN_REFRESH_TTL_SECONDS || 7 * 24 * 60 * 60)
@@ -44,10 +44,7 @@ function tokenBlacklistKey(token: string): string {
  */
 export async function revokeToken(token: string, expiresIn: number): Promise<void> {
   const redis = getRedis()
-  
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
 
   const key = tokenBlacklistKey(token)
 
@@ -78,10 +75,7 @@ export async function revokeToken(token: string, expiresIn: number): Promise<voi
  */
 export async function isTokenRevoked(token: string): Promise<boolean> {
   const redis = getRedis()
-  
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
 
   const tokenParts = token.split('.')
   const signature = tokenParts[tokenParts.length - 1]
@@ -106,10 +100,7 @@ export async function isTokenRevoked(token: string): Promise<boolean> {
  */
 export async function revokeAllUserTokens(userId: string): Promise<void> {
   const redis = getRedis()
-
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
 
   // Store a flag that user's session is invalidated
   // This can be checked before validating any token
@@ -132,10 +123,7 @@ export async function revokeAllUserTokens(userId: string): Promise<void> {
  */
 export async function isUserTokensRevoked(userId: string, tokenIssuedAt?: number): Promise<boolean> {
   const redis = getRedis()
-
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
 
   const key = `blacklist:user:${userId}`
   const revocationTimestamp = await redis.get(key)
@@ -165,10 +153,7 @@ export async function isUserTokensRevoked(userId: string, tokenIssuedAt?: number
  */
 export async function clearUserRevocation(userId: string): Promise<void> {
   const redis = getRedis()
-
-  if (redis.status !== 'ready') {
-    await redis.connect()
-  }
+  await ensureRedisReady(redis)
 
   const key = `blacklist:user:${userId}`
   await redis.del(key)

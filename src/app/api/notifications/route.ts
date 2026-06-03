@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { Prisma } from '@prisma/client'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { canDoAction, canSeeMenu } from '@/lib/rbac'
 import { rateLimit } from '@/lib/rate-limit'
 import {
@@ -87,7 +87,7 @@ const pinnedNotificationFilter = {
  * - successOnly: 1|0 (default 1)
  */
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+    const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -353,7 +353,7 @@ export async function GET(request: NextRequest) {
  * Available to all authenticated internal users.
  */
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+    const authResult = await requireApiUser(request)
   if (authResult instanceof Response) {
     return authResult
   }

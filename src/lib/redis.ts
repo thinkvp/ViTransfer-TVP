@@ -136,12 +136,6 @@ export function getRedisForQueue(): any {
 }
 
 /**
- * Alias for backwards compatibility
- * Some modules use getRedisConnection() instead of getRedis()
- */
-export const getRedisConnection = getRedis
-
-/**
  * Close Redis connection gracefully
  * Should be called on application shutdown
  */

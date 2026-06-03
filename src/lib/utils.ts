@@ -138,6 +138,18 @@ export function generateSlug(title: string): string {
     .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
 }
 
+/**
+ * Sanitize a string to be URL-safe slug
+ */
+export function sanitizeSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
 function randomSlugSuffix(length: number): string {
   const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz'
   const cryptoObj = globalThis.crypto

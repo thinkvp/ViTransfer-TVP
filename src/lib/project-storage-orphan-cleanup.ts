@@ -6,7 +6,6 @@ import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath, buildVideoT
 import {
   getFilePath,
   getRawStoragePath,
-  PROJECT_REDIRECT_FILENAME,
   PROJECT_REDIRECTS_INDEX_FILENAME,
   STORAGE_ROOT,
 } from '@/lib/storage'
@@ -93,7 +92,7 @@ function isProtectedMetadataFile(relPath: string): boolean {
   const normalized = normalizeRelativeStoragePath(relPath)
   return (
     normalized === `projects/${PROJECT_REDIRECTS_INDEX_FILENAME}` ||
-    path.posix.basename(normalized) === PROJECT_REDIRECT_FILENAME
+    path.posix.basename(normalized) === '.vitransfer_project_redirect'
   )
 }
 

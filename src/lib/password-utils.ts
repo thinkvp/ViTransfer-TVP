@@ -1,11 +1,6 @@
 /**
- * Sanitize a string to be URL-safe slug
+ * @deprecated Import sanitizeSlug from '@/lib/utils' instead.
+ * This file will be removed in a future update.
  */
-export function sanitizeSlug(input: string): string {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-}
+export { sanitizeSlug } from '@/lib/utils'
+

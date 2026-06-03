@@ -627,6 +627,8 @@ export function CommentSectionView({
   // Check if ANY video in the group is approved (for admin view with multiple versions)
   const hasAnyApprovedVideo = videos.some(v => (v as any).approved === true) || hasLocallyApprovedVideoInGroup
   const approvedVideo = videos.find(v => (v as any).approved === true) || videos.find(v => v.id === localApprovedVideoId)
+  // Project is approved but this specific video is NOT individually approved
+  const isProjectApprovedOnly = isApproved && !isCurrentVideoApproved && !hasAnyApprovedVideo && !hasLocallyApprovedVideoInGroup
   const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || hasLocallyApprovedVideoInGroup
 
   // Always use hook comments (includes optimistic updates)
@@ -1274,8 +1276,24 @@ export function CommentSectionView({
           </DialogContent>
         </Dialog>
 
-        {/* Approval Status Banner */}
-        {commentsDisabled && (
+                {/* Approval Status Banner */}
+        {commentsDisabled && isProjectApprovedOnly && (
+                    <div className="bg-primary p-4 flex-shrink-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="min-w-0">
+                  <h3 className="text-white font-medium">
+                    Project Approved
+                  </h3>
+                  <p className="text-sm text-white/80">
+                    Downloads were not enabled for this version.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {commentsDisabled && !isProjectApprovedOnly && (
           <div className="bg-success-visible border-b-2 border-success-visible p-4 flex-shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
@@ -1292,7 +1310,7 @@ export function CommentSectionView({
                 </div>
               </div>
 
-              {showVideoActions && headerVideo && ((headerVideo as any)?.approved || isApproved || isHeaderVideoLocallyApproved) ? (
+              {showVideoActions && headerVideo && ((headerVideo as any)?.approved || isHeaderVideoLocallyApproved) ? (
                 <div className="flex-shrink-0">
                   <Button
                     variant="default"
@@ -1403,10 +1421,12 @@ export function CommentSectionView({
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
               <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />
-              <p className="text-muted-foreground">
-                {commentsDisabled
-                  ? 'This video has been approved. Comments are now closed.'
-                  : 'Have some feedback? Leave it here.'}
+                            <p className="text-muted-foreground">
+                {commentsDisabled && isProjectApprovedOnly
+                  ? 'This project has been approved. Comments are now closed.'
+                  : commentsDisabled
+                    ? 'This video has been approved. Comments are now closed.'
+                    : 'Have some feedback? Leave it here.'}
               </p>
             </div>
           ) : (

@@ -1,7 +1,6 @@
 import { Server } from '@tus/server'
 import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
-import { videoQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
 import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import path from 'path'
@@ -345,7 +344,10 @@ async function handleVideoUploadFinish(
 
   const skipPreviews = projectRecord?.status === 'CLOSED' && !!globalSettings?.autoDeletePreviewsOnClose
 
-  await videoQueue.add('process-video', {
+  const { getVideoQueue } = await import('@/lib/queue')
+  const vq = getVideoQueue()
+
+  await vq.add('process-video', {
     videoId: video.id,
     originalStoragePath: video.originalStoragePath,
     projectId: video.projectId,

@@ -1,19 +1,11 @@
 const isEdgeRuntime = typeof process !== 'undefined' && process.env.NEXT_RUNTIME === 'edge'
 
-// Lazy-load crypto so the module isn't pulled into Edge bundles.
-let cryptoModule: typeof import('crypto') | null = null
+import { scryptSync, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'crypto'
+import bcrypt from 'bcryptjs'
 
-function getCrypto(): typeof import('crypto') {
-  if (cryptoModule) return cryptoModule
-
-  if (isEdgeRuntime) {
-    throw new Error('Encryption utilities require the Node.js runtime. Set runtime = \"nodejs\" for routes that use them.')
-  }
-
-  // Safe to require because all callers run on the server (Node.js)
-
-  cryptoModule = require('crypto') as typeof import('crypto')
-  return cryptoModule
+// Guard against Edge Runtime usage
+if (isEdgeRuntime) {
+  throw new Error('Encryption utilities require the Node.js runtime. Set runtime = "nodejs" for routes that use them.')
 }
 
 // Encryption key REQUIRED in production (see README for setup instructions)
@@ -54,15 +46,23 @@ function validateEncryptionKey(): void {
   }
 }
 
+// Cached derived key — computed once at module initialization to avoid expensive
+// scryptSync calls on every encrypt/decrypt operation.
+let cachedEncryptionKey: Buffer | null = null
+
 /**
  * Derive encryption key using scrypt (Key Derivation Function)
  * This is more secure than simple padding as it:
  * 1. Creates a consistent 32-byte key from any input length
  * 2. Uses a deterministic salt for consistent key generation
  * 3. Applies computational hardening (though minimal for performance)
+ *
+ * PERFORMANCE: The derived key is cached after the first call since the
+ * ENCRYPTION_KEY and salt are fixed for the lifetime of the process.
+ * This avoids blocking the event loop with scryptSync on every operation.
  */
 function getEncryptionKey(): Buffer {
-  const crypto = getCrypto()
+  if (cachedEncryptionKey) return cachedEncryptionKey
 
   // Use a fixed salt for deterministic key derivation
   // This ensures the same ENCRYPTION_KEY always produces the same derived key
@@ -70,11 +70,13 @@ function getEncryptionKey(): Buffer {
 
   // Use scrypt with minimal cost for fast key derivation
   // N=1024, r=8, p=1 provides good security with minimal performance impact
-  return crypto.scryptSync(ENCRYPTION_KEY, salt, 32, {
+  cachedEncryptionKey = scryptSync(ENCRYPTION_KEY, salt, 32, {
     N: 1024,  // CPU/memory cost (lower = faster, still secure for deterministic derivation)
     r: 8,     // Block size
     p: 1      // Parallelization
   })
+
+  return cachedEncryptionKey
 }
 
 /**
@@ -88,10 +90,9 @@ export function encrypt(text: string): string {
   validateEncryptionKey()
   
   try {
-    const crypto = getCrypto()
     const key = getEncryptionKey()
-    const iv = crypto.randomBytes(IV_LENGTH)
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
+    const iv = randomBytes(IV_LENGTH)
+    const cipher = createCipheriv(ALGORITHM, key, iv)
     
     let encrypted = cipher.update(text, 'utf8', 'hex')
     encrypted += cipher.final('hex')
@@ -117,7 +118,6 @@ export function decrypt(encryptedText: string): string {
   validateEncryptionKey()
   
   try {
-    const crypto = getCrypto()
     const key = getEncryptionKey()
     const parts = encryptedText.split(':')
     
@@ -129,7 +129,7 @@ export function decrypt(encryptedText: string): string {
     const authTag = Buffer.from(parts[1], 'hex')
     const encrypted = parts[2]
     
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv)
+    const decipher = createDecipheriv(ALGORITHM, key, iv)
     decipher.setAuthTag(authTag)
     
     let decrypted = decipher.update(encrypted, 'hex', 'utf8')
@@ -152,7 +152,6 @@ export async function hashPassword(password: string): Promise<string> {
     throw new Error(`Password must not exceed ${MAX_PASSWORD_LENGTH} characters`)
   }
 
-  const bcrypt = require('bcryptjs')
   const salt = await bcrypt.genSalt(14)
   return bcrypt.hash(password, salt)
 }
@@ -168,7 +167,6 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
     return false
   }
 
-  const bcrypt = require('bcryptjs')
   return bcrypt.compare(password, hash)
 }
 

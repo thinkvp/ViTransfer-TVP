@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiUser } from '@/lib/auth'
 import { listWebPushSubscriptionsForUser } from '@/lib/admin-web-push'
 import { Prisma } from '@prisma/client'
 import { rateLimit } from '@/lib/rate-limit'
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
-  const user = await requireApiAdmin(request)
+  const user = await requireApiUser(request)
   if (user instanceof Response) return user
 
   const limited = await rateLimit(request, { maxRequests: 60, windowMs: 60_000 }, 'web-push-subs-list')

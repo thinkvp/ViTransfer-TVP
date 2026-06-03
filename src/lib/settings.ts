@@ -55,11 +55,13 @@ const cachedSafeguardLimits: CachedValue<SafeguardLimits> = {
   },
   expiresAt: 0,
 }
+const cachedPasswordAttempts: CachedValue<number> = { value: 5, expiresAt: 0 }
 
 export function invalidateSecuritySettingsCaches() {
   cachedRateLimits.expiresAt = 0
   cachedSessionTimeout.expiresAt = 0
   cachedSafeguardLimits.expiresAt = 0
+  cachedPasswordAttempts.expiresAt = 0
 }
 
 export function invalidateSettingsCaches() {
@@ -382,14 +384,22 @@ export async function initializeSecuritySettings() {
 }
 
 export async function getMaxAuthAttempts(): Promise<number> {
+  const now = Date.now()
+  if (cachedPasswordAttempts.expiresAt > now) {
+    return cachedPasswordAttempts.value
+  }
+
   try {
     const securitySettings = await prisma.securitySettings.findUnique({
       where: { id: 'default' },
       select: { passwordAttempts: true }
     })
-    return securitySettings?.passwordAttempts || 5
+    const value = securitySettings?.passwordAttempts || 5
+    cachedPasswordAttempts.value = value
+    cachedPasswordAttempts.expiresAt = now + 30_000 // 30 second cache
+    return value
   } catch (error) {
-    return 5 // Default fallback
+    return cachedPasswordAttempts.value
   }
 }
 

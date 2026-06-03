@@ -610,7 +610,9 @@ export default function VideoPlayer({
       if (commentRangeActiveRef.current) return
       const current = currentTimeRef.current
       const duration = effectiveDurationSeconds
-      const initialVisualGap = Math.min(0.8, Math.max(0.25, duration * 0.02))
+            // Use a percentage-based visual gap so the distance between handles looks
+      // consistent regardless of video duration (~2% of timeline width).
+      const initialVisualGap = Math.max(0.3, duration * 0.02)
       const start = duration > initialVisualGap
         ? Math.min(current, duration - initialVisualGap)
         : Math.max(0, current)
@@ -642,7 +644,9 @@ export default function VideoPlayer({
       if (!commentRangeActiveRef.current) return
       const start = commentRangeStartRef.current
       const duration = effectiveDurationSeconds
-      const initialVisualGap = Math.min(0.8, Math.max(0.25, duration * 0.02))
+            // Use a percentage-based visual gap so the distance between handles looks
+      // consistent regardless of video duration (~2% of timeline width).
+      const initialVisualGap = Math.max(0.3, duration * 0.02)
       const end = duration > 0
         ? Math.min(duration, start + initialVisualGap)
         : start + initialVisualGap
@@ -2493,7 +2497,7 @@ export default function VideoPlayer({
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </Button>
 
-                <div
+                                <div
                   className="relative flex-shrink-0"
                   data-volume-control="true"
                   onMouseEnter={openVolumeSlider}

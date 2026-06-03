@@ -1,36 +1,7 @@
 import { z } from 'zod'
 import DOMPurify from 'isomorphic-dompurify'
 import { isValidTimecode } from '@/lib/timecode'
-
-let domPurifyConfigured = false
-
-function configureDomPurifyOnce() {
-  if (domPurifyConfigured) return
-  domPurifyConfigured = true
-
-  DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
-    if (!node || node.tagName !== 'A') return
-
-    const href = (node.getAttribute?.('href') || '').toString()
-    const target = (node.getAttribute?.('target') || '').toString()
-
-    const isInternal = href.startsWith('/') || href.startsWith('#')
-    const isHttpLink = href.startsWith('http://') || href.startsWith('https://')
-
-    if (isHttpLink && !isInternal) {
-      node.setAttribute?.('target', '_blank')
-      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-      return
-    }
-
-    if (target === '_blank') {
-      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-    } else {
-      node.removeAttribute?.('target')
-      node.removeAttribute?.('rel')
-    }
-  })
-}
+import { ensureDomPurifyHooksRegistered } from '@/lib/security/dompurify-config'
 
 /**
  * Input Validation Schemas
@@ -86,7 +57,8 @@ export const contentSchema = z
   .max(10000, 'Content must not exceed 10,000 characters')
   .trim()
   .transform(content => {
-    configureDomPurifyOnce()
+    // Ensure global DOMPurify hooks are registered (idempotent)
+    ensureDomPurifyHooksRegistered()
     // Sanitize HTML to prevent XSS attacks
     // Allow only safe formatting tags
     return DOMPurify.sanitize(content, {

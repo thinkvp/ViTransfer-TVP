@@ -1,4 +1,5 @@
 import DOMPurify from 'isomorphic-dompurify'
+import { ensureDomPurifyHooksRegistered } from './dompurify-config'
 
 /**
  * HTML Sanitization Utilities
@@ -21,9 +22,8 @@ export function sanitizeCommentHtml(html: string): string {
     return ''
   }
 
-  // Configure once: enforce safe link attributes after DOMPurify sanitizes.
-  // (DOMPurify hooks are global per instance.)
-  configureDomPurifyOnce()
+  // Ensure global DOMPurify hooks are registered (idempotent)
+  ensureDomPurifyHooksRegistered()
 
   // Configure DOMPurify with strict settings
   const clean = DOMPurify.sanitize(html, {
@@ -57,36 +57,6 @@ export function sanitizeCommentHtml(html: string): string {
   })
 
   return clean.trim()
-}
-
-let domPurifyConfigured = false
-
-function configureDomPurifyOnce() {
-  if (domPurifyConfigured) return
-  domPurifyConfigured = true
-
-  DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
-    if (!node || node.tagName !== 'A') return
-
-    const href = (node.getAttribute?.('href') || '').toString()
-    const target = (node.getAttribute?.('target') || '').toString()
-
-    const isInternal = href.startsWith('/') || href.startsWith('#')
-    const isHttpLink = href.startsWith('http://') || href.startsWith('https://')
-
-    if (isHttpLink && !isInternal) {
-      node.setAttribute?.('target', '_blank')
-      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-      return
-    }
-
-    if (target === '_blank') {
-      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-    } else {
-      node.removeAttribute?.('target')
-      node.removeAttribute?.('rel')
-    }
-  })
 }
 
 /**

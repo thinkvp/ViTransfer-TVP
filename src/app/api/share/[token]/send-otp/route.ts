@@ -184,8 +184,20 @@ export async function POST(
     // Generate OTP
     const code = generateOTP()
 
-    // Store OTP in Redis
-    await storeOTP(email, project.id, code)
+        // Store OTP in Redis (with send rate limiting)
+    const storeResult = await storeOTP(email, project.id, code)
+    if (!storeResult.success) {
+      return NextResponse.json(
+        {
+          error: storeResult.error || 'Failed to send verification code. Please try again.',
+          ...(storeResult.retryAfter ? { retryAfter: storeResult.retryAfter } : {}),
+        },
+        {
+          status: storeResult.retryAfter ? 429 : 500,
+          ...(storeResult.retryAfter ? { headers: { 'Retry-After': String(storeResult.retryAfter) } } : {}),
+        }
+      )
+    }
 
     // Send OTP email
     try {

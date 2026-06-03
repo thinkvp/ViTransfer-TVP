@@ -8,20 +8,43 @@ const OTP_LENGTH = 6
 const OTP_EXPIRY_MINUTES = 10
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
 const ACCOUNT_LOCKOUT_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+const OTP_SEND_RATE_LIMIT_MS = 60_000 // 1 minute between OTP sends per email+project
+const OTP_SEND_RATE_LIMIT_KEY = 'otp:sendratelimit'
 
 // NOTE: OTP_MAX_ATTEMPTS and MAX_OTP_REQUESTS now use global SecuritySettings.passwordAttempts
 // This ensures consistent lockout behavior across password and OTP authentication
 
+// Cache for security settings to avoid repeated DB queries on every OTP operation
+let cachedPasswordAttempts: number | null = null
+let cachedPasswordAttemptsExpiresAt = 0
+const PASSWORD_ATTEMPTS_CACHE_TTL_MS = 30_000 // 30 seconds
+
 /**
- * Get max password attempts from security settings
+ * Get max password attempts from security settings (cached)
  * Uses global SecuritySettings.passwordAttempts for consistent lockout behavior
  */
 async function getMaxPasswordAttempts(): Promise<number> {
+  const now = Date.now()
+  if (cachedPasswordAttempts !== null && cachedPasswordAttemptsExpiresAt > now) {
+    return cachedPasswordAttempts
+  }
+
   const securitySettings = await prisma.securitySettings.findUnique({
     where: { id: 'default' },
     select: { passwordAttempts: true },
   })
-  return securitySettings?.passwordAttempts || 5 // Default to 5 if not set
+  cachedPasswordAttempts = securitySettings?.passwordAttempts || 5
+  cachedPasswordAttemptsExpiresAt = now + PASSWORD_ATTEMPTS_CACHE_TTL_MS
+  return cachedPasswordAttempts
+}
+
+/**
+ * Invalidate the cached password attempts value
+ * Call this after SecuritySettings.passwordAttempts is updated
+ */
+export function invalidatePasswordAttemptsCache(): void {
+  cachedPasswordAttempts = null
+  cachedPasswordAttemptsExpiresAt = 0
 }
 
 /**
@@ -33,6 +56,42 @@ function hashEmail(email: string): string {
     .update(email.toLowerCase().trim())
     .digest('hex')
     .slice(0, 16)
+}
+
+/**
+ * Check OTP send rate limit (prevents rapid OTP send requests)
+ * Separate from the per-window request count limit (checkOTPRateLimit)
+ * This limits how frequently OTPs can be sent to the same email+project
+ */
+async function checkOTPSendRateLimit(
+  email: string,
+  projectId: string
+): Promise<{ limited: boolean; retryAfter?: number }> {
+  const redis = getRedis()
+  const emailHash = hashEmail(email)
+  const sendLimitKey = `${OTP_SEND_RATE_LIMIT_KEY}:${projectId}:${emailHash}`
+
+  const lastSent = await redis.get(sendLimitKey)
+  if (lastSent) {
+    const elapsed = Date.now() - Number(lastSent)
+    if (elapsed < OTP_SEND_RATE_LIMIT_MS) {
+      const retryAfter = Math.ceil((OTP_SEND_RATE_LIMIT_MS - elapsed) / 1000)
+      return { limited: true, retryAfter }
+    }
+  }
+
+  return { limited: false }
+}
+
+/**
+ * Mark OTP as sent (updates send rate limit timestamp)
+ */
+async function markOTPSent(email: string, projectId: string): Promise<void> {
+  const redis = getRedis()
+  const emailHash = hashEmail(email)
+  const sendLimitKey = `${OTP_SEND_RATE_LIMIT_KEY}:${projectId}:${emailHash}`
+  // TTL slightly longer than the rate limit window to ensure cleanup
+  await redis.setex(sendLimitKey, Math.ceil(OTP_SEND_RATE_LIMIT_MS / 1000) + 5, String(Date.now()))
 }
 
 /**
@@ -165,10 +224,20 @@ export async function storeOTP(
   email: string,
   projectId: string,
   code: string
-): Promise<void> {
+): Promise<{ success: boolean; error?: string; retryAfter?: number }> {
   const redis = getRedis()
   const emailHash = hashEmail(email)
   const otpKey = `otp:${projectId}:${emailHash}`
+
+  // Check send rate limit (prevents rapid OTP generation requests)
+  const sendRateLimit = await checkOTPSendRateLimit(email, projectId)
+  if (sendRateLimit.limited) {
+    return {
+      success: false,
+      error: 'Please wait before requesting a new code',
+      retryAfter: sendRateLimit.retryAfter,
+    }
+  }
 
   const otpData = {
     code,
@@ -182,6 +251,11 @@ export async function storeOTP(
 
   // Increment rate limit counter
   await incrementOTPRateLimit(email, projectId)
+
+  // Mark OTP as sent for send rate limiting
+  await markOTPSent(email, projectId)
+
+  return { success: true }
 }
 
 /**

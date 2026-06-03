@@ -12,11 +12,6 @@ export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(),
 // Storage paths in DB are often under projects/{projectId}/...
 // Physical storage lives under projects/YYYY-MM/{projectId}/...
 // We resolve legacy paths via a central redirect index file under projects/.
-//
-// Back-compat: older versions used per-project stub folders at projects/{projectId}
-// containing a .vitransfer_project_redirect file; we still *read* that if present.
-export const PROJECT_REDIRECT_FILENAME = '.vitransfer_project_redirect'
-
 export const PROJECT_REDIRECTS_INDEX_FILENAME = '.vitransfer_projects_redirects.json'
 
 type ProjectRedirectIndex = Record<string, string>
@@ -38,11 +33,11 @@ function validatePath(filePath: string): string {
 
   // Project redirect support:
   // If the requested path is under projects/{projectId}/... and it doesn't exist,
-  // resolve via the per-project redirect file (projects/{projectId}/.vitransfer_project_redirect).
+  // resolve via the central redirect index.
   const redirected = resolveRedirectedProjectPath(posixNormalized, fullPath)
   if (redirected) return redirected
 
-  return fullPath
+    return fullPath
 }
 
 function validatePathForWrite(filePath: string): string {
@@ -119,52 +114,6 @@ function isLegacyProjectPath(posixNormalized: string): { projectId: string; rema
   const projectId = parts[1]
   const remainder = parts.slice(2).join('/')
   return { projectId, remainder }
-}
-
-function readProjectRedirectTargetPosix(projectId: string): string | null {
-  const projectRootAbs = path.join(STORAGE_ROOT, 'projects', projectId)
-  const redirectFileAbs = path.join(projectRootAbs, PROJECT_REDIRECT_FILENAME)
-
-  try {
-    if (!fs.existsSync(redirectFileAbs)) return null
-    const stat = fs.statSync(redirectFileAbs)
-    if (!stat.isFile()) return null
-
-    const raw = fs.readFileSync(redirectFileAbs, 'utf8').trim()
-    if (!raw) return null
-
-    // Validate the redirect target is a relative POSIX path within storage root.
-    let decoded = raw
-    try {
-      decoded = decodeURIComponent(raw)
-      decoded = decodeURIComponent(decoded)
-    } catch {
-      decoded = raw
-    }
-
-    decoded = decoded.replace(/\\/g, '/')
-    if (decoded.startsWith('/') || decoded.startsWith('\\')) {
-      throw new Error('Invalid redirect target - absolute path not allowed')
-    }
-    if (/^[a-zA-Z]:/.test(decoded) || decoded.includes(':')) {
-      throw new Error('Invalid redirect target - invalid characters')
-    }
-
-    const normalized = path.posix.normalize(decoded)
-    if (
-      normalized === '.' ||
-      normalized === '..' ||
-      normalized.startsWith('../') ||
-      normalized.includes('/../')
-    ) {
-      throw new Error('Invalid redirect target - path traversal detected')
-    }
-
-    return normalized
-  } catch (e) {
-    // Fail closed: if redirect file exists but is invalid, do not follow it.
-    return null
-  }
 }
 
 function getRedirectIndexAbs(): string {
@@ -373,9 +322,8 @@ export async function ensureProjectStorageLayout(
   }
 
   const pending = (async () => {
-    const existingTarget =
+        const existingTarget =
       readProjectRedirectTargetFromIndexPosix(pid) ||
-      readProjectRedirectTargetPosix(pid) ||
       findYearMonthProjectPathPosix(pid)
 
     if (existingTarget) {
@@ -438,10 +386,9 @@ function resolveRedirectedProjectPath(
   const info = isLegacyProjectPath(posixNormalized)
   if (!info) return null
 
-  // Prefer the central redirect index. Fall back to legacy per-project stub file.
+    // Prefer the central redirect index.
   const targetPosix =
     readProjectRedirectTargetFromIndexPosix(info.projectId) ||
-    readProjectRedirectTargetPosix(info.projectId) ||
     findYearMonthProjectPathPosix(info.projectId)
   if (!targetPosix) return null
 

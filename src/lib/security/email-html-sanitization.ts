@@ -1,4 +1,5 @@
 import DOMPurify from 'isomorphic-dompurify'
+import { ensureDomPurifyHooksRegistered } from './dompurify-config'
 
 let domPurifyConfigured = false
 
@@ -26,31 +27,12 @@ function configureDomPurifyOnce() {
   if (domPurifyConfigured) return
   domPurifyConfigured = true
 
+  // Register shared link-safety hooks from the central config.
+  ensureDomPurifyHooksRegistered()
+
+  // Register email-specific hooks (block remote images).
   DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
     if (!node?.tagName) return
-
-    // Enforce safe external-link behavior.
-    if (node.tagName === 'A') {
-      const href = (node.getAttribute?.('href') || '').toString()
-      const target = (node.getAttribute?.('target') || '').toString()
-
-      const isInternal = href.startsWith('/') || href.startsWith('#')
-      const isHttpLink = href.startsWith('http://') || href.startsWith('https://')
-
-      if (isHttpLink && !isInternal) {
-        node.setAttribute?.('target', '_blank')
-        node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-        return
-      }
-
-      if (target === '_blank') {
-        node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-      } else {
-        node.removeAttribute?.('target')
-        node.removeAttribute?.('rel')
-      }
-      return
-    }
 
     // Block remote image loading and tracking pixels.
     if (node.tagName === 'IMG') {

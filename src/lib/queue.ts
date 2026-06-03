@@ -450,16 +450,3 @@ export async function enqueueShareUploadPreview(
     // waiting/active/delayed state, giving us safe idempotent enqueue.
   })
 }
-
-// Export for backward compatibility, but use getter in new code
-export const videoQueue = new Proxy({} as Queue<VideoProcessingJob>, {
-  get(target, prop) {
-    return getVideoQueue()[prop as keyof Queue<VideoProcessingJob>]
-  }
-})
-
-export const assetQueue = new Proxy({} as Queue<AssetProcessingJob>, {
-  get(target, prop) {
-    return getAssetQueue()[prop as keyof Queue<AssetProcessingJob>]
-  }
-})

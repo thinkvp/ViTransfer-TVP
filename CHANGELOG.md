@@ -5,6 +5,34 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.5] - 2026-06-03
+
+### Added
+
+- **Centralized DOMPurify hook configuration** - created `src/lib/security/dompurify-config.ts` as the single source of truth for global DOMPurify `afterSanitizeAttributes` hooks. All three sanitization modules (`validation.ts`, `html-sanitization.ts`, `email-html-sanitization.ts`) now call `ensureDomPurifyHooksRegistered()` instead of each registering their own copy of the same link-safety hook. This eliminates the risk of conflicting duplicate hooks and ensures consistent `rel="noopener noreferrer nofollow"` enforcement on external links regardless of import order.
+- **`sanitizeSlug()` now lives in `utils.ts`** - moved from the single-utility `password-utils.ts` into `src/lib/utils.ts` alongside the existing `generateSlug()`. The old module remains as a deprecated re-export (`export { sanitizeSlug } from '@/lib/utils'`) for backward compatibility.
+
+### Changed
+
+- **Timeline left and right range marker improved** - The animated timeline marker with draggable left/right bars for range comments now uses a percentage based gap between each other to better indicate that the bars are two separate items that can be interacted with. Previously for longer videos the bars were too close together and appeared as a single object.
+- **Encryption key derivation is now cached per process** - `getEncryptionKey()` in `encryption.ts` computes `scryptSync` once at module initialization and returns the cached `Buffer` on subsequent calls. Previously every `encrypt()` or `decrypt()` call re-derived the key, blocking the event loop each time.
+- **Rate-limit admin functions now use `SCAN` instead of `KEYS`** - both `unblockIpAddress()` and `getRateLimitedEntries()` in `rate-limit.ts` use cursor-based `redis.scan()` with `MATCH`/`COUNT` instead of blocking `KEYS *`, preventing Redis performance degradation on large key sets.
+- **Token revocation now uses shared `ensureRedisReady()`** - all five functions in `token-revocation.ts` (`revokeToken`, `isTokenRevoked`, `revokeAllUserTokens`, `isUserTokensRevoked`, `clearUserRevocation`) call `ensureRedisReady(redis)` instead of manually checking `redis.status !== 'ready'` and calling `redis.connect()`, avoiding "already connecting/connected" race conditions under concurrent load.
+- **Removed backward-compatible queue proxy exports** - the `videoQueue` and `assetQueue` Proxy objects were removed from `queue.ts`. All consumers (`uploads/s3/complete/route.ts`, `pages/api/uploads/[[...path]].ts`) now use `getVideoQueue()`/`getAssetQueue()` directly.
+- **Removed unused `getRedisConnection` alias** - the backward-compatibility alias `export const getRedisConnection = getRedis` was removed from `redis.ts` after confirming zero remaining references.
+- **Project settings page imports `sanitizeSlug` from `@/lib/utils`** - updated the single caller in `admin/projects/[id]/settings/page.tsx` to use the new canonical location.
+- **Consolidated duplicate user queries in auth layer** - introduced `fetchUserById(userId)` helper in `auth.ts` that performs the user + role/permissions query and mapping once. All four callers (`getCurrentUserFromRequest`, `getCurrentUser`, `getAdminOverrideFromRequest`, `refreshAdminTokens`) now delegate to this shared function, eliminating 3 redundant copies of the same ~25-line Prisma query.
+- **`requireApiAdmin()` renamed to `requireApiUser()`** - the function only checks authentication (not admin role). All 8 route call sites (web-push routes, notifications route) updated. Old name kept as deprecated alias.
+- **`getMaxAuthAttempts()` DB query now cached** - `getMaxAuthAttempts()` in `settings.ts` and `getMaxPasswordAttempts()` in `otp.ts` cache the `SecuritySettings.passwordAttempts` value for 30 seconds, eliminating repeated DB queries on every login/OTP attempt. `incrementRateLimit()` in `rate-limit.ts` also uses the cached `getMaxAuthAttempts()` instead of repeating its own Prisma query.
+- **OTP send rate limiting added** - new `checkOTPSendRateLimit()` prevents rapid OTP generation requests (1 per minute per email+project). Separate from the existing per-window request count limit.
+- **Encryption module now uses ESM imports instead of `require()`** - `encryption.ts` replaced `require('crypto')` and `require('bcryptjs')` with standard ESM imports. This ensures compatibility with strict ESM environments.
+- **TypeScript target updated to ES2022** - changed `tsconfig.json` target from `ES2017` to `ES2022`, unlocking modern JS features.
+- **Removed legacy per-project `.vitransfer_project_redirect` stub file reading** - the old per-project stub folder redirect path and its `PROJECT_REDIRECT_FILENAME` constant were removed. Project redirects now exclusively use the central `.vitransfer_projects_redirects.json` index file.
+
+### Fixed
+
+- **Non-approvable videos no longer say Video Approved when a project status is set to Approved** - Added a Project Approved banner and text that states that particular version was not eligible for download/approval.
+
 ## [1.9.4] - 2026-06-02
 
 ### Added

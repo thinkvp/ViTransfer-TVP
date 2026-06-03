@@ -232,24 +232,7 @@ export async function refreshAdminTokens(params: {
     }
   }
 
-  const user = await prisma.user.findFirst({
-    where: { id: payload.userId, active: true },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      active: true,
-      appRoleId: true,
-      appRole: {
-        select: {
-          id: true,
-          name: true,
-          isSystemAdmin: true,
-          permissions: true,
-        },
-      },
-    },
-  })
+    const user = await fetchUserById(payload.userId)
   if (!user) {
     await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
     return null
@@ -346,14 +329,18 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
   }
 }
 
-export async function getCurrentUserFromRequest(request: NextRequest): Promise<AuthUser | null> {
-  const bearer = parseBearerToken(request)
-  if (!bearer) return null
-  const payload = await verifyAdminAccessToken(bearer)
-  if (!payload) return null
-
+/**
+ * Fetch a user by ID and return an AuthUser with resolved role/permissions.
+ *
+ * Extracted as a shared helper to eliminate redundant DB queries across
+ * getCurrentUserFromRequest(), getCurrentUser(), and getAdminOverrideFromRequest()
+ * — all of which previously repeated the same Prisma query + role-mapping logic.
+ *
+ * Returns null if the user is not found or is inactive.
+ */
+async function fetchUserById(userId: string): Promise<AuthUser | null> {
   const user = await prisma.user.findFirst({
-    where: { id: payload.userId, active: true },
+    where: { id: userId, active: true },
     select: {
       id: true,
       email: true,
@@ -371,11 +358,9 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
     },
   })
 
-  if (user) {
-    await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
-  }
-
   if (!user) return null
+
+  await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
 
   return {
     id: user.id,
@@ -385,8 +370,19 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
     appRoleId: user.appRoleId,
     appRoleName: user.appRole?.name ?? null,
     appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
-    permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions)),
+    permissions: user.appRole?.isSystemAdmin
+      ? adminAllPermissions()
+      : normalizeRolePermissions(user.appRole?.permissions),
   }
+}
+
+export async function getCurrentUserFromRequest(request: NextRequest): Promise<AuthUser | null> {
+  const bearer = parseBearerToken(request)
+  if (!bearer) return null
+  const payload = await verifyAdminAccessToken(bearer)
+  if (!payload) return null
+
+  return fetchUserById(payload.userId)
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
@@ -398,47 +394,20 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   const payload = await verifyAdminAccessToken(token)
   if (!payload) return null
 
-  const user = await prisma.user.findFirst({
-    where: { id: payload.userId, active: true },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      active: true,
-      appRoleId: true,
-      appRole: {
-        select: {
-          id: true,
-          name: true,
-          isSystemAdmin: true,
-          permissions: true,
-        },
-      },
-    },
-  })
-
-  if (user) {
-    await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
-  }
-
-  if (!user) return null
-
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    active: user.active,
-    appRoleId: user.appRoleId,
-    appRoleName: user.appRole?.name ?? null,
-    appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
-    permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions)),
-  }
+  return fetchUserById(payload.userId)
 }
 
-export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
-  // DEPRECATED: legacy guard that checked `user.role === 'ADMIN'`.
-  // The app now uses RBAC via `appRoleIsSystemAdmin` + `permissions`.
-  // Keep this function as "require authenticated internal user" for compatibility.
+/**
+ * Require an authenticated internal user (any authenticated API user).
+ *
+ * This function authenticates the request via bearer token but does NOT
+ * enforce any specific role/permission. Use requireApiSystemAdmin(),
+ * requireApiMenu(), or requireApiAction() for RBAC enforcement.
+ *
+ * NOTE: Previously named requireApiAdmin(). Renamed to reflect that
+ * it only requires authentication, not admin privileges.
+ */
+export async function requireApiUser(request: NextRequest): Promise<AuthUser | Response> {
   const user = await getCurrentUserFromRequest(request)
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -446,13 +415,14 @@ export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | 
   return user
 }
 
-// RBAC-era naming: prefer these helpers going forward.
-export async function requireApiUser(request: NextRequest): Promise<AuthUser | Response> {
-  return requireApiAdmin(request)
+/** @deprecated Use requireApiUser() — this function does NOT check admin privileges. */
+export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
+  return requireApiUser(request)
 }
 
+// RBAC-era naming: prefer these helpers going forward.
 export async function requireApiSystemAdmin(request: NextRequest): Promise<AuthUser | Response> {
-  const user = await requireApiAdmin(request)
+  const user = await requireApiUser(request)
   if (user instanceof Response) return user
   if (user.appRoleIsSystemAdmin !== true) {
     logSecurityEvent({
@@ -472,7 +442,7 @@ export async function requireApiSystemAdmin(request: NextRequest): Promise<AuthU
 }
 
 export async function requireApiMenu(request: NextRequest, menu: Parameters<typeof requireMenuAccess>[1]): Promise<AuthUser | Response> {
-  const user = await requireApiAdmin(request)
+  const user = await requireApiUser(request)
   if (user instanceof Response) return user
   const forbidden = requireMenuAccess(user, menu)
   if (forbidden) return forbidden
@@ -480,7 +450,7 @@ export async function requireApiMenu(request: NextRequest, menu: Parameters<type
 }
 
 export async function requireApiAction(request: NextRequest, action: Parameters<typeof requireActionAccess>[1]): Promise<AuthUser | Response> {
-  const user = await requireApiAdmin(request)
+  const user = await requireApiUser(request)
   if (user instanceof Response) return user
   const forbidden = requireActionAccess(user, action)
   if (forbidden) return forbidden
@@ -488,7 +458,7 @@ export async function requireApiAction(request: NextRequest, action: Parameters<
 }
 
 export async function requireApiAnyAction(request: NextRequest, actions: Parameters<typeof requireAnyActionAccess>[1]): Promise<AuthUser | Response> {
-  const user = await requireApiAdmin(request)
+  const user = await requireApiUser(request)
   if (user instanceof Response) return user
   const forbidden = requireAnyActionAccess(user, actions)
   if (forbidden) return forbidden
@@ -535,39 +505,8 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
   if (!adminHeader) return null
   const payload = await verifyAdminAccessToken(adminHeader)
   if (!payload) return null
-  const user = await prisma.user.findFirst({
-    where: { id: payload.userId, active: true },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      active: true,
-      appRoleId: true,
-      appRole: {
-        select: {
-          id: true,
-          name: true,
-          isSystemAdmin: true,
-          permissions: true,
-        },
-      },
-    },
-  })
-  if (user) {
-    await setDatabaseUserContext(user.id, user.appRole?.name ?? 'Admin')
-  }
 
-  if (!user) return null
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    active: user.active,
-    appRoleId: user.appRoleId,
-    appRoleName: user.appRole?.name ?? null,
-    appRoleIsSystemAdmin: user.appRole?.isSystemAdmin ?? false,
-    permissions: (user.appRole?.isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(user.appRole?.permissions)),
-  }
+  return fetchUserById(payload.userId)
 }
 
 export async function requireShareToken(request: NextRequest) {
