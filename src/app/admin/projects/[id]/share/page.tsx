@@ -970,6 +970,27 @@ export default function AdminSharePage() {
     await fetchDownloadableFiles()
   }, [fetchDownloadableFiles, project?.slug])
 
+  const handleApproveVideo = useCallback(async (file: DownloadableFile) => {
+    if (!file.videoId) throw new Error('Video ID is missing')
+    if (!id) throw new Error('Project not loaded')
+
+    const url = `/api/projects/${id}/approve`
+    const response = await apiFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectedVideoId: file.videoId }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.error || 'Failed to approve video')
+    }
+
+    markVideoApproved(file.videoId)
+    window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: { videoId: file.videoId } }))
+    void fetchDownloadableFiles()
+  }, [id, markVideoApproved, fetchDownloadableFiles])
+
   const handleUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
     if (!project?.slug) throw new Error('Project share link is unavailable')
     if (!Array.isArray(files) || files.length === 0) return
@@ -2027,6 +2048,24 @@ export default function AdminSharePage() {
           selectedFileIds={selectedFileIds}
           onSelectedFileIdsChange={setSelectedFileIds}
           activeFilesFolderName={requestedFilesFolderName}
+          shareSlug={String(project.slug)}
+          canDeleteUploads={true}
+          onDeleteUploadFile={handleDeleteUploadFile}
+          onDeleteUploadFolder={handleDeleteUploadFolder}
+          onRenameUploadFolder={handleRenameUploadFolder}
+          onOpenVideoVersion={(file, folderName) => {
+            if (file.type !== 'video' || !file.videoId) return
+            if (folderName) {
+              handleVideoSelect(folderName)
+            }
+            setDesktopContentTab('view')
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
+              window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
+              window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
+            }, 0)
+          }}
+          onApproveVideo={handleApproveVideo}
         />
 
         {/* Main Content Area */}
@@ -2077,6 +2116,7 @@ export default function AdminSharePage() {
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
                 resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
                 onPreviewTokenExpired={() => requestFilesRefresh(true)}
+                onApproveVideo={handleApproveVideo}
                 shareSlug={String(project.slug)}
                 shareToken={null}
                 transferItems={transferItemsCombined}

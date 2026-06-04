@@ -40,9 +40,18 @@ export async function POST(
 
     const project = asset.video.project
     const normalizedFileType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
-    const isPreviewableImage = normalizedFileType.startsWith('image/')
-    const isPreviewableVideo = normalizedFileType.startsWith('video/')
-    const isAudioAsset = normalizedFileType.startsWith('audio/')
+    const fileNameExt = typeof asset.fileName === 'string'
+      ? asset.fileName.slice(asset.fileName.lastIndexOf('.') + 1).toLowerCase()
+      : ''
+
+    // Fall back to extension-based detection when the stored fileType is missing.
+    const imageExtensions = ['jpg','jpeg','png','webp','gif','bmp','avif','heic','heif']
+    const videoExtensions = ['mp4','mov','m4v','avi','mkv','webm','mxf']
+    const audioExtensions = ['mp3','wav','aac','flac','ogg','m4a']
+
+    const isPreviewableImage = normalizedFileType.startsWith('image/') || imageExtensions.includes(fileNameExt)
+    const isPreviewableVideo = normalizedFileType.startsWith('video/') || videoExtensions.includes(fileNameExt)
+    const isAudioAsset = normalizedFileType.startsWith('audio/') || audioExtensions.includes(fileNameExt)
     const hasReadyGeneratedPlaybackPreview =
       asset.previewStatus === 'READY'
       && typeof asset.previewPath === 'string'

@@ -7,26 +7,28 @@
 # ========================================
 FROM node:24.13.0-alpine3.23 AS base-common
 
-RUN npm install -g npm@latest && npm cache clean --force
-
 # Use a stable Alpine mirror (helps in environments where dl-cdn.alpinelinux.org DNS fails)
 RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.edge.kernel.org/alpine|g' /etc/apk/repositories
 
 # Security: Update Alpine to latest packages
+# (single apk update, no redundant second call)
 RUN set -e; \
     for i in 1 2 3 4 5; do \
         apk update && apk upgrade --no-cache && break; \
         echo "apk update/upgrade failed (attempt $i), retrying..."; \
         sleep 2; \
-    done; \
-    apk update
+    done
 
 # OpenSSL 3.x compatibility for Prisma engines + basic runtime utilities
+# Installed before npm global install for stable layer caching
 RUN apk add --no-cache \
     openssl \
     bash \
     curl \
     ca-certificates
+
+# npm global update after system packages
+RUN npm install -g npm@latest && npm cache clean --force
 
 # ========================================
 # Worker base (adds FFmpeg)
@@ -59,9 +61,9 @@ COPY prisma ./prisma
 COPY patches ./patches
 
 RUN if [ -f package-lock.json ]; then \
-            npm ci --legacy-peer-deps; \
+            npm ci --legacy-peer-deps && npm cache clean --force; \
         else \
-            npm install --legacy-peer-deps; \
+            npm install --legacy-peer-deps && npm cache clean --force; \
         fi
 
 RUN echo "Running npm security audit..." && \
@@ -85,7 +87,16 @@ FROM base-common AS builder
 WORKDIR /app
 
 COPY --from=deps-full /app/node_modules ./node_modules
-COPY . .
+# Copy only what's needed for the build — reduces cache busting
+COPY package.json package-lock.json* ./
+COPY next.config.js tsconfig.json tailwind.config.ts postcss.config.mjs eslint.config.mjs ./
+COPY prisma ./prisma
+COPY public ./public
+COPY src ./src
+COPY scripts ./scripts
+COPY patches ./patches
+COPY worker.mjs ./
+COPY VERSION ./
 
 RUN npx prisma generate
 

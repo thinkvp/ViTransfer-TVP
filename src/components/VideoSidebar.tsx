@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Play,
   ChevronDown,
@@ -32,12 +33,15 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { apiFetch } from '@/lib/api-client'
 import Image from 'next/image'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
+import { ContextMenuItems } from '@/components/ShareFilesBrowser'
 import type { TransferItem, TransferSummary } from '@/lib/transfer-state'
 import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { InputDialog } from '@/components/ui/input-dialog'
 
 interface VideoGroup {
   name: string
@@ -192,6 +196,24 @@ interface VideoSidebarProps {
   onSelectedFileIdsChange?: React.Dispatch<React.SetStateAction<Set<string>>>
   /** Currently open folder in the main files display for row highlighting. */
   activeFilesFolderName?: string | null
+  /** Called when the user clicks Play on a video in the context menu. */
+  onOpenVideoVersion?: (file: DownloadableFile, folderName: string | null) => void
+  /** Called when the user clicks Approve on an unapproved video in the context menu. */
+  onApproveVideo?: (file: DownloadableFile) => Promise<void>
+  /** Album social copy enabled state, keyed by albumId. */
+  albumSocialEnabledByAlbumId?: Record<string, boolean>
+  /** Album photo social download URLs, keyed by photoId. */
+  albumPhotoMetaByPhotoId?: Record<string, { socialDownloadUrl: string; socialReady: boolean }>
+  /** Share slug for API calls (album photo meta). */
+  shareSlug?: string
+  /** Whether the current user can delete uploads. */
+  canDeleteUploads?: boolean
+  /** Delete an upload file by ID. */
+  onDeleteUploadFile?: (fileId: string) => Promise<void>
+  /** Delete an upload folder by path. */
+  onDeleteUploadFolder?: (folderPath: string) => Promise<void>
+  /** Rename an upload folder. */
+  onRenameUploadFolder?: (folderPath: string, folderName: string) => Promise<void>
 }
 
 
@@ -230,8 +252,26 @@ export default function VideoSidebar({
   selectedFileIds,
   onSelectedFileIdsChange,
   activeFilesFolderName,
+  onOpenVideoVersion,
+  onApproveVideo,
+  albumSocialEnabledByAlbumId = {},
+  albumPhotoMetaByPhotoId = {},
+  shareSlug,
+  canDeleteUploads = false,
+  onDeleteUploadFile,
+  onDeleteUploadFolder,
+  onRenameUploadFolder,
 }: VideoSidebarProps) {
   const logoSrc = '/api/branding/logo'
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    file?: DownloadableFile
+    group?: DownloadableGroup & { folderGroupType?: string }
+    imageList?: DownloadableFile[]
+    openFolder?: { name: string; groupType: string } | null
+  } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const [isCollapsed, setIsCollapsed] = useState(initialCollapsed)
   const [isMobileCollapsed, setIsMobileCollapsed] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(256) // Default 256px (w-64)
@@ -249,6 +289,13 @@ export default function VideoSidebar({
   const [transferPanelHeight, setTransferPanelHeight] = useState(208)
   const [isDraggingTransferPanel, setIsDraggingTransferPanel] = useState(false)
   const [collapsedFoldersByKey, setCollapsedFoldersByKey] = useState<Record<string, boolean>>({})
+  const [albumMetaLoadedByAlbumId, setAlbumMetaLoadedByAlbumId] = useState<Record<string, boolean>>({})
+  const [albumSocialEnabledByAlbumIdInternal, setAlbumSocialEnabledByAlbumIdInternal] = useState<Record<string, boolean>>({})
+  const [albumPhotoMetaByPhotoIdInternal, setAlbumPhotoMetaByPhotoIdInternal] = useState<Record<string, { socialDownloadUrl: string; socialReady: boolean }>>({})
+  const [renameFolderTarget, setRenameFolderTarget] = useState<{ path: string; currentName: string } | null>(null)
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<{ path: string; label: string } | null>(null)
+  const [deleteFileTarget, setDeleteFileTarget] = useState<{ fileId: string; fileName: string } | null>(null)
+  const [isUploadActionBusy, setIsUploadActionBusy] = useState(false)
   const autoClearUploadsTimeoutRef = useRef<number | null>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -467,6 +514,73 @@ export default function VideoSidebar({
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isMobileCollapsed])
+
+  // Close context menu when clicking outside or pressing Escape
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    const onMouseDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        close()
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onMouseDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [contextMenu])
+
+  // Load album photo meta for social download support (shared with context menu)
+  const loadAlbumPhotoMeta = useCallback(async (albumId: string | null, slug: string | null) => {
+    if (!albumId || !slug) return
+    if (albumMetaLoadedByAlbumId[albumId]) return
+
+    try {
+      const res = await apiFetch(`/api/share/${encodeURIComponent(slug)}/albums/${encodeURIComponent(albumId)}`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) return
+
+      const data = await res.json().catch(() => ({}))
+      const photos = Array.isArray((data as any)?.photos) ? (data as any).photos : []
+      const socialEnabled = (data as any)?.album?.socialCopiesEnabled !== false
+
+      setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
+      setAlbumSocialEnabledByAlbumIdInternal((prev) => ({ ...prev, [albumId]: socialEnabled }))
+      setAlbumPhotoMetaByPhotoIdInternal((prev) => {
+        const next = { ...prev }
+        for (const photo of photos) {
+          const photoId = typeof photo?.id === 'string' ? photo.id : ''
+          const socialDownloadUrl = typeof photo?.socialDownloadUrl === 'string' ? photo.socialDownloadUrl : ''
+          if (!photoId || !socialDownloadUrl) continue
+          next[photoId] = { socialDownloadUrl, socialReady: photo?.socialReady === true }
+        }
+        return next
+      })
+    } catch {
+      // ignore
+    }
+  }, [albumMetaLoadedByAlbumId])
+
+  // Preload album photo meta for sidebar context menu
+  useEffect(() => {
+    if (desktopActiveTabValue !== 'files' || !shareSlug) return
+    for (const group of downloadableFiles ?? []) {
+      if (group.groupType === 'album') {
+        for (const file of group.subFiles) {
+          if (file.albumId) {
+            void loadAlbumPhotoMeta(file.albumId, shareSlug)
+            break
+          }
+        }
+      }
+    }
+  }, [desktopActiveTabValue, downloadableFiles, loadAlbumPhotoMeta, shareSlug])
 
   const queueSidebarDownloads = useCallback(async (files: DownloadableFile[], withProgress?: boolean) => {
     if (!files.length) return
@@ -1157,7 +1271,7 @@ export default function VideoSidebar({
               <button
                 type="button"
                 className={cn(
-                  'text-xs font-bold tracking-widest truncate text-left hover:underline',
+                  'text-sm font-semibold truncate text-left hover:underline',
                   isRootFilesFolderActive ? 'text-primary' : 'text-foreground'
                 )}
                 title={`Open ${projectLabel} root folder`}
@@ -1165,7 +1279,7 @@ export default function VideoSidebar({
                   window.dispatchEvent(new CustomEvent('shareOpenFilesRoot'))
                 }}
               >
-                {projectLabel.toUpperCase()}
+                PROJECT
               </button>
             </div>
 
@@ -1206,7 +1320,15 @@ export default function VideoSidebar({
               }
               return (
                 <div key={vg.name}>
-                  <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                  <div
+                    className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (!dlGroup) return
+                      setContextMenu({ x: e.clientX, y: e.clientY, group: dlGroup, openFolder: { name: vg.name, groupType: 'video' } })
+                    }}
+                  >
                     <button
                       type="button"
                       className="text-muted-foreground hover:text-foreground transition-colors"
@@ -1279,6 +1401,17 @@ export default function VideoSidebar({
                               detail: { folderName: vg.name, fileKey },
                             }))
                           }}
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              file,
+                              imageList: orderedGroupFiles,
+                              openFolder: { name: vg.name, groupType: 'video' },
+                            })
+                          }}
                         >
                           <input
                             type="checkbox"
@@ -1337,7 +1470,15 @@ export default function VideoSidebar({
               }
               return (
                 <div key={a.id}>
-                  <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                  <div
+                    className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (!dlGroup) return
+                      setContextMenu({ x: e.clientX, y: e.clientY, group: dlGroup, openFolder: { name: a.name, groupType: 'album' } })
+                    }}
+                  >
                     <button
                       type="button"
                       className="text-muted-foreground hover:text-foreground transition-colors"
@@ -1400,6 +1541,17 @@ export default function VideoSidebar({
                               detail: { folderName: a.name, fileKey },
                             }))
                           }}
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              file,
+                              imageList: sortedGroupFiles,
+                              openFolder: { name: a.name, groupType: 'album' },
+                            })
+                          }}
                         >
                           <input
                             type="checkbox"
@@ -1430,9 +1582,17 @@ export default function VideoSidebar({
               )
             })}
 
-            {!isProjectRootCollapsed && hasUploads ? (
+            {hasUploads ? (
               <div>
-                <div className={cn('flex items-center gap-2 pl-6 pr-3 pt-2 pb-1', isUploadsRootActive && 'rounded-md bg-primary/15')}>
+                <div
+                  className={cn('flex items-center gap-2 px-3 pt-2 pb-1', isUploadsRootActive && 'rounded-md bg-primary/15')}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!uploadRootGroup) return
+                    setContextMenu({ x: e.clientX, y: e.clientY, group: uploadRootGroup, openFolder: { name: 'UPLOADS', groupType: 'uploads' } })
+                  }}
+                >
                   <button
                     type="button"
                     className="text-muted-foreground hover:text-foreground transition-colors"
@@ -1495,6 +1655,17 @@ export default function VideoSidebar({
                     <div
                       key={fileKey}
                       className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-12"
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          file,
+                          imageList: sortedUploadRootFiles,
+                          openFolder: { name: 'UPLOADS', groupType: 'uploads' },
+                        })
+                      }}
                     >
                       <input
                         type="checkbox"
@@ -1537,7 +1708,14 @@ export default function VideoSidebar({
 
                   return (
                     <div key={`uploads-${group.name}`}>
-                      <div className={cn('flex items-center gap-2 pl-12 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}>
+                      <div
+                        className={cn('flex items-center gap-2 pl-12 pr-3 pt-2 pb-1', isActiveFolder && 'rounded-md bg-primary/15')}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setContextMenu({ x: e.clientX, y: e.clientY, group, openFolder: { name: group.name, groupType: 'uploads' } })
+                        }}
+                      >
                         <button
                           type="button"
                           className="text-muted-foreground hover:text-foreground transition-colors"
@@ -1589,6 +1767,17 @@ export default function VideoSidebar({
                             <div
                               key={fileKey}
                               className="flex items-center gap-2 py-0.5 pr-3 hover:bg-accent transition-colors pl-16"
+                              onContextMenu={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                setContextMenu({
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                  file,
+                                  imageList: sortedGroupFiles,
+                                  openFolder: { name: group.name, groupType: 'uploads' },
+                                })
+                              }}
                             >
                               <input
                                 type="checkbox"
@@ -1919,6 +2108,226 @@ export default function VideoSidebar({
 
               {/* FILES tab */}
               {desktopActiveTabValue === 'files' && renderFilesTabSection(false)}
+
+              {/* Right-click context menu for FILES mode */}
+              {desktopActiveTabValue === 'files' && contextMenu
+                ? createPortal(
+                    <div
+                      ref={contextMenuRef}
+                      className="fixed z-[9999] min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-elevation-lg text-popover-foreground"
+                      style={{
+                        left: Math.min(contextMenu.x, window.innerWidth - 220),
+                        top: Math.min(contextMenu.y, Math.max(4, window.innerHeight - 260)),
+                      }}
+                      onClick={() => setContextMenu(null)}
+                    >
+                      <ContextMenuItems
+                        contextMenu={contextMenu}
+                        file={contextMenu.file}
+                        group={contextMenu.group}
+                        canSelectFile={contextMenu.file ? isSelectableDownloadableFile(contextMenu.file) : false}
+                        isSelected={contextMenu.file ? selectedFileIdsValue.has(getDownloadableFileKey(contextMenu.file)) : false}
+                        isGroupSelected={
+                          contextMenu.group
+                            ? (() => {
+                                const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
+                                  .filter((f) => isSelectableDownloadableFile(f))
+                                return files.length > 0 && files.every((f) => selectedFileIdsValue.has(getDownloadableFileKey(f)))
+                              })()
+                            : false
+                        }
+                        canDownloadFile={contextMenu.file ? (contextMenu.file.type !== 'video' || contextMenu.file.isApproved !== false) : false}
+                        showApproveButton={contextMenu.file ? (
+                          contextMenu.file.type === 'video' &&
+                          contextMenu.file.isApproved === false &&
+                          contextMenu.file.allowApproval === true &&
+                          !!onApproveVideo &&
+                          // Don't allow approving another version if one is already approved.
+                          !((() => {
+                            const groupName = contextMenu.openFolder?.name
+                            if (!groupName) return false
+                            const group = (downloadableFiles ?? []).find(
+                              (g) => g.name === groupName && g.groupType === 'video'
+                            )
+                            if (!group) return false
+                            return [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+                              .some((f) => f.type === 'video' && f.isApproved === true)
+                          })())
+                        ) : false}
+                        fileKind={contextMenu.file ? getDownloadableFileKind(contextMenu.file) : null}
+                        isVideoAssetFile={contextMenu.file ? (getDownloadableFileKind(contextMenu.file) === 'video' && contextMenu.file.type !== 'video') : false}
+                        openFolder={contextMenu.openFolder ?? null}
+                        onPlay={() => {
+                          if (contextMenu.file && onOpenVideoVersion) {
+                            onOpenVideoVersion(contextMenu.file, contextMenu.openFolder?.name || null)
+                          }
+                        }}
+                        onOpenLightbox={() => {
+                          if (!contextMenu.file || !contextMenu.imageList) return
+                          const kind = getDownloadableFileKind(contextMenu.file)
+                          if (kind === 'image' || kind === 'video' || kind === 'audio') {
+                            // Navigate the main files area to the parent folder, then open the lightbox.
+                            const folderName = contextMenu.openFolder?.name
+                            if (!folderName) return
+                            setDesktopActiveTabValue('files')
+                            if (contextMenu.openFolder?.groupType === 'video') {
+                              onVideoSelect(folderName)
+                            }
+                            window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                              detail: {
+                                folderName,
+                                fileKey: getDownloadableFileKey(contextMenu.file),
+                              },
+                            }))
+                          }
+                        }}
+                        onOpenFolder={() => {
+                          if (!contextMenu.group || !contextMenu.openFolder) return
+                          setDesktopActiveTabValue('files')
+                          if (contextMenu.openFolder.groupType === 'video') {
+                            onVideoSelect(contextMenu.openFolder.name)
+                          } else if (contextMenu.openFolder.groupType === 'album') {
+                            onAlbumSelect?.(contextMenu.group.subFiles.find((f) => f.albumId)?.albumId || '')
+                          }
+                          window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                            detail: { folderName: contextMenu.openFolder.name },
+                          }))
+                        }}
+                        onSelect={() => {
+                          if (!contextMenu.file) return
+                          const key = getDownloadableFileKey(contextMenu.file)
+                          setSelectedFileIdsValue((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(key)) next.delete(key)
+                            else next.add(key)
+                            return next
+                          })
+                        }}
+                        onSelectFolder={() => {
+                          if (!contextMenu.group || !contextMenu.openFolder) return
+                          // For upload folders, also collect files from nested subfolders.
+                          let groups: DownloadableGroup[]
+                          if (contextMenu.openFolder.groupType === 'uploads') {
+                            const prefix = contextMenu.openFolder.name
+                            groups = (downloadableFiles ?? []).filter(
+                              (g) => g.groupType === 'uploads' && (g.name === prefix || g.name.startsWith(prefix + ' / '))
+                            )
+                          } else {
+                            groups = [contextMenu.group]
+                          }
+                          const files = groups
+                            .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
+                            .filter((f) => isSelectableDownloadableFile(f))
+                          const allKeys = files.map((f) => getDownloadableFileKey(f))
+                          const allSelected = allKeys.length > 0 && allKeys.every((k) => selectedFileIdsValue.has(k))
+                          setSelectedFileIdsValue((prev) => {
+                            const next = new Set(prev)
+                            if (allSelected) {
+                              allKeys.forEach((k) => next.delete(k))
+                            } else {
+                              allKeys.forEach((k) => next.add(k))
+                            }
+                            return next
+                          })
+                        }}
+                        onDownload={() => {
+                          if (contextMenu.file && onDownloadFile) void onDownloadFile(contextMenu.file)
+                        }}
+                        onDownloadFolder={() => {
+                          if (!contextMenu.group) return
+                          const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
+                            .filter((f) => isSelectableDownloadableFile(f))
+                          if (files.length > 0) {
+                            if (onDownloadFiles) {
+                              void onDownloadFiles(files)
+                            } else if (onDownloadFile) {
+                              void Promise.all(files.map((f) => onDownloadFile!(f).catch(() => undefined)))
+                            }
+                          }
+                        }}
+                        onApprove={() => {
+                          if (contextMenu.file && onApproveVideo) {
+                            void onApproveVideo(contextMenu.file)
+                          }
+                        }}
+                        onRenameFolder={() => {
+                          if (!contextMenu.group || !onRenameUploadFolder) return
+                          const path = getUploadsRelativePath(contextMenu.group.name)
+                          const label = path.split('/').pop()?.trim() || contextMenu.group.name
+                          setRenameFolderTarget({ path, currentName: label })
+                        }}
+                        onDeleteFolder={() => {
+                          if (!contextMenu.group || !onDeleteUploadFolder) return
+                          const path = getUploadsRelativePath(contextMenu.group.name)
+                          const label = path.split('/').pop()?.trim() || contextMenu.group.name
+                          setDeleteFolderTarget({ path, label })
+                        }}
+                        onDeleteFile={() => {
+                          if (contextMenu.file?.uploadFileId && onDeleteUploadFile) {
+                            setDeleteFileTarget({ fileId: contextMenu.file.uploadFileId, fileName: contextMenu.file.fileName })
+                          }
+                        }}
+                        canUploadAdmin={canDeleteUploads}
+                        onOpenAlbumPhoto={() => {
+                          if (contextMenu.file && contextMenu.imageList) {
+                            // Navigate the main files area to the album folder, then open the album viewer.
+                            const folderName = contextMenu.openFolder?.name
+                            if (!folderName) return
+                            setDesktopActiveTabValue('files')
+                            if (contextMenu.openFolder?.groupType === 'album') {
+                              onAlbumSelect?.(contextMenu.file.albumId || '')
+                            }
+                            window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
+                              detail: {
+                                folderName,
+                                fileKey: getDownloadableFileKey(contextMenu.file),
+                              },
+                            }))
+                          }
+                        }}
+                        albumPhotoSocialDownloadUrl={
+                          contextMenu.file?.photoId && contextMenu.file?.albumId ? (
+                            (() => {
+                              const socialEnabled = (albumSocialEnabledByAlbumId[contextMenu.file.albumId!] ?? albumSocialEnabledByAlbumIdInternal[contextMenu.file.albumId!]) !== false
+                              const meta = albumPhotoMetaByPhotoId[contextMenu.file.photoId!] ?? albumPhotoMetaByPhotoIdInternal[contextMenu.file.photoId!]
+                              return socialEnabled && meta?.socialDownloadUrl && meta?.socialReady ? meta.socialDownloadUrl : null
+                            })()
+                          ) : null
+                        }
+                        onDownloadSocial={() => {
+                          if (contextMenu.file?.photoId && contextMenu.file?.albumId) {
+                            const meta = albumPhotoMetaByPhotoId[contextMenu.file.photoId] ?? albumPhotoMetaByPhotoIdInternal[contextMenu.file.photoId]
+                            if (meta?.socialDownloadUrl) {
+                              const link = document.createElement('a')
+                              link.href = meta.socialDownloadUrl
+                              link.rel = 'noopener'
+                              link.download = ''
+                              link.style.display = 'none'
+                              document.body.appendChild(link)
+                              link.click()
+                              link.remove()
+                            }
+                          }
+                        }}
+                        groupHasApprovedVersion={
+                          contextMenu.file?.type === 'video'
+                            ? ((() => {
+                                const groupName = contextMenu.openFolder?.name
+                                if (!groupName) return false
+                                const group = (downloadableFiles ?? []).find(
+                                  (g) => g.name === groupName && g.groupType === 'video'
+                                )
+                                if (!group) return false
+                                return [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+                                  .some((f) => f.type === 'video' && f.isApproved === true)
+                              })())
+                            : false
+                        }
+                      />
+                    </div>,
+                    document.body,
+                  )
+                : null}
             </>
           )}
         </div>
@@ -2251,6 +2660,69 @@ export default function VideoSidebar({
           }
         }}
         onCancel={() => setBulkFsaUnsupportedFiles(null)}
+      />
+
+      {/* Upload rename folder dialog */}
+      <InputDialog
+        open={renameFolderTarget !== null}
+        onOpenChange={(v) => { if (!v) setRenameFolderTarget(null) }}
+        title="Rename folder"
+        label={`Enter a new name for "${renameFolderTarget?.currentName || ''}"`}
+        defaultValue={renameFolderTarget?.currentName || ''}
+        confirmLabel="Rename"
+        cancelLabel="Cancel"
+        onConfirm={async (newName) => {
+          if (!renameFolderTarget || !onRenameUploadFolder) return
+          setIsUploadActionBusy(true)
+          try {
+            await onRenameUploadFolder(renameFolderTarget.path, newName)
+          } finally {
+            setIsUploadActionBusy(false)
+            setRenameFolderTarget(null)
+          }
+        }}
+      />
+
+      {/* Upload delete folder dialog */}
+      <ConfirmDialog
+        open={deleteFolderTarget !== null}
+        onOpenChange={(v) => { if (!v) setDeleteFolderTarget(null) }}
+        title="Delete folder?"
+        description={`This will permanently delete the folder "${deleteFolderTarget?.label || ''}" and all files inside it. This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteFolderTarget || !onDeleteUploadFolder) return
+          setIsUploadActionBusy(true)
+          try {
+            await onDeleteUploadFolder(deleteFolderTarget.path)
+          } finally {
+            setIsUploadActionBusy(false)
+            setDeleteFolderTarget(null)
+          }
+        }}
+      />
+
+      {/* Upload delete file dialog */}
+      <ConfirmDialog
+        open={deleteFileTarget !== null}
+        onOpenChange={(v) => { if (!v) setDeleteFileTarget(null) }}
+        title="Delete file?"
+        description={`This will permanently delete "${deleteFileTarget?.fileName || 'this file'}". This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteFileTarget || !onDeleteUploadFile) return
+          setIsUploadActionBusy(true)
+          try {
+            await onDeleteUploadFile(deleteFileTarget.fileId)
+          } finally {
+            setIsUploadActionBusy(false)
+            setDeleteFileTarget(null)
+          }
+        }}
       />
 
     </>

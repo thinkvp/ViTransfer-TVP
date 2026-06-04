@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -10,15 +11,18 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { apiFetch } from '@/lib/api-client'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import type { TransferItem } from '@/lib/transfer-state'
 import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import {
   ArrowLeft,
+  Check,
   CheckSquare,
   ChevronLeft,
   ChevronRight,
@@ -82,6 +86,7 @@ type ShareFilesBrowserProps = {
   onDeleteUploadFolder?: (folderPath: string) => Promise<void>
   onRenameUploadFolder?: (folderPath: string, folderName: string) => Promise<void>
   onPreviewTokenExpired?: () => void
+  onApproveVideo?: (file: DownloadableFile) => Promise<void>
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -152,6 +157,195 @@ function isLightboxMediaFile(file: DownloadableFile): boolean {
   return false
 }
 
+export type ContextMenuItemsProps = {
+  contextMenu: { file?: DownloadableFile; group?: DownloadableGroup; imageList?: DownloadableFile[] } | null
+  file?: DownloadableFile
+  group?: DownloadableGroup
+  canSelectFile: boolean
+  isSelected: boolean
+  isGroupSelected: boolean
+  canDownloadFile: boolean
+  showApproveButton: boolean
+  fileKind: ReturnType<typeof getDownloadableFileKind> | null
+  isVideoAssetFile: boolean
+  openFolder: { name: string; groupType: string } | null
+  onPlay: () => void
+  onOpenLightbox: () => void
+  onOpenFolder: () => void
+  onSelect: () => void
+  onSelectFolder: () => void
+  onDownload: () => void
+  onDownloadFolder: () => void
+  onApprove: () => void
+  onRenameFolder: () => void
+  onDeleteFolder: () => void
+  onDeleteFile: () => void
+  canUploadAdmin: boolean
+  onOpenAlbumPhoto: () => void
+  albumPhotoSocialDownloadUrl: string | null
+  onDownloadSocial: () => void
+  /** Whether another version in the same video group is already approved. */
+  groupHasApprovedVersion?: boolean
+}
+
+export function ContextMenuItems({
+  contextMenu,
+  file,
+  group,
+  canSelectFile,
+  isSelected,
+  isGroupSelected,
+  canDownloadFile,
+  showApproveButton,
+  fileKind,
+  isVideoAssetFile,
+  onPlay,
+  onOpenLightbox,
+  onOpenFolder,
+  onSelect,
+  onSelectFolder,
+  onDownload,
+  onDownloadFolder,
+  onApprove,
+  onRenameFolder,
+  onDeleteFolder,
+  onDeleteFile,
+  canUploadAdmin,
+  onOpenAlbumPhoto,
+  albumPhotoSocialDownloadUrl,
+  onDownloadSocial,
+  groupHasApprovedVersion = false,
+}: ContextMenuItemsProps) {
+  if (!contextMenu) return null
+
+  const itemClass = 'flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground'
+  const destructiveClass = 'flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none text-destructive hover:bg-destructive/10 hover:text-destructive'
+  const separatorClass = 'mx-1 my-1 h-px bg-border'
+
+  // Folder context menu
+  if (group) {
+    const isUploads = group.groupType === 'uploads'
+    const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+    const hasSelectable = groupFiles.some((f) => f.type !== 'video' || f.isApproved === true)
+
+    return (
+      <>
+        <div className={itemClass} onClick={onOpenFolder}>
+          <Folder className="mr-2 h-4 w-4" />
+          Open
+        </div>
+        {hasSelectable ? (
+          <div className={itemClass} onClick={onSelectFolder}>
+            {isGroupSelected ? <Square className="mr-2 h-4 w-4" /> : <CheckSquare className="mr-2 h-4 w-4" />}
+            {isGroupSelected ? 'Deselect' : 'Select'}
+          </div>
+        ) : null}
+        {hasSelectable ? (
+          <div className={itemClass} onClick={onDownloadFolder}>
+            <Download className="mr-2 h-4 w-4" />
+            Download All
+          </div>
+        ) : null}
+        {isUploads && canUploadAdmin ? (
+          <>
+            <div className={separatorClass} />
+            <div className={itemClass} onClick={onRenameFolder}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Rename folder
+            </div>
+            <div className={destructiveClass} onClick={onDeleteFolder}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete folder
+            </div>
+          </>
+        ) : null}
+      </>
+    )
+  }
+
+  // File context menu
+  if (!file) return null
+
+  const isVideo = file.type === 'video'
+  const isAlbumPhoto = file.type === 'album-photo'
+  const isAlbumZip = file.type === 'album-zip'
+  const isUploadFile = file.type === 'upload-file'
+  const isApproved = file.isApproved === true
+
+  return (
+    <>
+      {/* Play / Open actions */}
+      {isVideo && !isApproved && groupHasApprovedVersion ? (
+        <div className={cn(itemClass, 'opacity-50 cursor-default')}>
+          <Play className="mr-2 h-4 w-4" />
+          Play (another version approved)
+        </div>
+      ) : isVideo ? (
+        <div className={itemClass} onClick={onPlay}>
+          <Play className="mr-2 h-4 w-4" />
+          Play
+        </div>
+      ) : !isUploadFile && (isVideoAssetFile || fileKind === 'image' || fileKind === 'audio' || isAlbumPhoto) ? (
+        <div className={itemClass} onClick={isAlbumPhoto ? onOpenAlbumPhoto : onOpenLightbox}>
+          <Play className="mr-2 h-4 w-4" />
+          Open
+        </div>
+      ) : null}
+
+      {/* Select / Unselect */}
+      {canSelectFile ? (
+        <div className={itemClass} onClick={onSelect}>
+          {isSelected ? <Square className="mr-2 h-4 w-4" /> : <CheckSquare className="mr-2 h-4 w-4" />}
+          {isSelected ? 'Deselect' : 'Select'}
+        </div>
+      ) : null}
+
+      {/* Approve (unapproved video) */}
+      {showApproveButton ? (
+        <div className={itemClass} onClick={onApprove}>
+          <Check className="mr-2 h-4 w-4" />
+          Approve version
+        </div>
+      ) : null}
+
+      {/* Album photo downloads */}
+      {isAlbumPhoto && canDownloadFile ? (
+        <>
+          <div className={itemClass} onClick={onDownload}>
+            <Download className="mr-2 h-4 w-4" />
+            Download Full Resolution
+          </div>
+          {albumPhotoSocialDownloadUrl ? (
+            <div className={itemClass} onClick={onDownloadSocial}>
+              <Download className="mr-2 h-4 w-4" />
+              Download Social Sized
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* Download (non-album files) */}
+      {!isAlbumPhoto && canDownloadFile ? (
+        <div className={itemClass} onClick={onDownload}>
+          <Download className="mr-2 h-4 w-4" />
+          Download
+        </div>
+      ) : null}
+
+      {/* Upload file delete */}
+      {isUploadFile && canUploadAdmin ? (
+        <>
+          <div className={separatorClass} />
+          <div className={destructiveClass} onClick={onDeleteFile}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete file
+          </div>
+        </>
+      ) : null}
+    </>
+  )
+}
+
 export function ShareFilesBrowser({
   groups,
   rootFolderLabel,
@@ -181,6 +375,7 @@ export function ShareFilesBrowser({
   onDeleteUploadFolder,
   onRenameUploadFolder,
   onPreviewTokenExpired,
+  onApproveVideo,
 }: ShareFilesBrowserProps) {
   const [openFolderName, setOpenFolderName] = useState<string | null>(null)
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
@@ -191,6 +386,20 @@ export function ShareFilesBrowser({
   const [folderPreviewTilesByName, setFolderPreviewTilesByName] = useState<Record<string, string[]>>({})
   const [folderPreviewPosterByName, setFolderPreviewPosterByName] = useState<Record<string, string | null>>({})
   const [lightboxState, setLightboxState] = useState<{ images: DownloadableFile[]; currentIndex: number } | null>(null)
+  const [approveConfirmFile, setApproveConfirmFile] = useState<DownloadableFile | null>(null)
+  const [approveConfirmVideoName, setApproveConfirmVideoName] = useState<string>('')
+  const [approving, setApproving] = useState(false)
+  const approvingRef = useRef(false)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    file?: DownloadableFile
+    group?: DownloadableGroup
+    imageList?: DownloadableFile[]
+  } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
+  const [lightboxContextMenu, setLightboxContextMenu] = useState<{ x: number; y: number; file: DownloadableFile } | null>(null)
+  const lightboxContextMenuRef = useRef<HTMLDivElement | null>(null)
   const [audioLightboxState, setAudioLightboxState] = useState<{ files: DownloadableFile[]; currentIndex: number } | null>(null)
   const [audioPlaybackUrlByFileKey, setAudioPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
   const [videoPlaybackUrlByFileKey, setVideoPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
@@ -231,6 +440,49 @@ export function ShareFilesBrowser({
     lastPreviewTokenRefreshAtRef.current = now
     onPreviewTokenExpired()
   }, [onPreviewTokenExpired])
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    const onMouseDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        close()
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onMouseDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    // Close on scroll/wheel
+    window.addEventListener('wheel', close, { once: true })
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('wheel', close)
+    }
+  }, [contextMenu])
+
+  // Close lightbox context menu on outside click or Escape
+  useEffect(() => {
+    if (!lightboxContextMenu) return
+    const close = () => setLightboxContextMenu(null)
+    const onMouseDown = (e: MouseEvent) => {
+      if (lightboxContextMenuRef.current && !lightboxContextMenuRef.current.contains(e.target as Node)) {
+        close()
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onMouseDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [lightboxContextMenu])
 
   useEffect(() => {
     const availableFileKeys = new Set<string>()
@@ -660,6 +912,13 @@ export function ShareFilesBrowser({
   const filesInOpenFolder = useMemo(() => {
     if (!openFolder) return []
     return [...(openFolder.mainFile ? [openFolder.mainFile] : []), ...openFolder.subFiles]
+  }, [openFolder])
+
+  // Don't allow approving another video version if one in the same group is already approved.
+  const groupHasApprovedVersion = useMemo(() => {
+    if (!openFolder || openFolder.groupType !== 'video') return false
+    return [...(openFolder.mainFile ? [openFolder.mainFile] : []), ...openFolder.subFiles]
+      .some((f) => f.type === 'video' && f.isApproved === true)
   }, [openFolder])
 
   useEffect(() => {
@@ -1093,7 +1352,25 @@ export function ShareFilesBrowser({
     })
   }, [groups, setSelectedFileIds])
 
+  // When no folder is open (root PROJECT view), "Select all" selects every file
+  // across all groups — matching the sidebar's Select All behavior.
+  const rootViewAllKeys = useMemo(() => {
+    if (openFolder) return null
+    return groups
+      .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
+      .filter((file) => isSelectableDownloadableFile(file))
+      .map(getDownloadableFileKey)
+  }, [openFolder, groups])
+
   const selectAllVisible = () => {
+    if (rootViewAllKeys) {
+      setSelectedFileIds((prev) => {
+        const next = new Set(prev)
+        rootViewAllKeys.forEach((key) => next.add(key))
+        return next
+      })
+      return
+    }
     const visibleKeys = visibleFiles
       .filter((file) => isSelectableDownloadableFile(file))
       .map(getDownloadableFileKey)
@@ -1111,11 +1388,14 @@ export function ShareFilesBrowser({
   }
 
   const allVisibleSelected = useMemo(() => {
+    if (rootViewAllKeys) {
+      return rootViewAllKeys.length > 0 && rootViewAllKeys.every((key) => selectedFileIds.has(key))
+    }
     const visibleSelectableKeys = visibleFiles
       .filter((file) => isSelectableDownloadableFile(file))
       .map(getDownloadableFileKey)
     return visibleSelectableKeys.length > 0 && visibleSelectableKeys.every((key) => selectedFileIds.has(key))
-  }, [visibleFiles, selectedFileIds])
+  }, [rootViewAllKeys, visibleFiles, selectedFileIds])
 
   const toggleAllVisibleSelection = () => {
     if (allVisibleSelected) {
@@ -1339,6 +1619,24 @@ export function ShareFilesBrowser({
     if (av == null && bv != null) return 1
     return compareFileNameAsc(a, b)
   }, [compareFileNameAsc, getVideoVersionNumber])
+
+  const handleApproveVideo = useCallback(async () => {
+    const file = approveConfirmFile
+    if (!file || !onApproveVideo) return
+    if (approvingRef.current) return
+    approvingRef.current = true
+    setApproving(true)
+    try {
+      await onApproveVideo(file)
+      setApproveConfirmFile(null)
+      setApproveConfirmVideoName('')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Approval failed')
+    } finally {
+      approvingRef.current = false
+      setApproving(false)
+    }
+  }, [approveConfirmFile, onApproveVideo])
 
   const openFolderVideoVersions = useMemo(() => {
     if (openFolder?.groupType !== 'video') return [] as DownloadableFile[]
@@ -1623,19 +1921,17 @@ export function ShareFilesBrowser({
     if (albumMetaLoadedByAlbumId[albumId]) return
 
     try {
-      const res = await fetch(`/api/share/${encodeURIComponent(shareSlug)}/albums/${encodeURIComponent(albumId)}`, {
+      const res = await apiFetch(`/api/share/${encodeURIComponent(shareSlug)}/albums/${encodeURIComponent(albumId)}`, {
         cache: 'no-store',
         headers: shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined,
       })
-      if (!res.ok) {
-        setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
-        return
-      }
+      if (!res.ok) return
 
       const data = await res.json().catch(() => ({}))
       const photos = Array.isArray((data as any)?.photos) ? (data as any).photos : []
       const socialEnabled = (data as any)?.album?.socialCopiesEnabled !== false
 
+      setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
       setAlbumSocialEnabledByAlbumId((prev) => ({ ...prev, [albumId]: socialEnabled }))
       setAlbumPhotoMetaByPhotoId((prev) => {
         const next = { ...prev }
@@ -1651,9 +1947,7 @@ export function ShareFilesBrowser({
         return next
       })
     } catch {
-      // Ignore metadata fetch errors; full-resolution download remains available.
-    } finally {
-      setAlbumMetaLoadedByAlbumId((prev) => ({ ...prev, [albumId]: true }))
+      // Ignore errors; retry on next trigger.
     }
   }, [albumMetaLoadedByAlbumId, shareSlug, shareToken])
 
@@ -1671,6 +1965,21 @@ export function ShareFilesBrowser({
     if (!albumViewerState) return
     void loadAlbumPhotoMeta(albumViewerState.albumId)
   }, [albumViewerState, loadAlbumPhotoMeta])
+
+  // Preload album photo meta for all album groups (so right-click context menu has social data)
+  useEffect(() => {
+    if (!shareSlug) return
+    for (const group of groups) {
+      if (group.groupType === 'album') {
+        for (const file of group.subFiles) {
+          if (file.albumId) {
+            void loadAlbumPhotoMeta(file.albumId)
+            break
+          }
+        }
+      }
+    }
+  }, [groups, loadAlbumPhotoMeta, shareSlug])
 
   useEffect(() => {
     if (!albumViewerState) return
@@ -1801,6 +2110,13 @@ export function ShareFilesBrowser({
                 : 'Queued for upload'
       : null
     const keepActionsOnTitleRow = file.type === 'video'
+    const showApproveButton =
+      file.type === 'video' &&
+      file.isApproved === false &&
+      file.allowApproval === true &&
+      onApproveVideo &&
+      !muteInactiveVideoVersion &&
+      !groupHasApprovedVersion
     const showPlayableVideoOverlay = (isVideoAssetFile || (file.type === 'video' && !muteInactiveVideoVersion)) && (showImagePreview || showVideoPreview)
     const actionButtons = canDownloadFile ? (
       <div className="flex items-center gap-1">
@@ -1835,6 +2151,23 @@ export function ShareFilesBrowser({
           <Download className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
         </Button>
       </div>
+    ) : showApproveButton ? (
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant="default"
+          size="icon"
+          className={cn('shrink-0 bg-green-600 hover:bg-green-700 text-white', compact ? 'h-6 w-6' : 'h-7 w-7')}
+          disabled={approving}
+          onClick={(event) => { event.stopPropagation(); setApproveConfirmFile(file); setApproveConfirmVideoName(openFolder?.name || file.fileName) }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          aria-label={`Approve ${displayFileName}`}
+          title={`Approve ${displayFileName}`}
+        >
+          <Check className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5')} />
+        </Button>
+      </div>
     ) : null
 
     return (
@@ -1855,6 +2188,10 @@ export function ShareFilesBrowser({
           if (file.type === 'upload-file') return
           if (isImageFile) {
             openImageLightbox(file, imageList)
+            return
+          }
+          if (fileKind === 'video' && file.type !== 'video') {
+            openVideoLightbox(file, imageList)
             return
           }
           if (isAudioFile) {
@@ -1882,6 +2219,14 @@ export function ShareFilesBrowser({
           }
           if (!canDownloadFile) return
           void onDownloadFile(file)
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          setContextMenu({ x: event.clientX, y: event.clientY, file, imageList })
+          // Trigger album photo meta load for social download (safety net)
+          if (file.type === 'album-photo' && file.albumId) {
+            void loadAlbumPhotoMeta(file.albumId)
+          }
         }}
       >
         <div className={cn('relative bg-gradient-to-b from-muted/70 to-muted/35', compact ? 'p-2 pb-1.5' : 'p-2.5 pb-2')}>
@@ -2031,6 +2376,7 @@ export function ShareFilesBrowser({
 
   const renderRootFolderCard = (group: DownloadableGroup) => {
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+    const hasSelectableFiles = groupFiles.some((f) => isSelectableDownloadableFile(f))
     const uploadFolderPath = group.groupType === 'uploads' ? getUploadsFolderPathFromGroup(group.name) : ''
     const displayGroupName = group.groupType === 'uploads'
       ? getUploadsFolderLabelFromGroup(group.name)
@@ -2074,6 +2420,11 @@ export function ShareFilesBrowser({
           const targetPath = getUploadsFolderPathFromGroup(group.name)
           const droppedFiles = Array.from(event.dataTransfer?.files || [])
           void submitUploadFiles(targetPath, droppedFiles)
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setContextMenu({ x: event.clientX, y: event.clientY, group })
         }}
       >
         <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
@@ -2182,11 +2533,12 @@ export function ShareFilesBrowser({
             <input
               type="checkbox"
               checked={allChecked}
+              disabled={!hasSelectableFiles}
               ref={(el) => {
                 if (el) el.indeterminate = someChecked && !allChecked
               }}
               onChange={(event) => toggleGroup(group, event.target.checked)}
-              className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, groupFiles.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
+              className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, hasSelectableFiles ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
               aria-label={`Select files in ${displayGroupName}`}
             />
           </div>
@@ -2340,8 +2692,8 @@ export function ShareFilesBrowser({
               )}
               disabled={visibleFiles.length === 0}
               onClick={toggleAllVisibleSelection}
-              aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
-              title={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
+              aria-label={allVisibleSelected ? 'Unselect all' : 'Select all'}
+              title={allVisibleSelected ? 'Unselect all' : 'Select all'}
             >
               {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
               <Files className="w-4 h-4" />
@@ -2416,8 +2768,8 @@ export function ShareFilesBrowser({
               )}
               disabled={visibleFiles.length === 0}
               onClick={toggleAllVisibleSelection}
-              aria-label={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
-              title={allVisibleSelected ? 'Unselect all visible files' : 'Select all visible files'}
+              aria-label={allVisibleSelected ? 'Unselect all' : 'Select all'}
+              title={allVisibleSelected ? 'Unselect all' : 'Select all'}
             >
               {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
               <Files className="w-4 h-4" />
@@ -2733,9 +3085,15 @@ export function ShareFilesBrowser({
         const hasMultiple = lightboxState && lightboxState.images.length > 1
         return (
           <Dialog open={Boolean(lightboxState)} onOpenChange={(open) => { if (!open) setLightboxState(null) }}>
-            <DialogContent className="max-w-[92vw] sm:max-w-5xl p-0 overflow-hidden bg-black border-border">
+            <DialogContent
+              className="max-w-[92vw] sm:max-w-5xl p-0 overflow-hidden bg-black border-border"
+              title="File preview"
+            >
               {lightboxFile ? (
-                <div className="relative w-full h-[70vh] bg-black">
+                <div
+                  className="relative w-full h-[70vh] bg-black"
+                  onContextMenu={(e) => { e.preventDefault() }}
+                >
                   {isVideoLightbox && lightboxSrc ? (
                     <video
                       src={lightboxSrc}
@@ -2745,7 +3103,7 @@ export function ShareFilesBrowser({
                       playsInline
                       controlsList="nodownload noplaybackrate noremoteplayback"
                       disablePictureInPicture
-                      onContextMenu={(event) => event.preventDefault()}
+                      onContextMenu={(e) => e.preventDefault()}
                     />
                   ) : isVideoLightbox && lightboxPlaybackState === undefined ? (
                     <div className="flex h-full w-full items-center justify-center text-sm text-white/75">
@@ -2810,7 +3168,7 @@ export function ShareFilesBrowser({
 
         return (
           <Dialog open={Boolean(audioLightboxState)} onOpenChange={(open) => { if (!open) setAudioLightboxState(null) }}>
-            <DialogContent className="max-w-[92vw] sm:max-w-3xl p-0 overflow-hidden bg-black border-border">
+            <DialogContent className="max-w-[92vw] sm:max-w-3xl p-0 overflow-hidden bg-black border-border" title="Audio player">
               {audioFile ? (
                 <div className="relative w-full min-h-[260px] bg-black text-white p-5 sm:p-7 flex flex-col gap-5">
                   <div className="flex items-center gap-3 min-w-0">
@@ -2873,7 +3231,7 @@ export function ShareFilesBrowser({
 
         return (
           <Dialog open={Boolean(albumViewerState)} onOpenChange={(open) => { if (!open) setAlbumViewerState(null) }}>
-            <DialogContent className="max-w-none w-[95vw] h-[95vh] flex flex-col">
+            <DialogContent className="max-w-none w-[95vw] h-[95vh] flex flex-col" title="Album photo viewer">
               {viewerFile && viewerSrc ? (
                 <div className="flex-1 min-h-0 flex flex-col gap-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -3050,6 +3408,174 @@ export function ShareFilesBrowser({
         onConfirm={confirmDeleteUploadFolder}
         loading={isUploadActionBusy}
       />
+
+      {/* Approve video dialog */}
+      <ConfirmDialog
+        open={approveConfirmFile !== null}
+        onOpenChange={(v) => { if (!v) { setApproveConfirmFile(null); setApproveConfirmVideoName('') } }}
+        title="Approve Video"
+        description={
+          approveConfirmFile
+            ? `Approve ${approveConfirmFile.versionLabel || 'this version'} for ${approveConfirmVideoName || approveConfirmFile.fileName}? This will lock further feedback and make it downloadable.`
+            : 'Approve this version? This will lock further feedback and make it downloadable.'
+        }
+        confirmLabel={approving ? 'Approving...' : 'Approve'}
+        cancelLabel="Cancel"
+        variant="default"
+        onConfirm={handleApproveVideo}
+        loading={approving}
+      />
+
+      {/* Right-click context menu */}
+      {contextMenu
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              className="fixed z-[9999] min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-elevation-lg text-popover-foreground"
+              style={{
+                left: Math.min(contextMenu.x, window.innerWidth - 220),
+                top: Math.min(contextMenu.y, Math.max(4, window.innerHeight - 260)),
+              }}
+              onClick={() => setContextMenu(null)}
+            >
+              <ContextMenuItems
+                contextMenu={contextMenu}
+                file={contextMenu.file}
+                group={contextMenu.group}
+                canSelectFile={contextMenu.file ? isSelectableDownloadableFile(contextMenu.file) : false}
+                isSelected={contextMenu.file ? selectedFileIds.has(getDownloadableFileKey(contextMenu.file)) : false}
+                isGroupSelected={
+                  contextMenu.group
+                    ? (() => {
+                        const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
+                          .filter((f) => isSelectableDownloadableFile(f))
+                        return files.length > 0 && files.every((f) => selectedFileIds.has(getDownloadableFileKey(f)))
+                      })()
+                    : false
+                }
+                canDownloadFile={contextMenu.file ? (contextMenu.file.type !== 'video' || contextMenu.file.isApproved !== false) : false}
+                showApproveButton={contextMenu.file ? (
+                  contextMenu.file.type === 'video' &&
+                  contextMenu.file.isApproved === false &&
+                  contextMenu.file.allowApproval === true &&
+                  !!onApproveVideo &&
+                  // Don't allow approving another version if one is already approved.
+                  !((() => {
+                    const folderName = openFolder?.name
+                    if (!folderName) return false
+                    const group = groups.find(
+                      (g) => g.name === folderName && g.groupType === 'video'
+                    )
+                    if (!group) return false
+                    return [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+                      .some((f) => f.type === 'video' && f.isApproved === true)
+                  })())
+                ) : false}
+                fileKind={contextMenu.file ? getDownloadableFileKind(contextMenu.file) : null}
+                isVideoAssetFile={contextMenu.file ? (getDownloadableFileKind(contextMenu.file) === 'video' && contextMenu.file.type !== 'video') : false}
+                openFolder={openFolder}
+                onPlay={() => {
+                  if (contextMenu.file && onOpenVideoVersion) {
+                    onOpenVideoVersion(contextMenu.file, openFolder?.name || null)
+                  }
+                }}
+                onOpenLightbox={() => {
+                  if (!contextMenu.file || !contextMenu.imageList) return
+                  const kind = getDownloadableFileKind(contextMenu.file)
+                  if (kind === 'image') {
+                    openImageLightbox(contextMenu.file, contextMenu.imageList)
+                  } else if (kind === 'video' && contextMenu.file.type !== 'video') {
+                    openVideoLightbox(contextMenu.file, contextMenu.imageList)
+                  } else if (kind === 'audio') {
+                    openAudioLightbox(contextMenu.file, contextMenu.imageList)
+                  }
+                }}
+                onOpenFolder={() => {
+                  if (contextMenu.group) setOpenFolderName(contextMenu.group.name)
+                }}
+                onSelect={() => {
+                  if (!contextMenu.file) return
+                  const key = getDownloadableFileKey(contextMenu.file)
+                  toggleFile(key, !selectedFileIds.has(key))
+                }}
+                onDownload={() => {
+                  if (contextMenu.file) void onDownloadFile(contextMenu.file)
+                }}
+                onDownloadFolder={() => {
+                  if (!contextMenu.group) return
+                  const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
+                    .filter((f) => isSelectableDownloadableFile(f))
+                  if (files.length > 0) {
+                    if (onDownloadFiles) {
+                      void onDownloadFiles(files)
+                    } else {
+                      void Promise.all(files.map((f) => onDownloadFile(f).catch(() => undefined)))
+                    }
+                  }
+                }}
+                onApprove={() => {
+                  if (contextMenu.file) {
+                    setApproveConfirmFile(contextMenu.file)
+                    setApproveConfirmVideoName(openFolder?.name || contextMenu.file.fileName)
+                  }
+                }}
+                onRenameFolder={() => {
+                  if (!contextMenu.group) return
+                  const path = getUploadsFolderPathFromGroup(contextMenu.group.name)
+                  const label = getUploadsFolderLabelFromGroup(contextMenu.group.name)
+                  renameUploadFolder(path, label.split('/').pop()?.trim() || label)
+                }}
+                onDeleteFolder={() => {
+                  if (!contextMenu.group) return
+                  const path = getUploadsFolderPathFromGroup(contextMenu.group.name)
+                  deleteUploadFolder(path)
+                }}
+                onDeleteFile={() => {
+                  if (contextMenu.file?.uploadFileId) {
+                    deleteUploadFile(contextMenu.file.uploadFileId)
+                  }
+                }}
+                canUploadAdmin={canDeleteUploads}
+                onOpenAlbumPhoto={() => {
+                  if (contextMenu.file && contextMenu.imageList) openImageLightbox(contextMenu.file, contextMenu.imageList)
+                }}
+                onSelectFolder={() => {
+                  if (!contextMenu.group) return
+                  const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
+                    .filter((f) => isSelectableDownloadableFile(f))
+                  const allKeys = files.map((f) => getDownloadableFileKey(f))
+                  const allSelected = allKeys.every((k) => selectedFileIds.has(k))
+                  setSelectedFileIds((prev) => {
+                    const next = new Set(prev)
+                    if (allSelected) {
+                      allKeys.forEach((k) => next.delete(k))
+                    } else {
+                      allKeys.forEach((k) => next.add(k))
+                    }
+                    return next
+                  })
+                }}
+                albumPhotoSocialDownloadUrl={
+                  contextMenu.file?.photoId && contextMenu.file?.albumId ? (
+                    (() => {
+                      const socialEnabled = albumSocialEnabledByAlbumId[contextMenu.file.albumId!] !== false
+                      const meta = albumPhotoMetaByPhotoId[contextMenu.file.photoId!]
+                      return socialEnabled && meta?.socialDownloadUrl && meta?.socialReady ? meta.socialDownloadUrl : null
+                    })()
+                  ) : null
+                }
+                onDownloadSocial={() => {
+                  if (contextMenu.file?.photoId && contextMenu.file?.albumId) {
+                    const meta = albumPhotoMetaByPhotoId[contextMenu.file.photoId]
+                    if (meta?.socialDownloadUrl) triggerDirectDownload(meta.socialDownloadUrl)
+                  }
+                }}
+                groupHasApprovedVersion={groupHasApprovedVersion}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

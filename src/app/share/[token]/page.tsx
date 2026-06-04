@@ -129,6 +129,45 @@ export default function SharePage() {
   const uploadAccessUrlRequestCacheRef = useRef<Map<string, Promise<UploadAccessUrlCacheEntry | null>>>(new Map())
   const logoSrc = '/api/branding/logo'
 
+  // Centralised session-expiry handler — clears all caches and resets auth state.
+  // Call this whenever a 401 is received or when the JWT expiry timer fires.
+  const clearAllShareCaches = useCallback(() => {
+    tokenCacheRef.current.clear()
+    tokenRequestCacheRef.current.clear()
+    sidebarVideoCacheRef.current.clear()
+    sidebarThumbnailRequestCacheRef.current.clear()
+    uploadAccessUrlCacheRef.current.clear()
+    uploadAccessUrlRequestCacheRef.current.clear()
+    lastFilesRefreshAtRef.current = 0
+    filesRefreshInFlightRef.current = false
+    lastVideoTokenRefreshAtRef.current = 0
+  }, [])
+
+  const handleSessionExpired = useCallback(async (response?: Response) => {
+    clearAllShareCaches()
+    saveShareToken(storageKey, null)
+    setShareToken(null)
+    setDownloadableFiles(null)
+    setAlbums([])
+    setSwitchableProjects([])
+    setSwitchProjectsError(null)
+    setIsPasswordProtected(true)
+    setIsAuthenticated(false)
+    if (response) {
+      try {
+        const data = await response.json().catch(() => null)
+        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
+        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+      } catch {
+        setAuthMode('PASSWORD')
+        setGuestMode(false)
+      }
+    } else {
+      setAuthMode('PASSWORD')
+      setGuestMode(false)
+    }
+  }, [clearAllShareCaches, storageKey])
+
   const availableFileCount = useMemo(() => {
     return (downloadableFiles || []).reduce((total, group) => {
       if (group.groupType === 'uploads') return total
@@ -319,17 +358,6 @@ export default function SharePage() {
     if (!token) return
     if (!isAdminSession && !authToken) return
 
-    const handleUnauthorized = async (response: Response) => {
-      // Some endpoints include extra context on 401 (authMode, guestMode, etc.)
-      const data = await response.json().catch(() => null)
-      saveShareToken(storageKey, null)
-      setShareToken(null)
-      setIsPasswordProtected(true)
-      setIsAuthenticated(false)
-      setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-      setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
-    }
-
     setCommentsLoading(true)
     try {
       const response = await apiFetch(`/api/share/${token}/comments`, {
@@ -337,7 +365,7 @@ export default function SharePage() {
         headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
       if (response.status === 401 && !isAdminSession) {
-        await handleUnauthorized(response)
+        await handleSessionExpired(response)
         return
       }
       if (response.ok) {
@@ -349,7 +377,7 @@ export default function SharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }, [token, shareToken, isAdminSession, storageKey])
+  }, [token, shareToken, isAdminSession, handleSessionExpired])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -447,13 +475,7 @@ export default function SharePage() {
       })
 
       if (projectResponse.status === 401 && !isAdminSession) {
-        const data = await projectResponse.json().catch(() => null)
-        saveShareToken(storageKey, null)
-        setShareToken(null)
-        setIsPasswordProtected(true)
-        setIsAuthenticated(false)
-        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        await handleSessionExpired(projectResponse)
         return
       }
 
@@ -484,7 +506,7 @@ export default function SharePage() {
     } catch (error) {
       // Failed to load project data
     }
-  }, [fetchComments, shareToken, storageKey, token, isAdminSession])
+  }, [fetchComments, shareToken, storageKey, token, isAdminSession, handleSessionExpired])
 
   const fetchAlbums = useCallback(async (tokenOverride?: string | null) => {
     const authToken = tokenOverride || shareToken
@@ -502,13 +524,7 @@ export default function SharePage() {
         headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
       if (response.status === 401 && !isAdminSession) {
-        const data = await response.json().catch(() => null)
-        saveShareToken(storageKey, null)
-        setShareToken(null)
-        setIsPasswordProtected(true)
-        setIsAuthenticated(false)
-        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        await handleSessionExpired(response)
         return
       }
       if (response.ok) {
@@ -524,7 +540,7 @@ export default function SharePage() {
     } finally {
       setAlbumsLoading(false)
     }
-  }, [token, shareToken, isAdminSession, project, storageKey])
+  }, [token, shareToken, isAdminSession, project, handleSessionExpired])
 
   const fetchDownloadableFiles = useCallback(async (tokenOverride?: string | null) => {
     if (isGuest) {
@@ -634,13 +650,7 @@ export default function SharePage() {
       })
 
       if (response.status === 401) {
-        const data = await response.json().catch(() => null)
-        saveShareToken(storageKey, null)
-        setShareToken(null)
-        setIsPasswordProtected(true)
-        setIsAuthenticated(false)
-        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        await handleSessionExpired(response)
         setSwitchableProjects([])
         return
       }
@@ -664,7 +674,7 @@ export default function SharePage() {
     } finally {
       setSwitchProjectsLoading(false)
     }
-  }, [token, shareToken, storageKey, project?.id, isGuest, isAdminSession])
+  }, [token, shareToken, project?.id, isGuest, isAdminSession, handleSessionExpired])
 
   const handleProjectSwitch = useCallback(async (targetProject: SwitchableProject) => {
     if (!shareToken || !token) return
@@ -683,13 +693,7 @@ export default function SharePage() {
       })
 
       if (response.status === 401) {
-        const data = await response.json().catch(() => null)
-        saveShareToken(storageKey, null)
-        setShareToken(null)
-        setIsPasswordProtected(true)
-        setIsAuthenticated(false)
-        setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+        await handleSessionExpired(response)
         return
       }
 
@@ -718,7 +722,7 @@ export default function SharePage() {
     } finally {
       setSwitchingProjectId(null)
     }
-  }, [confirmShareDraftNavigation, router, shareToken, storageKey, token])
+  }, [confirmShareDraftNavigation, router, shareToken, token, handleSessionExpired])
 
   // When a client approves a video from the comment panel, refresh project/videos so UI updates without a full reload.
   useEffect(() => {
@@ -759,12 +763,7 @@ export default function SharePage() {
         if (!isMounted) return
 
         if (response.status === 401) {
-          saveShareToken(storageKey, null)
-          const data = await response.json()
-          setIsPasswordProtected(true)
-          setIsAuthenticated(false)
-          setAuthMode(data.authMode || 'PASSWORD')
-          setGuestMode(data.guestMode || false)
+          await handleSessionExpired(response)
           return
         }
 
@@ -833,7 +832,7 @@ export default function SharePage() {
     return () => {
       isMounted = false
     }
-  }, [token, shareToken, storageKey, fetchComments, isAdminSession])
+  }, [token, shareToken, storageKey, fetchComments, isAdminSession, handleSessionExpired])
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
@@ -948,19 +947,13 @@ export default function SharePage() {
       }
     })
     if (response.status === 401) {
-      const data = await response.json().catch(() => null)
-      saveShareToken(storageKey, null)
-      setShareToken(null)
-      setIsPasswordProtected(true)
-      setIsAuthenticated(false)
-      setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-      setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
+      await handleSessionExpired(response)
       return ''
     }
     if (!response.ok) return ''
     const data = await response.json()
     return data.token || ''
-  }, [token, shareToken, storageKey])
+  }, [token, shareToken, handleSessionExpired])
 
   const getUploadAccessUrl = useCallback(async (fileId: string): Promise<UploadAccessUrlCacheEntry | null> => {
     const normalizedFileId = String(fileId || '').trim()
@@ -1126,6 +1119,43 @@ export default function SharePage() {
 
     await fetchDownloadableFiles()
   }, [isGuest, isAdminSession, shareToken, token, fetchDownloadableFiles])
+
+  const handleApproveVideo = useCallback(async (file: DownloadableFile) => {
+    if (!file.videoId) throw new Error('Video ID is missing')
+    if (!project?.id) throw new Error('Project not loaded')
+
+    const url = `/api/projects/${project.id}/approve`
+    const response = isAdminSession
+      ? await apiFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selectedVideoId: file.videoId }),
+        })
+      : shareToken
+        ? await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${shareToken}`,
+            },
+            body: JSON.stringify({ selectedVideoId: file.videoId }),
+          })
+        : await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selectedVideoId: file.videoId }),
+          })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.error || 'Failed to approve video')
+    }
+
+    markVideoApproved(file.videoId)
+    window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: { videoId: file.videoId } }))
+    void fetchProjectData()
+    void fetchDownloadableFiles()
+  }, [project?.id, isAdminSession, shareToken, markVideoApproved, fetchProjectData, fetchDownloadableFiles])
 
   const handleUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
     if (isGuest) throw new Error('Guests cannot upload files')
@@ -1788,10 +1818,7 @@ export default function SharePage() {
           const resetToAuthScreen = () => {
             // Don't interrupt an active upload or download.
             if (hasAnyActiveTransfers) return
-            saveShareToken(storageKey, null)
-            setShareToken(null)
-            setIsAuthenticated(false)
-            setIsPasswordProtected(true)
+            void handleSessionExpired()
           }
           if (msUntilExpiry <= 0) {
             resetToAuthScreen()
@@ -1807,7 +1834,7 @@ export default function SharePage() {
     return () => {
       if (timer) clearTimeout(timer)
     }
-  }, [shareToken, isAuthenticated, isAdminSession, storageKey, hasAnyActiveTransfers])
+  }, [shareToken, isAuthenticated, isAdminSession, hasAnyActiveTransfers, handleSessionExpired])
 
   const sidebarVideosByName = useMemo(() => {
     return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
@@ -2288,7 +2315,10 @@ export default function SharePage() {
         setIsAuthenticated(true)
         setIsGuest(false)
 
+        // Clear all caches tied to the previous (expired) session before fetching fresh data.
+        clearAllShareCaches()
         await fetchProjectData(data.shareToken)
+        void fetchDownloadableFiles(data.shareToken)
       } else {
         setError('Invalid or expired code. Please try again.')
       }
@@ -2321,7 +2351,10 @@ export default function SharePage() {
         setIsAuthenticated(true)
         setIsGuest(false)
 
+        // Clear all caches tied to the previous (expired) session before fetching fresh data.
+        clearAllShareCaches()
         await fetchProjectData(data.shareToken)
+        void fetchDownloadableFiles(data.shareToken)
       } else {
         setError('Incorrect password')
       }
@@ -2351,7 +2384,10 @@ export default function SharePage() {
         setIsAuthenticated(true)
         setIsGuest(true)
 
+        // Clear all caches tied to the previous (expired) session before fetching fresh data.
+        clearAllShareCaches()
         await fetchProjectData(data.shareToken)
+        // Guest mode — downloadable files are intentionally null for guests.
       } else {
         setError('Unable to access as guest')
       }
@@ -2918,6 +2954,20 @@ export default function SharePage() {
         selectedFileIds={selectedFileIds}
         onSelectedFileIdsChange={setSelectedFileIds}
         activeFilesFolderName={requestedFilesFolderName}
+        shareSlug={token}
+        onOpenVideoVersion={(file, folderName) => {
+          if (file.type !== 'video' || !file.videoId) return
+          if (folderName) {
+            handleVideoSelect(folderName)
+          }
+          setDesktopContentTab('view')
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
+            window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
+            window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
+          }, 0)
+        }}
+        onApproveVideo={handleApproveVideo}
       />
 
       {/* Main Content Area */}
@@ -2967,6 +3017,7 @@ export default function SharePage() {
               resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
               resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
               onPreviewTokenExpired={() => requestFilesRefresh(true)}
+              onApproveVideo={handleApproveVideo}
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}
